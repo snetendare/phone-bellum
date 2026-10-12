@@ -114,11 +114,15 @@
    "color": "#9BD35A",
    "skills": [
     "swift",
-    "poison"
+    "shrink"
    ],
    "skillsOn": [
     false,
     false
+   ],
+   "skillMods": [
+    null,
+    null
    ]
   },
   {
@@ -152,6 +156,10 @@
    "skillsOn": [
     false,
     false
+   ],
+   "skillMods": [
+    null,
+    null
    ]
   },
   {
@@ -185,6 +193,10 @@
    "skillsOn": [
     false,
     false
+   ],
+   "skillMods": [
+    null,
+    null
    ]
   },
   {
@@ -203,7 +215,7 @@
    "name": "Fire Mage",
    "cost": 100,
    "bodies": 1,
-   "hp": 320,
+   "hp": 150,
    "hit": 35,
    "aps": 0.8,
    "range": 26,
@@ -213,11 +225,15 @@
    "color": "#fb0022",
    "skills": [
     "range",
-    "heavy"
+    "armorHp"
    ],
    "skillsOn": [
     false,
     false
+   ],
+   "skillMods": [
+    null,
+    null
    ]
   },
   {
@@ -251,6 +267,10 @@
    "skillsOn": [
     false,
     false
+   ],
+   "skillMods": [
+    null,
+    null
    ]
   },
   {
@@ -284,6 +304,10 @@
    "skillsOn": [
     false,
     false
+   ],
+   "skillMods": [
+    null,
+    null
    ]
   },
   {
@@ -317,6 +341,10 @@
    "skillsOn": [
     false,
     false
+   ],
+   "skillMods": [
+    null,
+    null
    ]
   },
   {
@@ -350,6 +378,10 @@
    "skillsOn": [
     false,
     false
+   ],
+   "skillMods": [
+    null,
+    null
    ]
   }
  ]
