@@ -317,7 +317,8 @@ const Engine = (() => {
         }
         if (b.firing < 0) b.firing = 0;
         const spin = b.u.spinUp > 0 ? Math.min(SPIN_CAP, 1 + b.u.spinUp / 100 * b.firing) : 1;
-        b.cd += 1 / Math.max(0.01, b.u.aps * spin);
+        // reload doesn't stack up while the unit has nothing to shoot: keep at most one step of carry-over
+        b.cd = Math.max(b.cd, -dt) + 1 / Math.max(0.01, b.u.aps * spin);
         const n = Math.max(1, Math.round(b.u.burst));
         if (n > 1) {
           const dx = primary.x - b.x, dy = primary.y - b.y, d = hyp(dx, dy) || 1;
