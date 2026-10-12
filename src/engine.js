@@ -30,7 +30,7 @@ const Engine = (() => {
   // ---------- skills ----------
   // Each skill type and its settings (key, label, default, step). Shared by Counter Lab and the game.
   const SKILL_TYPES = {
-    regen:   { label: 'Regeneration', params: [['pct', 'Health regained per second (% of max)', 2, 0.5]] },
+    regen:   { label: 'Regeneration', params: [['pct', 'Health regained per second (% of max)', 2, 0.5], ['hp', 'Health (+%)', 20, 5]] },
     poison:  { label: 'Poison shot', params: [['pct', 'Poison damage (% of hit, in total)', 100, 10], ['duration', 'Poison lasts (s)', 4, 0.5], ['slow', 'Longer time between attacks (%)', 30, 5]] },
     stealth: { label: 'Stealth', params: [] },
     armorHp: { label: 'Armor and health', params: [['armor', 'Armor (blocked from every hit)', 8, 1], ['hp', 'Health (+%)', 25, 5]] },
@@ -57,7 +57,7 @@ const Engine = (() => {
     const P = (k) => skillParam(d, k);
     const n = (k) => { const v = +P(k); return isFinite(v) ? String(Math.round(v * 100) / 100) : '0'; };
     switch (d.type) {
-      case 'regen': return `Regains ${n('pct')}% of its max health every second.`;
+      case 'regen': return `+${n('hp')}% health, and regains ${n('pct')}% of its max health every second.`;
       case 'poison': return `Hits poison the target for ${n('pct')}% of the hit over ${n('duration')} s, ignoring armor and ward. ${n('slow')}% more time between attacks.`;
       case 'stealth': return 'Can’t be targeted until it attacks for the first time. Splash and piercing shots can still hit it.';
       case 'armorHp': return `+${n('armor')} armor and +${n('hp')}% health.`;
@@ -81,7 +81,7 @@ const Engine = (() => {
       if (!d || !SKILL_TYPES[d.type]) continue;
       const P = (k) => { const v = +skillParam(d, k); return isFinite(v) ? v : 0; };
       switch (d.type) {
-        case 'regen': u.regen = (u.regen || 0) + Math.max(0, P('pct')); break;
+        case 'regen': u.regen = (u.regen || 0) + Math.max(0, P('pct')); u.hp = u.hp * (1 + P('hp') / 100); break;
         case 'poison':
           u.poisonPct = (u.poisonPct || 0) + Math.max(0, P('pct'));
           u.poisonDur = Math.max(u.poisonDur || 0, Math.max(0.5, P('duration')));

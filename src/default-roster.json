@@ -269,7 +269,7 @@
    "cost": 100,
    "bodies": 1,
    "hp": 200,
-   "hit": 300,
+   "hit": 250,
    "aps": 0.3,
    "range": 40,
    "speed": 4,
@@ -305,7 +305,7 @@
    "name": "Brute",
    "cost": 200,
    "bodies": 1,
-   "hp": 1300,
+   "hp": 1200,
    "hit": 98,
    "aps": 0.6,
    "range": 2,
@@ -392,6 +392,43 @@
    "color": "#00d200",
    "skills": [
     "rapid",
+    "range"
+   ],
+   "skillsOn": [
+    false,
+    false
+   ],
+   "skillMods": [
+    null,
+    null
+   ]
+  },
+  {
+   "burst": 1,
+   "pellets": 1,
+   "spinUp": 0,
+   "pierce": 5,
+   "projSpeed": 35,
+   "minRange": 0,
+   "charge": 1,
+   "knockback": 0,
+   "windUp": 0.5,
+   "defense": "none",
+   "defVal": 0,
+   "level": 0,
+   "name": "Earth Wizard",
+   "cost": 200,
+   "bodies": 1,
+   "hp": 600,
+   "hit": 420,
+   "aps": 0.2,
+   "range": 20,
+   "speed": 6,
+   "splash": 2,
+   "shape": "circle",
+   "color": "#24590d",
+   "skills": [
+    "regen",
     "range"
    ],
    "skillsOn": [
