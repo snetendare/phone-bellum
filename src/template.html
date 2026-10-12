@@ -1028,6 +1028,7 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
         ctx.setLineDash([]); ctx.globalAlpha = 1;
       } else Shapes.body(ctx, shape, x, y, rad, up, fill, c, 0.3 + 0.7 * b[2]);
       if (b[6]) { ctx.fillStyle = css('--win'); ctx.beginPath(); ctx.arc(x + rad * 0.9, y - rad * 0.9, Math.max(2, rad * 0.3), 0, Math.PI * 2); ctx.fill(); } // poisoned
+      if (b[7]) { ctx.fillStyle = '#5FA8E8'; ctx.beginPath(); ctx.arc(x - rad * 0.9, y - rad * 0.9, Math.max(2, rad * 0.3), 0, Math.PI * 2); ctx.fill(); } // slowed
       ctx.strokeStyle = c;
       if (b[4] > 0) { // wind-up charging: ring fills clockwise
         ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc(x, y, rad + 3.5, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * b[4]); ctx.stroke();

@@ -85,6 +85,20 @@
    "name": "Shortsight",
    "cost": 100,
    "params": {}
+  },
+  {
+   "id": "ward",
+   "type": "ward",
+   "name": "Ward",
+   "cost": 100,
+   "params": {}
+  },
+  {
+   "id": "slow",
+   "type": "slow",
+   "name": "Slow",
+   "cost": 100,
+   "params": {}
   }
  ],
  "units": [

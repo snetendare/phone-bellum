@@ -41,6 +41,8 @@ const Engine = (() => {
     healer:  { label: 'Healing touch', params: [['pct', 'Heal per attack (% of hit)', 50, 5]] },
     range:   { label: 'Long reach', params: [['m', 'Range (+m)', 5, 1]] },
     shrink:  { label: 'Shortsight', params: [['m', 'Enemy range (−m)', 4, 0.5], ['duration', 'Lasts (s)', 3, 0.5]] },
+    ward:    { label: 'Ward', params: [['cap', 'Most damage one hit can deal', 40, 5]] },
+    slow:    { label: 'Slow', params: [['move', 'Enemy move speed (−%)', 40, 5], ['attack', 'Enemy attack speed (−%)', 20, 5], ['duration', 'Lasts (s)', 3, 0.5]] },
   };
   const skillParam = (d, k) => {
     const v = d.params && d.params[k];
@@ -66,6 +68,8 @@ const Engine = (() => {
       case 'healer': return `Each attack heals a random wounded ally for ${n('pct')}% of its hit.`;
       case 'range': return `+${n('m')} m range.`;
       case 'shrink': return `Hits cut the target’s range by ${n('m')} m for ${n('duration')} s, but not below 1 m.`;
+      case 'ward': return `No single hit can deal more than ${n('cap')} damage to it.`;
+      case 'slow': return `Hits slow the target for ${n('duration')} s: −${n('move')}% move speed and −${n('attack')}% attack speed.`;
     }
     return '';
   }
@@ -103,6 +107,12 @@ const Engine = (() => {
         case 'healer': u.healPct = (u.healPct || 0) + Math.max(0, P('pct')); break;
         case 'range': u.range = u.range + P('m'); break;
         case 'shrink': u.shrinkM = Math.max(u.shrinkM || 0, P('m')); u.shrinkDur = Math.max(u.shrinkDur || 0, Math.max(0.5, P('duration'))); break;
+        case 'ward': { const c = Math.max(1, P('cap')); u.bonusWard = u.bonusWard ? Math.min(u.bonusWard, c) : c; break; }
+        case 'slow':
+          u.slowMove = Math.max(u.slowMove || 0, Math.min(90, P('move')));
+          u.slowAtk = Math.max(u.slowAtk || 0, Math.min(90, P('attack')));
+          u.slowDur = Math.max(u.slowDur || 0, Math.max(0.5, P('duration')));
+          break;
       }
     }
     return u;
@@ -128,6 +138,7 @@ const Engine = (() => {
     const armor = (u.defense === 'armor' ? u.defVal : 0) + (u.bonusArmor || 0);
     let d = armor > 0 ? Math.max(hit - armor, hit * g.minDmgPct / 100) : hit;
     if (u.defense === 'ward') d = Math.min(d, u.defVal);
+    if (u.bonusWard > 0) d = Math.min(d, u.bonusWard); // ward from a skill; works next to armor
     return d;
   }
 
@@ -167,7 +178,7 @@ const Engine = (() => {
       u, side, x, y, hp: u.hp, alive: true, squad, level: u.level || 0, xp: 0,
       cd: ((i * 7) % 11) / 11 * interval, // deterministic stagger
       moved: 0, firing: -1, burstLeft: 0, burstTimer: 0, burstDir: [0, 1], windTarget: null, windT: 0, setUp: false,
-      hidden: !!u.stealth, poison: null, shrinkM: 0, shrinkT: 0,
+      hidden: !!u.stealth, poison: null, shrinkM: 0, shrinkT: 0, slowT: 0, slowMove: 0, slowAtk: 0,
       spawnT: u.spawn ? u.spawn.every : 0, kids: null,
     };
   }
@@ -251,6 +262,13 @@ const Engine = (() => {
         const list = v.poison || (v.poison = []);
         const dose = list.find(p => p.src === owner);
         if (dose) { dose.dps = dps; dose.t = owner.u.poisonDur; } else list.push({ src: owner, dps, t: owner.u.poisonDur });
+      }
+      if (owner.u.slowDur > 0) {
+        // slow: the stronger effect counts, and the longest remaining time
+        if (!(v.slowT > 0)) { v.slowMove = 0; v.slowAtk = 0; }
+        v.slowMove = Math.max(v.slowMove, owner.u.slowMove || 0);
+        v.slowAtk = Math.max(v.slowAtk, owner.u.slowAtk || 0);
+        v.slowT = Math.max(v.slowT, owner.u.slowDur);
       }
       if (owner.u.shrinkM > 0) {
         v.shrinkM = v.shrinkT > 0 ? Math.max(v.shrinkM, owner.u.shrinkM) : owner.u.shrinkM;
@@ -368,7 +386,7 @@ const Engine = (() => {
         const rg = R(b);
         if (near && nd > rg) {
           // walk a little inside max range, so being nudged by allies doesn't leave the unit just out of reach
-          const mv = Math.min(b.u.speed * dt, nd - (rg - Math.min(APPROACH, rg * 0.25)));
+          const mv = Math.min(b.u.speed * (b.slowT > 0 ? 1 - b.slowMove / 100 : 1) * dt, nd - (rg - Math.min(APPROACH, rg * 0.25)));
           b.x += (near.x - b.x) / nd * mv;
           b.y += (near.y - b.y) / nd * mv;
           b.moved += mv;
@@ -415,6 +433,7 @@ const Engine = (() => {
         }
         if (b.u.regen > 0 && b.hp < b.u.hp) b.hp = Math.min(b.u.hp, b.hp + b.u.hp * b.u.regen / 100 * dt);
         if (b.shrinkT > 0) { b.shrinkT -= dt; if (b.shrinkT <= 0) { b.shrinkT = 0; b.shrinkM = 0; } }
+        if (b.slowT > 0) { b.slowT -= dt; if (b.slowT <= 0) { b.slowT = 0; b.slowMove = 0; b.slowAtk = 0; } }
         if (b.u.spawn) {
           b.spawnT -= dt;
           if (b.spawnT <= 0) {
@@ -433,7 +452,7 @@ const Engine = (() => {
       // attacks
       for (const b of all) {
         if (!b.alive) continue;
-        b.cd -= dt;
+        b.cd -= dt * (b.slowT > 0 ? 1 - b.slowAtk / 100 : 1); // slowed units reload slower
         if (b.firing >= 0) b.firing += dt;
         // follow-up shots of a running burst fly along the direction locked at the start
         // and hit the first enemy on that line; if the line is empty the shot misses
@@ -533,7 +552,7 @@ const Engine = (() => {
       return {
         t, shots: final ? [] : shots,
         p: final ? [] : projectiles.map(p => [p.x, p.y, p.owner.side]),
-        b: all.map(x => [x.x, x.y, x.alive ? x.hp / x.u.hp : 0, x.side, x.windTarget && x.u.windUp > 0 ? 1 - x.windT / x.u.windUp : 0, x.hidden ? 1 : 0, x.poison && x.poison.length ? 1 : 0]),
+        b: all.map(x => [x.x, x.y, x.alive ? x.hp / x.u.hp : 0, x.side, x.windTarget && x.u.windUp > 0 ? 1 - x.windT / x.u.windUp : 0, x.hidden ? 1 : 0, x.poison && x.poison.length ? 1 : 0, x.slowT > 0 ? 1 : 0]),
       };
     }
 
