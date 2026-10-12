@@ -285,7 +285,7 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
       <div class="rule"><h3>Ward</h3><p>No single hit can deal more than the ward value. It shuts down big hits and ignores small ones.</p></div>
       <div class="rule"><h3>Range vs speed</h3><p>A ranged unit gets free shots while the enemy closes the gap. Fast units shrink that window.</p></div>
       <div class="rule"><h3>Burst and shotgun</h3><p>A burst fires its shots 0.15 s apart along the line toward its first target. Each shot hits the first body in its path: the target while it lives, then whoever stands behind it. If the line is empty, the shot misses. A shotgun fires all its pellets at once into a 60° cone, each at a different body, wrapping back to bodies already hit when it runs out.</p></div>
-      <div class="rule"><h3>Wind-up</h3><p>Once an enemy is in range, the unit locks onto it and charges for the wind-up time, then hits. If the target dies or gets out of range first, the charge is lost and the unit starts over. The reload starts after the hit.</p></div>
+      <div class="rule"><h3>Wind-up</h3><p>Each body winds up once, before its first hit. When an enemy first comes in range, the body locks onto it, charges for the wind-up time, then hits. If the target dies or gets out of range first, the charge is lost and the body starts over. After the first hit lands, it attacks at its normal rate.</p></div>
       <div class="rule"><h3>Spin-up</h3><p>Raises attack speed every second the unit keeps firing, up to three times its base speed.</p></div>
       <div class="rule"><h3>Pierce and projectiles</h3><p>A piercing shot also hits bodies lined up behind its target. A projectile with a speed travels in a straight line and hits the first enemy it touches, so units moving sideways can dodge it while units charging straight at it get hit.</p></div>
       <div class="rule"><h3>Upgrades</h3><p>Each upgrade adds the unit’s starting health and hit again: one upgrade doubles them, two triple them. In the game, squads earn upgrades through experience and gold; here you set them directly to test upgraded matchups.</p></div>
@@ -462,7 +462,7 @@ const Engine = (() => {
     const s = squadsFor(u, g);
     const n = s * u.bodies;
     const hp = n * u.hp;
-    const cycle = 1 / Math.max(0.01, u.aps) + Math.max(0, u.windUp); // wind-up adds to every attack cycle
+    const cycle = 1 / Math.max(0.01, u.aps); // wind-up is a one-time delay before the first hit, so it isn't counted here
     const dps = n * u.hit / cycle * Math.max(1, u.burst) * Math.max(1, u.pellets);
     return { squads: s, bodies: n, hp, dps, strength: hp * dps };
   }
@@ -496,7 +496,7 @@ const Engine = (() => {
     return {
       u, side, x, y, hp: u.hp, alive: true, squad, level: u.level || 0, xp: 0,
       cd: ((i * 7) % 11) / 11 * interval, // deterministic stagger
-      moved: 0, firing: -1, burstLeft: 0, burstTimer: 0, burstDir: [0, 1], windTarget: null, windT: 0,
+      moved: 0, firing: -1, burstLeft: 0, burstTimer: 0, burstDir: [0, 1], windTarget: null, windT: 0, windDone: false,
     };
   }
 
@@ -712,8 +712,10 @@ const Engine = (() => {
           }
         }
         let valid, primary;
-        if (b.u.windUp > 0) {
-          // wind-up: lock a target, charge, then hit. Lost if the target dies or escapes first.
+        if (b.u.windUp > 0 && !b.windDone) {
+          // wind-up: once per body, before its first hit. Lock the first enemy in range, charge, then hit.
+          // If the target dies or escapes first, the charge is lost and the body winds up again.
+          // After the wind-up hit lands, the body attacks normally for the rest of the battle.
           if (b.windTarget) {
             b.windT -= dt;
             if (b.windT > 0) continue;
@@ -723,6 +725,7 @@ const Engine = (() => {
             if (!(d <= b.u.range + 0.01 && d >= b.u.minRange)) { stats[b.side].windLost++; continue; }
             primary = tg;
             valid = validTargets(b);
+            b.windDone = true;
             b.cd = 0; // reload starts after the hit
           } else {
             if (b.cd > 0) continue;
@@ -849,7 +852,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
     ['minRange', 'Minimum range (m)', 1, 'Can’t hit anything closer than this.'],
     ['charge', 'Charge (× damage)', 0.5, 'Next hit after running 5 m. 1 = off.'],
     ['knockback', 'Knockback (m)', 0.5, 'How far a big hit pushes a small body.'],
-    ['windUp', 'Wind-up (s)', 0.1, 'Charges this long before each attack. Lost if the target dies or escapes first.'],
+    ['windUp', 'Wind-up (s)', 0.1, 'Charges this long before its first hit only. Lost if the target dies or escapes first.'],
   ];
   const LEVERS = [
     ['cost', 'Cost (gold)', 10, 'Price of one squad. A standard squad is 100.'],

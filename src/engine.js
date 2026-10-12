@@ -36,7 +36,7 @@ const Engine = (() => {
     const s = squadsFor(u, g);
     const n = s * u.bodies;
     const hp = n * u.hp;
-    const cycle = 1 / Math.max(0.01, u.aps) + Math.max(0, u.windUp); // wind-up adds to every attack cycle
+    const cycle = 1 / Math.max(0.01, u.aps); // wind-up is a one-time delay before the first hit, so it isn't counted here
     const dps = n * u.hit / cycle * Math.max(1, u.burst) * Math.max(1, u.pellets);
     return { squads: s, bodies: n, hp, dps, strength: hp * dps };
   }
@@ -70,7 +70,7 @@ const Engine = (() => {
     return {
       u, side, x, y, hp: u.hp, alive: true, squad, level: u.level || 0, xp: 0,
       cd: ((i * 7) % 11) / 11 * interval, // deterministic stagger
-      moved: 0, firing: -1, burstLeft: 0, burstTimer: 0, burstDir: [0, 1], windTarget: null, windT: 0,
+      moved: 0, firing: -1, burstLeft: 0, burstTimer: 0, burstDir: [0, 1], windTarget: null, windT: 0, windDone: false,
     };
   }
 
@@ -286,8 +286,10 @@ const Engine = (() => {
           }
         }
         let valid, primary;
-        if (b.u.windUp > 0) {
-          // wind-up: lock a target, charge, then hit. Lost if the target dies or escapes first.
+        if (b.u.windUp > 0 && !b.windDone) {
+          // wind-up: once per body, before its first hit. Lock the first enemy in range, charge, then hit.
+          // If the target dies or escapes first, the charge is lost and the body winds up again.
+          // After the wind-up hit lands, the body attacks normally for the rest of the battle.
           if (b.windTarget) {
             b.windT -= dt;
             if (b.windT > 0) continue;
@@ -297,6 +299,7 @@ const Engine = (() => {
             if (!(d <= b.u.range + 0.01 && d >= b.u.minRange)) { stats[b.side].windLost++; continue; }
             primary = tg;
             valid = validTargets(b);
+            b.windDone = true;
             b.cd = 0; // reload starts after the hit
           } else {
             if (b.cd > 0) continue;
