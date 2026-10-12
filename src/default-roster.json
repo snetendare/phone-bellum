@@ -305,9 +305,9 @@
    "name": "Brute",
    "cost": 200,
    "bodies": 1,
-   "hp": 1200,
+   "hp": 1100,
    "hit": 98,
-   "aps": 0.6,
+   "aps": 0.5,
    "range": 2,
    "speed": 5,
    "splash": 2.1,
@@ -419,7 +419,7 @@
    "name": "Earth Wizard",
    "cost": 200,
    "bodies": 1,
-   "hp": 600,
+   "hp": 650,
    "hit": 440,
    "aps": 0.2,
    "range": 20,
@@ -456,7 +456,7 @@
    "name": "Flame Wizard",
    "cost": 400,
    "bodies": 1,
-   "hp": 3000,
+   "hp": 2000,
    "hit": 1,
    "aps": 4,
    "range": 15,
@@ -486,7 +486,7 @@
    "minRange": 0,
    "charge": 1,
    "knockback": 0,
-   "windUp": 2,
+   "windUp": 0,
    "defense": "none",
    "defVal": 0,
    "level": 0,
@@ -494,7 +494,7 @@
    "cost": 400,
    "bodies": 1,
    "hp": 1800,
-   "hit": 100,
+   "hit": 150,
    "aps": 0.9,
    "range": 15,
    "speed": 2,
@@ -517,6 +517,43 @@
       "hit": 20
      }
     }
+   ]
+  },
+  {
+   "burst": 1,
+   "pellets": 1,
+   "spinUp": 0,
+   "pierce": 0,
+   "projSpeed": 0,
+   "minRange": 0,
+   "charge": 1,
+   "knockback": 0,
+   "windUp": 0,
+   "defense": "none",
+   "defVal": 0,
+   "level": 0,
+   "name": "Slime Wizard",
+   "cost": 400,
+   "bodies": 1,
+   "hp": 700,
+   "hit": 450,
+   "aps": 0.15,
+   "range": 20,
+   "speed": 4,
+   "splash": 5,
+   "shape": "ring",
+   "color": "#81f038",
+   "skills": [
+    "skmv5oxpgk2",
+    "range"
+   ],
+   "skillsOn": [
+    false,
+    false
+   ],
+   "skillMods": [
+    null,
+    null
    ]
   }
  ]
