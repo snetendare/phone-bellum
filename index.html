@@ -1263,7 +1263,9 @@ if (typeof module !== 'undefined') module.exports = Game;
   const now = () => Date.now();
 
   // ---------- state ----------
-  let mode = 'ai';          // ai | host | guest
+  let mode = 'ai';          // ai | claude | host | guest
+  const solo = () => mode === 'ai' || mode === 'claude'; // playing against the computer on this screen
+  const foeName = () => mode === 'ai' ? 'Enemy' : mode === 'claude' ? 'Claude' : 'Opponent';
   let me = 0;               // which side of the match this screen plays (the guest is side 1)
   const foe = () => 1 - me;
   let m = null;             // match state (on the guest: a copy kept in step by the host)
@@ -1455,7 +1457,7 @@ if (typeof module !== 'undefined') module.exports = Game;
     $('hpbar-foe').style.width = (hpFoe / Game.START_HP * 100) + '%';
     $('round').textContent = v ? v.round : 1;
     $('phase').textContent = { start: 'Ready', lobby: 'Lobby', deploy: 'Deploy', battle: 'Battle', result: 'Result', end: 'Match over' }[phase];
-    $('foe-name').textContent = mode === 'ai' ? 'Enemy' : 'Opponent';
+    $('foe-name').textContent = foeName();
   }
 
   function setNet(text, state) {
@@ -1465,7 +1467,7 @@ if (typeof module !== 'undefined') module.exports = Game;
     $('net-text').textContent = text;
   }
   function netStatus() {
-    if (mode === 'ai') { setNet(''); return; }
+    if (solo()) { setNet(''); return; }
     if (net.connected) setNet(mode === 'host' ? `Match ${net.code} · opponent connected` : `Match ${net.code} · connected`, 'ok');
     else if (phase === 'lobby') setNet('');
     else setNet(mode === 'host' ? `Opponent disconnected. Waiting for them to come back…` : 'Connection lost. Reconnecting…', 'bad');
@@ -1473,7 +1475,7 @@ if (typeof module !== 'undefined') module.exports = Game;
 
   // ---------- countdown ----------
   const fmtClock = (ms) => { const s = Math.max(0, Math.ceil(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
-  const editable = () => phase === 'deploy' && !ready[me] && !timeUp;
+  const editable = () => phase === 'deploy' && !ready[me] && !timeUp && !(mode === 'claude' && claude.fightWaiting);
 
   function tick() {
     const t = now();
@@ -1487,14 +1489,14 @@ if (typeof module !== 'undefined') module.exports = Game;
         $('clock').textContent = left > 0 ? `${fmtClock(left)} to deploy` : 'Time’s up';
         if (mode !== 'guest' && left <= (mode === 'host' ? -500 : 0)) runFight();
         else if (mode === 'guest' && left <= 0 && !timeUp) { timeUp = true; selected = null; closeSheet(); sendSide(); panelDeploy(); render(); }
-      } else if (el) { el.textContent = mode === 'ai' ? '' : 'paused'; el.classList.remove('low'); }
+      } else if (el) { el.textContent = solo() ? '' : 'paused'; el.classList.remove('low'); }
     }
     if ((phase === 'result' || phase === 'end') && resultShownAt) {
       const left = resultShownAt + NEXT_SECONDS * 1000 - t;
       const nb = $('pbtn');
       if (phase === 'result' && !nextReady[me]) {
         if (left <= 0) tapNext();
-        else if (nb && mode !== 'ai') nb.textContent = `Next round · ${Math.ceil(left / 1000)}`;
+        else if (nb && !solo()) nb.textContent = `Next round · ${Math.ceil(left / 1000)}`;
       }
     }
   }
@@ -1511,7 +1513,7 @@ if (typeof module !== 'undefined') module.exports = Game;
     const can = editable();
     const canBuy = (i) => can && g >= price(i) && left > 0;
     let hint;
-    if (!can) hint = timeUp ? 'Time’s up. The fight is about to start.' : 'You’re ready. Tap Not ready to make changes.';
+    if (!can) hint = mode === 'claude' && claude.fightWaiting ? 'Waiting for Claude to finish its move. The fight starts as soon as it does.' : timeUp ? 'Time’s up. The fight is about to start.' : 'You’re ready. Tap Not ready to make changes.';
     else {
       hint = selected !== null
         ? (canBuy(selected) ? `Tap a tile in your zone to place ${esc(units[selected].name)}.` : left <= 0 ? 'No deployments left this round.' : `Not enough gold for ${esc(units[selected].name)}.`)
@@ -1524,8 +1526,9 @@ if (typeof module !== 'undefined') module.exports = Game;
         ${can && m.extraDeploys[me] > 0 && left > 0 ? `<button class="btn small" id="refund-deploy">Refund unused</button>` : ''}
       </span>`;
     let action, status;
-    if (mode === 'ai') {
+    if (solo()) {
       status = `${m.armies[me].length} squad${m.armies[me].length === 1 ? '' : 's'} on the board`;
+      if (mode === 'claude') status = claudeStatus();
       action = `<button class="btn primary" id="fight" ${m.armies[me].length ? '' : 'disabled'}>${deadline ? 'Fight now' : 'Fight'}</button>`;
     } else {
       const away = mode === 'host' && !net.connected;
@@ -1585,7 +1588,7 @@ if (typeof module !== 'undefined') module.exports = Game;
         </div>
         <button class="btn small" id="skip">Skip to result</button>
       </div>
-      <span class="hint">Blue is you, red is the ${mode === 'ai' ? 'enemy' : 'opponent'}. Battles speed up on their own after 20 seconds.</span>`;
+      <span class="hint">Blue is you, red is ${mode === 'claude' ? 'Claude' : 'the ' + foeName().toLowerCase()}. Battles speed up on their own after 20 seconds.</span>`;
     $('panel').querySelectorAll('[data-s]').forEach(b => b.addEventListener('click', () => {
       speed = +b.dataset.s;
       $('panel').querySelectorAll('[data-s]').forEach(x => x.setAttribute('aria-pressed', String(+x.dataset.s === speed)));
@@ -1607,6 +1610,7 @@ if (typeof module !== 'undefined') module.exports = Game;
 
   function showStart() {
     leaveNet();
+    if (claude.ctl) { claude.ctl.abort(); claude.ctl = null; } claude.busy = false;
     mode = 'ai'; me = 0; phase = 'start'; m = null; bt = null; battlePre = null; deadline = 0; resultShownAt = 0;
     hud(); netStatus(); $('clock').textContent = '';
     let resume = null;
@@ -1633,6 +1637,7 @@ if (typeof module !== 'undefined') module.exports = Game;
         <button class="btn ${resume ? '' : 'primary'}" id="friend" style="flex:1">Challenge a friend</button>
         <button class="btn" id="go" style="flex:1">Play vs AI</button>
       </div>
+      ${sampleFn ? `<button class="btn primary" id="vs-claude">Play vs Claude</button>` : ''}
       <div class="bar">
         <span class="hint">Got a code from a friend?</span>
         <span class="joinrow"><input id="code-in" maxlength="5" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-label="Match code" placeholder="CODE"><button class="btn" id="join">Join</button></span>
@@ -1656,6 +1661,7 @@ if (typeof module !== 'undefined') module.exports = Game;
       </div>`;
     $('friend').addEventListener('click', hostLobby);
     $('go').addEventListener('click', startAiMatch);
+    if ($('vs-claude')) $('vs-claude').addEventListener('click', startClaudeMatch);
     if ($('resume')) $('resume').addEventListener('click', () => resumeHost(resume));
     $('load-units').addEventListener('click', openLoader);
     const joinNow = () => {
@@ -1680,40 +1686,43 @@ if (typeof module !== 'undefined') module.exports = Game;
     const iWon = sum.winner === me && !sum.timeout, iLost = sum.winner === foe() && !sum.timeout;
     const head = sum.timeout ? 'Time ran out' : iWon ? `Round ${sum.round} won` : iLost ? `Round ${sum.round} lost` : 'Draw';
     const cls = iWon ? 'you' : iLost ? 'foe' : '';
-    const them = mode === 'ai' ? 'Enemy' : 'Opponent';
+    const them = foeName();
     const lines = [];
     if (sum.dmg[foe()]) lines.push(`${them} takes <b class="num">${sum.dmg[foe()]}</b> damage.`);
     if (sum.dmg[me]) lines.push(`You take <b class="num">${sum.dmg[me]}</b> damage.`);
     if (!sum.dmg[0] && !sum.dmg[1]) lines.push('Nobody takes damage.');
     const lv = (list) => list.map(x => `${esc(units[x.unit].name)} (to level ${x.level + 1})`).join(', ');
     const lvLines = [];
-    if (mode === 'ai' && lastAiLevels.length) lvLines.push(`<p><span style="color:var(--gold)">Enemy leveled up before the fight:</span> ${lv(lastAiLevels)}.</p>`);
+    if (solo() && lastAiLevels.length) lvLines.push(`<p><span style="color:var(--gold)">${them} leveled up before the fight:</span> ${lv(lastAiLevels)}.</p>`);
+    if (mode === 'claude' && claude.did.length) lvLines.push(`<p><span style="color:var(--gold)">Claude also:</span> ${esc(claude.did.join(', '))}.</p>`);
+    if (mode === 'claude' && claude.say) lvLines.push(`<p class="big" style="color:var(--foe);font-style:italic">“${esc(claude.say)}”</p>`);
+    if (mode === 'claude' && claude.note) lvLines.push(`<p>${esc(claude.note)}</p>`);
     if (sum.newlyReady[me].length) lvLines.push(`<p><span style="color:var(--gold)">Ready to level up:</span> ${lv(sum.newlyReady[me])}.</p>`);
     resultShownAt = now();
     if (m.over) {
       const win = m.winner === me, loss = m.winner === foe();
       phase = 'end'; hud(); netStatus();
-      const wait = mode !== 'ai' && rematch[me];
+      const wait = !solo() && rematch[me];
       overlay(`<div class="card">
         <span class="eyebrow">After ${m.history.length} rounds</span>
         <h2 class="${win ? 'you' : loss ? 'foe' : ''}">${win ? 'Victory' : loss ? 'Defeat' : 'Draw'}</h2>
         <p class="big">${lines.join(' ')}</p>
-        ${mode !== 'ai' && rematch[foe()] && !rematch[me] ? '<p>Your opponent wants a rematch.</p>' : ''}
+        ${!solo() && rematch[foe()] && !rematch[me] ? '<p>Your opponent wants a rematch.</p>' : ''}
         <div class="btnrow">
-          ${mode === 'ai' ? '<button class="btn primary" id="again">Play again</button>'
+          ${solo() ? '<button class="btn primary" id="again">Play again</button>'
             : `<button class="btn primary" id="again" ${wait ? 'disabled' : ''}>${wait ? 'Waiting for opponent…' : 'Rematch'}</button>`}
           <button class="btn" id="menu">Main menu</button>
         </div>
       </div>`);
-      if (mode === 'ai') panelInfo('The AI buys units that counter what you fielded last round.', 'Play again', startAiMatch);
+      if (solo()) panelInfo(mode === 'claude' ? 'Claude plans each round from what it has seen of your army.' : 'The AI buys units that counter what you fielded last round.', 'Play again', mode === 'claude' ? startClaudeMatch : startAiMatch);
       else panelInfo(wait ? 'Waiting for your opponent to accept the rematch.' : 'A rematch starts when you both tap Rematch.', wait ? '' : 'Rematch', askRematch);
-      $('again').addEventListener('click', mode === 'ai' ? startAiMatch : askRematch);
+      $('again').addEventListener('click', mode === 'claude' ? startClaudeMatch : mode === 'ai' ? startAiMatch : askRematch);
       $('menu').addEventListener('click', () => { if (mode === 'host') clearHost(); showStart(); });
       return;
     }
     phase = 'result'; hud(); netStatus();
     const bonus = sum.bonusTo === me ? ` You get ${Game.LOSER_BONUS} extra for losing the round.` : sum.bonusTo === foe() ? ` The ${them.toLowerCase()} gets ${Game.LOSER_BONUS} extra for losing the round.` : '';
-    const waiting = mode !== 'ai' && nextReady[me];
+    const waiting = !solo() && nextReady[me];
     overlay(`<div class="card">
       <span class="eyebrow">${Math.round(sum.time)} s of fighting</span>
       <h2 class="${cls}">${head}</h2>
@@ -1727,6 +1736,165 @@ if (typeof module !== 'undefined') module.exports = Game;
     if ($('next')) $('next').addEventListener('click', tapNext);
   }
 
+  // ---------- flow: vs Claude ----------
+  // Only inside Claude: the page asks Claude (on the player's own account) for its move each round.
+  let sampleFn = null;
+  (async () => {
+    try { if (window.claude && typeof window.claude.use === 'function') sampleFn = await window.claude.use('sample'); } catch (e) { sampleFn = null; }
+    if (sampleFn && phase === 'start') showStart();
+  })();
+  const claude = { busy: false, fightWaiting: false, bot: false, off: false, did: [], say: '', note: '', started: 0, ctl: null, history: [] };
+
+  function startClaudeMatch() {
+    if (!sampleFn) { startAiMatch(); return; }
+    leaveNet();
+    mode = 'claude'; me = 0;
+    m = Game.createMatch(units, M, (now() ^ (Math.random() * 1e9)) >>> 0);
+    nextReady = [false, false]; rematch = [false, false];
+    claude.off = false; claude.history = [];
+    beginAiRound();
+  }
+
+  function claudeStatus() {
+    if (claude.busy) return `Claude is planning its move… ${Math.max(0, Math.round((now() - claude.started) / 1000))} s`;
+    if (claude.bot) return claude.off ? 'The bot is playing for Claude.' : 'Claude had trouble this round, so the bot played it.';
+    return 'Claude has made its move.';
+  }
+  setInterval(() => { if (mode === 'claude' && phase === 'deploy' && claude.busy) { const h = $('panel').querySelector('.bar:last-child .hint'); if (h) h.textContent = claudeStatus(); } }, 1000);
+
+  function startClaudeTurn() {
+    claude.did = []; claude.say = ''; claude.note = ''; claude.fightWaiting = false; claude.bot = false;
+    if (claude.off) { Game.aiDeploy(m, 1); claude.bot = true; return; }
+    const round = m.round, prompt = claudePrompt();
+    claude.busy = true; claude.started = now();
+    if (claude.ctl) claude.ctl.abort();
+    const ctl = claude.ctl = new AbortController();
+    const opts = { modelTier: 'default', effort: 'low', cache: false, signal: ctl.signal };
+    const ask = typeof sampleFn.json === 'function'
+      ? sampleFn.json(prompt, opts)
+      : sampleFn(prompt, opts).then(r => { const t = r.text, a = t.indexOf('{'), b = t.lastIndexOf('}'); return JSON.parse(t.slice(a, b + 1)); });
+    ask.then((mv) => {
+      if (ctl !== claude.ctl || mode !== 'claude' || !m || m.round !== round || phase !== 'deploy') return;
+      applyClaudeMove(mv && typeof mv === 'object' ? mv : {});
+    }, (e) => {
+      if (ctl !== claude.ctl || (e && e.code === 'cancelled')) return;
+      if (mode !== 'claude' || !m || m.round !== round || phase !== 'deploy') return;
+      const code = e && e.code;
+      if (['not_granted', 'sampling_disabled', 'not_declared', 'capability_disabled', 'capability_removed', 'session_expired'].includes(code)) {
+        claude.off = true;
+        claude.note = code === 'not_granted' ? 'Claude wasn’t allowed to play, so the bot is playing for it this match.' : 'Claude isn’t available here, so the bot is playing for it this match.';
+      } else claude.note = code === 'rate_limited' ? 'Claude hit a usage limit this round, so the bot played it.' : 'Claude had trouble this round, so the bot played it.';
+      Game.aiDeploy(m, 1); claude.bot = true;
+    }).finally(() => {
+      if (ctl !== claude.ctl) return;
+      claude.busy = false;
+      if (mode === 'claude' && phase === 'deploy') {
+        if (claude.fightWaiting) { claude.fightWaiting = false; runFight(); }
+        else panelDeploy();
+      }
+    });
+  }
+
+  // Everything Claude needs to know, from its own (red) side of the board
+  function claudePrompt() {
+    const n1 = (x, d = 1) => Math.round(x * 10 ** d) / 10 ** d;
+    const unitLine = (u, i) => {
+      const t = [];
+      if (u.splash > 0) t.push(`splash ${u.splash} m`);
+      if (u.defense === 'armor') t.push(`armor ${u.defVal}`);
+      if (u.defense === 'ward') t.push(`ward ${u.defVal} (max damage per hit)`);
+      if (u.burst > 1) t.push(`burst ${u.burst}`);
+      if (u.pellets > 1) t.push(`shotgun ${u.pellets}`);
+      if (u.spinUp > 0) t.push(`spin-up ${u.spinUp}%/s`);
+      if (u.pierce > 0) t.push(`pierce ${u.pierce}`);
+      if (u.projSpeed > 0) t.push(`projectile ${u.projSpeed} m/s`);
+      if (u.minRange > 0) t.push(`min range ${u.minRange} m`);
+      if (u.charge > 1) t.push(`charge x${u.charge}`);
+      if (u.knockback > 0) t.push(`knockback ${u.knockback} m`);
+      if (u.windUp > 0) t.push(`wind-up ${u.windUp} s`);
+      const sk = (u.skillDefs || []).map((d, k) => d ? `skill ${k + 1} "${d.name}" (${Game.skillCost(m, i, k)} gold${Game.hasSkill(m, 1, i, k) ? ', YOU OWN IT' : ''}): ${Engine.describeSkill(d)}` : null).filter(Boolean);
+      return `- ${u.name}: price ${Game.unitCostOf(u)}, ${u.bodies} ${u.bodies === 1 ? 'body' : 'bodies'} x ${n1(u.hp, 0)} hp each, hit ${n1(u.hit)} x ${n1(u.aps, 2)}/s, range ${u.range} m, speed ${u.speed} m/s${t.length ? ', ' + t.join(', ') : ''}. Level-up cost ${Game.levelCost(u)}.${sk.length ? '\n    ' + sk.join('\n    ') : ''}`;
+    };
+    const tag = (u) => u.name;
+    const matrix = units.map((u, i) => `${tag(u)}: ` + units.map((v, j) => i === j ? null : `${tag(v)} ${M[i][j] > 0 ? '+' : ''}${Math.round(M[i][j] * 100)}`).filter(Boolean).join(', ')).join('\n');
+    const mine = m.armies[1].map(s => {
+      const u = units[s.unit], need = s.level < Engine.MAX_LEVEL ? Math.round(Game.xpNeeded(u, s.level)) : null;
+      return `- id ${s.id}: ${u.name} at col ${s.col}, row ${s.row}, level ${s.level + 1}${need ? `, XP ${Math.round(s.xp)}/${need}` : ', max level'}${Game.isReady(m, s) ? ', READY TO LEVEL UP' : ''}${s.round < m.round ? `, sells for ${Game.sellValue(m, s)}` : ''}`;
+    });
+    const theirs = m.armies[0].filter(s => s.round < m.round).map(s => `- ${units[s.unit].name} at col ${s.col}, row ${s.row}, level ${s.level + 1}`);
+    const theirSkills = [];
+    units.forEach((u, i) => [0, 1].forEach(k => { if (Game.skillVisible(m, 0, i, k)) theirSkills.push(`${(u.skillDefs[k] || {}).name} on ${u.name}`); }));
+    const hist = m.history.slice(-4).map(h => `- round ${h.round}: ${h.timeout ? 'time ran out' : h.winner === 1 ? 'you won' : h.winner === 0 ? 'you lost' : 'draw'}; you took ${h.dmg[1]} damage, they took ${h.dmg[0]}`);
+    return `You are playing Phone Bellum, a small auto-battler, against a human player. You are the RED side. Decide your moves for round ${m.round}. The human places their new squads at the same time and can't see yours until the fight. You only see their squads from earlier rounds. Play to win: build counters to what they have, protect your damage dealers, and think about what they are likely to add next.
+
+RULES
+- Board: columns 0-11, rows 0-11, tiles 6 m wide. Your zone is rows 0-3; row 3 is your front line, nearest the enemy, and row 0 is the back. The enemy zone is rows 8-11; row 8 is their front. One squad per tile. Squads keep their tile for the whole match.
+- The fight is automatic. Every body walks toward the nearest enemy and attacks once it is in range. Short-range units in front shield long-range units behind. Spreading out limits splash damage; columns decide which enemies you meet first.
+- The round's loser loses health: for each surviving enemy squad, 2 x (its price / 100), scaled by the share of its bodies alive. If time runs out, both sides take damage. Health starts at 40 and the match ends at 0.
+- Gold: +${Game.INCOME} per round for both, +${Game.LOSER_BONUS} extra for the round's loser. Unspent gold carries over.
+- This round you may place ${Game.deploysAllowed(m, 1)} new squad(s). Each extra deployment costs ${Game.CONFIG.extraDeployCost} gold.
+- Squads earn XP by dealing and taking damage. A squad marked READY TO LEVEL UP can be upgraded for its unit's level-up cost: level 2 doubles health and hit, level 3 triples them. Leveling up chaff (many cheap bodies) gives the enemy lots of XP when they die.
+- Skills: each unit has 2. Buying one (its price) gives it to ALL your squads of that unit, now and later. You need at least one squad of that unit on the board (placing one this round counts).
+- You may sell squads from earlier rounds for half their price (their tile becomes free).
+
+UNITS
+${units.map(unitLine).join('\n')}
+
+COUNTER TABLE (each unit vs each other with equal gold; +100 = wins easily, -100 = loses badly)
+${matrix}
+
+STATE
+- Your health ${m.hp[1]}, their health ${m.hp[0]}. Your gold: ${m.gold[1]}.
+${hist.length ? 'Recent rounds:\n' + hist.join('\n') : '- This is the first round.'}
+
+YOUR SQUADS
+${mine.length ? mine.join('\n') : '- none yet'}
+
+THEIR SQUADS (from earlier rounds)
+${theirs.length ? theirs.join('\n') : '- none yet'}
+${theirSkills.length ? 'Their skills: ' + theirSkills.join(', ') : ''}
+
+Reply with only a JSON object in this shape:
+{"sell":[squad ids],"levelUp":[squad ids, list one twice to level it twice],"skills":[{"unit":"unit name","slot":1}],"extraDeployments":0,"place":[{"unit":"unit name","col":5,"row":3}],"say":"one short playful line to your opponent, at most 15 words, shown after the fight"}
+Actions run in this order: sell, levelUp, skills, extraDeployments, place. Anything you can't afford or that breaks a rule is skipped, so keep the total cost within your gold (${m.gold[1]} plus any sales). Use exact unit names. Unspent gold isn't lost, but squads on the board win rounds.`;
+  }
+
+  function applyClaudeMove(mv) {
+    const list = (x) => Array.isArray(x) ? x.slice(0, 20) : [];
+    const int = (x) => Math.round(Number(x));
+    const unitIdx = (name) => units.findIndex(u => u.name.toLowerCase() === String(name || '').toLowerCase().trim());
+    const did = [];
+    for (const id of list(mv.sell)) {
+      const sq = m.armies[1].find(s => s.id === int(id));
+      if (sq && Game.sell(m, 1, sq.id)) did.push(`sold ${units[sq.unit].name}`);
+    }
+    const levels = [];
+    for (const id of list(mv.levelUp)) {
+      const sq = m.armies[1].find(s => s.id === int(id));
+      if (sq && Game.levelUp(m, 1, sq.id)) levels.push({ id: sq.id, unit: sq.unit, level: sq.level });
+    }
+    const skills = list(mv.skills);
+    const trySkills = () => {
+      for (const x of skills) {
+        if (!x || x.done) continue;
+        const ui = unitIdx(x.unit), k = int(x.slot) - 1;
+        if (ui >= 0 && (k === 0 || k === 1) && Game.buySkill(m, 1, ui, k)) { x.done = true; did.push(`bought ${units[ui].skillDefs[k].name} for ${units[ui].name}`); }
+      }
+    };
+    trySkills();
+    const extra = Math.max(0, Math.min(3, int(mv.extraDeployments) || 0));
+    for (let k = 0; k < extra; k++) Game.buyDeploy(m, 1);
+    for (const pl of list(mv.place)) {
+      const ui = unitIdx(pl && pl.unit);
+      if (ui >= 0) Game.place(m, 1, ui, int(pl.col), int(pl.row));
+    }
+    trySkills(); // skills for units placed just now
+    while (m.extraDeploys[1] > 0 && Game.deploysLeft(m, 1) > 0 && Game.refundDeploy(m, 1)) {}
+    lastAiLevels = levels;
+    claude.did = did;
+    claude.say = String(mv.say || '').replace(/\s+/g, ' ').trim().slice(0, 140);
+  }
+
   // ---------- flow: vs AI ----------
   function startAiMatch() {
     leaveNet();
@@ -1737,6 +1905,7 @@ if (typeof module !== 'undefined') module.exports = Game;
   }
 
   function beginAiRound() {
+    if (mode === 'claude') { startClaudeTurn(); enterDeploy(timerOn ? DEPLOY_SECONDS * 1000 : 0); return; }
     Game.aiDeploy(m, 1);       // the AI commits first; its new squads stay hidden until the fight
     enterDeploy(timerOn ? DEPLOY_SECONDS * 1000 : 0);
   }
@@ -1751,7 +1920,7 @@ if (typeof module !== 'undefined') module.exports = Game;
 
   function tapNext() {
     if (phase !== 'result') return;
-    if (mode === 'ai') { beginAiRound(); return; }
+    if (solo()) { beginAiRound(); return; }
     nextReady[me] = true;
     if (mode === 'guest') send({ t: 'next', round: lastSummary && lastSummary.round });
     else { sendStatus(); saveHost(); if (!checkNext()) showResult(lastSummary); return; }
@@ -1759,7 +1928,7 @@ if (typeof module !== 'undefined') module.exports = Game;
   }
 
   function askRematch() {
-    if (phase !== 'end' || mode === 'ai') return;
+    if (phase !== 'end' || solo()) return;
     rematch[me] = true;
     if (mode === 'guest') send({ t: 'rematch' });
     else { sendStatus(); if (checkRematch()) return; }
@@ -1773,8 +1942,10 @@ if (typeof module !== 'undefined') module.exports = Game;
   function runFight() {
     if (phase !== 'deploy' || !m) return;
     if (mode === 'guest') return;
+    if (mode === 'claude' && claude.busy) { if (!claude.fightWaiting) { claude.fightWaiting = true; selected = null; closeSheet(); panelDeploy(); } return; }
     closeSheet(); selected = null;
-    lastAiLevels = mode === 'ai' ? Game.aiLevel(m, 1) : []; // the AI spends its level-ups now
+    if (mode === 'ai' || (mode === 'claude' && claude.bot)) lastAiLevels = Game.aiLevel(m, 1); // the AI spends its level-ups now
+    else if (mode !== 'claude') lastAiLevels = [];
     const pre = snapshot(m);
     // work out the result first; both screens then play the same battle back
     const sim = Game.startBattle(m);
@@ -1883,7 +2054,7 @@ if (typeof module !== 'undefined') module.exports = Game;
         } else act = `<span class="hint">${cost} gold</span>`;
       } else {
         act = Game.skillVisible(m, side, i, k) || (phase !== 'deploy' && Game.hasSkill(m, side, i, k))
-          ? `<span class="chip" style="color:var(--foe);border:1px solid currentColor;border-radius:99px;padding:1px 8px;font-size:12px">${mode === 'ai' ? 'Enemy' : 'Opponent'} has it</span>` : `<span class="hint">Not bought</span>`;
+          ? `<span class="chip" style="color:var(--foe);border:1px solid currentColor;border-radius:99px;padding:1px 8px;font-size:12px">${foeName()} has it</span>` : `<span class="hint">Not bought</span>`;
       }
       return `<div style="display:grid;gap:4px;border-top:1px solid var(--line);padding-top:8px">
         <div class="bar"><b style="font-family:var(--font-display)">${esc(d.name)}</b><span>${act}</span></div>
