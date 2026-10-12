@@ -18,7 +18,8 @@ const Engine = (() => {
   const PIERCE_DEPTH = 10;     // metres a piercing shot travels past its target
   const PIERCE_WIDTH = 1;      // half-width of the pierce corridor (m)
   const APPROACH = 0.5;         // metres a moving unit steps inside its max range
-  const PROJ_HIT_RADIUS = 1;   // a projectile hits a body within this distance of where it lands
+  const PROJ_HIT_RADIUS = 1;
+  const SIGHT = 12;            // metres beyond its own range at which a unit notices an enemy and turns toward it   // a projectile hits a body within this distance of where it lands
 
   const LEVEL_BONUS = 1;       // each upgrade adds +100% of starting health and hit (2x, then 3x)
   const MAX_LEVEL = 2;         // two upgrades on top of the base unit
@@ -228,6 +229,7 @@ const Engine = (() => {
       { dealt: 0, wasted: 0, blocked: 0, missed: 0, windLost: 0, winds: 0, totalHp: B.reduce((s, b) => s + b.u.hp, 0) },
     ];
     const dt = g.dt;
+    const sight = g.sight == null ? SIGHT : g.sight;
     let projectiles = [];
     let t = 0, shots = [], over = false;
     const dist = (a, b) => hyp(a.x - b.x, a.y - b.y);
@@ -418,10 +420,23 @@ const Engine = (() => {
         b.near = near;
         const rg = R(b);
         if (near && nd > rg) {
-          // walk a little inside max range, so being nudged by allies doesn't leave the unit just out of reach
-          const mv = Math.min(b.u.speed * (b.slowT > 0 ? 1 - b.slowMove / 100 : 1) * dt, nd - (rg - Math.min(APPROACH, rg * 0.25)));
-          b.x += (near.x - b.x) / nd * mv;
-          b.y += (near.y - b.y) / nd * mv;
+          const step = b.u.speed * (b.slowT > 0 ? 1 - b.slowMove / 100 : 1) * dt;
+          let mv;
+          // March straight ahead until an enemy comes within sight (range + SIGHT), then turn toward it.
+          // So a squad meets what stands in its own lane, and an empty lane lets it walk around the side.
+          // Once every enemy is level or behind, it turns toward the nearest one.
+          const fwd = b.side === 0 ? 1 : -1;
+          let ahead = false;
+          if (nd > rg + sight) for (const f of foes) if (f.alive && !f.hidden && (f.y - b.y) * fwd > 0) { ahead = true; break; }
+          if (ahead) {
+            mv = step;
+            b.y += fwd * mv;
+          } else {
+            // walk a little inside max range, so being nudged by allies doesn't leave the unit just out of reach
+            mv = Math.min(step, nd - (rg - Math.min(APPROACH, rg * 0.25)));
+            b.x += (near.x - b.x) / nd * mv;
+            b.y += (near.y - b.y) / nd * mv;
+          }
           b.moved += mv;
           // a unit with wind-up has to set up again after it moves; a charge in progress is lost
           if (b.u.windUp > 0 && mv > 0) {

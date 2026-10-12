@@ -218,6 +218,7 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
       <div class="field"><label for="s-spacing">Body spacing (m)</label><input id="s-spacing" type="number" min="0.5" step="0.5" data-s="spacing"><span class="hint">How tightly squads stand. Tighter means more splash hits.</span></div>
       <div class="field"><label for="s-floor">Armor floor (%)</label><input id="s-floor" type="number" min="0" max="100" step="1" data-s="minDmgPct"><span class="hint">Share of a hit that always gets through armor.</span></div>
       <div class="field"><label for="s-cap">Time limit (s)</label><input id="s-cap" type="number" min="5" step="5" data-s="timeCap"><span class="hint">After this, the side with more health left wins.</span></div>
+      <div class="field"><label for="s-sight">Sight (m)</label><input id="s-sight" type="number" min="0" step="1" data-s="sight"><span class="hint">Units march straight ahead until an enemy is this far beyond their range, then turn to it. 200 = chase the nearest enemy anywhere.</span></div>
     </div>
   </section>
 
@@ -325,7 +326,7 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
   <section class="panel" aria-labelledby="rules-h">
     <div class="panel-head"><h2 id="rules-h">How a fight works</h2></div>
     <div class="rules">
-      <div class="rule"><h3>Targeting and movement</h3><p>Every body walks toward the nearest enemy and stops once it is in range. Melee units have a range of about 2 m.</p></div>
+      <div class="rule"><h3>Targeting and movement</h3><p>Every body marches straight ahead until an enemy comes within its range plus the sight distance, then turns toward the nearest enemy and stops once it is in range. Once no enemy is ahead, it turns toward the nearest one. Wide formations lose focus: bodies on the edges walk past a narrow enemy before turning in. Melee units have a range of about 2 m.</p></div>
       <div class="rule"><h3>Overkill</h3><p>Damage beyond a body's remaining health is wasted. Big hits on small bodies lose most of their damage.</p></div>
       <div class="rule"><h3>Splash</h3><p>Every enemy within the splash radius of the target takes the full hit. Packed squads take many hits from one attack.</p></div>
       <div class="rule"><h3>Armor</h3><p>Subtracts a flat amount from every hit, down to the armor floor. It shuts down small, fast hits and barely dents big ones.</p></div>
@@ -494,7 +495,8 @@ const Engine = (() => {
   const PIERCE_DEPTH = 10;     // metres a piercing shot travels past its target
   const PIERCE_WIDTH = 1;      // half-width of the pierce corridor (m)
   const APPROACH = 0.5;         // metres a moving unit steps inside its max range
-  const PROJ_HIT_RADIUS = 1;   // a projectile hits a body within this distance of where it lands
+  const PROJ_HIT_RADIUS = 1;
+  const SIGHT = 12;            // metres beyond its own range at which a unit notices an enemy and turns toward it   // a projectile hits a body within this distance of where it lands
 
   const LEVEL_BONUS = 1;       // each upgrade adds +100% of starting health and hit (2x, then 3x)
   const MAX_LEVEL = 2;         // two upgrades on top of the base unit
@@ -704,6 +706,7 @@ const Engine = (() => {
       { dealt: 0, wasted: 0, blocked: 0, missed: 0, windLost: 0, winds: 0, totalHp: B.reduce((s, b) => s + b.u.hp, 0) },
     ];
     const dt = g.dt;
+    const sight = g.sight == null ? SIGHT : g.sight;
     let projectiles = [];
     let t = 0, shots = [], over = false;
     const dist = (a, b) => hyp(a.x - b.x, a.y - b.y);
@@ -894,10 +897,23 @@ const Engine = (() => {
         b.near = near;
         const rg = R(b);
         if (near && nd > rg) {
-          // walk a little inside max range, so being nudged by allies doesn't leave the unit just out of reach
-          const mv = Math.min(b.u.speed * (b.slowT > 0 ? 1 - b.slowMove / 100 : 1) * dt, nd - (rg - Math.min(APPROACH, rg * 0.25)));
-          b.x += (near.x - b.x) / nd * mv;
-          b.y += (near.y - b.y) / nd * mv;
+          const step = b.u.speed * (b.slowT > 0 ? 1 - b.slowMove / 100 : 1) * dt;
+          let mv;
+          // March straight ahead until an enemy comes within sight (range + SIGHT), then turn toward it.
+          // So a squad meets what stands in its own lane, and an empty lane lets it walk around the side.
+          // Once every enemy is level or behind, it turns toward the nearest one.
+          const fwd = b.side === 0 ? 1 : -1;
+          let ahead = false;
+          if (nd > rg + sight) for (const f of foes) if (f.alive && !f.hidden && (f.y - b.y) * fwd > 0) { ahead = true; break; }
+          if (ahead) {
+            mv = step;
+            b.y += fwd * mv;
+          } else {
+            // walk a little inside max range, so being nudged by allies doesn't leave the unit just out of reach
+            mv = Math.min(step, nd - (rg - Math.min(APPROACH, rg * 0.25)));
+            b.x += (near.x - b.x) / nd * mv;
+            b.y += (near.y - b.y) / nd * mv;
+          }
           b.moved += mv;
           // a unit with wind-up has to set up again after it moves; a charge in progress is lost
           if (b.u.windUp > 0 && mv > 0) {
@@ -1183,7 +1199,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
       skillsOn: [0, 1].map(k => !!(Array.isArray(u.skillsOn) && u.skillsOn[k])),
       skillMods: [0, 1].map(k => cleanMod(Array.isArray(u.skillMods) ? u.skillMods[k] : null)),
     })));
-    return { settings: { ...SAMPLE.settings, ...p.settings }, skills, units };
+    return { settings: { sight: 12, ...SAMPLE.settings, ...p.settings }, skills, units };
   }
   function validSkill(sk) { return sk && typeof sk.id === 'string' && typeof sk.name === 'string' && Engine.SKILL_TYPES[sk.type]; }
   const skillById = (id) => state.skills.find(sk => sk.id === id) || null;

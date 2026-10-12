@@ -2,10 +2,10 @@
 const Game = (() => {
   const E = (typeof Engine !== 'undefined') ? Engine : require('./engine.js');
 
-  const COLS = 12, ROWS = 12, TILE = 6;
+  const COLS = 12, ROWS = 16, TILE = 6, ZONE = 5; // each side builds in ZONE rows; the rows between are no man's land
   const START_HP = 40, START_GOLD = 300, INCOME = 250, LOSER_BONUS = 50;
   const SQUAD_COST = 100, SQUAD_POINTS = 2;
-  const SETTINGS = { dt: 0.05, timeCap: 60, spacing: 3.5, minDmgPct: 15, absorbXp: 1 };
+  const SETTINGS = { dt: 0.05, timeCap: 60, spacing: 3.5, minDmgPct: 15, absorbXp: 1, sight: 12 };
   // XP a squad needs in total to reach level 1, 2, 3, as multiples of its own starting health.
   // XP = damage dealt + damage absorbed + bounty for killing leveled bodies.
   const XP_STEPS = [5, 12, 24];
@@ -25,9 +25,9 @@ const Game = (() => {
   const levelCost = (unit) => Math.max(10, Math.round(CONFIG.levelCostPerTier * (unit.cost || 1) / 5) * 5);
   const AI = { levelPolicy: 'smart', maxExtraDeploys: 3, skills: true }; // levelPolicy: smart | never | all (for experiments)
 
-  // rows 0-3: enemy zone (row 3 is its front), rows 4-7: no man's land, rows 8-11: player zone (row 8 is its front)
-  const zoneRows = (side) => side === 0 ? [8, 9, 10, 11] : [3, 2, 1, 0];
-  const inZone = (side, row) => side === 0 ? row >= 8 && row <= 11 : row >= 0 && row <= 3;
+  // rows 0-4: enemy zone (row 4 is its front), rows 5-10: no man's land, rows 11-15: player zone (row 11 is its front)
+  const zoneRows = (side) => Array.from({ length: ZONE }, (_, i) => side === 0 ? ROWS - ZONE + i : ZONE - 1 - i); // front row first
+  const inZone = (side, row) => side === 0 ? row >= ROWS - ZONE && row < ROWS : row >= 0 && row < ZONE;
   const tileToWorld = (col, row) => ({ x: (col - (COLS - 1) / 2) * TILE, y: ((ROWS - 1) / 2 - row) * TILE });
 
   function rng(seed) { // mulberry32
@@ -307,7 +307,7 @@ const Game = (() => {
   function aiSpot(m, side, unitIdx, oppArmy, r) {
     const u = E.withTraits(m.units[unitIdx]);
     const rows = zoneRows(side);
-    const band = u.range <= 12 ? [0, 1] : u.range <= 30 ? [1, 2] : [2, 3];
+    const band = u.range <= 12 ? [0, 1] : u.range <= 22 ? [1, 2] : u.range <= 30 ? [2, 3] : [3, 4]; // rows counted from the front
     // aim at the columns of the enemy squads this unit counters
     let wsum = 0, csum = 0;
     for (const s of oppArmy) {
@@ -329,7 +329,7 @@ const Game = (() => {
   }
 
   return {
-    COLS, ROWS, TILE, START_HP, START_GOLD, INCOME, incomeFor, LOSER_BONUS, SQUAD_COST, SQUAD_POINTS, SETTINGS, XP_STEPS, xpNeeded, unitCostOf,
+    COLS, ROWS, TILE, ZONE, START_HP, START_GOLD, INCOME, incomeFor, LOSER_BONUS, SQUAD_COST, SQUAD_POINTS, SETTINGS, XP_STEPS, xpNeeded, unitCostOf,
     levelCost, isReady, levelUp, undoLevel, aiLevel, AI, CONFIG,
     deploysAllowed, deploysLeft, deployedThisRound, buyDeploy, refundDeploy,
     skillDef, skillCost, hasSkill, skillVisible, unitFor, canBuySkill, buySkill, undoSkill, sellValue, sell,

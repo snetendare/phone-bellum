@@ -148,8 +148,8 @@ a { color: var(--you); }
   </div>
   <div class="net" id="net" hidden aria-live="polite"><i></i><span id="net-text"></span></div>
 
-  <div class="board-wrap" id="wrap">
-    <canvas id="board" aria-label="Battlefield. Your zone is the bottom four rows, the enemy zone the top four."></canvas>
+  <div class="board-wrap" id="wrap" style="aspect-ratio: 12 / 16; width: min(100%, calc((100svh - 300px) * 0.75)); margin: 0 auto;">
+    <canvas id="board" aria-label="Battlefield. Your zone is the bottom five rows, the enemy zone the top five, with six rows of no man's land between."></canvas>
     <span class="tag-clock" id="clock"></span>
     <div class="overlay" id="overlay"></div>
   </div>
@@ -309,7 +309,8 @@ const Engine = (() => {
   const PIERCE_DEPTH = 10;     // metres a piercing shot travels past its target
   const PIERCE_WIDTH = 1;      // half-width of the pierce corridor (m)
   const APPROACH = 0.5;         // metres a moving unit steps inside its max range
-  const PROJ_HIT_RADIUS = 1;   // a projectile hits a body within this distance of where it lands
+  const PROJ_HIT_RADIUS = 1;
+  const SIGHT = 12;            // metres beyond its own range at which a unit notices an enemy and turns toward it   // a projectile hits a body within this distance of where it lands
 
   const LEVEL_BONUS = 1;       // each upgrade adds +100% of starting health and hit (2x, then 3x)
   const MAX_LEVEL = 2;         // two upgrades on top of the base unit
@@ -519,6 +520,7 @@ const Engine = (() => {
       { dealt: 0, wasted: 0, blocked: 0, missed: 0, windLost: 0, winds: 0, totalHp: B.reduce((s, b) => s + b.u.hp, 0) },
     ];
     const dt = g.dt;
+    const sight = g.sight == null ? SIGHT : g.sight;
     let projectiles = [];
     let t = 0, shots = [], over = false;
     const dist = (a, b) => hyp(a.x - b.x, a.y - b.y);
@@ -709,10 +711,23 @@ const Engine = (() => {
         b.near = near;
         const rg = R(b);
         if (near && nd > rg) {
-          // walk a little inside max range, so being nudged by allies doesn't leave the unit just out of reach
-          const mv = Math.min(b.u.speed * (b.slowT > 0 ? 1 - b.slowMove / 100 : 1) * dt, nd - (rg - Math.min(APPROACH, rg * 0.25)));
-          b.x += (near.x - b.x) / nd * mv;
-          b.y += (near.y - b.y) / nd * mv;
+          const step = b.u.speed * (b.slowT > 0 ? 1 - b.slowMove / 100 : 1) * dt;
+          let mv;
+          // March straight ahead until an enemy comes within sight (range + SIGHT), then turn toward it.
+          // So a squad meets what stands in its own lane, and an empty lane lets it walk around the side.
+          // Once every enemy is level or behind, it turns toward the nearest one.
+          const fwd = b.side === 0 ? 1 : -1;
+          let ahead = false;
+          if (nd > rg + sight) for (const f of foes) if (f.alive && !f.hidden && (f.y - b.y) * fwd > 0) { ahead = true; break; }
+          if (ahead) {
+            mv = step;
+            b.y += fwd * mv;
+          } else {
+            // walk a little inside max range, so being nudged by allies doesn't leave the unit just out of reach
+            mv = Math.min(step, nd - (rg - Math.min(APPROACH, rg * 0.25)));
+            b.x += (near.x - b.x) / nd * mv;
+            b.y += (near.y - b.y) / nd * mv;
+          }
           b.moved += mv;
           // a unit with wind-up has to set up again after it moves; a charge in progress is lost
           if (b.u.windUp > 0 && mv > 0) {
@@ -935,10 +950,10 @@ if (typeof module !== 'undefined') module.exports = Engine;
 const Game = (() => {
   const E = (typeof Engine !== 'undefined') ? Engine : require('./engine.js');
 
-  const COLS = 12, ROWS = 12, TILE = 6;
+  const COLS = 12, ROWS = 16, TILE = 6, ZONE = 5; // each side builds in ZONE rows; the rows between are no man's land
   const START_HP = 40, START_GOLD = 300, INCOME = 250, LOSER_BONUS = 50;
   const SQUAD_COST = 100, SQUAD_POINTS = 2;
-  const SETTINGS = { dt: 0.05, timeCap: 60, spacing: 3.5, minDmgPct: 15, absorbXp: 1 };
+  const SETTINGS = { dt: 0.05, timeCap: 60, spacing: 3.5, minDmgPct: 15, absorbXp: 1, sight: 12 };
   // XP a squad needs in total to reach level 1, 2, 3, as multiples of its own starting health.
   // XP = damage dealt + damage absorbed + bounty for killing leveled bodies.
   const XP_STEPS = [5, 12, 24];
@@ -958,9 +973,9 @@ const Game = (() => {
   const levelCost = (unit) => Math.max(10, Math.round(CONFIG.levelCostPerTier * (unit.cost || 1) / 5) * 5);
   const AI = { levelPolicy: 'smart', maxExtraDeploys: 3, skills: true }; // levelPolicy: smart | never | all (for experiments)
 
-  // rows 0-3: enemy zone (row 3 is its front), rows 4-7: no man's land, rows 8-11: player zone (row 8 is its front)
-  const zoneRows = (side) => side === 0 ? [8, 9, 10, 11] : [3, 2, 1, 0];
-  const inZone = (side, row) => side === 0 ? row >= 8 && row <= 11 : row >= 0 && row <= 3;
+  // rows 0-4: enemy zone (row 4 is its front), rows 5-10: no man's land, rows 11-15: player zone (row 11 is its front)
+  const zoneRows = (side) => Array.from({ length: ZONE }, (_, i) => side === 0 ? ROWS - ZONE + i : ZONE - 1 - i); // front row first
+  const inZone = (side, row) => side === 0 ? row >= ROWS - ZONE && row < ROWS : row >= 0 && row < ZONE;
   const tileToWorld = (col, row) => ({ x: (col - (COLS - 1) / 2) * TILE, y: ((ROWS - 1) / 2 - row) * TILE });
 
   function rng(seed) { // mulberry32
@@ -1240,7 +1255,7 @@ const Game = (() => {
   function aiSpot(m, side, unitIdx, oppArmy, r) {
     const u = E.withTraits(m.units[unitIdx]);
     const rows = zoneRows(side);
-    const band = u.range <= 12 ? [0, 1] : u.range <= 30 ? [1, 2] : [2, 3];
+    const band = u.range <= 12 ? [0, 1] : u.range <= 22 ? [1, 2] : u.range <= 30 ? [2, 3] : [3, 4]; // rows counted from the front
     // aim at the columns of the enemy squads this unit counters
     let wsum = 0, csum = 0;
     for (const s of oppArmy) {
@@ -1262,7 +1277,7 @@ const Game = (() => {
   }
 
   return {
-    COLS, ROWS, TILE, START_HP, START_GOLD, INCOME, incomeFor, LOSER_BONUS, SQUAD_COST, SQUAD_POINTS, SETTINGS, XP_STEPS, xpNeeded, unitCostOf,
+    COLS, ROWS, TILE, ZONE, START_HP, START_GOLD, INCOME, incomeFor, LOSER_BONUS, SQUAD_COST, SQUAD_POINTS, SETTINGS, XP_STEPS, xpNeeded, unitCostOf,
     levelCost, isReady, levelUp, undoLevel, aiLevel, AI, CONFIG,
     deploysAllowed, deploysLeft, deployedThisRound, buyDeploy, refundDeploy,
     skillDef, skillCost, hasSkill, skillVisible, unitFor, canBuySkill, buySkill, undoSkill, sellValue, sell,
@@ -1274,7 +1289,7 @@ if (typeof module !== 'undefined') module.exports = Game;
 </script>
 <script>
 (() => {
-  const DATA = {"units":[{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"none","defVal":0,"level":0,"name":"Goblin Swarm","cost":1,"bodies":12,"hp":28,"hit":16,"aps":1.2,"range":2,"speed":12,"splash":0,"shape":"triangle","color":"#9BD35A","skills":["swift","shrink"],"skillMods":[null,null]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"none","defVal":0,"level":0,"name":"Skeleton Archers","cost":1,"bodies":8,"hp":32,"hit":12,"aps":0.8,"range":20,"speed":2.5,"splash":0,"shape":"triangle","color":"#E9E3CF","skills":["range","rapid"],"skillMods":[null,null]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"none","defVal":0,"level":0,"name":"Ember Imps","cost":1,"bodies":4,"hp":110,"hit":20,"aps":0.8,"range":10,"speed":4,"splash":3,"shape":"pentagon","color":"#FFA94D","skills":["swift","heavy"],"skillMods":[null,null]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"none","defVal":0,"level":0,"name":"Fire Mage","cost":1,"bodies":1,"hp":150,"hit":35,"aps":0.8,"range":26,"speed":3,"splash":4,"shape":"hexagon","color":"#fb0022","skills":["range","armorHp"],"skillMods":[null,null]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":1,"defense":"none","defVal":0,"level":0,"name":"Sniper","cost":1,"bodies":1,"hp":200,"hit":230,"aps":0.25,"range":35,"speed":2,"splash":0,"shape":"cross","color":"#F7D154","skills":["rapid","spawn"],"skillMods":[null,null]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"armor","defVal":6,"level":0,"name":"Brute","cost":2,"bodies":1,"hp":1100,"hit":98,"aps":0.5,"range":2,"speed":5,"splash":2.1,"shape":"square","color":"#8D99AE","skills":["armorHp","swift"],"skillMods":[null,null]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":20,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"none","defVal":40,"level":0,"name":"Wisps","cost":1,"bodies":3,"hp":80,"hit":70,"aps":0.8,"range":15,"speed":5,"splash":0,"shape":"ring","color":"#ff90ff","skills":["stealth","skmv5oxj501"],"skillMods":[null,{"params":{},"cost":200}]},{"burst":6,"pellets":2,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0.2,"defense":"none","defVal":0,"level":0,"name":"Leaf Wizard","cost":2,"bodies":1,"hp":300,"hit":21,"aps":0.45,"range":27,"speed":8,"splash":0,"shape":"hexagon","color":"#00d200","skills":["rapid","range"],"skillMods":[null,null]},{"burst":1,"pellets":1,"spinUp":0,"pierce":5,"projSpeed":35,"minRange":0,"charge":1,"knockback":0,"windUp":0.5,"defense":"none","defVal":0,"level":0,"name":"Earth Wizard","cost":2,"bodies":1,"hp":650,"hit":440,"aps":0.2,"range":20,"speed":3,"splash":2,"shape":"circle","color":"#24590d","skills":["regen","range"],"skillMods":[null,null]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"none","defVal":0,"level":0,"name":"Flame Wizard","cost":4,"bodies":1,"hp":2000,"hit":20,"aps":4,"range":15,"speed":2,"splash":0,"shape":"bar","color":"#b95018","skills":["armorHp","range"],"skillMods":[null,null],"flame":30},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"none","defVal":0,"level":0,"name":"Steel Wizard","cost":4,"bodies":1,"hp":1800,"hit":150,"aps":0.9,"range":15,"speed":2,"splash":2,"shape":"bar","color":"#57535a","skills":["range","heavy"],"skillMods":[null,{"params":{"slow":20,"hit":20}}]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"none","defVal":0,"level":0,"name":"Slime Wizard","cost":4,"bodies":1,"hp":700,"hit":450,"aps":0.15,"range":20,"speed":4,"splash":5,"shape":"ring","color":"#81f038","skills":["skmv5oxpgk2","range"],"skillMods":[null,null]}],"matrix":[[0,0.336,-0.648,-0.787,0.917,0.104,0.271,0.49,0.813,-0.856,0.417,0.833],[-0.336,0,-0.116,-1,0.656,0.594,0.594,-0.92,0.625,0.375,0.813,0.813],[0.648,0.116,0,-0.767,0.125,0.625,-0.5,-0.5,0.25,-0.86,-0.078,0.188],[0.787,1,0.767,0,-0.912,-0.288,0.767,0.08,0.5,-0.405,-0.514,-0.35],[-0.917,-0.656,-0.125,0.912,0,0.51,-0.5,-0.117,1,1,1,0.25],[-0.104,-0.594,-0.625,0.288,-0.51,0,-0.833,0.182,-0.397,0.322,-0.456,0.193],[-0.271,-0.594,0.5,-0.767,0.5,0.833,0,-0.3,0.667,-0.405,0.667,0.333],[-0.49,0.92,0.5,-0.08,0.117,-0.182,0.3,0,-0.257,0.733,-0.02,-0.28],[-0.813,-0.625,-0.25,-0.5,-1,0.397,-0.667,0.257,0,0.469,0.154,0.308],[0.856,-0.375,0.86,0.405,-1,-0.322,0.405,-0.733,-0.469,0,-0.356,0.55],[-0.417,-0.813,0.078,0.514,-1,0.456,-0.667,0.02,-0.154,0.356,0,0.5],[-0.833,-0.813,-0.188,0.35,-0.25,-0.193,-0.333,0.28,-0.308,-0.55,-0.5,0]],"skills":[{"id":"regen","type":"regen","name":"Regeneration","cost":100,"params":{}},{"id":"poison","type":"poison","name":"Poison shot","cost":100,"params":{"pct":150}},{"id":"stealth","type":"stealth","name":"Stealth","cost":100,"params":{}},{"id":"armorHp","type":"armorHp","name":"Armor and health","cost":200,"params":{}},{"id":"spawn","type":"spawn","name":"Spawn goblins","cost":200,"params":{}},{"id":"rapid","type":"rapid","name":"Rapid fire","cost":100,"params":{}},{"id":"swift","type":"swift","name":"Swift strikes","cost":100,"params":{}},{"id":"heavy","type":"heavy","name":"Heavy shot","cost":100,"params":{}},{"id":"healer","type":"healer","name":"Healing touch","cost":200,"params":{}},{"id":"range","type":"range","name":"Long reach","cost":200,"params":{}},{"id":"shrink","type":"shrink","name":"Shortsight","cost":100,"params":{}},{"id":"skmv5oxj501","type":"ward","name":"Ward","cost":100,"params":{}},{"id":"skmv5oxpgk2","type":"slow","name":"Slow","cost":100,"params":{}}]};
+  const DATA = {"units":[{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"none","defVal":0,"level":0,"name":"Goblin Swarm","cost":1,"bodies":12,"hp":28,"hit":16,"aps":1.2,"range":2,"speed":12,"splash":0,"shape":"triangle","color":"#9BD35A","skills":["swift","shrink"],"skillMods":[null,null]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"none","defVal":0,"level":0,"name":"Skeleton Archers","cost":1,"bodies":8,"hp":32,"hit":12,"aps":0.8,"range":20,"speed":2.5,"splash":0,"shape":"triangle","color":"#E9E3CF","skills":["range","rapid"],"skillMods":[null,null]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"none","defVal":0,"level":0,"name":"Ember Imps","cost":1,"bodies":4,"hp":110,"hit":20,"aps":0.8,"range":10,"speed":4,"splash":3,"shape":"pentagon","color":"#FFA94D","skills":["swift","heavy"],"skillMods":[null,null]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"none","defVal":0,"level":0,"name":"Fire Mage","cost":1,"bodies":1,"hp":150,"hit":35,"aps":0.8,"range":26,"speed":3,"splash":4,"shape":"hexagon","color":"#fb0022","skills":["range","armorHp"],"skillMods":[null,null]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":1,"defense":"none","defVal":0,"level":0,"name":"Sniper","cost":1,"bodies":1,"hp":200,"hit":230,"aps":0.25,"range":35,"speed":2,"splash":0,"shape":"cross","color":"#F7D154","skills":["rapid","spawn"],"skillMods":[null,null]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"armor","defVal":6,"level":0,"name":"Brute","cost":2,"bodies":1,"hp":1100,"hit":98,"aps":0.5,"range":2,"speed":5,"splash":2.1,"shape":"square","color":"#8D99AE","skills":["armorHp","swift"],"skillMods":[null,null]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":20,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"none","defVal":40,"level":0,"name":"Wisps","cost":1,"bodies":3,"hp":80,"hit":70,"aps":0.8,"range":15,"speed":5,"splash":0,"shape":"ring","color":"#ff90ff","skills":["stealth","skmv5oxj501"],"skillMods":[null,{"params":{},"cost":200}]},{"burst":6,"pellets":2,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0.2,"defense":"none","defVal":0,"level":0,"name":"Leaf Wizard","cost":2,"bodies":1,"hp":300,"hit":21,"aps":0.45,"range":27,"speed":8,"splash":0,"shape":"hexagon","color":"#00d200","skills":["rapid","range"],"skillMods":[null,null]},{"burst":1,"pellets":1,"spinUp":0,"pierce":5,"projSpeed":35,"minRange":0,"charge":1,"knockback":0,"windUp":0.5,"defense":"none","defVal":0,"level":0,"name":"Earth Wizard","cost":2,"bodies":1,"hp":650,"hit":440,"aps":0.2,"range":20,"speed":3,"splash":2,"shape":"circle","color":"#24590d","skills":["regen","range"],"skillMods":[null,null]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"none","defVal":0,"level":0,"name":"Flame Wizard","cost":4,"bodies":1,"hp":2000,"hit":20,"aps":4,"range":15,"speed":2,"splash":0,"shape":"bar","color":"#b95018","skills":["armorHp","range"],"skillMods":[null,null],"flame":30},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"none","defVal":0,"level":0,"name":"Steel Wizard","cost":4,"bodies":1,"hp":1800,"hit":150,"aps":0.9,"range":15,"speed":2,"splash":2,"shape":"bar","color":"#57535a","skills":["range","heavy"],"skillMods":[null,{"params":{"slow":20,"hit":20}}]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"none","defVal":0,"level":0,"name":"Slime Wizard","cost":4,"bodies":1,"hp":700,"hit":450,"aps":0.15,"range":20,"speed":4,"splash":5,"shape":"ring","color":"#81f038","skills":["skmv5oxpgk2","range"],"skillMods":[null,null]}],"matrix":[[0,0.295,-0.611,-0.653,0.917,-0.018,0.354,0.37,0.833,-0.792,0.229,0.875],[-0.295,0,-0.116,-1,0.656,0.594,0.656,-0.84,0.594,0.406,0.813,0.813],[0.611,0.116,0,-0.833,0.188,0.576,-0.542,-0.333,0.375,-0.8,-0.1,0.125],[0.653,1,0.833,0,-0.912,-0.288,0.767,0.02,0.5,-0.405,-0.514,-0.35],[-0.917,-0.656,-0.188,0.912,0,0.51,-0.417,-0.117,1,1,1,1],[0.018,-0.594,-0.576,0.288,-0.51,0,-0.833,0.182,-0.397,0.315,-0.456,0.193],[-0.354,-0.656,0.542,-0.767,0.417,0.833,0,-0.533,0.667,-0.405,0.667,0.5],[-0.37,0.84,0.333,-0.02,0.117,-0.182,0.533,0,-0.225,0.733,-0.02,-0.28],[-0.833,-0.594,-0.375,-0.5,-1,0.397,-0.667,0.225,0,-0.12,0.154,0.308],[0.792,-0.406,0.8,0.405,-1,-0.315,0.405,-0.733,0.12,0,-0.356,0.55],[-0.229,-0.813,0.1,0.514,-1,0.456,-0.667,0.02,-0.154,0.356,0,0.5],[-0.875,-0.813,-0.125,0.35,-1,-0.193,-0.5,0.28,-0.308,-0.55,-0.5,0]],"skills":[{"id":"regen","type":"regen","name":"Regeneration","cost":100,"params":{}},{"id":"poison","type":"poison","name":"Poison shot","cost":100,"params":{"pct":150}},{"id":"stealth","type":"stealth","name":"Stealth","cost":100,"params":{}},{"id":"armorHp","type":"armorHp","name":"Armor and health","cost":200,"params":{}},{"id":"spawn","type":"spawn","name":"Spawn goblins","cost":200,"params":{}},{"id":"rapid","type":"rapid","name":"Rapid fire","cost":100,"params":{}},{"id":"swift","type":"swift","name":"Swift strikes","cost":100,"params":{}},{"id":"heavy","type":"heavy","name":"Heavy shot","cost":100,"params":{}},{"id":"healer","type":"healer","name":"Healing touch","cost":200,"params":{}},{"id":"range","type":"range","name":"Long reach","cost":200,"params":{}},{"id":"shrink","type":"shrink","name":"Shortsight","cost":100,"params":{}},{"id":"skmv5oxj501","type":"ward","name":"Ward","cost":100,"params":{}},{"id":"skmv5oxpgk2","type":"slow","name":"Slow","cost":100,"params":{}}]};
   const ROLES = {
     'Goblin Swarm': 'Fast melee swarm. Soaks shots and overwhelms single-target units.',
     'Skeleton Archers': 'Cheap ranged squad that deals steady damage from behind.',
@@ -1303,7 +1318,7 @@ if (typeof module !== 'undefined') module.exports = Game;
   // ---------- unit sets: built-in, or loaded from Counter Lab ----------
   const BUILTIN = { units: DATA.units, matrix: DATA.matrix, skills: DATA.skills || [] };
   const STORE = 'phonebellum.units.v1';
-  const MATRIX_SETTINGS = { budget: 2, distance: 40, spacing: 3.5, minDmgPct: 15, timeCap: 60, dt: 0.05 };
+  const MATRIX_SETTINGS = { budget: 2, distance: 42, spacing: 3.5, minDmgPct: 15, timeCap: 60, dt: 0.05, sight: 12 }; // distance = gap between the front rows on the board
   const LEVERS = ['cost', 'bodies', 'hp', 'hit', 'aps', 'range', 'speed', 'splash'];
   let units, M, customSet = false, rawSet = BUILTIN;
   const validUnits = (list) => Array.isArray(list) && list.length >= 2 && list.length <= 30 &&
@@ -1362,20 +1377,20 @@ if (typeof module !== 'undefined') module.exports = Game;
 
   // ---------- canvas ----------
   const cv = $('board'), ctx = cv.getContext('2d');
-  let W = 0, S = 0;
+  let W = 0, H = 0, S = 0;
   function size() {
     const r = cv.getBoundingClientRect();
     const dpr = Math.min(2, window.devicePixelRatio || 1);
-    W = r.width;
-    cv.width = Math.round(r.width * dpr); cv.height = Math.round(r.width * dpr);
+    W = r.width; H = W * Game.ROWS / Game.COLS;
+    cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     S = W / (Game.COLS * Game.TILE);
   }
-  const half = Game.COLS * Game.TILE / 2;
+  const half = Game.COLS * Game.TILE / 2, halfY = Game.ROWS * Game.TILE / 2;
   // The board is turned around for side 1, so both players see their own zone at the bottom
   const flip = () => me === 1 ? -1 : 1;
   const PX = (x) => (half + x * flip()) * S;
-  const PY = (y) => (half - y * flip()) * S;
+  const PY = (y) => (halfY - y * flip()) * S;
   const scol = (c) => me === 1 ? Game.COLS - 1 - c : c;   // model column -> screen column (and back)
   const srow = (r) => me === 1 ? Game.ROWS - 1 - r : r;
   const tilePx = () => Game.TILE * S;
@@ -1385,21 +1400,20 @@ if (typeof module !== 'undefined') module.exports = Game;
 
   function drawBoard() {
     const t = tilePx();
-    ctx.fillStyle = css('--board'); ctx.fillRect(0, 0, W, W);
+    const Z = Game.ZONE, mine = (Game.ROWS - Z) * t;
+    ctx.fillStyle = css('--board'); ctx.fillRect(0, 0, W, H);
     ctx.globalAlpha = 0.08;
-    ctx.fillStyle = css('--foe'); ctx.fillRect(0, 0, W, t * 4);
-    ctx.fillStyle = css('--you'); ctx.fillRect(0, t * 8, W, t * 4);
+    ctx.fillStyle = css('--foe'); ctx.fillRect(0, 0, W, t * Z);
+    ctx.fillStyle = css('--you'); ctx.fillRect(0, mine, W, t * Z);
     ctx.globalAlpha = 1;
     ctx.strokeStyle = 'rgba(200, 230, 225, 0.06)'; ctx.lineWidth = 1;
-    for (let i = 1; i < Game.COLS; i++) {
-      ctx.beginPath(); ctx.moveTo(i * t, 0); ctx.lineTo(i * t, W); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(0, i * t); ctx.lineTo(W, i * t); ctx.stroke();
-    }
+    for (let i = 1; i < Game.COLS; i++) { ctx.beginPath(); ctx.moveTo(i * t, 0); ctx.lineTo(i * t, H); ctx.stroke(); }
+    for (let i = 1; i < Game.ROWS; i++) { ctx.beginPath(); ctx.moveTo(0, i * t); ctx.lineTo(W, i * t); ctx.stroke(); }
     ctx.setLineDash([5, 6]); ctx.lineWidth = 1.2;
     ctx.strokeStyle = css('--foe'); ctx.globalAlpha = 0.5;
-    ctx.beginPath(); ctx.moveTo(0, t * 4); ctx.lineTo(W, t * 4); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, t * Z); ctx.lineTo(W, t * Z); ctx.stroke();
     ctx.strokeStyle = css('--you');
-    ctx.beginPath(); ctx.moveTo(0, t * 8); ctx.lineTo(W, t * 8); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, mine); ctx.lineTo(W, mine); ctx.stroke();
     ctx.setLineDash([]); ctx.globalAlpha = 1;
   }
 
@@ -1598,7 +1612,7 @@ if (typeof module !== 'undefined') module.exports = Game;
     else {
       hint = selected !== null
         ? (canBuy(selected) ? `Tap a tile in your zone to place ${esc(units[selected].name)}.` : left <= 0 ? 'No deployments left this round.' : `Not enough gold for ${esc(units[selected].name)}.`)
-        : (fresh ? 'Tap a squad you placed this round to take it back.' : 'Pick a unit, then tap a tile in the bottom four rows.');
+        : (fresh ? 'Tap a squad you placed this round to take it back.' : 'Pick a unit, then tap a tile in the bottom five rows.');
       if (left <= 0 && selected === null) hint = `No deployments left. Buy one more for ${Game.CONFIG.extraDeployCost} gold, or spend gold on upgrades.`;
       if (readyN && selected === null) hint = `${readyN} squad${readyN === 1 ? ' is' : 's are'} ready to level up. Tap ${readyN === 1 ? 'it' : 'one'} to upgrade.`;
     }
@@ -1702,7 +1716,8 @@ if (typeof module !== 'undefined') module.exports = Game;
       <h2>Phone Bellum</h2>
       <ul>
         <li>Buy squads with gold each round. A standard squad costs ${Game.SQUAD_COST}. Income grows by ${Game.CONFIG.incomeStep} every round.</li>
-        <li>Place them in the bottom four rows. They stay for the whole match.</li>
+        <li>Place them in the bottom five rows. They stay for the whole match.</li>
+        <li>Columns are lanes: squads march straight ahead and fight what they meet, so an empty lane lets a squad walk around the side.</li>
         <li>You have ${DEPLOY_SECONDS} seconds to deploy, then the armies fight on their own.</li>
         <li>The loser takes damage from every enemy squad still standing.</li>
         <li>You see the enemy’s earlier squads while you deploy, so build counters.</li>
@@ -1985,8 +2000,8 @@ Worst choices against it: ${answers.slice(-3).reverse().map(([i, v]) => `${units
     return `You are playing Phone Bellum, a small auto-battler, against a human player. You are the RED side. Decide your moves for round ${m.round}. The human places their new squads at the same time and can't see yours until the fight. You only see their squads from earlier rounds. Play to win: build counters to what they have, protect your damage dealers, and think about what they are likely to add next.
 
 RULES
-- Board: columns 0-11, rows 0-11, tiles 6 m wide. Your zone is rows 0-3; row 3 is your front line, nearest the enemy, and row 0 is the back. The enemy zone is rows 8-11; row 8 is their front. One squad per tile. Squads keep their tile for the whole match.
-- The fight is automatic. Every body walks toward the nearest enemy and attacks once it is in range. Short-range units in front shield long-range units behind. Spreading out limits splash damage; columns decide which enemies you meet first.
+- Board: columns 0-${Game.COLS - 1}, rows 0-${Game.ROWS - 1}, tiles ${Game.TILE} m wide. Your zone is rows 0-${Game.ZONE - 1}; row ${Game.ZONE - 1} is your front line, nearest the enemy, and row 0 is the back. Rows ${Game.ZONE}-${Game.ROWS - Game.ZONE - 1} are no man's land. The enemy zone is rows ${Game.ROWS - Game.ZONE}-${Game.ROWS - 1}; row ${Game.ROWS - Game.ZONE} is their front. One squad per tile. Squads keep their tile for the whole match.
+- The fight is automatic. Every body marches straight ahead in its own column until an enemy comes within its range + ${Game.SETTINGS.sight} m, then turns toward the nearest enemy and attacks once in range. Once no enemy is ahead of it, it turns toward the nearest one. So columns are lanes: a squad fights what stands in its lane, a squad in an empty lane walks past and hits the enemy from the side or behind, and long-range units in the back only get attacked once the front is gone. Short-range units in front shield long-range units behind. Spreading out limits splash damage.
 - The round's loser loses health: for each surviving enemy squad, 2 x (its price / 100), scaled by the share of its bodies alive. If time runs out, both sides take damage. Health starts at 40 and the match ends at 0.
 - Gold: both players get ${Game.incomeFor(2)} going into round 2, and ${Game.CONFIG.incomeStep} more every round after that (next round: +${Game.incomeFor(m.round + 1)}). The round's loser gets +${Game.LOSER_BONUS} extra. Unspent gold carries over.
 - This round you may place ${Game.deploysAllowed(m, 1)} new squad(s). Each extra deployment costs ${Game.CONFIG.extraDeployCost} gold.

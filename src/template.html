@@ -207,6 +207,7 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
       <div class="field"><label for="s-spacing">Body spacing (m)</label><input id="s-spacing" type="number" min="0.5" step="0.5" data-s="spacing"><span class="hint">How tightly squads stand. Tighter means more splash hits.</span></div>
       <div class="field"><label for="s-floor">Armor floor (%)</label><input id="s-floor" type="number" min="0" max="100" step="1" data-s="minDmgPct"><span class="hint">Share of a hit that always gets through armor.</span></div>
       <div class="field"><label for="s-cap">Time limit (s)</label><input id="s-cap" type="number" min="5" step="5" data-s="timeCap"><span class="hint">After this, the side with more health left wins.</span></div>
+      <div class="field"><label for="s-sight">Sight (m)</label><input id="s-sight" type="number" min="0" step="1" data-s="sight"><span class="hint">Units march straight ahead until an enemy is this far beyond their range, then turn to it. 200 = chase the nearest enemy anywhere.</span></div>
     </div>
   </section>
 
@@ -314,7 +315,7 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
   <section class="panel" aria-labelledby="rules-h">
     <div class="panel-head"><h2 id="rules-h">How a fight works</h2></div>
     <div class="rules">
-      <div class="rule"><h3>Targeting and movement</h3><p>Every body walks toward the nearest enemy and stops once it is in range. Melee units have a range of about 2 m.</p></div>
+      <div class="rule"><h3>Targeting and movement</h3><p>Every body marches straight ahead until an enemy comes within its range plus the sight distance, then turns toward the nearest enemy and stops once it is in range. Once no enemy is ahead, it turns toward the nearest one. Wide formations lose focus: bodies on the edges walk past a narrow enemy before turning in. Melee units have a range of about 2 m.</p></div>
       <div class="rule"><h3>Overkill</h3><p>Damage beyond a body's remaining health is wasted. Big hits on small bodies lose most of their damage.</p></div>
       <div class="rule"><h3>Splash</h3><p>Every enemy within the splash radius of the target takes the full hit. Packed squads take many hits from one attack.</p></div>
       <div class="rule"><h3>Armor</h3><p>Subtracts a flat amount from every hit, down to the armor floor. It shuts down small, fast hits and barely dents big ones.</p></div>
@@ -406,7 +407,7 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
       skillsOn: [0, 1].map(k => !!(Array.isArray(u.skillsOn) && u.skillsOn[k])),
       skillMods: [0, 1].map(k => cleanMod(Array.isArray(u.skillMods) ? u.skillMods[k] : null)),
     })));
-    return { settings: { ...SAMPLE.settings, ...p.settings }, skills, units };
+    return { settings: { sight: 12, ...SAMPLE.settings, ...p.settings }, skills, units };
   }
   function validSkill(sk) { return sk && typeof sk.id === 'string' && typeof sk.name === 'string' && Engine.SKILL_TYPES[sk.type]; }
   const skillById = (id) => state.skills.find(sk => sk.id === id) || null;

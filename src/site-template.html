@@ -49,8 +49,8 @@ a { color: var(--you); }
   </div>
   <div class="net" id="net" hidden aria-live="polite"><i></i><span id="net-text"></span></div>
 
-  <div class="board-wrap" id="wrap">
-    <canvas id="board" aria-label="Battlefield. Your zone is the bottom four rows, the enemy zone the top four."></canvas>
+  <div class="board-wrap" id="wrap" style="aspect-ratio: 12 / 16; width: min(100%, calc((100svh - 300px) * 0.75)); margin: 0 auto;">
+    <canvas id="board" aria-label="Battlefield. Your zone is the bottom five rows, the enemy zone the top five, with six rows of no man's land between."></canvas>
     <span class="tag-clock" id="clock"></span>
     <div class="overlay" id="overlay"></div>
   </div>
@@ -99,7 +99,7 @@ a { color: var(--you); }
   // ---------- unit sets: built-in, or loaded from Counter Lab ----------
   const BUILTIN = { units: DATA.units, matrix: DATA.matrix, skills: DATA.skills || [] };
   const STORE = 'phonebellum.units.v1';
-  const MATRIX_SETTINGS = { budget: 2, distance: 40, spacing: 3.5, minDmgPct: 15, timeCap: 60, dt: 0.05 };
+  const MATRIX_SETTINGS = { budget: 2, distance: 42, spacing: 3.5, minDmgPct: 15, timeCap: 60, dt: 0.05, sight: 12 }; // distance = gap between the front rows on the board
   const LEVERS = ['cost', 'bodies', 'hp', 'hit', 'aps', 'range', 'speed', 'splash'];
   let units, M, customSet = false, rawSet = BUILTIN;
   const validUnits = (list) => Array.isArray(list) && list.length >= 2 && list.length <= 30 &&
@@ -158,20 +158,20 @@ a { color: var(--you); }
 
   // ---------- canvas ----------
   const cv = $('board'), ctx = cv.getContext('2d');
-  let W = 0, S = 0;
+  let W = 0, H = 0, S = 0;
   function size() {
     const r = cv.getBoundingClientRect();
     const dpr = Math.min(2, window.devicePixelRatio || 1);
-    W = r.width;
-    cv.width = Math.round(r.width * dpr); cv.height = Math.round(r.width * dpr);
+    W = r.width; H = W * Game.ROWS / Game.COLS;
+    cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     S = W / (Game.COLS * Game.TILE);
   }
-  const half = Game.COLS * Game.TILE / 2;
+  const half = Game.COLS * Game.TILE / 2, halfY = Game.ROWS * Game.TILE / 2;
   // The board is turned around for side 1, so both players see their own zone at the bottom
   const flip = () => me === 1 ? -1 : 1;
   const PX = (x) => (half + x * flip()) * S;
-  const PY = (y) => (half - y * flip()) * S;
+  const PY = (y) => (halfY - y * flip()) * S;
   const scol = (c) => me === 1 ? Game.COLS - 1 - c : c;   // model column -> screen column (and back)
   const srow = (r) => me === 1 ? Game.ROWS - 1 - r : r;
   const tilePx = () => Game.TILE * S;
@@ -181,21 +181,20 @@ a { color: var(--you); }
 
   function drawBoard() {
     const t = tilePx();
-    ctx.fillStyle = css('--board'); ctx.fillRect(0, 0, W, W);
+    const Z = Game.ZONE, mine = (Game.ROWS - Z) * t;
+    ctx.fillStyle = css('--board'); ctx.fillRect(0, 0, W, H);
     ctx.globalAlpha = 0.08;
-    ctx.fillStyle = css('--foe'); ctx.fillRect(0, 0, W, t * 4);
-    ctx.fillStyle = css('--you'); ctx.fillRect(0, t * 8, W, t * 4);
+    ctx.fillStyle = css('--foe'); ctx.fillRect(0, 0, W, t * Z);
+    ctx.fillStyle = css('--you'); ctx.fillRect(0, mine, W, t * Z);
     ctx.globalAlpha = 1;
     ctx.strokeStyle = 'rgba(200, 230, 225, 0.06)'; ctx.lineWidth = 1;
-    for (let i = 1; i < Game.COLS; i++) {
-      ctx.beginPath(); ctx.moveTo(i * t, 0); ctx.lineTo(i * t, W); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(0, i * t); ctx.lineTo(W, i * t); ctx.stroke();
-    }
+    for (let i = 1; i < Game.COLS; i++) { ctx.beginPath(); ctx.moveTo(i * t, 0); ctx.lineTo(i * t, H); ctx.stroke(); }
+    for (let i = 1; i < Game.ROWS; i++) { ctx.beginPath(); ctx.moveTo(0, i * t); ctx.lineTo(W, i * t); ctx.stroke(); }
     ctx.setLineDash([5, 6]); ctx.lineWidth = 1.2;
     ctx.strokeStyle = css('--foe'); ctx.globalAlpha = 0.5;
-    ctx.beginPath(); ctx.moveTo(0, t * 4); ctx.lineTo(W, t * 4); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, t * Z); ctx.lineTo(W, t * Z); ctx.stroke();
     ctx.strokeStyle = css('--you');
-    ctx.beginPath(); ctx.moveTo(0, t * 8); ctx.lineTo(W, t * 8); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, mine); ctx.lineTo(W, mine); ctx.stroke();
     ctx.setLineDash([]); ctx.globalAlpha = 1;
   }
 
@@ -394,7 +393,7 @@ a { color: var(--you); }
     else {
       hint = selected !== null
         ? (canBuy(selected) ? `Tap a tile in your zone to place ${esc(units[selected].name)}.` : left <= 0 ? 'No deployments left this round.' : `Not enough gold for ${esc(units[selected].name)}.`)
-        : (fresh ? 'Tap a squad you placed this round to take it back.' : 'Pick a unit, then tap a tile in the bottom four rows.');
+        : (fresh ? 'Tap a squad you placed this round to take it back.' : 'Pick a unit, then tap a tile in the bottom five rows.');
       if (left <= 0 && selected === null) hint = `No deployments left. Buy one more for ${Game.CONFIG.extraDeployCost} gold, or spend gold on upgrades.`;
       if (readyN && selected === null) hint = `${readyN} squad${readyN === 1 ? ' is' : 's are'} ready to level up. Tap ${readyN === 1 ? 'it' : 'one'} to upgrade.`;
     }
@@ -498,7 +497,8 @@ a { color: var(--you); }
       <h2>Phone Bellum</h2>
       <ul>
         <li>Buy squads with gold each round. A standard squad costs ${Game.SQUAD_COST}. Income grows by ${Game.CONFIG.incomeStep} every round.</li>
-        <li>Place them in the bottom four rows. They stay for the whole match.</li>
+        <li>Place them in the bottom five rows. They stay for the whole match.</li>
+        <li>Columns are lanes: squads march straight ahead and fight what they meet, so an empty lane lets a squad walk around the side.</li>
         <li>You have ${DEPLOY_SECONDS} seconds to deploy, then the armies fight on their own.</li>
         <li>The loser takes damage from every enemy squad still standing.</li>
         <li>You see the enemy’s earlier squads while you deploy, so build counters.</li>
@@ -781,8 +781,8 @@ Worst choices against it: ${answers.slice(-3).reverse().map(([i, v]) => `${units
     return `You are playing Phone Bellum, a small auto-battler, against a human player. You are the RED side. Decide your moves for round ${m.round}. The human places their new squads at the same time and can't see yours until the fight. You only see their squads from earlier rounds. Play to win: build counters to what they have, protect your damage dealers, and think about what they are likely to add next.
 
 RULES
-- Board: columns 0-11, rows 0-11, tiles 6 m wide. Your zone is rows 0-3; row 3 is your front line, nearest the enemy, and row 0 is the back. The enemy zone is rows 8-11; row 8 is their front. One squad per tile. Squads keep their tile for the whole match.
-- The fight is automatic. Every body walks toward the nearest enemy and attacks once it is in range. Short-range units in front shield long-range units behind. Spreading out limits splash damage; columns decide which enemies you meet first.
+- Board: columns 0-${Game.COLS - 1}, rows 0-${Game.ROWS - 1}, tiles ${Game.TILE} m wide. Your zone is rows 0-${Game.ZONE - 1}; row ${Game.ZONE - 1} is your front line, nearest the enemy, and row 0 is the back. Rows ${Game.ZONE}-${Game.ROWS - Game.ZONE - 1} are no man's land. The enemy zone is rows ${Game.ROWS - Game.ZONE}-${Game.ROWS - 1}; row ${Game.ROWS - Game.ZONE} is their front. One squad per tile. Squads keep their tile for the whole match.
+- The fight is automatic. Every body marches straight ahead in its own column until an enemy comes within its range + ${Game.SETTINGS.sight} m, then turns toward the nearest enemy and attacks once in range. Once no enemy is ahead of it, it turns toward the nearest one. So columns are lanes: a squad fights what stands in its lane, a squad in an empty lane walks past and hits the enemy from the side or behind, and long-range units in the back only get attacked once the front is gone. Short-range units in front shield long-range units behind. Spreading out limits splash damage.
 - The round's loser loses health: for each surviving enemy squad, 2 x (its price / 100), scaled by the share of its bodies alive. If time runs out, both sides take damage. Health starts at 40 and the match ends at 0.
 - Gold: both players get ${Game.incomeFor(2)} going into round 2, and ${Game.CONFIG.incomeStep} more every round after that (next round: +${Game.incomeFor(m.round + 1)}). The round's loser gets +${Game.LOSER_BONUS} extra. Unspent gold carries over.
 - This round you may place ${Game.deploysAllowed(m, 1)} new squad(s). Each extra deployment costs ${Game.CONFIG.extraDeployCost} gold.
