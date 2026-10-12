@@ -49,18 +49,30 @@ const Engine = (() => {
   }
 
   function makeSide(unit, side, g) {
-    const u = leveled(unit);
-    const s = squadsFor(u, g);
-    const n = s * u.bodies;
-    const cols = Math.max(1, Math.min(n, Math.ceil(Math.sqrt(n * 2.5))));
-    const sp = g.spacing;
+    return makeArmy([{ unit, gold: g.budget }], side, g);
+  }
+
+  // An army of one or more unit types, listed front to back. Each entry is a unit, or { unit, gold }
+  // to give that unit its own budget (default: the battle budget). Each group stands in its own rows.
+  function makeArmy(list, side, g) {
     const bodies = [];
-    for (let i = 0; i < n; i++) {
-      const c = i % cols, r = Math.floor(i / cols);
-      const x = (c - (cols - 1) / 2) * sp;
-      const y = (g.distance / 2 + r * sp) * (side === 0 ? -1 : 1);
-      bodies.push(newBody(u, side, x, y, i, 0));
-    }
+    let depth = 0, idx = 0;
+    list.forEach((entry, k) => {
+      const e = entry && entry.unit ? entry : { unit: entry, gold: g.budget };
+      const u = leveled(e.unit);
+      const s = squadsFor(u, { budget: e.gold == null ? g.budget : e.gold });
+      const n = s * u.bodies;
+      const cols = Math.max(1, Math.min(n, Math.ceil(Math.sqrt(n * 2.5))));
+      const sp = g.spacing;
+      for (let i = 0; i < n; i++) {
+        const c = i % cols, r = Math.floor(i / cols);
+        const x = (c - (cols - 1) / 2) * sp;
+        const y = (g.distance / 2 + depth + r * sp) * (side === 0 ? -1 : 1);
+        bodies.push(newBody(u, side, x, y, list.length === 1 ? i : idx, k));
+        idx++;
+      }
+      depth += Math.ceil(n / cols) * sp + sp; // the next group stands one gap further back
+    });
     return bodies;
   }
 
@@ -90,8 +102,10 @@ const Engine = (() => {
   }
 
   // Lab battle: one unit type per side in a standard formation
+  // Either side may be one unit or an army list (see makeArmy)
   function battle(uA, uB, g, opts = {}) {
-    const bt = createBattle(makeSide(uA, 0, g), makeSide(uB, 1, g), g, opts);
+    const side = (x, k) => Array.isArray(x) ? makeArmy(x, k, g) : makeSide(x, k, g);
+    const bt = createBattle(side(uA, 0), side(uB, 1), g, opts);
     const frames = [];
     while (bt.step()) if (opts.record) frames.push(bt.frame());
     const r = bt.result();
@@ -412,6 +426,6 @@ const Engine = (() => {
     return m;
   }
 
-  return { battle, matrix, createBattle, buildSquad, rawStrength, squadsFor, withTraits, leveled, TRAIT_DEFAULTS, SPIN_CAP, CHARGE_RUN, LEVEL_BONUS, MAX_LEVEL };
+  return { battle, makeArmy, matrix, createBattle, buildSquad, rawStrength, squadsFor, withTraits, leveled, TRAIT_DEFAULTS, SPIN_CAP, CHARGE_RUN, LEVEL_BONUS, MAX_LEVEL };
 })();
 if (typeof module !== 'undefined') module.exports = Engine;

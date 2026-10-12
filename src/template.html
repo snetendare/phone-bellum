@@ -163,6 +163,11 @@ h3.sub { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-sp
 .derived { font-size: 13px; color: var(--muted); display: grid; gap: 2px; }
 .derived b { color: var(--ink); font-family: var(--font-data); font-weight: 500; }
 .confirm { font-size: 13px; }
+.combo-detail { display: grid; gap: 10px; }
+.combo-detail h3 { font-size: 17px; font-weight: 600; }
+.combo-detail .sum { font-size: 14px; }
+.combo-detail td button { font-size: 12px; padding: 3px 8px; }
+.cell.best { box-shadow: inset 0 0 0 1px var(--ink); }
 
 /* data + rules */
 textarea { min-height: 110px; resize: vertical; font-size: 12px; }
@@ -232,6 +237,25 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
     </section>
   </div>
 
+  <section class="panel" aria-labelledby="combo-h">
+    <div class="panel-head">
+      <h2 id="combo-h">Combos</h2>
+      <span class="status" id="combo-status">Not run yet</span>
+    </div>
+    <p class="muted" style="font-size:14px">Some units are weak alone but strong next to a partner. Here every pair of units fights as one army, with the gold per side for each unit, against every unit with the same total gold. The shorter-ranged unit stands in front. Each number is the synergy: how much better the pair does than its two units do apart in the counter table, on the same scale.</p>
+    <div class="row">
+      <button class="btn primary small" id="combo-run">Run combos</button>
+      <span class="msg" id="combo-msg" aria-live="polite"></span>
+    </div>
+    <div class="scroll"><table class="matrix" id="combo"></table></div>
+    <div class="legend" id="combo-legend" hidden>
+      <span><i class="sw" style="background:color-mix(in srgb, var(--win) 70%, var(--surface))"></i>Better together</span>
+      <span><i class="sw" style="background:color-mix(in srgb, var(--loss) 70%, var(--surface))"></i>Worse together</span>
+      <span><i class="sw" style="box-shadow:inset 0 0 0 1px var(--ink);background:transparent"></i>Row unit’s best partner</span>
+    </div>
+    <div class="combo-detail" id="combo-detail"></div>
+  </section>
+
   <section class="panel" aria-labelledby="units-h">
     <div class="panel-head">
       <h2 id="units-h">Units</h2>
@@ -278,6 +302,7 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
       <div class="rule"><h3>Spin-up</h3><p>Raises attack speed every second the unit keeps firing, up to three times its base speed.</p></div>
       <div class="rule"><h3>Pierce and projectiles</h3><p>A piercing shot also hits bodies lined up behind its target. A projectile with a speed travels in a straight line and hits the first enemy it touches, so units moving sideways can dodge it while units charging straight at it get hit.</p></div>
       <div class="rule"><h3>Upgrades</h3><p>Each upgrade adds the unit’s starting health and hit again: one upgrade doubles them, two triple them. In the game, squads earn upgrades through experience and gold; here you set them directly to test upgraded matchups.</p></div>
+      <div class="rule"><h3>Combos</h3><p>A pair fights as one army: the shorter-ranged unit in front, the other a short gap behind it, each with the gold per side. Its opponent gets twice the gold. Synergy compares the pair’s result with the average of its two units’ results against the same opponent.</p></div>
       <div class="rule"><h3>Fair price and tiers</h3><p>The price check finds how many squads of a unit tie against 6 squads of each 100-gold unit, and turns that into a fair price in gold. Under 140 gold is tier 1, 140–280 is tier 2, above 280 is tier 3. Raising one stat and measuring again shows what that stat is worth for that unit.</p></div>
       <div class="rule"><h3>Minimum range, charge and knockback</h3><p>A unit can’t attack anything inside its minimum range. Charge multiplies the next hit after the unit has run 5 m. Knockback pushes a hit body away, fully for small bodies and barely for big ones.</p></div>
     </div>
@@ -605,13 +630,14 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
     runTimer = setTimeout(runAll, 250);
   }
   function runAll() {
+    comboChanged();
     const t0 = performance.now();
     result = Engine.matrix(state.units, state.settings);
     const ms = performance.now() - t0;
     const n = state.units.length;
     $('status').textContent = `${n * (n - 1) / 2} fights in ${Math.round(ms)} ms`;
     renderMatrix();
-    if (!sel || !state.units.find(u => u.id === sel.a) || !state.units.find(u => u.id === sel.b)) {
+    if (!sel || !sideSpec(sel.a, sel.b) || !sideSpec(sel.b, sel.a)) {
       sel = pickInteresting();
     }
     loadReplay(false);
@@ -659,21 +685,36 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
   // ---------- replay ----------
   const cv = $('cv'), ctx = cv.getContext('2d');
   let rep = null, playing = false, ft = 0, lastTs = 0, raf = 0;
+  // One side of a replay: a unit id, or a list of ids for a combo (front first).
+  // A single unit facing a combo gets the same total gold as the combo.
+  function sideSpec(x, other) {
+    const g = state.settings.budget;
+    const find = (id) => state.units.find(u => u.id === id);
+    if (Array.isArray(x)) {
+      const us = x.map(find);
+      if (us.some(u => !u)) return null;
+      return { army: us.map(u => ({ unit: u, gold: g })), name: us.map(u => u.name).join(' + '), tag: us.map(tagOf).join('+'), gold: g * us.length };
+    }
+    const u = find(x);
+    if (!u) return null;
+    const gold = Array.isArray(other) ? g * other.length : g;
+    return { army: [{ unit: u, gold }], name: u.name, tag: tagOf(u), gold };
+  }
   function loadReplay(autoplay) {
     if (!sel) return;
-    const ua = state.units.find(u => u.id === sel.a), ub = state.units.find(u => u.id === sel.b);
-    if (!ua || !ub) return;
-    const r = Engine.battle(ua, ub, state.settings, { record: true });
+    const A = sideSpec(sel.a, sel.b), B = sideSpec(sel.b, sel.a);
+    if (!A || !B) return;
+    const r = Engine.battle(A.army, B.army, state.settings, { record: true });
     // bounds
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
     for (const f of r.frames) for (const b of f.b) { if (b[0] < minX) minX = b[0]; if (b[0] > maxX) maxX = b[0]; if (b[1] < minY) minY = b[1]; if (b[1] > maxY) maxY = b[1]; }
-    rep = { r, ua, ub, bounds: { minX, maxX, minY, maxY } };
+    rep = { r, bounds: { minX, maxX, minY, maxY } };
     ft = 0; playing = false;
-    $('vs').innerHTML = `<span class="a">${esc(ua.name)}</span><span class="x">vs</span><span class="b">${esc(ub.name)}</span>`;
-    const sa = Engine.squadsFor(ua, state.settings), sb = Engine.squadsFor(ub, state.settings);
-    $('rep-status').textContent = `${fmt(state.settings.budget)} gold each`;
+    $('vs').innerHTML = `<span class="a">${esc(A.name)}</span><span class="x">vs</span><span class="b">${esc(B.name)}</span>`;
+    const squads = (S) => S.army.map(e => `${Engine.squadsFor(e.unit, { budget: e.gold })} × ${e.unit.bodies}`).join(' + ');
+    $('rep-status').textContent = A.gold === B.gold ? `${fmt(A.gold)} gold each` : `${fmt(A.gold)} vs ${fmt(B.gold)} gold`;
     const w = r.winner;
-    const name = w === 0 ? ua.name : w === 1 ? ub.name : null;
+    const name = w === 0 ? A.name : w === 1 ? B.name : null;
     const v = $('verdict');
     v.className = 'verdict ' + (w === 0 ? 'a' : w === 1 ? 'b' : '');
     v.textContent = name
@@ -682,9 +723,9 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
     const st = r.stats;
     const pct = (a, b) => b > 0 ? Math.round(a / b * 100) + '%' : '0%';
     $('stats').innerHTML = `
-      <thead><tr><th></th><th class="a">${esc(tagOf(ua))}</th><th class="b">${esc(tagOf(ub))}</th></tr></thead>
+      <thead><tr><th></th><th class="a">${esc(A.tag)}</th><th class="b">${esc(B.tag)}</th></tr></thead>
       <tbody>
-        <tr><td>Squads × bodies</td><td>${sa} × ${ua.bodies}</td><td>${sb} × ${ub.bodies}</td></tr>
+        <tr><td>Squads × bodies</td><td>${squads(A)}</td><td>${squads(B)}</td></tr>
         <tr><td>Bodies left</td><td>${r.survivors[0]} / ${r.counts[0]}</td><td>${r.survivors[1]} / ${r.counts[1]}</td></tr>
         <tr><td>Health left</td><td>${Math.round(r.frac[0] * 100)}%</td><td>${Math.round(r.frac[1] * 100)}%</td></tr>
         <tr><td>Damage dealt</td><td>${fmt(st[0].dealt)}</td><td>${fmt(st[1].dealt)}</td></tr>
@@ -769,6 +810,103 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
   window.addEventListener('resize', () => { sizeCanvas(); draw(); });
   matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', draw);
   new MutationObserver(draw).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+
+  // ---------- combos ----------
+  let combo = null, comboJob = 0, comboSel = null;
+  const front = (a, b) => (a.range < b.range || (a.range === b.range && a.hp * a.bodies >= b.hp * b.bodies)) ? [a, b] : [b, a];
+  function comboChanged() {
+    if (comboJob) { comboJob = 0; }
+    if (combo) { combo.stale = true; renderCombo(); }
+    else $('combo-status').textContent = 'Not run yet';
+  }
+  function* comboGen(us, g, base) {
+    const n = us.length, pairs = {};
+    const total = n * (n - 1) / 2 * n;
+    let done = 0;
+    for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) {
+      const [f, b] = front(us[i], us[j]);
+      const vs = [];
+      for (let k = 0; k < n; k++) {
+        const r = Engine.battle([{ unit: f, gold: g.budget }, { unit: b, gold: g.budget }], [{ unit: us[k], gold: g.budget * 2 }], g);
+        const apart = ((base[i][k] ? base[i][k].score : 0) + (base[j][k] ? base[j][k].score : 0)) / 2;
+        vs.push({ score: r.score, timeout: r.timeout, apart });
+        yield [++done, total];
+      }
+      const together = vs.reduce((s, x) => s + x.score, 0) / n;
+      const apart = vs.reduce((s, x) => s + x.apart, 0) / n;
+      pairs[i + ',' + j] = { front: f.id, back: b.id, vs, together, apart, syn: together - apart };
+    }
+    return pairs;
+  }
+  $('combo-run').addEventListener('click', () => {
+    if (!result) return;
+    const us = state.units.slice(), g = clone(state.settings), base = result;
+    const job = ++comboJob, t0 = performance.now();
+    const gen = comboGen(us, g, base);
+    $('combo-run').disabled = true;
+    (function step() {
+      if (job !== comboJob) { $('combo-run').disabled = false; return; }
+      const t1 = performance.now();
+      let r;
+      while (performance.now() - t1 < 40) {
+        r = gen.next();
+        if (r.done) {
+          combo = { ids: us.map(u => u.id), pairs: r.value, stale: false, fights: us.length * (us.length - 1) / 2 * us.length, ms: performance.now() - t0 };
+          comboJob = 0; $('combo-run').disabled = false; $('combo-msg').textContent = '';
+          if (comboSel && !(comboSel in combo.pairs)) comboSel = null;
+          renderCombo(); return;
+        }
+      }
+      $('combo-status').textContent = `Running ${fmt(r.value[0])} of ${fmt(r.value[1])} fights…`;
+      setTimeout(step, 0);
+    })();
+  });
+  function renderCombo() {
+    const t = $('combo');
+    if (!combo) { t.innerHTML = ''; $('combo-legend').hidden = true; $('combo-detail').innerHTML = ''; return; }
+    const us = combo.ids.map(id => state.units.find(u => u.id === id));
+    if (us.some(u => !u)) { combo = null; comboSel = null; renderCombo(); $('combo-status').textContent = 'Units changed. Run again.'; return; }
+    $('combo-status').textContent = combo.stale ? 'Out of date. Run again to update.' : `${fmt(combo.fights)} fights in ${fmt(combo.ms / 1000, 1)} s`;
+    $('combo-legend').hidden = false;
+    const key = (i, j) => i < j ? i + ',' + j : j + ',' + i;
+    let h = '<thead><tr><th></th>' + us.map(u => `<th scope="col" title="${esc(u.name)}">${tagOf(u)}</th>`).join('') + '<th scope="col" class="overall">Best partner</th></tr></thead><tbody>';
+    us.forEach((u, i) => {
+      let best = -1, bs = -Infinity;
+      us.forEach((v, j) => { if (j !== i && combo.pairs[key(i, j)].syn > bs) { bs = combo.pairs[key(i, j)].syn; best = j; } });
+      h += `<tr><th scope="row"><span class="ico" style="color:${u.color}">${Shapes.svg(u.shape, 12)}</span> <span class="tag">${tagOf(u)}</span><span class="nm">${esc(u.name)}</span></th>`;
+      us.forEach((v, j) => {
+        if (i === j) { h += `<td><span class="cell self" aria-hidden="true">·</span></td>`; return; }
+        const k = key(i, j), p = combo.pairs[k];
+        h += `<td><button class="cell${j === best ? ' best' : ''}${comboSel === k ? ' sel' : ''}" data-k="${k}"
+              style="background:${cellBg(p.syn * 2)}" aria-label="${esc(u.name)} with ${esc(v.name)}: synergy ${margin(p.syn)}">${margin(p.syn)}</button></td>`;
+      });
+      h += `<td class="overall"><span class="num" style="font-size:13px">${best >= 0 ? `${tagOf(us[best])} ${margin(bs)}` : '—'}</span></td></tr>`;
+    });
+    t.innerHTML = h + '</tbody>';
+    t.querySelectorAll('button.cell').forEach(b => b.addEventListener('click', () => { comboSel = b.dataset.k; renderCombo(); $('combo-detail').scrollIntoView({ block: 'nearest' }); }));
+    renderComboDetail(us);
+  }
+  function renderComboDetail(us) {
+    const d = $('combo-detail');
+    if (!comboSel || !combo.pairs[comboSel]) { d.innerHTML = '<p class="muted" style="font-size:14px">Tap a cell to see how that pair does against each unit.</p>'; return; }
+    const p = combo.pairs[comboSel];
+    const f = state.units.find(u => u.id === p.front), b = state.units.find(u => u.id === p.back);
+    d.innerHTML = `
+      <h3>${esc(f.name)} + ${esc(b.name)}</h3>
+      <p class="sum">${esc(f.name)} in front. Together <b class="num">${margin(p.together)}</b> overall, apart <b class="num">${margin(p.apart)}</b>, synergy <b class="num">${margin(p.syn)}</b>.</p>
+      <div class="scroll"><table class="stats">
+        <thead><tr><th>Against</th><th>Together</th><th>Apart</th><th>Synergy</th><th></th></tr></thead>
+        <tbody>${us.map((u, k) => { const x = p.vs[k]; return `<tr><td>${esc(u.name)}</td><td>${margin(x.score)}${x.timeout ? '*' : ''}</td><td>${margin(x.apart)}</td>
+          <td style="color:${x.score - x.apart > 0.05 ? 'var(--win)' : x.score - x.apart < -0.05 ? 'var(--loss)' : 'inherit'}">${margin(x.score - x.apart)}</td>
+          <td><button class="btn small" data-w="${u.id}">Watch</button></td></tr>`; }).join('')}</tbody>
+      </table></div>
+      <p class="muted" style="font-size:13px">* time limit reached.${combo.stale ? ' These numbers are from before your last change.' : ''}</p>`;
+    d.querySelectorAll('[data-w]').forEach(btn => btn.addEventListener('click', () => {
+      sel = { a: [p.front, p.back], b: +btn.dataset.w };
+      renderMatrix(); loadReplay(true);
+      $('rep-h').scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
+    }));
+  }
 
   // ---------- save / share ----------
   function flash(t) { $('io-msg').textContent = t; }
