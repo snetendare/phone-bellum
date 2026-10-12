@@ -106,7 +106,12 @@ a { color: var(--you); }
       .map(sk => ({ ...sk, name: String(sk.name || Engine.SKILL_TYPES[sk.type].label).replace(/[<>&"]/g, '').slice(0, 40) })) : [];
     // each unit's two skill slots, resolved to skill definitions
     units = Shapes.assign(set.units).map(u => ({ ...Engine.withTraits(u), name: String(u.name).replace(/[<>&"]/g, '').trim().slice(0, 40) || 'Unit', level: 0, bodies: Math.max(1, Math.round(u.bodies)),
-      skillDefs: [0, 1].map(k => (Array.isArray(u.skills) && skills.find(sk => sk.id === u.skills[k])) || null) }));
+      skillDefs: [0, 1].map(k => {
+        const base = Array.isArray(u.skills) && skills.find(sk => sk.id === u.skills[k]);
+        if (!base) return null;
+        const mod = Array.isArray(u.skillMods) && u.skillMods[k] && typeof u.skillMods[k] === 'object' ? u.skillMods[k] : null; // the unit's own adjustments
+        return mod ? { ...base, cost: isFinite(+mod.cost) && mod.cost !== null ? +mod.cost : base.cost, params: { ...base.params, ...(mod.params || {}) } } : base;
+      }) }));
     M = set.matrix; customSet = custom; rawSet = set;
   }
   try {

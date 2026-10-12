@@ -170,6 +170,10 @@ h3.sub { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-sp
 .slot { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 10px; align-items: center; }
 .slot label.on { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; color: var(--muted); white-space: nowrap; }
 .slot .skill-desc { grid-column: 1 / -1; }
+details.slot-custom { grid-column: 1 / -1; border: 1px solid var(--line); border-radius: 4px; padding: 6px 10px; }
+details.slot-custom summary { cursor: pointer; font-size: 13px; color: var(--accent); font-weight: 600; }
+details.slot-custom .levers { margin-top: 8px; }
+.custom-tag { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--side-b); margin-left: 6px; }
 .combo-detail h3 { font-size: 17px; font-weight: 600; }
 .combo-detail .sum { font-size: 14px; }
 .combo-detail td button { font-size: 12px; padding: 3px 8px; }
@@ -283,7 +287,7 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
         <button class="btn small" id="skill-add">Add skill</button>
       </div>
     </div>
-    <p class="muted" style="font-size:14px">Each unit has two skill slots. In the game, players buy a skill once and it applies to all their squads of that unit. Several units can share a skill, or you can make a copy with its own settings for one unit. Set which skills a unit has in its card under Units, and tick On in tests to include a skill in the counter table, the combos and the price check.</p>
+    <p class="muted" style="font-size:14px">Each unit has two skill slots. In the game, players buy a skill once and it applies to all their squads of that unit. Several units can share a skill. To tune a skill for one unit only, open Adjust in that unit’s skill slot: whatever you change there applies to that unit alone, and everything else still follows the skill here. Set which skills a unit has in its card under Units, and tick On in tests to include a skill in the counter table, the combos and the price check.</p>
     <div class="msg" id="skill-msg" aria-live="polite"></div>
     <div class="skills" id="skills"></div>
   </section>
@@ -398,14 +402,31 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
       defense: 'none', defVal: 0, ...u,
       skills: [0, 1].map(k => (Array.isArray(u.skills) && ids.has(u.skills[k])) ? u.skills[k] : null),
       skillsOn: [0, 1].map(k => !!(Array.isArray(u.skillsOn) && u.skillsOn[k])),
+      skillMods: [0, 1].map(k => cleanMod(Array.isArray(u.skillMods) ? u.skillMods[k] : null)),
     })));
     return { settings: { ...SAMPLE.settings, ...p.settings }, skills, units };
   }
   function validSkill(sk) { return sk && typeof sk.id === 'string' && typeof sk.name === 'string' && Engine.SKILL_TYPES[sk.type]; }
   const skillById = (id) => state.skills.find(sk => sk.id === id) || null;
+  // A unit can adjust a skill's cost and settings for itself only; everything it doesn't adjust comes from the skill
+  function cleanMod(mod) {
+    if (!mod || typeof mod !== 'object') return null;
+    const out = { params: {} };
+    if (isFinite(+mod.cost) && mod.cost !== null && mod.cost !== '') out.cost = Math.max(0, +mod.cost);
+    if (mod.params && typeof mod.params === 'object') for (const k in mod.params) out.params[k] = mod.params[k];
+    return out.cost === undefined && !Object.keys(out.params).length ? null : out;
+  }
+  function slotDef(u, k) {
+    const base = u.skills && skillById(u.skills[k]);
+    if (!base) return null;
+    const mod = u.skillMods && u.skillMods[k];
+    if (!mod) return base;
+    return { ...base, cost: mod.cost !== undefined ? mod.cost : base.cost, params: { ...base.params, ...mod.params } };
+  }
+  const isCustom = (u, k) => !!(u.skillMods && u.skillMods[k]);
   // The unit as tests see it: with the skills ticked On in tests
   function prep(u) {
-    const defs = [0, 1].filter(k => u.skills && u.skills[k] && u.skillsOn && u.skillsOn[k]).map(k => skillById(u.skills[k])).filter(Boolean);
+    const defs = [0, 1].filter(k => u.skills && u.skills[k] && u.skillsOn && u.skillsOn[k]).map(k => slotDef(u, k)).filter(Boolean);
     return defs.length ? Engine.applySkills(u, defs, state.units) : u;
   }
   function valid(p) {
@@ -552,7 +573,7 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
       if (u.knockback > 0) tr.push(`knockback ${fmt(u.knockback, 1)} m`);
       if (u.windUp > 0) tr.push(`wind-up ${fmt(u.windUp, 1)} s`);
       if (u.level > 0) tr.push(`${u.level + 1}× stats`);
-      [0, 1].forEach(k => { const sk = u.skills && skillById(u.skills[k]); if (sk) tr.push(`${sk.name}${u.skillsOn[k] ? ' (on)' : ''}`); });
+      [0, 1].forEach(k => { const sk = slotDef(u, k); if (sk) tr.push(`${sk.name}${isCustom(u, k) ? '*' : ''}${u.skillsOn[k] ? ' (on)' : ''}`); });
       d.querySelector('.sum-line').textContent =
         `${u.bodies} × ${fmt(u.hp)} hp · ${fmt(u.hit)} dmg × ${fmt(u.aps, 2)}/s · ${fmt(u.range)} m${u.splash ? ` · splash ${u.splash}` : ''}${def}${tr.length ? ' · ' + tr.join(' · ') : ''}`;
       d.querySelector('.bar i').style.width = (r.strength / max * 100).toFixed(1) + '%';
@@ -569,19 +590,39 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
   }
   // ---------- skill slots on a unit ----------
   function renderSlots(u, d) {
+    if (!u.skillMods) u.skillMods = [null, null];
     const box = d.querySelector('.skill-slots');
-    box.innerHTML = [0, 1].map(k => `
+    const open = new Set([...box.querySelectorAll('details.slot-custom[open]')].map(x => x.dataset.k));
+    box.innerHTML = [0, 1].map(k => {
+      const def = slotDef(u, k);
+      const T = def && Engine.SKILL_TYPES[def.type];
+      return `
       <div class="slot">
         <select data-slot="${k}" aria-label="Skill ${k + 1}">
           <option value="">No skill</option>
           ${state.skills.map(sk => `<option value="${esc(sk.id)}" ${u.skills[k] === sk.id ? 'selected' : ''}>${esc(sk.name)}</option>`).join('')}
         </select>
         <label class="on"><input type="checkbox" data-on="${k}" ${u.skillsOn[k] ? 'checked' : ''} ${u.skills[k] ? '' : 'disabled'}> On in tests</label>
-        <span class="skill-desc">${u.skills[k] && skillById(u.skills[k]) ? esc(Engine.describeSkill(skillById(u.skills[k]))) + ` ${fmt(skillById(u.skills[k]).cost)} gold.` : ''}</span>
-      </div>`).join('');
+        <span class="skill-desc" data-desc="${k}">${def ? slotText(u, k) : ''}</span>
+        ${def ? `<details class="slot-custom" data-k="${k}" ${open.has(String(k)) ? 'open' : ''}>
+          <summary>Adjust for ${esc(u.name)} only</summary>
+          <div class="levers">
+            <div class="field"><label for="sc-${u.id}-${k}">Cost (gold)</label><input type="number" id="sc-${u.id}-${k}" data-mod="cost" min="0" step="5" value="${def.cost}"></div>
+            ${T.params.map(([pk, label, dflt, step]) => `
+              <div class="field ${step == null ? 'full' : ''}"><label for="sp-${u.id}-${k}-${pk}">${esc(label)}</label>
+                ${step == null
+                  ? `<select id="sp-${u.id}-${k}-${pk}" data-mod="${pk}">${state.units.map(x => `<option ${String(Engine.skillParam(def, pk)) === x.name ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select>`
+                  : `<input type="number" id="sp-${u.id}-${k}-${pk}" data-mod="${pk}" min="0" step="${step}" value="${Engine.skillParam(def, pk)}">`}
+              </div>`).join('')}
+          </div>
+          <div class="row" style="margin-top:8px"><button class="btn small" data-reset="${k}" ${isCustom(u, k) ? '' : 'disabled'}>Use ${esc(skillById(u.skills[k]).name)}’s settings</button></div>
+        </details>` : ''}
+      </div>`;
+    }).join('');
     box.querySelectorAll('[data-slot]').forEach(sl => sl.addEventListener('change', () => {
       const k = +sl.dataset.slot;
       u.skills[k] = sl.value || null;
+      u.skillMods[k] = null; // a different skill starts from its own settings
       if (!u.skills[k]) u.skillsOn[k] = false;
       save(); renderSlots(u, d); renderUnitSummaries(); renderSkillUse(); scheduleRun();
     }));
@@ -589,6 +630,30 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
       u.skillsOn[+cb.dataset.on] = cb.checked;
       save(); renderUnitSummaries(); scheduleRun();
     }));
+    box.querySelectorAll('details.slot-custom').forEach(det => {
+      const k = +det.dataset.k;
+      det.querySelectorAll('[data-mod]').forEach(inp => inp.addEventListener(inp.tagName === 'SELECT' ? 'change' : 'input', () => {
+        const key = inp.dataset.mod, base = skillById(u.skills[k]);
+        let v = inp.tagName === 'SELECT' ? inp.value : parseFloat(inp.value);
+        if (inp.tagName !== 'SELECT') { if (!isFinite(v)) return; v = Math.max(0, v); }
+        const mod = u.skillMods[k] || { params: {} };
+        if (key === 'cost') { if (v === base.cost) delete mod.cost; else mod.cost = v; }
+        else if (String(v) === String(Engine.skillParam(base, key))) delete mod.params[key];
+        else mod.params[key] = v;
+        u.skillMods[k] = cleanMod(mod);
+        det.querySelector('[data-reset]').disabled = !isCustom(u, k);
+        box.querySelector(`[data-desc="${k}"]`).innerHTML = slotText(u, k);
+        save(); renderUnitSummaries(); scheduleRun();
+      }));
+      det.querySelector('[data-reset]').addEventListener('click', () => {
+        u.skillMods[k] = null;
+        save(); renderSlots(u, d); renderUnitSummaries(); scheduleRun();
+      });
+    });
+  }
+  function slotText(u, k) {
+    const def = slotDef(u, k);
+    return esc(Engine.describeSkill(def)) + ` ${fmt(def.cost)} gold.` + (isCustom(u, k) ? '<span class="custom-tag">Adjusted for this unit</span>' : '');
   }
   function refreshSlots() {
     state.units.forEach(u => { const d = unitsEl.querySelector(`details[data-id="${u.id}"]`); if (d) renderSlots(u, d); });
@@ -773,7 +838,7 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
   }
 
   $('add').addEventListener('click', () => {
-    const u = { ...Shapes.assign([...state.units, Engine.withTraits({ name: 'New unit', cost: 100, bodies: 4, hp: 200, hit: 20, aps: 1, range: 10, speed: 6, splash: 0 })]).pop(), id: uid++, skills: [null, null], skillsOn: [false, false] };
+    const u = { ...Shapes.assign([...state.units, Engine.withTraits({ name: 'New unit', cost: 100, bodies: 4, hp: 200, hit: 20, aps: 1, range: 10, speed: 6, splash: 0 })]).pop(), id: uid++, skills: [null, null], skillsOn: [false, false], skillMods: [null, null] };
     state.units.push(u);
     save(); renderUnits(); scheduleRun();
     const d = unitsEl.querySelector(`details[data-id="${u.id}"]`);
@@ -786,7 +851,7 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
     const merged = Shapes.assign([...state.units, ...clone(add)]); // new examples get shapes not already in use
     const ids = new Set(state.skills.map(sk => sk.id));
     state.units.push(...merged.slice(state.units.length).map(u => ({ ...Engine.withTraits(u), id: uid++,
-      skills: [0, 1].map(k => (u.skills && ids.has(u.skills[k])) ? u.skills[k] : null), skillsOn: [false, false] })));
+      skills: [0, 1].map(k => (u.skills && ids.has(u.skills[k])) ? u.skills[k] : null), skillsOn: [false, false], skillMods: [null, null] })));
     save(); renderUnits(); scheduleRun();
     $('ex-msg').textContent = `Added ${add.map(e => e.name).join(', ')}.`;
   });
