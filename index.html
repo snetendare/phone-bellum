@@ -318,6 +318,87 @@ const Engine = (() => {
     return { ...u, level: L, hp: u.hp * k, hit: u.hit * k };
   }
 
+  // ---------- skills ----------
+  // Each skill type and its settings (key, label, default, step). Shared by Counter Lab and the game.
+  const SKILL_TYPES = {
+    regen:   { label: 'Regeneration', params: [['pct', 'Health regained per second (% of max)', 2, 0.5]] },
+    poison:  { label: 'Poison shot', params: [['pct', 'Poison damage (% of hit, in total)', 100, 10], ['duration', 'Poison lasts (s)', 4, 0.5], ['slow', 'Longer time between attacks (%)', 30, 5]] },
+    stealth: { label: 'Stealth', params: [] },
+    armorHp: { label: 'Armor and health', params: [['armor', 'Armor (blocked from every hit)', 8, 1], ['hp', 'Health (+%)', 25, 5]] },
+    spawn:   { label: 'Spawn goblins', params: [['unit', 'Spawns (unit name)', 'Goblin Swarm', null], ['count', 'Bodies per spawn', 2, 1], ['every', 'Every (s)', 4, 0.5], ['max', 'Most alive at once', 6, 1]] },
+    rapid:   { label: 'Rapid fire', params: [['aps', 'Attack speed (+%)', 50, 5], ['range', 'Range (−%)', 30, 5]] },
+    swift:   { label: 'Swift strikes', params: [['speed', 'Move speed (+%)', 30, 5], ['hit', 'Hit size (+%)', 25, 5]] },
+    heavy:   { label: 'Heavy shot', params: [['slow', 'Projectile speed (−%)', 40, 5], ['instant', 'Projectile speed if the unit hits instantly (m/s)', 30, 5], ['hit', 'Hit size (+%)', 40, 5]] },
+    healer:  { label: 'Healing touch', params: [['pct', 'Heal per attack (% of hit)', 50, 5]] },
+    range:   { label: 'Long reach', params: [['m', 'Range (+m)', 5, 1]] },
+    shrink:  { label: 'Shortsight', params: [['m', 'Enemy range (−m)', 4, 0.5], ['duration', 'Lasts (s)', 3, 0.5]] },
+  };
+  const skillParam = (d, k) => {
+    const v = d.params && d.params[k];
+    if (v !== undefined && v !== null && v !== '') return v;
+    const def = (SKILL_TYPES[d.type].params.find(p => p[0] === k) || [])[2];
+    return def;
+  };
+
+  // One plain sentence describing what a skill does with its current settings
+  function describeSkill(d) {
+    if (!d || !SKILL_TYPES[d.type]) return '';
+    const P = (k) => skillParam(d, k);
+    const n = (k) => { const v = +P(k); return isFinite(v) ? String(Math.round(v * 100) / 100) : '0'; };
+    switch (d.type) {
+      case 'regen': return `Regains ${n('pct')}% of its max health every second.`;
+      case 'poison': return `Hits poison the target for ${n('pct')}% of the hit over ${n('duration')} s, ignoring armor and ward. ${n('slow')}% more time between attacks.`;
+      case 'stealth': return 'Can’t be targeted until it attacks for the first time. Splash and piercing shots can still hit it.';
+      case 'armorHp': return `+${n('armor')} armor and +${n('hp')}% health.`;
+      case 'spawn': return `Every ${n('every')} s, spawns ${n('count')} ${String(P('unit'))} ${+P('count') === 1 ? 'body' : 'bodies'}, up to ${n('max')} alive at once.`;
+      case 'rapid': return `+${n('aps')}% attack speed, −${n('range')}% range.`;
+      case 'swift': return `+${n('speed')}% move speed and +${n('hit')}% hit size.`;
+      case 'heavy': return `Projectiles fly ${n('slow')}% slower (${n('instant')} m/s if it normally hits instantly), +${n('hit')}% hit size.`;
+      case 'healer': return `Each attack heals a random wounded ally for ${n('pct')}% of its hit.`;
+      case 'range': return `+${n('m')} m range.`;
+      case 'shrink': return `Hits cut the target’s range by ${n('m')} m for ${n('duration')} s, but not below 1 m.`;
+    }
+    return '';
+  }
+
+  // A unit with skills applied. defs = the skill definitions that are active; roster = all units (for spawns).
+  function applySkills(unit, defs, roster) {
+    const u = withTraits(unit);
+    for (const d of defs || []) {
+      if (!d || !SKILL_TYPES[d.type]) continue;
+      const P = (k) => { const v = +skillParam(d, k); return isFinite(v) ? v : 0; };
+      switch (d.type) {
+        case 'regen': u.regen = (u.regen || 0) + Math.max(0, P('pct')); break;
+        case 'poison':
+          u.poisonPct = (u.poisonPct || 0) + Math.max(0, P('pct'));
+          u.poisonDur = Math.max(u.poisonDur || 0, Math.max(0.5, P('duration')));
+          u.aps = u.aps / (1 + Math.max(0, P('slow')) / 100);
+          break;
+        case 'stealth': u.stealth = true; break;
+        case 'armorHp': u.bonusArmor = (u.bonusArmor || 0) + Math.max(0, P('armor')); u.hp = u.hp * (1 + P('hp') / 100); break;
+        case 'spawn': {
+          const name = String(skillParam(d, 'unit'));
+          const src = (roster || []).find(r => r && r.name === name);
+          if (src) {
+            const { skills, skillDefs, skillsOn, ...plain } = src;
+            u.spawn = { unit: withTraits({ ...plain, level: 0 }), count: Math.max(1, Math.round(P('count'))), every: Math.max(0.5, P('every')), max: Math.max(1, Math.round(P('max'))) };
+          }
+          break;
+        }
+        case 'rapid': u.aps = u.aps * (1 + P('aps') / 100); u.range = Math.max(0.5, u.range * (1 - Math.min(90, P('range')) / 100)); break;
+        case 'swift': u.speed = u.speed * (1 + P('speed') / 100); u.hit = u.hit * (1 + P('hit') / 100); break;
+        case 'heavy':
+          u.projSpeed = u.projSpeed > 0 ? Math.max(2, u.projSpeed * (1 - Math.min(90, P('slow')) / 100)) : Math.max(2, P('instant'));
+          u.hit = u.hit * (1 + P('hit') / 100);
+          break;
+        case 'healer': u.healPct = (u.healPct || 0) + Math.max(0, P('pct')); break;
+        case 'range': u.range = u.range + P('m'); break;
+        case 'shrink': u.shrinkM = Math.max(u.shrinkM || 0, P('m')); u.shrinkDur = Math.max(u.shrinkDur || 0, Math.max(0.5, P('duration'))); break;
+      }
+    }
+    return u;
+  }
+
   function squadsFor(unit, g) {
     return Math.max(1, Math.floor(g.budget / Math.max(0.0001, unit.cost) + 1e-9));
   }
@@ -334,9 +415,11 @@ const Engine = (() => {
   }
 
   function damageAfterDefense(hit, target, g) {
-    if (target.u.defense === 'armor') return Math.max(hit - target.u.defVal, hit * g.minDmgPct / 100);
-    if (target.u.defense === 'ward') return Math.min(hit, target.u.defVal);
-    return hit;
+    const u = target.u;
+    const armor = (u.defense === 'armor' ? u.defVal : 0) + (u.bonusArmor || 0);
+    let d = armor > 0 ? Math.max(hit - armor, hit * g.minDmgPct / 100) : hit;
+    if (u.defense === 'ward') d = Math.min(d, u.defVal);
+    return d;
   }
 
   function makeSide(unit, side, g) {
@@ -375,6 +458,8 @@ const Engine = (() => {
       u, side, x, y, hp: u.hp, alive: true, squad, level: u.level || 0, xp: 0,
       cd: ((i * 7) % 11) / 11 * interval, // deterministic stagger
       moved: 0, firing: -1, burstLeft: 0, burstTimer: 0, burstDir: [0, 1], windTarget: null, windT: 0, setUp: false,
+      hidden: !!u.stealth, poison: null, shrinkM: 0, shrinkT: 0,
+      spawnT: u.spawn ? u.spawn.every : 0, kids: null,
     };
   }
 
@@ -419,6 +504,23 @@ const Engine = (() => {
     let projectiles = [];
     let t = 0, shots = [], over = false;
     const dist = (a, b) => hyp(a.x - b.x, a.y - b.y);
+    // current range: shortsight can shrink it for a while, but never below 1 m (or the unit's own range if shorter)
+    const R = (b) => b.shrinkT > 0 ? Math.max(Math.min(b.u.range, 1), b.u.range - b.shrinkM) : b.u.range;
+    // deterministic random numbers for healing targets (same on every device)
+    let seed = (A.length * 7919 + B.length * 104729 + 1) >>> 0;
+    const rnd = () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let x = Math.imul(seed ^ seed >>> 15, 1 | seed); x = x + Math.imul(x ^ x >>> 7, 61 | x) ^ x; return ((x ^ x >>> 14) >>> 0) / 4294967296; };
+    let spawnIdx = A.length + B.length;
+    const SPAWN_SPOTS = [[1, 0], [-1, 0], [0, 1], [0, -1], [0.7, 0.7], [-0.7, 0.7], [0.7, -0.7], [-0.7, -0.7]];
+    // damage that skips armor and ward (poison)
+    function direct(owner, v, amount) {
+      const applied = Math.min(amount, v.hp);
+      if (applied <= 0) return;
+      stats[owner.side].dealt += applied;
+      owner.xp += applied;
+      v.xp += applied * (g.absorbXp == null ? 0.5 : g.absorbXp);
+      v.hp -= applied;
+      if (v.hp <= 1e-9) { v.hp = 0; v.alive = false; owner.xp += v.u.hp * v.level; }
+    }
     const aliveCount = (arr) => { let c = 0; for (const b of arr) if (b.alive) c++; return c; };
 
     function hurt(owner, v, hit, fromX, fromY) {
@@ -433,6 +535,18 @@ const Engine = (() => {
       v.xp += applied * (g.absorbXp == null ? 0.5 : g.absorbXp);
       v.hp -= dmg;
       if (v.hp <= 0) { v.hp = 0; v.alive = false; owner.xp += v.u.hp * v.level; return; }
+      if (owner.u.poisonPct > 0) {
+        // poison: a share of the hit, spread over its duration. Each attacker keeps one dose on the target;
+        // its next hit refreshes that dose. Doses from different attackers add up.
+        const dps = hit * owner.u.poisonPct / 100 / owner.u.poisonDur;
+        const list = v.poison || (v.poison = []);
+        const dose = list.find(p => p.src === owner);
+        if (dose) { dose.dps = dps; dose.t = owner.u.poisonDur; } else list.push({ src: owner, dps, t: owner.u.poisonDur });
+      }
+      if (owner.u.shrinkM > 0) {
+        v.shrinkM = v.shrinkT > 0 ? Math.max(v.shrinkM, owner.u.shrinkM) : owner.u.shrinkM;
+        v.shrinkT = Math.max(v.shrinkT, owner.u.shrinkDur);
+      }
       if (owner.u.knockback > 0) {
         // big hits on small bodies push the full distance; on big bodies barely at all
         const push = owner.u.knockback * Math.min(1, hit / v.u.hp);
@@ -477,9 +591,9 @@ const Engine = (() => {
     function validTargets(b) {
       const valid = [];
       for (const f of sides[1 - b.side]) {
-        if (!f.alive) continue;
+        if (!f.alive || f.hidden) continue;
         const d = dist(f, b);
-        if (d <= b.u.range + 0.01 && d >= b.u.minRange) valid.push([d, f]);
+        if (d <= R(b) + 0.01 && d >= b.u.minRange) valid.push([d, f]);
       }
       valid.sort((p, q) => p[0] - q[0]);
       return valid.map(v => v[1]);
@@ -504,6 +618,16 @@ const Engine = (() => {
     function fire(b, targets, canCharge) {
       const charged = canCharge && b.u.charge > 1 && b.moved >= CHARGE_RUN;
       b.moved = 0;
+      b.hidden = false; // stealth ends with the first attack
+      if (b.u.healPct > 0) {
+        // heal a random wounded ally (not itself)
+        const hurtAllies = sides[b.side].filter(a => a.alive && a !== b && a.hp < a.u.hp);
+        if (hurtAllies.length) {
+          const a = hurtAllies[Math.min(hurtAllies.length - 1, Math.floor(rnd() * hurtAllies.length))];
+          a.hp = Math.min(a.u.hp, a.hp + b.u.hit * b.u.healPct / 100);
+          if (opts.record) shots.push([b.x, b.y, a.x, a.y, b.side, 0, 0, 1]);
+        }
+      }
       const hit = b.u.hit * (charged ? b.u.charge : 1);
       for (const tgt of targets) {
         const dx = tgt.x - b.x, dy = tgt.y - b.y, d = hyp(dx, dy) || 1;
@@ -527,14 +651,15 @@ const Engine = (() => {
         const foes = sides[1 - b.side];
         let near = null, nd = Infinity;
         for (const f of foes) {
-          if (!f.alive) continue;
+          if (!f.alive || f.hidden) continue;
           const d = dist(f, b);
           if (d < nd) { nd = d; near = f; }
         }
         b.near = near;
-        if (near && nd > b.u.range) {
+        const rg = R(b);
+        if (near && nd > rg) {
           // walk a little inside max range, so being nudged by allies doesn't leave the unit just out of reach
-          const mv = Math.min(b.u.speed * dt, nd - (b.u.range - Math.min(APPROACH, b.u.range * 0.25)));
+          const mv = Math.min(b.u.speed * dt, nd - (rg - Math.min(APPROACH, rg * 0.25)));
           b.x += (near.x - b.x) / nd * mv;
           b.y += (near.y - b.y) / nd * mv;
           b.moved += mv;
@@ -565,6 +690,37 @@ const Engine = (() => {
           }
         }
       }
+      // ongoing effects: poison, regeneration, shortsight wearing off, spawns
+      const n0 = all.length;
+      for (let i = 0; i < n0; i++) {
+        const b = all[i];
+        if (!b.alive) continue;
+        if (b.poison && b.poison.length) {
+          for (const p of b.poison) {
+            if (!b.alive) break;
+            direct(p.src, b, p.dps * Math.min(dt, p.t));
+            p.t -= dt;
+          }
+          b.poison = b.poison.filter(p => p.t > 0);
+          if (!b.alive) continue;
+        }
+        if (b.u.regen > 0 && b.hp < b.u.hp) b.hp = Math.min(b.u.hp, b.hp + b.u.hp * b.u.regen / 100 * dt);
+        if (b.shrinkT > 0) { b.shrinkT -= dt; if (b.shrinkT <= 0) { b.shrinkT = 0; b.shrinkM = 0; } }
+        if (b.u.spawn) {
+          b.spawnT -= dt;
+          if (b.spawnT <= 0) {
+            b.spawnT += b.u.spawn.every;
+            b.kids = (b.kids || []).filter(k => k.alive);
+            const n = Math.min(b.u.spawn.count, b.u.spawn.max - b.kids.length);
+            for (let k = 0; k < n; k++) {
+              const [ox, oy] = SPAWN_SPOTS[(b.kids.length + k) % SPAWN_SPOTS.length];
+              const kid = newBody(b.u.spawn.unit, b.side, b.x + ox * g.spacing * 0.7, b.y + oy * g.spacing * 0.7, spawnIdx++, -1);
+              b.kids.push(kid); all.push(kid); sides[b.side].push(kid);
+              stats[b.side].totalHp += kid.u.hp;
+            }
+          }
+        }
+      }
       // attacks
       for (const b of all) {
         if (!b.alive) continue;
@@ -582,12 +738,12 @@ const Engine = (() => {
               const rx = f.x - b.x, ry = f.y - b.y;
               const along = rx * ux + ry * uy;
               const across = Math.abs(rx * uy - ry * ux);
-              if (along >= b.u.minRange && along <= b.u.range + 0.01 && across <= PIERCE_WIDTH && along < fa) { fa = along; first = f; }
+              if (along >= b.u.minRange && along <= R(b) + 0.01 && across <= PIERCE_WIDTH && along < fa) { fa = along; first = f; }
             }
             if (first) {
               fire(b, aim(b, first, validTargets(b)), false);
             } else {
-              const end = { x: b.x + ux * b.u.range, y: b.y + uy * b.u.range };
+              const end = { x: b.x + ux * R(b), y: b.y + uy * R(b) };
               if (b.u.projSpeed > 0) fire(b, [end], false); // the projectile flies on and can still clip someone
               else {
                 stats[b.side].missed += b.u.hit * Math.max(1, Math.round(b.u.pellets));
@@ -668,7 +824,7 @@ const Engine = (() => {
       return {
         t, shots: final ? [] : shots,
         p: final ? [] : projectiles.map(p => [p.x, p.y, p.owner.side]),
-        b: all.map(x => [x.x, x.y, x.alive ? x.hp / x.u.hp : 0, x.side, x.windTarget && x.u.windUp > 0 ? 1 - x.windT / x.u.windUp : 0]),
+        b: all.map(x => [x.x, x.y, x.alive ? x.hp / x.u.hp : 0, x.side, x.windTarget && x.u.windUp > 0 ? 1 - x.windT / x.u.windUp : 0, x.hidden ? 1 : 0, x.poison && x.poison.length ? 1 : 0]),
       };
     }
 
@@ -717,7 +873,7 @@ const Engine = (() => {
     return m;
   }
 
-  return { battle, makeArmy, matrix, createBattle, buildSquad, rawStrength, squadsFor, withTraits, leveled, TRAIT_DEFAULTS, SPIN_CAP, CHARGE_RUN, LEVEL_BONUS, MAX_LEVEL };
+  return { SKILL_TYPES, skillParam, describeSkill, applySkills, battle, makeArmy, matrix, createBattle, buildSquad, rawStrength, squadsFor, withTraits, leveled, TRAIT_DEFAULTS, SPIN_CAP, CHARGE_RUN, LEVEL_BONUS, MAX_LEVEL };
 })();
 if (typeof module !== 'undefined') module.exports = Engine;
 
@@ -746,7 +902,7 @@ const Game = (() => {
   const unitCostOf = (unit) => Math.max(10, Math.round((unit.cost || 1) * SQUAD_COST / 10) * 10);
   // Upgrades cost half the unit's price at the default setting (50 for a 100-gold squad)
   const levelCost = (unit) => Math.max(10, Math.round(CONFIG.levelCostPerTier * (unit.cost || 1) / 5) * 5);
-  const AI = { levelPolicy: 'smart', maxExtraDeploys: 3 }; // levelPolicy: smart | never | all (for experiments)
+  const AI = { levelPolicy: 'smart', maxExtraDeploys: 3, skills: true }; // levelPolicy: smart | never | all (for experiments)
 
   // rows 0-3: enemy zone (row 3 is its front), rows 4-7: no man's land, rows 8-11: player zone (row 8 is its front)
   const zoneRows = (side) => side === 0 ? [8, 9, 10, 11] : [3, 2, 1, 0];
@@ -764,7 +920,54 @@ const Game = (() => {
       round: 1, hp: [START_HP, START_HP], gold: [START_GOLD, START_GOLD],
       armies: [[], []], nextId: [1, 1], history: [], over: false, winner: -1,
       extraDeploys: [0, 0],
+      tech: [{}, {}], // skills bought per unit type: tech[side][unitIdx] = [round bought or 0, round bought or 0]
     };
+  }
+
+  // ---------- skills (bought per unit type, for all squads of that type) ----------
+  // m.units[i].skillDefs = [def or null, def or null], resolved from the unit's two skill slots
+  const skillDef = (m, ui, k) => (m.units[ui].skillDefs || [])[k] || null;
+  const skillCost = (m, ui, k) => { const d = skillDef(m, ui, k); return d ? Math.max(0, Math.round(+d.cost || 0)) : 0; };
+  const hasSkill = (m, side, ui, k) => !!(m.tech && m.tech[side] && m.tech[side][ui] && m.tech[side][ui][k] > 0);
+  // a skill bought this round is hidden from the opponent until the fight
+  const skillVisible = (m, side, ui, k) => hasSkill(m, side, ui, k) && m.tech[side][ui][k] < m.round;
+  function unitFor(m, side, ui) {
+    const base = m.units[ui];
+    const defs = [0, 1].filter(k => hasSkill(m, side, ui, k)).map(k => skillDef(m, ui, k));
+    return defs.length ? E.applySkills(base, defs, m.units) : base;
+  }
+  function canBuySkill(m, side, ui, k) {
+    const d = skillDef(m, ui, k);
+    if (!d || hasSkill(m, side, ui, k)) return false;
+    if (!m.armies[side].some(s => s.unit === ui)) return false; // needs a squad of that type on the board
+    return m.gold[side] >= skillCost(m, ui, k);
+  }
+  function buySkill(m, side, ui, k) {
+    if (!canBuySkill(m, side, ui, k)) return false;
+    m.gold[side] -= skillCost(m, ui, k);
+    if (!m.tech) m.tech = [{}, {}];
+    const t = m.tech[side][ui] || (m.tech[side][ui] = [0, 0]);
+    t[k] = m.round;
+    return true;
+  }
+  function undoSkill(m, side, ui, k) {
+    const t = m.tech && m.tech[side][ui];
+    if (!t || t[k] !== m.round) return false;
+    t[k] = 0;
+    m.gold[side] += skillCost(m, ui, k);
+    return true;
+  }
+
+  // ---------- selling ----------
+  // Squads from earlier rounds sell for half the unit's price (squads placed this round are taken back in full)
+  const sellValue = (m, sq) => Math.floor(unitCostOf(m.units[sq.unit]) / 2 / 5) * 5;
+  function sell(m, side, sqId) {
+    const i = m.armies[side].findIndex(s => s.id === sqId && s.round < m.round);
+    if (i < 0) return 0;
+    const [sq] = m.armies[side].splice(i, 1);
+    const v = sellValue(m, sq);
+    m.gold[side] += v;
+    return v;
   }
 
   function buyDeploy(m, side) {
@@ -810,7 +1013,7 @@ const Game = (() => {
     let idx = 0;
     for (const sq of m.armies[side]) {
       const w = tileToWorld(sq.col, sq.row);
-      const b = E.buildSquad(m.units[sq.unit], side, w.x, w.y, sq.id, TILE, idx, sq.level);
+      const b = E.buildSquad(unitFor(m, side, sq.unit), side, w.x, w.y, sq.id, TILE, idx, sq.level);
       idx += b.length;
       out.push(...b);
     }
@@ -826,7 +1029,7 @@ const Game = (() => {
     let sum = 0;
     for (const k in res.squads) {
       const s = res.squads[k];
-      if (s.side !== side || s.alive <= 0) continue;
+      if (s.side !== side || s.alive <= 0 || s.squad < 0) continue; // spawned bodies don't count
       const sq = m.armies[side].find(q => q.id === s.squad);
       const value = sq ? (m.units[sq.unit].cost || 1) : 1; // pricier squads hit harder, like their price
       sum += SQUAD_POINTS * value * s.alive / s.total;
@@ -933,8 +1136,17 @@ const Game = (() => {
         reserve += levelCost(m.units[sq.unit]);
       }
     }
-    let guard = 0;
     const minCost = Math.min(...m.units.map(unitCostOf));
+    // skills: for unit types it has 2 or more squads of, sometimes buy a skill if a squad is still affordable after
+    if (AI.skills) {
+      const types = Object.keys(own).map(Number).filter(ui => own[ui] >= 2).sort((a, b) => own[b] - own[a]);
+      for (const ui of types) for (const k of [0, 1]) {
+        if (!skillDef(m, ui, k) || hasSkill(m, side, ui, k)) continue;
+        if (m.gold[side] - reserve - skillCost(m, ui, k) < minCost) continue;
+        if (r() < 0.5) buySkill(m, side, ui, k);
+      }
+    }
+    let guard = 0;
     while (m.gold[side] - reserve >= minCost && guard++ < 60) {
       if (deploysLeft(m, side) <= 0) {
         // out of deployments: buy one more only if a squad is still affordable after it
@@ -991,6 +1203,7 @@ const Game = (() => {
     COLS, ROWS, TILE, START_HP, START_GOLD, INCOME, LOSER_BONUS, SQUAD_COST, SQUAD_POINTS, SETTINGS, XP_STEPS, xpNeeded, unitCostOf,
     levelCost, isReady, levelUp, undoLevel, aiLevel, AI, CONFIG,
     deploysAllowed, deploysLeft, deployedThisRound, buyDeploy, refundDeploy,
+    skillDef, skillCost, hasSkill, skillVisible, unitFor, canBuySkill, buySkill, undoSkill, sellValue, sell,
     zoneRows, inZone, tileToWorld, createMatch, place, unplace, bodiesFor, startBattle, resolve, aiDeploy, occupied,
   };
 })();
@@ -999,7 +1212,7 @@ if (typeof module !== 'undefined') module.exports = Game;
 </script>
 <script>
 (() => {
-  const DATA = {"units":[{"name":"Goblin Swarm","cost":1,"bodies":12,"hp":100,"hit":8,"aps":1,"range":2,"speed":12,"splash":0,"defense":"none","defVal":0},{"name":"Skeleton Archers","cost":1,"bodies":8,"hp":95,"hit":16,"aps":1,"range":32,"speed":4,"splash":0,"defense":"none","defVal":0},{"name":"Ember Imps","cost":1,"bodies":4,"hp":260,"hit":22,"aps":0.6,"range":10,"speed":5,"splash":3,"defense":"none","defVal":0},{"name":"Fire Mage","cost":1,"bodies":1,"hp":750,"hit":50,"aps":0.6,"range":28,"speed":4,"splash":4,"defense":"none","defVal":0},{"name":"Sniper","cost":1,"bodies":1,"hp":500,"hit":400,"aps":0.5,"range":45,"speed":4,"splash":0,"defense":"none","defVal":0},{"name":"Brute","cost":1,"bodies":1,"hp":800,"hit":35,"aps":1.2,"range":2,"speed":6,"splash":0,"defense":"armor","defVal":12},{"name":"Wisps","cost":1,"bodies":3,"hp":320,"hit":18,"aps":1.5,"range":15,"speed":7,"splash":0,"defense":"ward","defVal":40},{"name":"Crossbow Volley","cost":1,"bodies":2,"hp":300,"hit":52,"aps":0.35,"range":30,"speed":4,"splash":0,"defense":"none","defVal":0,"burst":4},{"name":"Ballista","cost":1,"bodies":1,"hp":750,"hit":220,"aps":0.6,"range":40,"speed":3,"splash":0,"defense":"none","defVal":0,"pierce":3,"minRange":6,"projSpeed":45},{"name":"Boar Riders","cost":1,"bodies":3,"hp":310,"hit":30,"aps":0.8,"range":2,"speed":11,"splash":0,"defense":"none","defVal":0,"charge":2.5,"knockback":3}],"matrix":[[0,-0.473,-0.677,-0.819,0.25,-0.827,0.051,-0.513,0.375,0.092],[0.473,0,0.759,-0.264,0.5,-0.37,0.721,0.5,-0.563,0.507],[0.677,-0.759,0,-0.677,-0.978,-0.425,0.029,-0.835,-0.956,0.12],[0.819,0.264,0.677,0,-0.9,0.3,0.268,-0.375,-0.667,0.32],[-0.25,-0.5,0.978,0.9,0,1,-0.792,0.792,0.34,0.895],[0.827,0.37,0.425,-0.3,-1,0,0.404,-0.883,0.11,-0.161],[-0.051,-0.721,-0.029,-0.268,0.792,-0.404,0,-0.535,0.417,0.266],[0.513,-0.5,0.835,0.375,-0.792,0.883,0.535,0,-0.376,0.375],[-0.375,0.563,0.956,0.667,-0.34,-0.11,-0.417,0.376,0,-0.263],[-0.092,-0.507,-0.12,-0.32,-0.895,0.161,-0.266,-0.375,0.263,0]]};
+  const DATA = {"units": [{"name": "Goblin Swarm", "cost": 1, "bodies": 12, "hp": 100, "hit": 8, "aps": 1, "range": 2, "speed": 12, "splash": 0, "defense": "none", "defVal": 0, "skills": ["swift", "regen"]}, {"name": "Skeleton Archers", "cost": 1, "bodies": 8, "hp": 95, "hit": 16, "aps": 1, "range": 32, "speed": 4, "splash": 0, "defense": "none", "defVal": 0, "skills": ["rapid", "poison"]}, {"name": "Ember Imps", "cost": 1, "bodies": 4, "hp": 260, "hit": 22, "aps": 0.6, "range": 10, "speed": 5, "splash": 3, "defense": "none", "defVal": 0, "skills": ["stealth", "swift"]}, {"name": "Fire Mage", "cost": 1, "bodies": 1, "hp": 750, "hit": 50, "aps": 0.6, "range": 28, "speed": 4, "splash": 4, "defense": "none", "defVal": 0, "skills": ["range", "shrink"]}, {"name": "Sniper", "cost": 1, "bodies": 1, "hp": 500, "hit": 400, "aps": 0.5, "range": 45, "speed": 4, "splash": 0, "defense": "none", "defVal": 0, "skills": ["stealth", "range"]}, {"name": "Brute", "cost": 1, "bodies": 1, "hp": 800, "hit": 35, "aps": 1.2, "range": 2, "speed": 6, "splash": 0, "defense": "armor", "defVal": 12, "skills": ["armorHp", "spawn"]}, {"name": "Wisps", "cost": 1, "bodies": 3, "hp": 320, "hit": 18, "aps": 1.5, "range": 15, "speed": 7, "splash": 0, "defense": "ward", "defVal": 40, "skills": ["healer", "regen"]}, {"name": "Crossbow Volley", "cost": 1, "bodies": 2, "hp": 300, "hit": 52, "aps": 0.35, "range": 30, "speed": 4, "splash": 0, "defense": "none", "defVal": 0, "burst": 4, "skills": ["rapid", "heavy"]}, {"name": "Ballista", "cost": 1, "bodies": 1, "hp": 750, "hit": 220, "aps": 0.6, "range": 40, "speed": 3, "splash": 0, "defense": "none", "defVal": 0, "pierce": 3, "minRange": 6, "projSpeed": 45, "skills": ["heavy", "range"]}, {"name": "Boar Riders", "cost": 1, "bodies": 3, "hp": 310, "hit": 30, "aps": 0.8, "range": 2, "speed": 11, "splash": 0, "defense": "none", "defVal": 0, "charge": 2.5, "knockback": 3, "skills": ["armorHp", "swift"]}], "matrix": [[0, -0.473, -0.677, -0.819, 0.25, -0.827, 0.051, -0.513, 0.375, 0.092], [0.473, 0, 0.759, -0.264, 0.5, -0.37, 0.721, 0.5, -0.563, 0.507], [0.677, -0.759, 0, -0.677, -0.978, -0.425, 0.029, -0.835, -0.956, 0.12], [0.819, 0.264, 0.677, 0, -0.9, 0.3, 0.268, -0.375, -0.667, 0.32], [-0.25, -0.5, 0.978, 0.9, 0, 1, -0.792, 0.792, 0.34, 0.895], [0.827, 0.37, 0.425, -0.3, -1, 0, 0.404, -0.883, 0.11, -0.161], [-0.051, -0.721, -0.029, -0.268, 0.792, -0.404, 0, -0.535, 0.417, 0.266], [0.513, -0.5, 0.835, 0.375, -0.792, 0.883, 0.535, 0, -0.376, 0.375], [-0.375, 0.563, 0.956, 0.667, -0.34, -0.11, -0.417, 0.376, 0, -0.263], [-0.092, -0.507, -0.12, -0.32, -0.895, 0.161, -0.266, -0.375, 0.263, 0]], "skills": [{"id": "regen", "type": "regen", "name": "Regeneration", "cost": 100, "params": {}}, {"id": "poison", "type": "poison", "name": "Poison shot", "cost": 100, "params": {}}, {"id": "stealth", "type": "stealth", "name": "Stealth", "cost": 100, "params": {}}, {"id": "armorHp", "type": "armorHp", "name": "Armor and health", "cost": 100, "params": {}}, {"id": "spawn", "type": "spawn", "name": "Spawn goblins", "cost": 100, "params": {}}, {"id": "rapid", "type": "rapid", "name": "Rapid fire", "cost": 100, "params": {}}, {"id": "swift", "type": "swift", "name": "Swift strikes", "cost": 100, "params": {}}, {"id": "heavy", "type": "heavy", "name": "Heavy shot", "cost": 100, "params": {}}, {"id": "healer", "type": "healer", "name": "Healing touch", "cost": 100, "params": {}}, {"id": "range", "type": "range", "name": "Long reach", "cost": 100, "params": {}}, {"id": "shrink", "type": "shrink", "name": "Shortsight", "cost": 100, "params": {}}]};
   const ROLES = {
     'Goblin Swarm': 'Fast melee swarm. Soaks shots and overwhelms single-target units.',
     'Skeleton Archers': 'Cheap ranged squad that deals steady damage from behind.',
@@ -1021,7 +1234,7 @@ if (typeof module !== 'undefined') module.exports = Game;
   const qs = new URLSearchParams(location.search);
 
   // ---------- unit sets: built-in, or loaded from Counter Lab ----------
-  const BUILTIN = { units: DATA.units, matrix: DATA.matrix };
+  const BUILTIN = { units: DATA.units, matrix: DATA.matrix, skills: DATA.skills || [] };
   const STORE = 'phonebellum.units.v1';
   const MATRIX_SETTINGS = { budget: 2, distance: 40, spacing: 3.5, minDmgPct: 15, timeCap: 60, dt: 0.05 };
   const LEVERS = ['cost', 'bodies', 'hp', 'hit', 'aps', 'range', 'speed', 'splash'];
@@ -1030,7 +1243,11 @@ if (typeof module !== 'undefined') module.exports = Game;
     list.every(u => u && typeof u.name === 'string' && u.name.trim() && LEVERS.every(k => typeof u[k] === 'number' && isFinite(u[k]) && u[k] >= 0) && u.bodies >= 1 && u.aps > 0 && u.cost > 0);
   const validSet = (s) => s && validUnits(s.units) && Array.isArray(s.matrix) && s.matrix.length === s.units.length;
   function useSet(set, custom) {
-    units = Shapes.assign(set.units).map(u => ({ ...Engine.withTraits(u), name: String(u.name).replace(/[<>&"]/g, '').trim().slice(0, 40) || 'Unit', level: 0, bodies: Math.max(1, Math.round(u.bodies)) }));
+    const skills = Array.isArray(set.skills) ? set.skills.filter(sk => sk && typeof sk.id === 'string' && Engine.SKILL_TYPES[sk.type])
+      .map(sk => ({ ...sk, name: String(sk.name || Engine.SKILL_TYPES[sk.type].label).replace(/[<>&"]/g, '').slice(0, 40) })) : [];
+    // each unit's two skill slots, resolved to skill definitions
+    units = Shapes.assign(set.units).map(u => ({ ...Engine.withTraits(u), name: String(u.name).replace(/[<>&"]/g, '').trim().slice(0, 40) || 'Unit', level: 0, bodies: Math.max(1, Math.round(u.bodies)),
+      skillDefs: [0, 1].map(k => (Array.isArray(u.skills) && skills.find(sk => sk.id === u.skills[k])) || null) }));
     M = set.matrix; customSet = custom; rawSet = set;
   }
   try {
@@ -1183,7 +1400,14 @@ if (typeof module !== 'undefined') module.exports = Game;
     for (const b of bt.bodies) {
       if (!b.alive) continue;
       const c = teamCol(b.side), r = radius(b.u), hpr = b.hp / b.u.hp;
+      if (b.hidden) { // stealthed: a dashed ghost until it attacks (fainter for the enemy's)
+        ctx.globalAlpha = b.side === me ? 0.6 : 0.3; ctx.strokeStyle = c; ctx.lineWidth = 1.5; ctx.setLineDash([2, 2]);
+        Shapes.outline(ctx, b.u.shape, PX(b.x), PY(b.y), r, upOf(b.side));
+        ctx.setLineDash([]); ctx.globalAlpha = 1;
+        continue;
+      }
       Shapes.body(ctx, b.u.shape, PX(b.x), PY(b.y), r, upOf(b.side), b.u.color, c, 0.35 + 0.65 * hpr);
+      if (b.poison && b.poison.length) { ctx.fillStyle = '#6FD08C'; ctx.beginPath(); ctx.arc(PX(b.x) + r * 0.9, PY(b.y) - r * 0.9, Math.max(2, r * 0.3), 0, Math.PI * 2); ctx.fill(); }
       if (b.u.hp >= 500 && hpr < 1) {
         ctx.strokeStyle = c; ctx.lineWidth = 1.5;
         ctx.beginPath(); ctx.arc(PX(b.x), PY(b.y), r + 2.5, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * hpr); ctx.stroke();
@@ -1199,6 +1423,10 @@ if (typeof module !== 'undefined') module.exports = Game;
     }
     for (const e of fx) {
       const a = 1 - e.age / e.life;
+      if (e.kind === 'heal') {
+        ctx.strokeStyle = '#6FD08C'; ctx.globalAlpha = 0.8 * a; ctx.lineWidth = 1.5; ctx.setLineDash([2, 3]);
+        ctx.beginPath(); ctx.moveTo(PX(e.x1), PY(e.y1)); ctx.lineTo(PX(e.x2), PY(e.y2)); ctx.stroke(); ctx.setLineDash([]);
+      }
       if (e.kind === 'shot') {
         ctx.strokeStyle = teamCol(e.side); ctx.globalAlpha = 0.7 * a; ctx.lineWidth = e.charged ? 3 : 1;
         ctx.beginPath(); ctx.moveTo(PX(e.x1), PY(e.y1)); ctx.lineTo(PX(e.x2), PY(e.y2)); ctx.stroke();
@@ -1311,7 +1539,7 @@ if (typeof module !== 'undefined') module.exports = Game;
         <div class="uwrap">
           <button class="ucard" data-i="${i}" aria-pressed="${selected === i}" aria-disabled="${!canBuy(i)}">
             <span class="t"><span style="color:${u.color};display:inline-flex">${Shapes.svg(u.shape, 13)}</span> ${tag(u)}</span><span class="n">${esc(u.name)}</span>
-            <span class="c">${price(i)} · ${u.bodies} ${u.bodies === 1 ? 'body' : 'bodies'}</span>
+            <span class="c">${price(i)} · ${u.bodies} ${u.bodies === 1 ? 'body' : 'bodies'}${[0, 1].filter(k => Game.hasSkill(m, me, i, k)).length ? ` · ${[0, 1].filter(k => Game.hasSkill(m, me, i, k)).length}★` : ''}</span>
           </button>
           <button class="info" data-info="${i}" aria-label="About ${esc(u.name)}">i</button>
         </div>`).join('')}</div>
@@ -1395,6 +1623,8 @@ if (typeof module !== 'undefined') module.exports = Game;
         <li>You see the enemy’s earlier squads while you deploy, so build counters.</li>
         <li>3 deployments in round 1, then 2 per round. Extra ones cost ${Game.CONFIG.extraDeployCost} gold.</li>
         <li>Squads earn experience. A gold + means you can upgrade it: level 2 doubles health and attack, level 3 triples them.</li>
+        <li>Each unit has two skills. Buy one and all your squads of that unit get it.</li>
+        <li>Tap a squad from an earlier round to sell it for half its price.</li>
       </ul>
     </div>`);
     $('panel').innerHTML = `
@@ -1410,7 +1640,7 @@ if (typeof module !== 'undefined') module.exports = Game;
       <span class="hint" id="join-msg" aria-live="polite" hidden></span>
       <div class="bar">
         <span class="hint">Playing with ${customSet ? `your ${units.length} units from Counter Lab` : `the ${units.length} built-in units`}.</span>
-        <span class="btnrow"><button class="btn small" id="load-units">Load units</button><a class="btn small" href="lab.html" style="text-decoration:none;color:inherit;display:inline-block">Counter Lab</a></span>
+        <span class="btnrow"><button class="btn small" id="load-units">Load units</button><a class="btn small" id="lab-link" href="lab.html" style="text-decoration:none;color:inherit;display:inline-block">Counter Lab</a></span>
       </div>
       <div class="bar">
         <span class="hint">Deploy timer vs AI</span>
@@ -1567,7 +1797,7 @@ if (typeof module !== 'undefined') module.exports = Game;
   }
 
   function absorb() {
-    for (const s of bt.lastShots()) fx.push({ kind: 'shot', x1: s[0], y1: s[1], x2: s[2], y2: s[3], side: s[4], splash: s[5], charged: s[6], age: 0, life: 0.18 });
+    for (const s of bt.lastShots()) fx.push({ kind: s[7] === 1 ? 'heal' : 'shot', x1: s[0], y1: s[1], x2: s[2], y2: s[3], side: s[4], splash: s[5], charged: s[6], age: 0, life: s[7] === 1 ? 0.35 : 0.18 });
     for (const b of bt.bodies) if (!b.alive && !b._gone) { b._gone = true; fx.push({ kind: 'death', x: b.x, y: b.y, r: radius(b.u), side: b.side, age: 0, life: 0.5 }); }
   }
 
@@ -1636,9 +1866,36 @@ if (typeof module !== 'undefined') module.exports = Game;
   });
 
   // ---------- unit sheet ----------
+  function skillBlock(i, side) {
+    const defs = units[i].skillDefs || [];
+    if (!defs.some(Boolean) || !m) return '';
+    const mine = side === undefined || side === me;
+    const rows = [0, 1].filter(k => defs[k]).map(k => {
+      const d = defs[k], cost = Game.skillCost(m, i, k);
+      let act = '';
+      if (mine) {
+        if (Game.hasSkill(m, me, i, k)) {
+          act = `<span class="chip" style="color:var(--gold);border:1px solid currentColor;border-radius:99px;padding:1px 8px;font-size:12px">Owned</span>`;
+          if (phase === 'deploy' && editable() && m.tech[me][i][k] === m.round) act += ` <button class="btn small" data-unskill="${k}">Undo</button>`;
+        } else if (phase === 'deploy') {
+          const why = !m.armies[me].some(q => q.unit === i) ? 'Place a squad first' : m.gold[me] < cost ? `Need ${cost} gold` : '';
+          act = why || !editable() ? `<button class="btn small" disabled>${why || `Buy · ${cost} gold`}</button>` : `<button class="btn small primary" data-skill="${k}">Buy · ${cost} gold</button>`;
+        } else act = `<span class="hint">${cost} gold</span>`;
+      } else {
+        act = Game.skillVisible(m, side, i, k) || (phase !== 'deploy' && Game.hasSkill(m, side, i, k))
+          ? `<span class="chip" style="color:var(--foe);border:1px solid currentColor;border-radius:99px;padding:1px 8px;font-size:12px">${mode === 'ai' ? 'Enemy' : 'Opponent'} has it</span>` : `<span class="hint">Not bought</span>`;
+      }
+      return `<div style="display:grid;gap:4px;border-top:1px solid var(--line);padding-top:8px">
+        <div class="bar"><b style="font-family:var(--font-display)">${esc(d.name)}</b><span>${act}</span></div>
+        <span class="hint">${esc(Engine.describeSkill(d))}</span></div>`;
+    });
+    return `<div style="display:grid;gap:8px"><h4 style="margin:0;font-size:12px;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted)">Skills${mine ? ' · for all your squads of this unit' : ''}</h4>${rows.join('')}</div>`;
+  }
+
   function openSheet(i, sq, side) {
     const base = units[i];
-    const u = sq ? Engine.leveled(base, sq.level) : base;
+    const owner = side === undefined ? me : side;
+    const u = Engine.leveled(m ? Game.unitFor(m, owner, i) : base, sq ? sq.level : 0);
     let lvl = '';
     if (sq) {
       const next = sq.level < Engine.MAX_LEVEL ? Math.round(Game.xpNeeded(base, sq.level)) : null;
@@ -1652,6 +1909,7 @@ if (typeof module !== 'undefined') module.exports = Game;
           ? `<button class="btn primary" id="lvl-up">Level up · ${cost} gold</button>`
           : `<button class="btn primary" disabled>${editable() ? `Need ${cost} gold` : `Level up · ${cost} gold`}</button>`);
         if (boughtNow && editable()) btns.push(`<button class="btn" id="lvl-undo">Undo level-up</button>`);
+        if (sq.round < m.round && editable()) btns.push(`<button class="btn" id="sell">Sell · ${Game.sellValue(m, sq)} gold</button>`);
         if (btns.length) lvl += `<div style="display:flex;gap:8px;flex-wrap:wrap">${btns.join('')}</div>`;
         else if (next) lvl += `<p class="hint" style="margin:0">Earns XP from damage it deals and takes. Killing leveled enemies pays extra.</p>`;
       }
@@ -1677,6 +1935,7 @@ if (typeof module !== 'undefined') module.exports = Game;
       <p class="role" style="margin:0">${ROLES[u.name] && !customSet ? ROLES[u.name] : customSet ? `From a Counter Lab roster · ${Game.unitCostOf(base)} gold` : ''}</p>
       ${lvl}
       ${tr.length ? `<div class="traits">${tr.map(x => `<span>${x}</span>`).join('')}</div>` : ''}
+      ${skillBlock(i, side)}
       <div class="stats num">
         <div><span>Bodies</span>${u.bodies}</div><div><span>Health</span>${Math.round(u.hp)}</div>
         <div><span>Hit</span>${Math.round(u.hit)}</div><div><span>Attacks/s</span>${u.aps}</div>
@@ -1691,6 +1950,13 @@ if (typeof module !== 'undefined') module.exports = Game;
     const after = () => { changed(); openSheet(i, sq, side); };
     if ($('lvl-up')) $('lvl-up').addEventListener('click', () => { if (editable() && Game.levelUp(m, me, sq.id)) after(); });
     if ($('lvl-undo')) $('lvl-undo').addEventListener('click', () => { if (editable() && Game.undoLevel(m, me, sq.id)) after(); });
+    $('sheet').querySelectorAll('[data-skill]').forEach(b => b.addEventListener('click', () => { if (editable() && Game.buySkill(m, me, i, +b.dataset.skill)) after(); }));
+    $('sheet').querySelectorAll('[data-unskill]').forEach(b => b.addEventListener('click', () => { if (editable() && Game.undoSkill(m, me, i, +b.dataset.unskill)) after(); }));
+    if ($('sell')) $('sell').addEventListener('click', () => {
+      const btn = $('sell');
+      if (!btn.dataset.sure) { btn.dataset.sure = '1'; btn.textContent = `Tap again to sell for ${Game.sellValue(m, sq)}`; btn.classList.add('primary'); return; }
+      if (editable() && Game.sell(m, me, sq.id)) { closeSheet(); changed(); }
+    });
     ($('lvl-up') || $('close')).focus();
   }
   function closeSheet() { $('sheet-back').hidden = true; loaderRun++; }
@@ -1750,7 +2016,7 @@ if (typeof module !== 'undefined') module.exports = Game;
         while (performance.now() - t0 < 30) {
           r = gen.next();
           if (r.done) {
-            const set = { units: clean, matrix: r.value };
+            const set = { units: clean, matrix: r.value, skills: (p && Array.isArray(p.skills)) ? p.skills : [] };
             try { localStorage.setItem(STORE, JSON.stringify(set)); } catch (e) {}
             useSet(set, true);
             closeSheet(); showStart();
@@ -1904,12 +2170,16 @@ if (typeof module !== 'undefined') module.exports = Game;
   // What the guest may see: the host's squads from this round stay hidden until the fight
   function syncState() {
     const s = snapshot(m);
-    if (phase === 'deploy') s.armies[0] = s.armies[0].filter(q => q.round < m.round);
+    if (phase === 'deploy') {
+      s.armies[0] = s.armies[0].filter(q => q.round < m.round);
+      // skills bought this round stay hidden too
+      for (const ui in (s.tech && s.tech[0]) || {}) s.tech[0][ui] = s.tech[0][ui].map(r => r === m.round ? 0 : r);
+    }
     return s;
   }
   function sendSync() {
     if (!net.connected) return;
-    const base = { t: 'sync', proto: 1, set: { units: rawSet.units, matrix: rawSet.matrix }, custom: customSet, config: { levelCostPerTier: Game.CONFIG.levelCostPerTier } };
+    const base = { t: 'sync', proto: 1, set: { units: rawSet.units, matrix: rawSet.matrix, skills: rawSet.skills || [] }, custom: customSet, config: { levelCostPerTier: Game.CONFIG.levelCostPerTier } };
     if (!m) { send({ ...base, phase: 'lobby' }); return; }
     const ph = phase === 'battle' ? 'result' : phase;
     send({ ...base, phase: ph, m: syncState(), remaining: phase === 'deploy' && deadline ? deadline - now() : 0, ready, nextReady, rematch, summary: lastSummary });
@@ -1948,6 +2218,13 @@ if (typeof module !== 'undefined') module.exports = Game;
     m.extraDeploys[1] = Math.max(0, d.extra | 0);
     m.nextId[1] = Math.max(m.nextId[1], d.nextId | 0);
     ready[1] = !!d.ready;
+    const tech = {};
+    if (d.tech && typeof d.tech === 'object') for (const ui in d.tech) {
+      const i = +ui, t = d.tech[ui];
+      if (Number.isInteger(i) && i >= 0 && i < n && Array.isArray(t)) tech[i] = [0, 1].map(k => Math.max(0, Math.min(m.round, t[k] | 0)));
+    }
+    if (!m.tech) m.tech = [{}, {}];
+    m.tech[1] = tech;
   }
 
   function checkNext() {
@@ -2061,7 +2338,7 @@ if (typeof module !== 'undefined') module.exports = Game;
 
   function sendSide() {
     if (mode !== 'guest' || !m || phase !== 'deploy') return;
-    send({ t: 'side', round: m.round, army: m.armies[1], gold: m.gold[1], extra: m.extraDeploys[1], nextId: m.nextId[1], ready: ready[1] || timeUp });
+    send({ t: 'side', round: m.round, army: m.armies[1], gold: m.gold[1], extra: m.extraDeploys[1], nextId: m.nextId[1], tech: (m.tech && m.tech[1]) || {}, ready: ready[1] || timeUp });
   }
 
   function guestRecv(d) {
@@ -2077,7 +2354,8 @@ if (typeof module !== 'undefined') module.exports = Game;
       if (d.phase === 'deploy') {
         if (phase === 'deploy' && m && m.round === incoming.round) {
           // same round after a reconnect: keep our own side as it is here, take everything else from the host
-          for (const k of ['armies', 'gold', 'extraDeploys', 'nextId']) incoming[k][1] = m[k][1];
+          if (!incoming.tech) incoming.tech = [{}, {}];
+          for (const k of ['armies', 'gold', 'extraDeploys', 'nextId', 'tech']) incoming[k][1] = (m[k] || [{}, {}])[1];
           m = incoming; ready[0] = theirReady;
           deadline = d.remaining > 0 ? now() + d.remaining - 300 : 0;
           timeUp = false;

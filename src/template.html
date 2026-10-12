@@ -164,6 +164,12 @@ h3.sub { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-sp
 .derived b { color: var(--ink); font-family: var(--font-data); font-weight: 500; }
 .confirm { font-size: 13px; }
 .combo-detail { display: grid; gap: 10px; }
+.skills { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); align-items: start; }
+@media (max-width: 400px) { .skills { grid-template-columns: 1fr; } }
+.skill-desc { font-size: 13px; color: var(--muted); }
+.slot { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 10px; align-items: center; }
+.slot label.on { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; color: var(--muted); white-space: nowrap; }
+.slot .skill-desc { grid-column: 1 / -1; }
 .combo-detail h3 { font-size: 17px; font-weight: 600; }
 .combo-detail .sum { font-size: 14px; }
 .combo-detail td button { font-size: 12px; padding: 3px 8px; }
@@ -269,6 +275,19 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
     <div class="units" id="units"></div>
   </section>
 
+  <section class="panel" aria-labelledby="skills-h">
+    <div class="panel-head">
+      <h2 id="skills-h">Skills</h2>
+      <div class="row">
+        <select id="skill-type" aria-label="Type of skill to add" style="width:auto;font-size:13px;padding:5px 8px"></select>
+        <button class="btn small" id="skill-add">Add skill</button>
+      </div>
+    </div>
+    <p class="muted" style="font-size:14px">Each unit has two skill slots. In the game, players buy a skill once and it applies to all their squads of that unit. Several units can share a skill, or you can make a copy with its own settings for one unit. Set which skills a unit has in its card under Units, and tick On in tests to include a skill in the counter table, the combos and the price check.</p>
+    <div class="msg" id="skill-msg" aria-live="polite"></div>
+    <div class="skills" id="skills"></div>
+  </section>
+
   <section class="panel" aria-labelledby="data-h">
     <div class="panel-head"><h2 id="data-h">Save and share</h2></div>
     <p class="muted" style="font-size:14px">Your changes are kept in this browser. To move a roster elsewhere, copy it as text and paste it back in here later.</p>
@@ -302,6 +321,7 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
       <div class="rule"><h3>Spin-up</h3><p>Raises attack speed every second the unit keeps firing, up to three times its base speed.</p></div>
       <div class="rule"><h3>Pierce and projectiles</h3><p>A piercing shot also hits bodies lined up behind its target. A projectile with a speed travels in a straight line and hits the first enemy it touches, so units moving sideways can dodge it while units charging straight at it get hit.</p></div>
       <div class="rule"><h3>Upgrades</h3><p>Each upgrade adds the unit’s starting health and hit again: one upgrade doubles them, two triple them. In the game, squads earn upgrades through experience and gold; here you set them directly to test upgraded matchups.</p></div>
+      <div class="rule"><h3>Skills</h3><p>Upgrades a player buys during a match. Each unit has two. A skill changes the unit’s stats, gives it a new ability, or both. Poison ignores armor and ward. Spawned bodies fight like normal bodies but don’t count for damage after the round.</p></div>
       <div class="rule"><h3>Combos</h3><p>A pair fights as one army: the shorter-ranged unit in front, the other a short gap behind it, each with the gold per side. Its opponent gets twice the gold. Synergy compares the pair’s result with the average of its two units’ results against the same opponent.</p></div>
       <div class="rule"><h3>Fair price and tiers</h3><p>The price check finds how many squads of a unit tie against 6 squads of each 100-gold unit, and turns that into a fair price in gold. Under 140 gold is tier 1, 140–280 is tier 2, above 280 is tier 3. Raising one stat and measuring again shows what that stat is worth for that unit.</p></div>
       <div class="rule"><h3>Minimum range, charge and knockback</h3><p>A unit can’t attack anything inside its minimum range. Charge multiplies the next hit after the unit has run 5 m. Knockback pushes a hit body away, fully for small bodies and barely for big ones.</p></div>
@@ -360,15 +380,33 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
   function load() {
     try {
       const raw = localStorage.getItem(KEY);
-      if (raw) { let p = JSON.parse(raw); if (valid(p)) { p = toGold(p); return { settings: { ...SAMPLE.settings, ...p.settings }, units: withIds(p.units) }; } }
+      if (raw) { let p = JSON.parse(raw); if (valid(p)) { p = toGold(p); return fromRoster(p); } }
     } catch (e) {}
-    return { settings: clone(SAMPLE.settings), units: withIds(clone(SAMPLE.units)) };
+    return fromRoster(clone(SAMPLE));
   }
   function save() {
     try { localStorage.setItem(KEY, JSON.stringify(exportData())); } catch (e) {}
   }
   function exportData() {
-    return { goldCosts: true, settings: state.settings, units: state.units.map(({ id, ...u }) => u) };
+    return { goldCosts: true, settings: state.settings, skills: state.skills, units: state.units.map(({ id, ...u }) => u) };
+  }
+  // Rosters saved before skills existed get the default skill library, with no skills set on their units
+  function fromRoster(p) {
+    const skills = Array.isArray(p.skills) ? p.skills.filter(validSkill).map(sk => ({ ...sk, params: { ...(sk.params || {}) } })) : clone(SAMPLE.skills);
+    const ids = new Set(skills.map(sk => sk.id));
+    const units = withIds(p.units.map(u => ({
+      defense: 'none', defVal: 0, ...u,
+      skills: [0, 1].map(k => (Array.isArray(u.skills) && ids.has(u.skills[k])) ? u.skills[k] : null),
+      skillsOn: [0, 1].map(k => !!(Array.isArray(u.skillsOn) && u.skillsOn[k])),
+    })));
+    return { settings: { ...SAMPLE.settings, ...p.settings }, skills, units };
+  }
+  function validSkill(sk) { return sk && typeof sk.id === 'string' && typeof sk.name === 'string' && Engine.SKILL_TYPES[sk.type]; }
+  const skillById = (id) => state.skills.find(sk => sk.id === id) || null;
+  // The unit as tests see it: with the skills ticked On in tests
+  function prep(u) {
+    const defs = [0, 1].filter(k => u.skills && u.skills[k] && u.skillsOn && u.skillsOn[k]).map(k => skillById(u.skills[k])).filter(Boolean);
+    return defs.length ? Engine.applySkills(u, defs, state.units) : u;
   }
   function valid(p) {
     return p && typeof p === 'object' && p.settings && Array.isArray(p.units) && p.units.length >= 2 &&
@@ -431,6 +469,8 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
                 <input type="number" id="${k}-${u.id}" data-k="${k}" min="0" step="${step}">
                 <span class="hint">${hint}</span></div>`).join('')}
           </div>
+          <h3 class="sub">Skills</h3>
+          <div class="skill-slots"></div>
           <div class="derived"></div>
           <h3 class="sub">Price check</h3>
           <div class="price">
@@ -467,6 +507,7 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
           save(); renderUnitSummaries(); scheduleRun();
         });
       });
+      renderSlots(u, d);
       d.querySelector('[data-act="price"]').addEventListener('click', () => priceCheck(u, d, false));
       d.querySelector('[data-act="values"]').addEventListener('click', () => priceCheck(u, d, true));
       d.querySelector('[data-act="dup"]').addEventListener('click', () => {
@@ -484,10 +525,11 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
       unitsEl.appendChild(d);
     });
     renderUnitSummaries();
+    if (skillsEl.children.length) renderSkills(); // unit names feed the spawn picker
   }
   function renderUnitSummaries() {
     const g = state.settings;
-    const rs = state.units.map(u => Engine.rawStrength(u, g));
+    const rs = state.units.map(u => Engine.rawStrength(prep(u), g));
     const max = Math.max(...rs.map(r => r.strength), 1);
     state.units.forEach((u, i) => {
       const d = unitsEl.querySelector(`details[data-id="${u.id}"]`);
@@ -510,6 +552,7 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
       if (u.knockback > 0) tr.push(`knockback ${fmt(u.knockback, 1)} m`);
       if (u.windUp > 0) tr.push(`wind-up ${fmt(u.windUp, 1)} s`);
       if (u.level > 0) tr.push(`${u.level + 1}× stats`);
+      [0, 1].forEach(k => { const sk = u.skills && skillById(u.skills[k]); if (sk) tr.push(`${sk.name}${u.skillsOn[k] ? ' (on)' : ''}`); });
       d.querySelector('.sum-line').textContent =
         `${u.bodies} × ${fmt(u.hp)} hp · ${fmt(u.hit)} dmg × ${fmt(u.aps, 2)}/s · ${fmt(u.range)} m${u.splash ? ` · splash ${u.splash}` : ''}${def}${tr.length ? ' · ' + tr.join(' · ') : ''}`;
       d.querySelector('.bar i').style.width = (r.strength / max * 100).toFixed(1) + '%';
@@ -519,10 +562,134 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
         `<span>One squad: <b>${fmt(squadHp)}</b> health, <b>${fmt(squadDps, 1)}</b> damage/s</span>
          <span>With ${fmt(g.budget)} gold: <b>${r.squads}</b> squad${r.squads === 1 ? '' : 's'}, <b>${r.bodies}</b> bodies</span>
          <span>Raw strength: <b>${fmt(r.strength / 1000)}k</b> (${Math.round(r.strength / max * 100)}% of the strongest)</span>${uncounted}`;
+      renderSkillUse();
       const dh = d.querySelector('.def-hint');
       dh.textContent = u.defense === 'armor' ? 'Blocked from every hit.' : u.defense === 'ward' ? 'Most damage one hit can deal.' : 'Not used without a defense.';
     });
   }
+  // ---------- skill slots on a unit ----------
+  function renderSlots(u, d) {
+    const box = d.querySelector('.skill-slots');
+    box.innerHTML = [0, 1].map(k => `
+      <div class="slot">
+        <select data-slot="${k}" aria-label="Skill ${k + 1}">
+          <option value="">No skill</option>
+          ${state.skills.map(sk => `<option value="${esc(sk.id)}" ${u.skills[k] === sk.id ? 'selected' : ''}>${esc(sk.name)}</option>`).join('')}
+        </select>
+        <label class="on"><input type="checkbox" data-on="${k}" ${u.skillsOn[k] ? 'checked' : ''} ${u.skills[k] ? '' : 'disabled'}> On in tests</label>
+        <span class="skill-desc">${u.skills[k] && skillById(u.skills[k]) ? esc(Engine.describeSkill(skillById(u.skills[k]))) + ` ${fmt(skillById(u.skills[k]).cost)} gold.` : ''}</span>
+      </div>`).join('');
+    box.querySelectorAll('[data-slot]').forEach(sl => sl.addEventListener('change', () => {
+      const k = +sl.dataset.slot;
+      u.skills[k] = sl.value || null;
+      if (!u.skills[k]) u.skillsOn[k] = false;
+      save(); renderSlots(u, d); renderUnitSummaries(); renderSkillUse(); scheduleRun();
+    }));
+    box.querySelectorAll('[data-on]').forEach(cb => cb.addEventListener('change', () => {
+      u.skillsOn[+cb.dataset.on] = cb.checked;
+      save(); renderUnitSummaries(); scheduleRun();
+    }));
+  }
+  function refreshSlots() {
+    state.units.forEach(u => { const d = unitsEl.querySelector(`details[data-id="${u.id}"]`); if (d) renderSlots(u, d); });
+  }
+
+  // ---------- skill library ----------
+  const skillsEl = $('skills');
+  $('skill-type').innerHTML = Object.entries(Engine.SKILL_TYPES).map(([k, t]) => `<option value="${k}">${esc(t.label)}</option>`).join('');
+  let skUid = 1;
+  const newSkillId = () => { let id; do { id = 'sk' + Date.now().toString(36) + (skUid++); } while (skillById(id)); return id; };
+  function usedBy(sk) { return state.units.filter(u => u.skills.includes(sk.id)); }
+  function renderSkillUse() {
+    state.skills.forEach(sk => {
+      const el = skillsEl.querySelector(`[data-sk="${CSS.escape(sk.id)}"] .used`);
+      if (el) { const us = usedBy(sk); el.textContent = us.length ? 'Used by ' + us.map(u => u.name).join(', ') : 'Not used by any unit yet'; }
+    });
+  }
+  function renderSkills() {
+    const open = new Set([...skillsEl.querySelectorAll('details[open]')].map(d => d.dataset.sk));
+    skillsEl.innerHTML = '';
+    state.skills.forEach(sk => {
+      const T = Engine.SKILL_TYPES[sk.type];
+      const d = document.createElement('details');
+      d.className = 'unit'; d.dataset.sk = sk.id;
+      d.innerHTML = `
+        <summary>
+          <div class="sum-top"><span class="sum-name"><span class="n">${esc(sk.name)}</span></span><span class="sum-cost">${fmt(sk.cost)} gold</span></div>
+          <div class="sum-line">${esc(T.label)} · <span class="desc">${esc(Engine.describeSkill(sk))}</span></div>
+          <div class="sum-line used"></div>
+        </summary>
+        <div class="unit-body">
+          <div class="levers">
+            <div class="field full"><label for="skn-${esc(sk.id)}">Name</label><input type="text" id="skn-${esc(sk.id)}" data-f="name" value="${esc(sk.name)}"></div>
+            <div class="field"><label>Type</label><span class="hint" style="font-size:14px;color:var(--ink)">${esc(T.label)}</span></div>
+            <div class="field"><label for="skc-${esc(sk.id)}">Cost (gold)</label><input type="number" id="skc-${esc(sk.id)}" data-f="cost" min="0" step="5" value="${sk.cost}"></div>
+            ${T.params.map(([k, label, def, step]) => `
+              <div class="field ${step == null ? 'full' : ''}"><label for="skp-${esc(sk.id)}-${k}">${esc(label)}</label>
+                ${step == null
+                  ? `<select id="skp-${esc(sk.id)}-${k}" data-p="${k}">${state.units.some(u => u.name === String(Engine.skillParam(sk, k))) ? '' : `<option selected value="${esc(Engine.skillParam(sk, k))}">${esc(Engine.skillParam(sk, k))} (not in roster)</option>`}${state.units.map(u => `<option ${String(Engine.skillParam(sk, k)) === u.name ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select>`
+                  : `<input type="number" id="skp-${esc(sk.id)}-${k}" data-p="${k}" min="0" step="${step}" value="${Engine.skillParam(sk, k)}">`}
+              </div>`).join('')}
+          </div>
+          <div class="row">
+            <button class="btn small" data-act="dup">Make a copy</button>
+            <button class="btn small danger" data-act="del">Delete</button>
+          </div>
+          <div class="row confirm" data-confirm hidden>
+            <span class="confirm-text"></span>
+            <button class="btn small danger" data-act="del-yes">Delete</button>
+            <button class="btn small" data-act="del-no">Keep</button>
+          </div>
+        </div>`;
+      const changed = () => {
+        d.querySelector('.n').textContent = sk.name;
+        d.querySelector('.sum-cost').textContent = `${fmt(sk.cost)} gold`;
+        d.querySelector('.desc').textContent = Engine.describeSkill(sk);
+        save(); refreshSlots(); renderUnitSummaries(); scheduleRun();
+      };
+      d.querySelector('[data-f="name"]').addEventListener('input', (e) => { sk.name = e.target.value.trim() || T.label; changed(); });
+      d.querySelector('[data-f="cost"]').addEventListener('input', (e) => { const v = parseFloat(e.target.value); if (isFinite(v)) { sk.cost = Math.max(0, v); changed(); } });
+      d.querySelectorAll('[data-p]').forEach(inp => inp.addEventListener(inp.tagName === 'SELECT' ? 'change' : 'input', () => {
+        if (inp.tagName === 'SELECT') sk.params[inp.dataset.p] = inp.value;
+        else { const v = parseFloat(inp.value); if (!isFinite(v)) return; sk.params[inp.dataset.p] = Math.max(0, v); }
+        changed();
+      }));
+      d.querySelector('[data-act="dup"]').addEventListener('click', () => {
+        const c = { ...clone(sk), id: newSkillId(), name: sk.name + ' copy' };
+        state.skills.splice(state.skills.indexOf(sk) + 1, 0, c);
+        save(); renderSkills(); refreshSlots();
+        $('skill-msg').textContent = `Made ${c.name}. Pick it in a unit’s skill slot to use it.`;
+      });
+      const conf = d.querySelector('[data-confirm]');
+      d.querySelector('[data-act="del"]').addEventListener('click', () => {
+        const us = usedBy(sk);
+        if (!us.length) { removeSkill(sk); return; }
+        conf.querySelector('.confirm-text').textContent = `Remove ${sk.name} from ${us.map(u => u.name).join(', ')} and delete it?`;
+        conf.hidden = false;
+      });
+      d.querySelector('[data-act="del-no"]').addEventListener('click', () => { conf.hidden = true; });
+      d.querySelector('[data-act="del-yes"]').addEventListener('click', () => removeSkill(sk));
+      if (open.has(sk.id)) d.open = true;
+      skillsEl.appendChild(d);
+    });
+    renderSkillUse();
+  }
+  function removeSkill(sk) {
+    state.skills = state.skills.filter(x => x !== sk);
+    state.units.forEach(u => [0, 1].forEach(k => { if (u.skills[k] === sk.id) { u.skills[k] = null; u.skillsOn[k] = false; } }));
+    save(); renderSkills(); refreshSlots(); renderUnitSummaries(); scheduleRun();
+    $('skill-msg').textContent = `Deleted ${sk.name}.`;
+  }
+  $('skill-add').addEventListener('click', () => {
+    const type = $('skill-type').value, T = Engine.SKILL_TYPES[type];
+    const sk = { id: newSkillId(), type, name: T.label, cost: 100, params: {} };
+    state.skills.push(sk);
+    save(); renderSkills(); refreshSlots();
+    const d = skillsEl.querySelector(`[data-sk="${CSS.escape(sk.id)}"]`);
+    if (d) { d.open = true; d.querySelector('[data-f="name"]').focus(); }
+    $('skill-msg').textContent = `Added ${sk.name}. Pick it in a unit’s skill slot to use it.`;
+  });
+
   // ---------- price check ----------
   // Fair price = how many squads of this unit tie against PRICE_REF squads of each 100-gold unit, on average.
   function* marginGen(x, n, refs, g) {
@@ -576,10 +743,10 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
   let priceRun = 0;
   function priceCheck(u, d, withValues) {
     const out = d.querySelector('.price-out');
-    const refs = state.units.filter(r => r !== u && r.cost === 100);
+    const refs = state.units.filter(r => r !== u && r.cost === 100).map(prep);
     if (refs.length < 2) { out.innerHTML = '<p class="hint">Add at least two other units that cost 100 gold to use as the yardstick.</p>'; return; }
     const id = ++priceRun;
-    const unitCopy = clone(u), g = { ...state.settings };
+    const unitCopy = clone(prep(u)), g = { ...state.settings };
     out.innerHTML = `<p class="hint">Measuring against ${refs.length} units…</p>`;
     const render = ({ base, rows }) => {
       const p = base.price * 100, tier = tierOf(p); // yardstick squads cost 100 gold
@@ -606,7 +773,7 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
   }
 
   $('add').addEventListener('click', () => {
-    const u = { ...Shapes.assign([...state.units, Engine.withTraits({ name: 'New unit', cost: 100, bodies: 4, hp: 200, hit: 20, aps: 1, range: 10, speed: 6, splash: 0 })]).pop(), id: uid++ };
+    const u = { ...Shapes.assign([...state.units, Engine.withTraits({ name: 'New unit', cost: 100, bodies: 4, hp: 200, hit: 20, aps: 1, range: 10, speed: 6, splash: 0 })]).pop(), id: uid++, skills: [null, null], skillsOn: [false, false] };
     state.units.push(u);
     save(); renderUnits(); scheduleRun();
     const d = unitsEl.querySelector(`details[data-id="${u.id}"]`);
@@ -617,7 +784,9 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
     const add = EXAMPLES.filter(e => !have.has(e.name));
     if (!add.length) { $('ex-msg').textContent = 'All trait examples are already in your roster.'; return; }
     const merged = Shapes.assign([...state.units, ...clone(add)]); // new examples get shapes not already in use
-    state.units.push(...merged.slice(state.units.length).map(u => ({ ...Engine.withTraits(u), id: uid++ })));
+    const ids = new Set(state.skills.map(sk => sk.id));
+    state.units.push(...merged.slice(state.units.length).map(u => ({ ...Engine.withTraits(u), id: uid++,
+      skills: [0, 1].map(k => (u.skills && ids.has(u.skills[k])) ? u.skills[k] : null), skillsOn: [false, false] })));
     save(); renderUnits(); scheduleRun();
     $('ex-msg').textContent = `Added ${add.map(e => e.name).join(', ')}.`;
   });
@@ -632,7 +801,7 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
   function runAll() {
     comboChanged();
     const t0 = performance.now();
-    result = Engine.matrix(state.units, state.settings);
+    result = Engine.matrix(state.units.map(prep), state.settings);
     const ms = performance.now() - t0;
     const n = state.units.length;
     $('status').textContent = `${n * (n - 1) / 2} fights in ${Math.round(ms)} ms`;
@@ -693,10 +862,12 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
     if (Array.isArray(x)) {
       const us = x.map(find);
       if (us.some(u => !u)) return null;
+      us.forEach((u, k) => { us[k] = prep(u); });
       return { army: us.map(u => ({ unit: u, gold: g })), name: us.map(u => u.name).join(' + '), tag: us.map(tagOf).join('+'), gold: g * us.length };
     }
-    const u = find(x);
-    if (!u) return null;
+    const u0 = find(x);
+    if (!u0) return null;
+    const u = prep(u0);
     const gold = Array.isArray(other) ? g * other.length : g;
     return { army: [{ unit: u, gold }], name: u.name, tag: tagOf(u), gold };
   }
@@ -763,6 +934,11 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
     ctx.beginPath(); ctx.moveTo(0, Y(0)); ctx.lineTo(W, Y(0)); ctx.stroke(); ctx.setLineDash([]);
     // shots
     for (const sh of f.shots) {
+      if (sh[7] === 1) { // a heal
+        ctx.strokeStyle = css('--win'); ctx.globalAlpha = 0.7; ctx.lineWidth = 1.5; ctx.setLineDash([2, 3]);
+        ctx.beginPath(); ctx.moveTo(X(sh[0]), Y(sh[1])); ctx.lineTo(X(sh[2]), Y(sh[3])); ctx.stroke(); ctx.setLineDash([]);
+        continue;
+      }
       ctx.strokeStyle = sh[4] === 0 ? colA : colB; ctx.globalAlpha = 0.55; ctx.lineWidth = sh[6] ? 3 : 1;
       ctx.beginPath(); ctx.moveTo(X(sh[0]), Y(sh[1])); ctx.lineTo(X(sh[2]), Y(sh[3])); ctx.stroke();
       ctx.lineWidth = 1;
@@ -781,7 +957,12 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
       const c = b[3] === 0 ? colA : colB;
       const shape = (rep.r.shapes && rep.r.shapes[bi]) || 'circle', up = b[3] === 0 ? 1 : -1;
       const fill = (rep.r.colors && rep.r.colors[bi]) || c;
-      Shapes.body(ctx, shape, x, y, rad, up, fill, c, 0.3 + 0.7 * b[2]);
+      if (b[5]) { // stealthed: a dashed ghost outline until it attacks
+        ctx.globalAlpha = 0.5; ctx.strokeStyle = c; ctx.lineWidth = 1.5; ctx.setLineDash([2, 2]);
+        Shapes.outline(ctx, shape, x, y, rad, up);
+        ctx.setLineDash([]); ctx.globalAlpha = 1;
+      } else Shapes.body(ctx, shape, x, y, rad, up, fill, c, 0.3 + 0.7 * b[2]);
+      if (b[6]) { ctx.fillStyle = css('--win'); ctx.beginPath(); ctx.arc(x + rad * 0.9, y - rad * 0.9, Math.max(2, rad * 0.3), 0, Math.PI * 2); ctx.fill(); } // poisoned
       ctx.strokeStyle = c;
       if (b[4] > 0) { // wind-up charging: ring fills clockwise
         ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc(x, y, rad + 3.5, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * b[4]); ctx.stroke();
@@ -840,7 +1021,7 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
   }
   $('combo-run').addEventListener('click', () => {
     if (!result) return;
-    const us = state.units.slice(), g = clone(state.settings), base = result;
+    const us = state.units.map(prep), g = clone(state.settings), base = result;
     const job = ++comboJob, t0 = performance.now();
     const gen = comboGen(us, g, base);
     $('combo-run').disabled = true;
@@ -922,21 +1103,22 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
     try { p = JSON.parse($('io').value); } catch (e) { flash('That text is not a roster. Paste text copied with "Copy roster".'); return; }
     if (!valid(p)) { flash('The roster needs settings and at least two units, each with a name and all eight levers.'); return; }
     p = toGold(p);
-    state = { settings: { ...SAMPLE.settings, ...p.settings }, units: withIds(p.units.map(u => ({ defense: 'none', defVal: 0, ...u }))) };
-    sel = null; syncSettings(); save(); renderUnits(); runAll();
+    state = fromRoster(p);
+    sel = null; syncSettings(); save(); renderUnits(); renderSkills(); runAll();
     flash(`Loaded ${state.units.length} units.`);
   });
   $('reset').addEventListener('click', () => { $('reset-confirm').hidden = false; });
   $('reset-no').addEventListener('click', () => { $('reset-confirm').hidden = true; });
   $('reset-yes').addEventListener('click', () => {
-    state = { settings: clone(SAMPLE.settings), units: withIds(clone(SAMPLE.units)) };
+    state = fromRoster(clone(SAMPLE));
     $('reset-confirm').hidden = true; sel = null;
-    syncSettings(); save(); renderUnits(); runAll();
+    syncSettings(); save(); renderUnits(); renderSkills(); runAll();
     flash('Sample units restored.');
   });
   function syncSettings() { document.querySelectorAll('[data-s]').forEach(inp => { inp.value = state.settings[inp.dataset.s]; }); }
 
   renderUnits();
+  renderSkills();
   runAll();
 })();
 </script>

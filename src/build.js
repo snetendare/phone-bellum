@@ -5,9 +5,12 @@ const src = (f) => fs.readFileSync(path.join(__dirname, f), 'utf8');
 const shapes = src('shapes.js'), eng = src('engine.js');
 // Counter Lab
 const r = JSON.parse(src('r5.json'));
-const sample = { goldCosts: true, settings: { ...r.settings, budget: r.settings.budget * 100 }, units: r.units.map(u => ({ ...u, cost: Math.round(u.cost * 100) })) };
+const SK = JSON.parse(src('skills-default.json'));
+const withSkills = (u) => ({ ...u, skills: SK.assign[u.name] || [null, null], skillsOn: [false, false] });
+const sample = { goldCosts: true, settings: { ...r.settings, budget: r.settings.budget * 100 }, skills: SK.skills, units: r.units.map(u => withSkills({ ...u, cost: Math.round(u.cost * 100) })) };
 const ex = JSON.parse(src('r9.json')).units.slice(7).map(u => ({ ...u, cost: Math.round(u.cost * 100) }));
 ex.push({ name: 'Ogre Smasher', cost: 100, bodies: 1, hp: 1100, hit: 260, aps: 0.5, range: 3, speed: 7, splash: 2.5, defense: 'none', defVal: 0, windUp: 1.0, knockback: 4 });
+ex.forEach((u, i) => { ex[i] = withSkills(u); });
 const lab = src('template.html').replace('/*SHAPES*/', () => shapes).replace('/*ENGINE*/', () => eng)
   .replace('/*SAMPLE*/', () => JSON.stringify(sample)).replace('/*EXAMPLES*/', () => JSON.stringify(ex));
 const cut = lab.indexOf('</style>') + '</style>'.length;

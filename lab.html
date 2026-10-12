@@ -172,6 +172,12 @@ h3.sub { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-sp
 .derived b { color: var(--ink); font-family: var(--font-data); font-weight: 500; }
 .confirm { font-size: 13px; }
 .combo-detail { display: grid; gap: 10px; }
+.skills { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); align-items: start; }
+@media (max-width: 400px) { .skills { grid-template-columns: 1fr; } }
+.skill-desc { font-size: 13px; color: var(--muted); }
+.slot { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 10px; align-items: center; }
+.slot label.on { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; color: var(--muted); white-space: nowrap; }
+.slot .skill-desc { grid-column: 1 / -1; }
 .combo-detail h3 { font-size: 17px; font-weight: 600; }
 .combo-detail .sum { font-size: 14px; }
 .combo-detail td button { font-size: 12px; padding: 3px 8px; }
@@ -280,6 +286,19 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
     <div class="units" id="units"></div>
   </section>
 
+  <section class="panel" aria-labelledby="skills-h">
+    <div class="panel-head">
+      <h2 id="skills-h">Skills</h2>
+      <div class="row">
+        <select id="skill-type" aria-label="Type of skill to add" style="width:auto;font-size:13px;padding:5px 8px"></select>
+        <button class="btn small" id="skill-add">Add skill</button>
+      </div>
+    </div>
+    <p class="muted" style="font-size:14px">Each unit has two skill slots. In the game, players buy a skill once and it applies to all their squads of that unit. Several units can share a skill, or you can make a copy with its own settings for one unit. Set which skills a unit has in its card under Units, and tick On in tests to include a skill in the counter table, the combos and the price check.</p>
+    <div class="msg" id="skill-msg" aria-live="polite"></div>
+    <div class="skills" id="skills"></div>
+  </section>
+
   <section class="panel" aria-labelledby="data-h">
     <div class="panel-head"><h2 id="data-h">Save and share</h2></div>
     <p class="muted" style="font-size:14px">Your changes are kept in this browser. To move a roster elsewhere, copy it as text and paste it back in here later.</p>
@@ -313,6 +332,7 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
       <div class="rule"><h3>Spin-up</h3><p>Raises attack speed every second the unit keeps firing, up to three times its base speed.</p></div>
       <div class="rule"><h3>Pierce and projectiles</h3><p>A piercing shot also hits bodies lined up behind its target. A projectile with a speed travels in a straight line and hits the first enemy it touches, so units moving sideways can dodge it while units charging straight at it get hit.</p></div>
       <div class="rule"><h3>Upgrades</h3><p>Each upgrade adds the unit’s starting health and hit again: one upgrade doubles them, two triple them. In the game, squads earn upgrades through experience and gold; here you set them directly to test upgraded matchups.</p></div>
+      <div class="rule"><h3>Skills</h3><p>Upgrades a player buys during a match. Each unit has two. A skill changes the unit’s stats, gives it a new ability, or both. Poison ignores armor and ward. Spawned bodies fight like normal bodies but don’t count for damage after the round.</p></div>
       <div class="rule"><h3>Combos</h3><p>A pair fights as one army: the shorter-ranged unit in front, the other a short gap behind it, each with the gold per side. Its opponent gets twice the gold. Synergy compares the pair’s result with the average of its two units’ results against the same opponent.</p></div>
       <div class="rule"><h3>Fair price and tiers</h3><p>The price check finds how many squads of a unit tie against 6 squads of each 100-gold unit, and turns that into a fair price in gold. Under 140 gold is tier 1, 140–280 is tier 2, above 280 is tier 3. Raising one stat and measuring again shows what that stat is worth for that unit.</p></div>
       <div class="rule"><h3>Minimum range, charge and knockback</h3><p>A unit can’t attack anything inside its minimum range. Charge multiplies the next hit after the unit has run 5 m. Knockback pushes a hit body away, fully for small bodies and barely for big ones.</p></div>
@@ -478,6 +498,87 @@ const Engine = (() => {
     return { ...u, level: L, hp: u.hp * k, hit: u.hit * k };
   }
 
+  // ---------- skills ----------
+  // Each skill type and its settings (key, label, default, step). Shared by Counter Lab and the game.
+  const SKILL_TYPES = {
+    regen:   { label: 'Regeneration', params: [['pct', 'Health regained per second (% of max)', 2, 0.5]] },
+    poison:  { label: 'Poison shot', params: [['pct', 'Poison damage (% of hit, in total)', 100, 10], ['duration', 'Poison lasts (s)', 4, 0.5], ['slow', 'Longer time between attacks (%)', 30, 5]] },
+    stealth: { label: 'Stealth', params: [] },
+    armorHp: { label: 'Armor and health', params: [['armor', 'Armor (blocked from every hit)', 8, 1], ['hp', 'Health (+%)', 25, 5]] },
+    spawn:   { label: 'Spawn goblins', params: [['unit', 'Spawns (unit name)', 'Goblin Swarm', null], ['count', 'Bodies per spawn', 2, 1], ['every', 'Every (s)', 4, 0.5], ['max', 'Most alive at once', 6, 1]] },
+    rapid:   { label: 'Rapid fire', params: [['aps', 'Attack speed (+%)', 50, 5], ['range', 'Range (−%)', 30, 5]] },
+    swift:   { label: 'Swift strikes', params: [['speed', 'Move speed (+%)', 30, 5], ['hit', 'Hit size (+%)', 25, 5]] },
+    heavy:   { label: 'Heavy shot', params: [['slow', 'Projectile speed (−%)', 40, 5], ['instant', 'Projectile speed if the unit hits instantly (m/s)', 30, 5], ['hit', 'Hit size (+%)', 40, 5]] },
+    healer:  { label: 'Healing touch', params: [['pct', 'Heal per attack (% of hit)', 50, 5]] },
+    range:   { label: 'Long reach', params: [['m', 'Range (+m)', 5, 1]] },
+    shrink:  { label: 'Shortsight', params: [['m', 'Enemy range (−m)', 4, 0.5], ['duration', 'Lasts (s)', 3, 0.5]] },
+  };
+  const skillParam = (d, k) => {
+    const v = d.params && d.params[k];
+    if (v !== undefined && v !== null && v !== '') return v;
+    const def = (SKILL_TYPES[d.type].params.find(p => p[0] === k) || [])[2];
+    return def;
+  };
+
+  // One plain sentence describing what a skill does with its current settings
+  function describeSkill(d) {
+    if (!d || !SKILL_TYPES[d.type]) return '';
+    const P = (k) => skillParam(d, k);
+    const n = (k) => { const v = +P(k); return isFinite(v) ? String(Math.round(v * 100) / 100) : '0'; };
+    switch (d.type) {
+      case 'regen': return `Regains ${n('pct')}% of its max health every second.`;
+      case 'poison': return `Hits poison the target for ${n('pct')}% of the hit over ${n('duration')} s, ignoring armor and ward. ${n('slow')}% more time between attacks.`;
+      case 'stealth': return 'Can’t be targeted until it attacks for the first time. Splash and piercing shots can still hit it.';
+      case 'armorHp': return `+${n('armor')} armor and +${n('hp')}% health.`;
+      case 'spawn': return `Every ${n('every')} s, spawns ${n('count')} ${String(P('unit'))} ${+P('count') === 1 ? 'body' : 'bodies'}, up to ${n('max')} alive at once.`;
+      case 'rapid': return `+${n('aps')}% attack speed, −${n('range')}% range.`;
+      case 'swift': return `+${n('speed')}% move speed and +${n('hit')}% hit size.`;
+      case 'heavy': return `Projectiles fly ${n('slow')}% slower (${n('instant')} m/s if it normally hits instantly), +${n('hit')}% hit size.`;
+      case 'healer': return `Each attack heals a random wounded ally for ${n('pct')}% of its hit.`;
+      case 'range': return `+${n('m')} m range.`;
+      case 'shrink': return `Hits cut the target’s range by ${n('m')} m for ${n('duration')} s, but not below 1 m.`;
+    }
+    return '';
+  }
+
+  // A unit with skills applied. defs = the skill definitions that are active; roster = all units (for spawns).
+  function applySkills(unit, defs, roster) {
+    const u = withTraits(unit);
+    for (const d of defs || []) {
+      if (!d || !SKILL_TYPES[d.type]) continue;
+      const P = (k) => { const v = +skillParam(d, k); return isFinite(v) ? v : 0; };
+      switch (d.type) {
+        case 'regen': u.regen = (u.regen || 0) + Math.max(0, P('pct')); break;
+        case 'poison':
+          u.poisonPct = (u.poisonPct || 0) + Math.max(0, P('pct'));
+          u.poisonDur = Math.max(u.poisonDur || 0, Math.max(0.5, P('duration')));
+          u.aps = u.aps / (1 + Math.max(0, P('slow')) / 100);
+          break;
+        case 'stealth': u.stealth = true; break;
+        case 'armorHp': u.bonusArmor = (u.bonusArmor || 0) + Math.max(0, P('armor')); u.hp = u.hp * (1 + P('hp') / 100); break;
+        case 'spawn': {
+          const name = String(skillParam(d, 'unit'));
+          const src = (roster || []).find(r => r && r.name === name);
+          if (src) {
+            const { skills, skillDefs, skillsOn, ...plain } = src;
+            u.spawn = { unit: withTraits({ ...plain, level: 0 }), count: Math.max(1, Math.round(P('count'))), every: Math.max(0.5, P('every')), max: Math.max(1, Math.round(P('max'))) };
+          }
+          break;
+        }
+        case 'rapid': u.aps = u.aps * (1 + P('aps') / 100); u.range = Math.max(0.5, u.range * (1 - Math.min(90, P('range')) / 100)); break;
+        case 'swift': u.speed = u.speed * (1 + P('speed') / 100); u.hit = u.hit * (1 + P('hit') / 100); break;
+        case 'heavy':
+          u.projSpeed = u.projSpeed > 0 ? Math.max(2, u.projSpeed * (1 - Math.min(90, P('slow')) / 100)) : Math.max(2, P('instant'));
+          u.hit = u.hit * (1 + P('hit') / 100);
+          break;
+        case 'healer': u.healPct = (u.healPct || 0) + Math.max(0, P('pct')); break;
+        case 'range': u.range = u.range + P('m'); break;
+        case 'shrink': u.shrinkM = Math.max(u.shrinkM || 0, P('m')); u.shrinkDur = Math.max(u.shrinkDur || 0, Math.max(0.5, P('duration'))); break;
+      }
+    }
+    return u;
+  }
+
   function squadsFor(unit, g) {
     return Math.max(1, Math.floor(g.budget / Math.max(0.0001, unit.cost) + 1e-9));
   }
@@ -494,9 +595,11 @@ const Engine = (() => {
   }
 
   function damageAfterDefense(hit, target, g) {
-    if (target.u.defense === 'armor') return Math.max(hit - target.u.defVal, hit * g.minDmgPct / 100);
-    if (target.u.defense === 'ward') return Math.min(hit, target.u.defVal);
-    return hit;
+    const u = target.u;
+    const armor = (u.defense === 'armor' ? u.defVal : 0) + (u.bonusArmor || 0);
+    let d = armor > 0 ? Math.max(hit - armor, hit * g.minDmgPct / 100) : hit;
+    if (u.defense === 'ward') d = Math.min(d, u.defVal);
+    return d;
   }
 
   function makeSide(unit, side, g) {
@@ -535,6 +638,8 @@ const Engine = (() => {
       u, side, x, y, hp: u.hp, alive: true, squad, level: u.level || 0, xp: 0,
       cd: ((i * 7) % 11) / 11 * interval, // deterministic stagger
       moved: 0, firing: -1, burstLeft: 0, burstTimer: 0, burstDir: [0, 1], windTarget: null, windT: 0, setUp: false,
+      hidden: !!u.stealth, poison: null, shrinkM: 0, shrinkT: 0,
+      spawnT: u.spawn ? u.spawn.every : 0, kids: null,
     };
   }
 
@@ -579,6 +684,23 @@ const Engine = (() => {
     let projectiles = [];
     let t = 0, shots = [], over = false;
     const dist = (a, b) => hyp(a.x - b.x, a.y - b.y);
+    // current range: shortsight can shrink it for a while, but never below 1 m (or the unit's own range if shorter)
+    const R = (b) => b.shrinkT > 0 ? Math.max(Math.min(b.u.range, 1), b.u.range - b.shrinkM) : b.u.range;
+    // deterministic random numbers for healing targets (same on every device)
+    let seed = (A.length * 7919 + B.length * 104729 + 1) >>> 0;
+    const rnd = () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let x = Math.imul(seed ^ seed >>> 15, 1 | seed); x = x + Math.imul(x ^ x >>> 7, 61 | x) ^ x; return ((x ^ x >>> 14) >>> 0) / 4294967296; };
+    let spawnIdx = A.length + B.length;
+    const SPAWN_SPOTS = [[1, 0], [-1, 0], [0, 1], [0, -1], [0.7, 0.7], [-0.7, 0.7], [0.7, -0.7], [-0.7, -0.7]];
+    // damage that skips armor and ward (poison)
+    function direct(owner, v, amount) {
+      const applied = Math.min(amount, v.hp);
+      if (applied <= 0) return;
+      stats[owner.side].dealt += applied;
+      owner.xp += applied;
+      v.xp += applied * (g.absorbXp == null ? 0.5 : g.absorbXp);
+      v.hp -= applied;
+      if (v.hp <= 1e-9) { v.hp = 0; v.alive = false; owner.xp += v.u.hp * v.level; }
+    }
     const aliveCount = (arr) => { let c = 0; for (const b of arr) if (b.alive) c++; return c; };
 
     function hurt(owner, v, hit, fromX, fromY) {
@@ -593,6 +715,18 @@ const Engine = (() => {
       v.xp += applied * (g.absorbXp == null ? 0.5 : g.absorbXp);
       v.hp -= dmg;
       if (v.hp <= 0) { v.hp = 0; v.alive = false; owner.xp += v.u.hp * v.level; return; }
+      if (owner.u.poisonPct > 0) {
+        // poison: a share of the hit, spread over its duration. Each attacker keeps one dose on the target;
+        // its next hit refreshes that dose. Doses from different attackers add up.
+        const dps = hit * owner.u.poisonPct / 100 / owner.u.poisonDur;
+        const list = v.poison || (v.poison = []);
+        const dose = list.find(p => p.src === owner);
+        if (dose) { dose.dps = dps; dose.t = owner.u.poisonDur; } else list.push({ src: owner, dps, t: owner.u.poisonDur });
+      }
+      if (owner.u.shrinkM > 0) {
+        v.shrinkM = v.shrinkT > 0 ? Math.max(v.shrinkM, owner.u.shrinkM) : owner.u.shrinkM;
+        v.shrinkT = Math.max(v.shrinkT, owner.u.shrinkDur);
+      }
       if (owner.u.knockback > 0) {
         // big hits on small bodies push the full distance; on big bodies barely at all
         const push = owner.u.knockback * Math.min(1, hit / v.u.hp);
@@ -637,9 +771,9 @@ const Engine = (() => {
     function validTargets(b) {
       const valid = [];
       for (const f of sides[1 - b.side]) {
-        if (!f.alive) continue;
+        if (!f.alive || f.hidden) continue;
         const d = dist(f, b);
-        if (d <= b.u.range + 0.01 && d >= b.u.minRange) valid.push([d, f]);
+        if (d <= R(b) + 0.01 && d >= b.u.minRange) valid.push([d, f]);
       }
       valid.sort((p, q) => p[0] - q[0]);
       return valid.map(v => v[1]);
@@ -664,6 +798,16 @@ const Engine = (() => {
     function fire(b, targets, canCharge) {
       const charged = canCharge && b.u.charge > 1 && b.moved >= CHARGE_RUN;
       b.moved = 0;
+      b.hidden = false; // stealth ends with the first attack
+      if (b.u.healPct > 0) {
+        // heal a random wounded ally (not itself)
+        const hurtAllies = sides[b.side].filter(a => a.alive && a !== b && a.hp < a.u.hp);
+        if (hurtAllies.length) {
+          const a = hurtAllies[Math.min(hurtAllies.length - 1, Math.floor(rnd() * hurtAllies.length))];
+          a.hp = Math.min(a.u.hp, a.hp + b.u.hit * b.u.healPct / 100);
+          if (opts.record) shots.push([b.x, b.y, a.x, a.y, b.side, 0, 0, 1]);
+        }
+      }
       const hit = b.u.hit * (charged ? b.u.charge : 1);
       for (const tgt of targets) {
         const dx = tgt.x - b.x, dy = tgt.y - b.y, d = hyp(dx, dy) || 1;
@@ -687,14 +831,15 @@ const Engine = (() => {
         const foes = sides[1 - b.side];
         let near = null, nd = Infinity;
         for (const f of foes) {
-          if (!f.alive) continue;
+          if (!f.alive || f.hidden) continue;
           const d = dist(f, b);
           if (d < nd) { nd = d; near = f; }
         }
         b.near = near;
-        if (near && nd > b.u.range) {
+        const rg = R(b);
+        if (near && nd > rg) {
           // walk a little inside max range, so being nudged by allies doesn't leave the unit just out of reach
-          const mv = Math.min(b.u.speed * dt, nd - (b.u.range - Math.min(APPROACH, b.u.range * 0.25)));
+          const mv = Math.min(b.u.speed * dt, nd - (rg - Math.min(APPROACH, rg * 0.25)));
           b.x += (near.x - b.x) / nd * mv;
           b.y += (near.y - b.y) / nd * mv;
           b.moved += mv;
@@ -725,6 +870,37 @@ const Engine = (() => {
           }
         }
       }
+      // ongoing effects: poison, regeneration, shortsight wearing off, spawns
+      const n0 = all.length;
+      for (let i = 0; i < n0; i++) {
+        const b = all[i];
+        if (!b.alive) continue;
+        if (b.poison && b.poison.length) {
+          for (const p of b.poison) {
+            if (!b.alive) break;
+            direct(p.src, b, p.dps * Math.min(dt, p.t));
+            p.t -= dt;
+          }
+          b.poison = b.poison.filter(p => p.t > 0);
+          if (!b.alive) continue;
+        }
+        if (b.u.regen > 0 && b.hp < b.u.hp) b.hp = Math.min(b.u.hp, b.hp + b.u.hp * b.u.regen / 100 * dt);
+        if (b.shrinkT > 0) { b.shrinkT -= dt; if (b.shrinkT <= 0) { b.shrinkT = 0; b.shrinkM = 0; } }
+        if (b.u.spawn) {
+          b.spawnT -= dt;
+          if (b.spawnT <= 0) {
+            b.spawnT += b.u.spawn.every;
+            b.kids = (b.kids || []).filter(k => k.alive);
+            const n = Math.min(b.u.spawn.count, b.u.spawn.max - b.kids.length);
+            for (let k = 0; k < n; k++) {
+              const [ox, oy] = SPAWN_SPOTS[(b.kids.length + k) % SPAWN_SPOTS.length];
+              const kid = newBody(b.u.spawn.unit, b.side, b.x + ox * g.spacing * 0.7, b.y + oy * g.spacing * 0.7, spawnIdx++, -1);
+              b.kids.push(kid); all.push(kid); sides[b.side].push(kid);
+              stats[b.side].totalHp += kid.u.hp;
+            }
+          }
+        }
+      }
       // attacks
       for (const b of all) {
         if (!b.alive) continue;
@@ -742,12 +918,12 @@ const Engine = (() => {
               const rx = f.x - b.x, ry = f.y - b.y;
               const along = rx * ux + ry * uy;
               const across = Math.abs(rx * uy - ry * ux);
-              if (along >= b.u.minRange && along <= b.u.range + 0.01 && across <= PIERCE_WIDTH && along < fa) { fa = along; first = f; }
+              if (along >= b.u.minRange && along <= R(b) + 0.01 && across <= PIERCE_WIDTH && along < fa) { fa = along; first = f; }
             }
             if (first) {
               fire(b, aim(b, first, validTargets(b)), false);
             } else {
-              const end = { x: b.x + ux * b.u.range, y: b.y + uy * b.u.range };
+              const end = { x: b.x + ux * R(b), y: b.y + uy * R(b) };
               if (b.u.projSpeed > 0) fire(b, [end], false); // the projectile flies on and can still clip someone
               else {
                 stats[b.side].missed += b.u.hit * Math.max(1, Math.round(b.u.pellets));
@@ -828,7 +1004,7 @@ const Engine = (() => {
       return {
         t, shots: final ? [] : shots,
         p: final ? [] : projectiles.map(p => [p.x, p.y, p.owner.side]),
-        b: all.map(x => [x.x, x.y, x.alive ? x.hp / x.u.hp : 0, x.side, x.windTarget && x.u.windUp > 0 ? 1 - x.windT / x.u.windUp : 0]),
+        b: all.map(x => [x.x, x.y, x.alive ? x.hp / x.u.hp : 0, x.side, x.windTarget && x.u.windUp > 0 ? 1 - x.windT / x.u.windUp : 0, x.hidden ? 1 : 0, x.poison && x.poison.length ? 1 : 0]),
       };
     }
 
@@ -877,14 +1053,14 @@ const Engine = (() => {
     return m;
   }
 
-  return { battle, makeArmy, matrix, createBattle, buildSquad, rawStrength, squadsFor, withTraits, leveled, TRAIT_DEFAULTS, SPIN_CAP, CHARGE_RUN, LEVEL_BONUS, MAX_LEVEL };
+  return { SKILL_TYPES, skillParam, describeSkill, applySkills, battle, makeArmy, matrix, createBattle, buildSquad, rawStrength, squadsFor, withTraits, leveled, TRAIT_DEFAULTS, SPIN_CAP, CHARGE_RUN, LEVEL_BONUS, MAX_LEVEL };
 })();
 if (typeof module !== 'undefined') module.exports = Engine;
 
 
 (() => {
-  const SAMPLE = {"goldCosts":true,"settings":{"budget":200,"distance":40,"spacing":2.5,"minDmgPct":15,"timeCap":60,"dt":0.05},"units":[{"name":"Goblin Swarm","cost":100,"bodies":12,"hp":100,"hit":8,"aps":1,"range":2,"speed":12,"splash":0,"defense":"none","defVal":0},{"name":"Skeleton Archers","cost":100,"bodies":8,"hp":95,"hit":16,"aps":1,"range":32,"speed":4,"splash":0,"defense":"none","defVal":0},{"name":"Ember Imps","cost":100,"bodies":4,"hp":260,"hit":22,"aps":0.6,"range":10,"speed":5,"splash":3,"defense":"none","defVal":0},{"name":"Fire Mage","cost":100,"bodies":1,"hp":750,"hit":50,"aps":0.6,"range":28,"speed":4,"splash":4,"defense":"none","defVal":0},{"name":"Sniper","cost":100,"bodies":1,"hp":500,"hit":400,"aps":0.5,"range":45,"speed":4,"splash":0,"defense":"none","defVal":0},{"name":"Brute","cost":100,"bodies":1,"hp":800,"hit":35,"aps":1.2,"range":2,"speed":6,"splash":0,"defense":"armor","defVal":12},{"name":"Wisps","cost":100,"bodies":3,"hp":320,"hit":18,"aps":1.5,"range":15,"speed":7,"splash":0,"defense":"ward","defVal":40}]};
-  const EXAMPLES = [{"name":"Crossbow Volley","cost":100,"bodies":2,"hp":300,"hit":52,"aps":0.35,"range":30,"speed":4,"splash":0,"defense":"none","defVal":0,"burst":4},{"name":"Ballista","cost":100,"bodies":1,"hp":750,"hit":220,"aps":0.6,"range":40,"speed":3,"splash":0,"defense":"none","defVal":0,"pierce":3,"minRange":6,"projSpeed":45},{"name":"Spinning Golem","cost":100,"bodies":1,"hp":1300,"hit":22,"aps":1.2,"range":12,"speed":4,"splash":0,"defense":"none","defVal":0,"spinUp":25},{"name":"Boar Riders","cost":100,"bodies":3,"hp":310,"hit":30,"aps":0.8,"range":2,"speed":11,"splash":0,"defense":"none","defVal":0,"charge":2.5,"knockback":3},{"name":"Blunderbuss Crew","cost":100,"bodies":2,"hp":380,"hit":18,"aps":0.6,"range":12,"speed":5,"splash":0,"defense":"none","defVal":0,"pellets":6},{"name":"Ogre Smasher","cost":100,"bodies":1,"hp":1100,"hit":260,"aps":0.5,"range":3,"speed":7,"splash":2.5,"defense":"none","defVal":0,"windUp":1,"knockback":4}];
+  const SAMPLE = {"goldCosts":true,"settings":{"budget":200,"distance":40,"spacing":2.5,"minDmgPct":15,"timeCap":60,"dt":0.05},"skills":[{"id":"regen","type":"regen","name":"Regeneration","cost":100,"params":{}},{"id":"poison","type":"poison","name":"Poison shot","cost":100,"params":{}},{"id":"stealth","type":"stealth","name":"Stealth","cost":100,"params":{}},{"id":"armorHp","type":"armorHp","name":"Armor and health","cost":100,"params":{}},{"id":"spawn","type":"spawn","name":"Spawn goblins","cost":100,"params":{}},{"id":"rapid","type":"rapid","name":"Rapid fire","cost":100,"params":{}},{"id":"swift","type":"swift","name":"Swift strikes","cost":100,"params":{}},{"id":"heavy","type":"heavy","name":"Heavy shot","cost":100,"params":{}},{"id":"healer","type":"healer","name":"Healing touch","cost":100,"params":{}},{"id":"range","type":"range","name":"Long reach","cost":100,"params":{}},{"id":"shrink","type":"shrink","name":"Shortsight","cost":100,"params":{}}],"units":[{"name":"Goblin Swarm","cost":100,"bodies":12,"hp":100,"hit":8,"aps":1,"range":2,"speed":12,"splash":0,"defense":"none","defVal":0,"skills":["swift","regen"],"skillsOn":[false,false]},{"name":"Skeleton Archers","cost":100,"bodies":8,"hp":95,"hit":16,"aps":1,"range":32,"speed":4,"splash":0,"defense":"none","defVal":0,"skills":["rapid","poison"],"skillsOn":[false,false]},{"name":"Ember Imps","cost":100,"bodies":4,"hp":260,"hit":22,"aps":0.6,"range":10,"speed":5,"splash":3,"defense":"none","defVal":0,"skills":["stealth","swift"],"skillsOn":[false,false]},{"name":"Fire Mage","cost":100,"bodies":1,"hp":750,"hit":50,"aps":0.6,"range":28,"speed":4,"splash":4,"defense":"none","defVal":0,"skills":["range","shrink"],"skillsOn":[false,false]},{"name":"Sniper","cost":100,"bodies":1,"hp":500,"hit":400,"aps":0.5,"range":45,"speed":4,"splash":0,"defense":"none","defVal":0,"skills":["stealth","range"],"skillsOn":[false,false]},{"name":"Brute","cost":100,"bodies":1,"hp":800,"hit":35,"aps":1.2,"range":2,"speed":6,"splash":0,"defense":"armor","defVal":12,"skills":["armorHp","spawn"],"skillsOn":[false,false]},{"name":"Wisps","cost":100,"bodies":3,"hp":320,"hit":18,"aps":1.5,"range":15,"speed":7,"splash":0,"defense":"ward","defVal":40,"skills":["healer","regen"],"skillsOn":[false,false]}]};
+  const EXAMPLES = [{"name":"Crossbow Volley","cost":100,"bodies":2,"hp":300,"hit":52,"aps":0.35,"range":30,"speed":4,"splash":0,"defense":"none","defVal":0,"burst":4,"skills":["rapid","heavy"],"skillsOn":[false,false]},{"name":"Ballista","cost":100,"bodies":1,"hp":750,"hit":220,"aps":0.6,"range":40,"speed":3,"splash":0,"defense":"none","defVal":0,"pierce":3,"minRange":6,"projSpeed":45,"skills":["heavy","range"],"skillsOn":[false,false]},{"name":"Spinning Golem","cost":100,"bodies":1,"hp":1300,"hit":22,"aps":1.2,"range":12,"speed":4,"splash":0,"defense":"none","defVal":0,"spinUp":25,"skills":["armorHp","regen"],"skillsOn":[false,false]},{"name":"Boar Riders","cost":100,"bodies":3,"hp":310,"hit":30,"aps":0.8,"range":2,"speed":11,"splash":0,"defense":"none","defVal":0,"charge":2.5,"knockback":3,"skills":["armorHp","swift"],"skillsOn":[false,false]},{"name":"Blunderbuss Crew","cost":100,"bodies":2,"hp":380,"hit":18,"aps":0.6,"range":12,"speed":5,"splash":0,"defense":"none","defVal":0,"pellets":6,"skills":["swift","poison"],"skillsOn":[false,false]},{"name":"Ogre Smasher","cost":100,"bodies":1,"hp":1100,"hit":260,"aps":0.5,"range":3,"speed":7,"splash":2.5,"defense":"none","defVal":0,"windUp":1,"knockback":4,"skills":["spawn","armorHp"],"skillsOn":[false,false]}];
   const KEY = 'counterlab.v1';
   const TRAITS = [
     ['burst', 'Burst shots', 1, 'Shots fired 0.15 s apart along one line; each hits the first body in its path. 1 = normal.'],
@@ -929,15 +1105,33 @@ if (typeof module !== 'undefined') module.exports = Engine;
   function load() {
     try {
       const raw = localStorage.getItem(KEY);
-      if (raw) { let p = JSON.parse(raw); if (valid(p)) { p = toGold(p); return { settings: { ...SAMPLE.settings, ...p.settings }, units: withIds(p.units) }; } }
+      if (raw) { let p = JSON.parse(raw); if (valid(p)) { p = toGold(p); return fromRoster(p); } }
     } catch (e) {}
-    return { settings: clone(SAMPLE.settings), units: withIds(clone(SAMPLE.units)) };
+    return fromRoster(clone(SAMPLE));
   }
   function save() {
     try { localStorage.setItem(KEY, JSON.stringify(exportData())); } catch (e) {}
   }
   function exportData() {
-    return { goldCosts: true, settings: state.settings, units: state.units.map(({ id, ...u }) => u) };
+    return { goldCosts: true, settings: state.settings, skills: state.skills, units: state.units.map(({ id, ...u }) => u) };
+  }
+  // Rosters saved before skills existed get the default skill library, with no skills set on their units
+  function fromRoster(p) {
+    const skills = Array.isArray(p.skills) ? p.skills.filter(validSkill).map(sk => ({ ...sk, params: { ...(sk.params || {}) } })) : clone(SAMPLE.skills);
+    const ids = new Set(skills.map(sk => sk.id));
+    const units = withIds(p.units.map(u => ({
+      defense: 'none', defVal: 0, ...u,
+      skills: [0, 1].map(k => (Array.isArray(u.skills) && ids.has(u.skills[k])) ? u.skills[k] : null),
+      skillsOn: [0, 1].map(k => !!(Array.isArray(u.skillsOn) && u.skillsOn[k])),
+    })));
+    return { settings: { ...SAMPLE.settings, ...p.settings }, skills, units };
+  }
+  function validSkill(sk) { return sk && typeof sk.id === 'string' && typeof sk.name === 'string' && Engine.SKILL_TYPES[sk.type]; }
+  const skillById = (id) => state.skills.find(sk => sk.id === id) || null;
+  // The unit as tests see it: with the skills ticked On in tests
+  function prep(u) {
+    const defs = [0, 1].filter(k => u.skills && u.skills[k] && u.skillsOn && u.skillsOn[k]).map(k => skillById(u.skills[k])).filter(Boolean);
+    return defs.length ? Engine.applySkills(u, defs, state.units) : u;
   }
   function valid(p) {
     return p && typeof p === 'object' && p.settings && Array.isArray(p.units) && p.units.length >= 2 &&
@@ -1000,6 +1194,8 @@ if (typeof module !== 'undefined') module.exports = Engine;
                 <input type="number" id="${k}-${u.id}" data-k="${k}" min="0" step="${step}">
                 <span class="hint">${hint}</span></div>`).join('')}
           </div>
+          <h3 class="sub">Skills</h3>
+          <div class="skill-slots"></div>
           <div class="derived"></div>
           <h3 class="sub">Price check</h3>
           <div class="price">
@@ -1036,6 +1232,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
           save(); renderUnitSummaries(); scheduleRun();
         });
       });
+      renderSlots(u, d);
       d.querySelector('[data-act="price"]').addEventListener('click', () => priceCheck(u, d, false));
       d.querySelector('[data-act="values"]').addEventListener('click', () => priceCheck(u, d, true));
       d.querySelector('[data-act="dup"]').addEventListener('click', () => {
@@ -1053,10 +1250,11 @@ if (typeof module !== 'undefined') module.exports = Engine;
       unitsEl.appendChild(d);
     });
     renderUnitSummaries();
+    if (skillsEl.children.length) renderSkills(); // unit names feed the spawn picker
   }
   function renderUnitSummaries() {
     const g = state.settings;
-    const rs = state.units.map(u => Engine.rawStrength(u, g));
+    const rs = state.units.map(u => Engine.rawStrength(prep(u), g));
     const max = Math.max(...rs.map(r => r.strength), 1);
     state.units.forEach((u, i) => {
       const d = unitsEl.querySelector(`details[data-id="${u.id}"]`);
@@ -1079,6 +1277,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
       if (u.knockback > 0) tr.push(`knockback ${fmt(u.knockback, 1)} m`);
       if (u.windUp > 0) tr.push(`wind-up ${fmt(u.windUp, 1)} s`);
       if (u.level > 0) tr.push(`${u.level + 1}× stats`);
+      [0, 1].forEach(k => { const sk = u.skills && skillById(u.skills[k]); if (sk) tr.push(`${sk.name}${u.skillsOn[k] ? ' (on)' : ''}`); });
       d.querySelector('.sum-line').textContent =
         `${u.bodies} × ${fmt(u.hp)} hp · ${fmt(u.hit)} dmg × ${fmt(u.aps, 2)}/s · ${fmt(u.range)} m${u.splash ? ` · splash ${u.splash}` : ''}${def}${tr.length ? ' · ' + tr.join(' · ') : ''}`;
       d.querySelector('.bar i').style.width = (r.strength / max * 100).toFixed(1) + '%';
@@ -1088,10 +1287,134 @@ if (typeof module !== 'undefined') module.exports = Engine;
         `<span>One squad: <b>${fmt(squadHp)}</b> health, <b>${fmt(squadDps, 1)}</b> damage/s</span>
          <span>With ${fmt(g.budget)} gold: <b>${r.squads}</b> squad${r.squads === 1 ? '' : 's'}, <b>${r.bodies}</b> bodies</span>
          <span>Raw strength: <b>${fmt(r.strength / 1000)}k</b> (${Math.round(r.strength / max * 100)}% of the strongest)</span>${uncounted}`;
+      renderSkillUse();
       const dh = d.querySelector('.def-hint');
       dh.textContent = u.defense === 'armor' ? 'Blocked from every hit.' : u.defense === 'ward' ? 'Most damage one hit can deal.' : 'Not used without a defense.';
     });
   }
+  // ---------- skill slots on a unit ----------
+  function renderSlots(u, d) {
+    const box = d.querySelector('.skill-slots');
+    box.innerHTML = [0, 1].map(k => `
+      <div class="slot">
+        <select data-slot="${k}" aria-label="Skill ${k + 1}">
+          <option value="">No skill</option>
+          ${state.skills.map(sk => `<option value="${esc(sk.id)}" ${u.skills[k] === sk.id ? 'selected' : ''}>${esc(sk.name)}</option>`).join('')}
+        </select>
+        <label class="on"><input type="checkbox" data-on="${k}" ${u.skillsOn[k] ? 'checked' : ''} ${u.skills[k] ? '' : 'disabled'}> On in tests</label>
+        <span class="skill-desc">${u.skills[k] && skillById(u.skills[k]) ? esc(Engine.describeSkill(skillById(u.skills[k]))) + ` ${fmt(skillById(u.skills[k]).cost)} gold.` : ''}</span>
+      </div>`).join('');
+    box.querySelectorAll('[data-slot]').forEach(sl => sl.addEventListener('change', () => {
+      const k = +sl.dataset.slot;
+      u.skills[k] = sl.value || null;
+      if (!u.skills[k]) u.skillsOn[k] = false;
+      save(); renderSlots(u, d); renderUnitSummaries(); renderSkillUse(); scheduleRun();
+    }));
+    box.querySelectorAll('[data-on]').forEach(cb => cb.addEventListener('change', () => {
+      u.skillsOn[+cb.dataset.on] = cb.checked;
+      save(); renderUnitSummaries(); scheduleRun();
+    }));
+  }
+  function refreshSlots() {
+    state.units.forEach(u => { const d = unitsEl.querySelector(`details[data-id="${u.id}"]`); if (d) renderSlots(u, d); });
+  }
+
+  // ---------- skill library ----------
+  const skillsEl = $('skills');
+  $('skill-type').innerHTML = Object.entries(Engine.SKILL_TYPES).map(([k, t]) => `<option value="${k}">${esc(t.label)}</option>`).join('');
+  let skUid = 1;
+  const newSkillId = () => { let id; do { id = 'sk' + Date.now().toString(36) + (skUid++); } while (skillById(id)); return id; };
+  function usedBy(sk) { return state.units.filter(u => u.skills.includes(sk.id)); }
+  function renderSkillUse() {
+    state.skills.forEach(sk => {
+      const el = skillsEl.querySelector(`[data-sk="${CSS.escape(sk.id)}"] .used`);
+      if (el) { const us = usedBy(sk); el.textContent = us.length ? 'Used by ' + us.map(u => u.name).join(', ') : 'Not used by any unit yet'; }
+    });
+  }
+  function renderSkills() {
+    const open = new Set([...skillsEl.querySelectorAll('details[open]')].map(d => d.dataset.sk));
+    skillsEl.innerHTML = '';
+    state.skills.forEach(sk => {
+      const T = Engine.SKILL_TYPES[sk.type];
+      const d = document.createElement('details');
+      d.className = 'unit'; d.dataset.sk = sk.id;
+      d.innerHTML = `
+        <summary>
+          <div class="sum-top"><span class="sum-name"><span class="n">${esc(sk.name)}</span></span><span class="sum-cost">${fmt(sk.cost)} gold</span></div>
+          <div class="sum-line">${esc(T.label)} · <span class="desc">${esc(Engine.describeSkill(sk))}</span></div>
+          <div class="sum-line used"></div>
+        </summary>
+        <div class="unit-body">
+          <div class="levers">
+            <div class="field full"><label for="skn-${esc(sk.id)}">Name</label><input type="text" id="skn-${esc(sk.id)}" data-f="name" value="${esc(sk.name)}"></div>
+            <div class="field"><label>Type</label><span class="hint" style="font-size:14px;color:var(--ink)">${esc(T.label)}</span></div>
+            <div class="field"><label for="skc-${esc(sk.id)}">Cost (gold)</label><input type="number" id="skc-${esc(sk.id)}" data-f="cost" min="0" step="5" value="${sk.cost}"></div>
+            ${T.params.map(([k, label, def, step]) => `
+              <div class="field ${step == null ? 'full' : ''}"><label for="skp-${esc(sk.id)}-${k}">${esc(label)}</label>
+                ${step == null
+                  ? `<select id="skp-${esc(sk.id)}-${k}" data-p="${k}">${state.units.some(u => u.name === String(Engine.skillParam(sk, k))) ? '' : `<option selected value="${esc(Engine.skillParam(sk, k))}">${esc(Engine.skillParam(sk, k))} (not in roster)</option>`}${state.units.map(u => `<option ${String(Engine.skillParam(sk, k)) === u.name ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select>`
+                  : `<input type="number" id="skp-${esc(sk.id)}-${k}" data-p="${k}" min="0" step="${step}" value="${Engine.skillParam(sk, k)}">`}
+              </div>`).join('')}
+          </div>
+          <div class="row">
+            <button class="btn small" data-act="dup">Make a copy</button>
+            <button class="btn small danger" data-act="del">Delete</button>
+          </div>
+          <div class="row confirm" data-confirm hidden>
+            <span class="confirm-text"></span>
+            <button class="btn small danger" data-act="del-yes">Delete</button>
+            <button class="btn small" data-act="del-no">Keep</button>
+          </div>
+        </div>`;
+      const changed = () => {
+        d.querySelector('.n').textContent = sk.name;
+        d.querySelector('.sum-cost').textContent = `${fmt(sk.cost)} gold`;
+        d.querySelector('.desc').textContent = Engine.describeSkill(sk);
+        save(); refreshSlots(); renderUnitSummaries(); scheduleRun();
+      };
+      d.querySelector('[data-f="name"]').addEventListener('input', (e) => { sk.name = e.target.value.trim() || T.label; changed(); });
+      d.querySelector('[data-f="cost"]').addEventListener('input', (e) => { const v = parseFloat(e.target.value); if (isFinite(v)) { sk.cost = Math.max(0, v); changed(); } });
+      d.querySelectorAll('[data-p]').forEach(inp => inp.addEventListener(inp.tagName === 'SELECT' ? 'change' : 'input', () => {
+        if (inp.tagName === 'SELECT') sk.params[inp.dataset.p] = inp.value;
+        else { const v = parseFloat(inp.value); if (!isFinite(v)) return; sk.params[inp.dataset.p] = Math.max(0, v); }
+        changed();
+      }));
+      d.querySelector('[data-act="dup"]').addEventListener('click', () => {
+        const c = { ...clone(sk), id: newSkillId(), name: sk.name + ' copy' };
+        state.skills.splice(state.skills.indexOf(sk) + 1, 0, c);
+        save(); renderSkills(); refreshSlots();
+        $('skill-msg').textContent = `Made ${c.name}. Pick it in a unit’s skill slot to use it.`;
+      });
+      const conf = d.querySelector('[data-confirm]');
+      d.querySelector('[data-act="del"]').addEventListener('click', () => {
+        const us = usedBy(sk);
+        if (!us.length) { removeSkill(sk); return; }
+        conf.querySelector('.confirm-text').textContent = `Remove ${sk.name} from ${us.map(u => u.name).join(', ')} and delete it?`;
+        conf.hidden = false;
+      });
+      d.querySelector('[data-act="del-no"]').addEventListener('click', () => { conf.hidden = true; });
+      d.querySelector('[data-act="del-yes"]').addEventListener('click', () => removeSkill(sk));
+      if (open.has(sk.id)) d.open = true;
+      skillsEl.appendChild(d);
+    });
+    renderSkillUse();
+  }
+  function removeSkill(sk) {
+    state.skills = state.skills.filter(x => x !== sk);
+    state.units.forEach(u => [0, 1].forEach(k => { if (u.skills[k] === sk.id) { u.skills[k] = null; u.skillsOn[k] = false; } }));
+    save(); renderSkills(); refreshSlots(); renderUnitSummaries(); scheduleRun();
+    $('skill-msg').textContent = `Deleted ${sk.name}.`;
+  }
+  $('skill-add').addEventListener('click', () => {
+    const type = $('skill-type').value, T = Engine.SKILL_TYPES[type];
+    const sk = { id: newSkillId(), type, name: T.label, cost: 100, params: {} };
+    state.skills.push(sk);
+    save(); renderSkills(); refreshSlots();
+    const d = skillsEl.querySelector(`[data-sk="${CSS.escape(sk.id)}"]`);
+    if (d) { d.open = true; d.querySelector('[data-f="name"]').focus(); }
+    $('skill-msg').textContent = `Added ${sk.name}. Pick it in a unit’s skill slot to use it.`;
+  });
+
   // ---------- price check ----------
   // Fair price = how many squads of this unit tie against PRICE_REF squads of each 100-gold unit, on average.
   function* marginGen(x, n, refs, g) {
@@ -1145,10 +1468,10 @@ if (typeof module !== 'undefined') module.exports = Engine;
   let priceRun = 0;
   function priceCheck(u, d, withValues) {
     const out = d.querySelector('.price-out');
-    const refs = state.units.filter(r => r !== u && r.cost === 100);
+    const refs = state.units.filter(r => r !== u && r.cost === 100).map(prep);
     if (refs.length < 2) { out.innerHTML = '<p class="hint">Add at least two other units that cost 100 gold to use as the yardstick.</p>'; return; }
     const id = ++priceRun;
-    const unitCopy = clone(u), g = { ...state.settings };
+    const unitCopy = clone(prep(u)), g = { ...state.settings };
     out.innerHTML = `<p class="hint">Measuring against ${refs.length} units…</p>`;
     const render = ({ base, rows }) => {
       const p = base.price * 100, tier = tierOf(p); // yardstick squads cost 100 gold
@@ -1175,7 +1498,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
   }
 
   $('add').addEventListener('click', () => {
-    const u = { ...Shapes.assign([...state.units, Engine.withTraits({ name: 'New unit', cost: 100, bodies: 4, hp: 200, hit: 20, aps: 1, range: 10, speed: 6, splash: 0 })]).pop(), id: uid++ };
+    const u = { ...Shapes.assign([...state.units, Engine.withTraits({ name: 'New unit', cost: 100, bodies: 4, hp: 200, hit: 20, aps: 1, range: 10, speed: 6, splash: 0 })]).pop(), id: uid++, skills: [null, null], skillsOn: [false, false] };
     state.units.push(u);
     save(); renderUnits(); scheduleRun();
     const d = unitsEl.querySelector(`details[data-id="${u.id}"]`);
@@ -1186,7 +1509,9 @@ if (typeof module !== 'undefined') module.exports = Engine;
     const add = EXAMPLES.filter(e => !have.has(e.name));
     if (!add.length) { $('ex-msg').textContent = 'All trait examples are already in your roster.'; return; }
     const merged = Shapes.assign([...state.units, ...clone(add)]); // new examples get shapes not already in use
-    state.units.push(...merged.slice(state.units.length).map(u => ({ ...Engine.withTraits(u), id: uid++ })));
+    const ids = new Set(state.skills.map(sk => sk.id));
+    state.units.push(...merged.slice(state.units.length).map(u => ({ ...Engine.withTraits(u), id: uid++,
+      skills: [0, 1].map(k => (u.skills && ids.has(u.skills[k])) ? u.skills[k] : null), skillsOn: [false, false] })));
     save(); renderUnits(); scheduleRun();
     $('ex-msg').textContent = `Added ${add.map(e => e.name).join(', ')}.`;
   });
@@ -1201,7 +1526,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
   function runAll() {
     comboChanged();
     const t0 = performance.now();
-    result = Engine.matrix(state.units, state.settings);
+    result = Engine.matrix(state.units.map(prep), state.settings);
     const ms = performance.now() - t0;
     const n = state.units.length;
     $('status').textContent = `${n * (n - 1) / 2} fights in ${Math.round(ms)} ms`;
@@ -1262,10 +1587,12 @@ if (typeof module !== 'undefined') module.exports = Engine;
     if (Array.isArray(x)) {
       const us = x.map(find);
       if (us.some(u => !u)) return null;
+      us.forEach((u, k) => { us[k] = prep(u); });
       return { army: us.map(u => ({ unit: u, gold: g })), name: us.map(u => u.name).join(' + '), tag: us.map(tagOf).join('+'), gold: g * us.length };
     }
-    const u = find(x);
-    if (!u) return null;
+    const u0 = find(x);
+    if (!u0) return null;
+    const u = prep(u0);
     const gold = Array.isArray(other) ? g * other.length : g;
     return { army: [{ unit: u, gold }], name: u.name, tag: tagOf(u), gold };
   }
@@ -1332,6 +1659,11 @@ if (typeof module !== 'undefined') module.exports = Engine;
     ctx.beginPath(); ctx.moveTo(0, Y(0)); ctx.lineTo(W, Y(0)); ctx.stroke(); ctx.setLineDash([]);
     // shots
     for (const sh of f.shots) {
+      if (sh[7] === 1) { // a heal
+        ctx.strokeStyle = css('--win'); ctx.globalAlpha = 0.7; ctx.lineWidth = 1.5; ctx.setLineDash([2, 3]);
+        ctx.beginPath(); ctx.moveTo(X(sh[0]), Y(sh[1])); ctx.lineTo(X(sh[2]), Y(sh[3])); ctx.stroke(); ctx.setLineDash([]);
+        continue;
+      }
       ctx.strokeStyle = sh[4] === 0 ? colA : colB; ctx.globalAlpha = 0.55; ctx.lineWidth = sh[6] ? 3 : 1;
       ctx.beginPath(); ctx.moveTo(X(sh[0]), Y(sh[1])); ctx.lineTo(X(sh[2]), Y(sh[3])); ctx.stroke();
       ctx.lineWidth = 1;
@@ -1350,7 +1682,12 @@ if (typeof module !== 'undefined') module.exports = Engine;
       const c = b[3] === 0 ? colA : colB;
       const shape = (rep.r.shapes && rep.r.shapes[bi]) || 'circle', up = b[3] === 0 ? 1 : -1;
       const fill = (rep.r.colors && rep.r.colors[bi]) || c;
-      Shapes.body(ctx, shape, x, y, rad, up, fill, c, 0.3 + 0.7 * b[2]);
+      if (b[5]) { // stealthed: a dashed ghost outline until it attacks
+        ctx.globalAlpha = 0.5; ctx.strokeStyle = c; ctx.lineWidth = 1.5; ctx.setLineDash([2, 2]);
+        Shapes.outline(ctx, shape, x, y, rad, up);
+        ctx.setLineDash([]); ctx.globalAlpha = 1;
+      } else Shapes.body(ctx, shape, x, y, rad, up, fill, c, 0.3 + 0.7 * b[2]);
+      if (b[6]) { ctx.fillStyle = css('--win'); ctx.beginPath(); ctx.arc(x + rad * 0.9, y - rad * 0.9, Math.max(2, rad * 0.3), 0, Math.PI * 2); ctx.fill(); } // poisoned
       ctx.strokeStyle = c;
       if (b[4] > 0) { // wind-up charging: ring fills clockwise
         ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc(x, y, rad + 3.5, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * b[4]); ctx.stroke();
@@ -1409,7 +1746,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
   }
   $('combo-run').addEventListener('click', () => {
     if (!result) return;
-    const us = state.units.slice(), g = clone(state.settings), base = result;
+    const us = state.units.map(prep), g = clone(state.settings), base = result;
     const job = ++comboJob, t0 = performance.now();
     const gen = comboGen(us, g, base);
     $('combo-run').disabled = true;
@@ -1491,21 +1828,22 @@ if (typeof module !== 'undefined') module.exports = Engine;
     try { p = JSON.parse($('io').value); } catch (e) { flash('That text is not a roster. Paste text copied with "Copy roster".'); return; }
     if (!valid(p)) { flash('The roster needs settings and at least two units, each with a name and all eight levers.'); return; }
     p = toGold(p);
-    state = { settings: { ...SAMPLE.settings, ...p.settings }, units: withIds(p.units.map(u => ({ defense: 'none', defVal: 0, ...u }))) };
-    sel = null; syncSettings(); save(); renderUnits(); runAll();
+    state = fromRoster(p);
+    sel = null; syncSettings(); save(); renderUnits(); renderSkills(); runAll();
     flash(`Loaded ${state.units.length} units.`);
   });
   $('reset').addEventListener('click', () => { $('reset-confirm').hidden = false; });
   $('reset-no').addEventListener('click', () => { $('reset-confirm').hidden = true; });
   $('reset-yes').addEventListener('click', () => {
-    state = { settings: clone(SAMPLE.settings), units: withIds(clone(SAMPLE.units)) };
+    state = fromRoster(clone(SAMPLE));
     $('reset-confirm').hidden = true; sel = null;
-    syncSettings(); save(); renderUnits(); runAll();
+    syncSettings(); save(); renderUnits(); renderSkills(); runAll();
     flash('Sample units restored.');
   });
   function syncSettings() { document.querySelectorAll('[data-s]').forEach(inp => { inp.value = state.settings[inp.dataset.s]; }); }
 
   renderUnits();
+  renderSkills();
   runAll();
 })();
 </script>

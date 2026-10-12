@@ -92,7 +92,7 @@ a { color: var(--you); }
   const qs = new URLSearchParams(location.search);
 
   // ---------- unit sets: built-in, or loaded from Counter Lab ----------
-  const BUILTIN = { units: DATA.units, matrix: DATA.matrix };
+  const BUILTIN = { units: DATA.units, matrix: DATA.matrix, skills: DATA.skills || [] };
   const STORE = 'phonebellum.units.v1';
   const MATRIX_SETTINGS = { budget: 2, distance: 40, spacing: 3.5, minDmgPct: 15, timeCap: 60, dt: 0.05 };
   const LEVERS = ['cost', 'bodies', 'hp', 'hit', 'aps', 'range', 'speed', 'splash'];
@@ -101,7 +101,11 @@ a { color: var(--you); }
     list.every(u => u && typeof u.name === 'string' && u.name.trim() && LEVERS.every(k => typeof u[k] === 'number' && isFinite(u[k]) && u[k] >= 0) && u.bodies >= 1 && u.aps > 0 && u.cost > 0);
   const validSet = (s) => s && validUnits(s.units) && Array.isArray(s.matrix) && s.matrix.length === s.units.length;
   function useSet(set, custom) {
-    units = Shapes.assign(set.units).map(u => ({ ...Engine.withTraits(u), name: String(u.name).replace(/[<>&"]/g, '').trim().slice(0, 40) || 'Unit', level: 0, bodies: Math.max(1, Math.round(u.bodies)) }));
+    const skills = Array.isArray(set.skills) ? set.skills.filter(sk => sk && typeof sk.id === 'string' && Engine.SKILL_TYPES[sk.type])
+      .map(sk => ({ ...sk, name: String(sk.name || Engine.SKILL_TYPES[sk.type].label).replace(/[<>&"]/g, '').slice(0, 40) })) : [];
+    // each unit's two skill slots, resolved to skill definitions
+    units = Shapes.assign(set.units).map(u => ({ ...Engine.withTraits(u), name: String(u.name).replace(/[<>&"]/g, '').trim().slice(0, 40) || 'Unit', level: 0, bodies: Math.max(1, Math.round(u.bodies)),
+      skillDefs: [0, 1].map(k => (Array.isArray(u.skills) && skills.find(sk => sk.id === u.skills[k])) || null) }));
     M = set.matrix; customSet = custom; rawSet = set;
   }
   try {
@@ -254,7 +258,14 @@ a { color: var(--you); }
     for (const b of bt.bodies) {
       if (!b.alive) continue;
       const c = teamCol(b.side), r = radius(b.u), hpr = b.hp / b.u.hp;
+      if (b.hidden) { // stealthed: a dashed ghost until it attacks (fainter for the enemy's)
+        ctx.globalAlpha = b.side === me ? 0.6 : 0.3; ctx.strokeStyle = c; ctx.lineWidth = 1.5; ctx.setLineDash([2, 2]);
+        Shapes.outline(ctx, b.u.shape, PX(b.x), PY(b.y), r, upOf(b.side));
+        ctx.setLineDash([]); ctx.globalAlpha = 1;
+        continue;
+      }
       Shapes.body(ctx, b.u.shape, PX(b.x), PY(b.y), r, upOf(b.side), b.u.color, c, 0.35 + 0.65 * hpr);
+      if (b.poison && b.poison.length) { ctx.fillStyle = '#6FD08C'; ctx.beginPath(); ctx.arc(PX(b.x) + r * 0.9, PY(b.y) - r * 0.9, Math.max(2, r * 0.3), 0, Math.PI * 2); ctx.fill(); }
       if (b.u.hp >= 500 && hpr < 1) {
         ctx.strokeStyle = c; ctx.lineWidth = 1.5;
         ctx.beginPath(); ctx.arc(PX(b.x), PY(b.y), r + 2.5, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * hpr); ctx.stroke();
@@ -270,6 +281,10 @@ a { color: var(--you); }
     }
     for (const e of fx) {
       const a = 1 - e.age / e.life;
+      if (e.kind === 'heal') {
+        ctx.strokeStyle = '#6FD08C'; ctx.globalAlpha = 0.8 * a; ctx.lineWidth = 1.5; ctx.setLineDash([2, 3]);
+        ctx.beginPath(); ctx.moveTo(PX(e.x1), PY(e.y1)); ctx.lineTo(PX(e.x2), PY(e.y2)); ctx.stroke(); ctx.setLineDash([]);
+      }
       if (e.kind === 'shot') {
         ctx.strokeStyle = teamCol(e.side); ctx.globalAlpha = 0.7 * a; ctx.lineWidth = e.charged ? 3 : 1;
         ctx.beginPath(); ctx.moveTo(PX(e.x1), PY(e.y1)); ctx.lineTo(PX(e.x2), PY(e.y2)); ctx.stroke();
@@ -382,7 +397,7 @@ a { color: var(--you); }
         <div class="uwrap">
           <button class="ucard" data-i="${i}" aria-pressed="${selected === i}" aria-disabled="${!canBuy(i)}">
             <span class="t"><span style="color:${u.color};display:inline-flex">${Shapes.svg(u.shape, 13)}</span> ${tag(u)}</span><span class="n">${esc(u.name)}</span>
-            <span class="c">${price(i)} · ${u.bodies} ${u.bodies === 1 ? 'body' : 'bodies'}</span>
+            <span class="c">${price(i)} · ${u.bodies} ${u.bodies === 1 ? 'body' : 'bodies'}${[0, 1].filter(k => Game.hasSkill(m, me, i, k)).length ? ` · ${[0, 1].filter(k => Game.hasSkill(m, me, i, k)).length}★` : ''}</span>
           </button>
           <button class="info" data-info="${i}" aria-label="About ${esc(u.name)}">i</button>
         </div>`).join('')}</div>
@@ -466,6 +481,8 @@ a { color: var(--you); }
         <li>You see the enemy’s earlier squads while you deploy, so build counters.</li>
         <li>3 deployments in round 1, then 2 per round. Extra ones cost ${Game.CONFIG.extraDeployCost} gold.</li>
         <li>Squads earn experience. A gold + means you can upgrade it: level 2 doubles health and attack, level 3 triples them.</li>
+        <li>Each unit has two skills. Buy one and all your squads of that unit get it.</li>
+        <li>Tap a squad from an earlier round to sell it for half its price.</li>
       </ul>
     </div>`);
     $('panel').innerHTML = `
@@ -481,7 +498,7 @@ a { color: var(--you); }
       <span class="hint" id="join-msg" aria-live="polite" hidden></span>
       <div class="bar">
         <span class="hint">Playing with ${customSet ? `your ${units.length} units from Counter Lab` : `the ${units.length} built-in units`}.</span>
-        <span class="btnrow"><button class="btn small" id="load-units">Load units</button><a class="btn small" href="lab.html" style="text-decoration:none;color:inherit;display:inline-block">Counter Lab</a></span>
+        <span class="btnrow"><button class="btn small" id="load-units">Load units</button><a class="btn small" id="lab-link" href="lab.html" style="text-decoration:none;color:inherit;display:inline-block">Counter Lab</a></span>
       </div>
       <div class="bar">
         <span class="hint">Deploy timer vs AI</span>
@@ -638,7 +655,7 @@ a { color: var(--you); }
   }
 
   function absorb() {
-    for (const s of bt.lastShots()) fx.push({ kind: 'shot', x1: s[0], y1: s[1], x2: s[2], y2: s[3], side: s[4], splash: s[5], charged: s[6], age: 0, life: 0.18 });
+    for (const s of bt.lastShots()) fx.push({ kind: s[7] === 1 ? 'heal' : 'shot', x1: s[0], y1: s[1], x2: s[2], y2: s[3], side: s[4], splash: s[5], charged: s[6], age: 0, life: s[7] === 1 ? 0.35 : 0.18 });
     for (const b of bt.bodies) if (!b.alive && !b._gone) { b._gone = true; fx.push({ kind: 'death', x: b.x, y: b.y, r: radius(b.u), side: b.side, age: 0, life: 0.5 }); }
   }
 
@@ -707,9 +724,36 @@ a { color: var(--you); }
   });
 
   // ---------- unit sheet ----------
+  function skillBlock(i, side) {
+    const defs = units[i].skillDefs || [];
+    if (!defs.some(Boolean) || !m) return '';
+    const mine = side === undefined || side === me;
+    const rows = [0, 1].filter(k => defs[k]).map(k => {
+      const d = defs[k], cost = Game.skillCost(m, i, k);
+      let act = '';
+      if (mine) {
+        if (Game.hasSkill(m, me, i, k)) {
+          act = `<span class="chip" style="color:var(--gold);border:1px solid currentColor;border-radius:99px;padding:1px 8px;font-size:12px">Owned</span>`;
+          if (phase === 'deploy' && editable() && m.tech[me][i][k] === m.round) act += ` <button class="btn small" data-unskill="${k}">Undo</button>`;
+        } else if (phase === 'deploy') {
+          const why = !m.armies[me].some(q => q.unit === i) ? 'Place a squad first' : m.gold[me] < cost ? `Need ${cost} gold` : '';
+          act = why || !editable() ? `<button class="btn small" disabled>${why || `Buy · ${cost} gold`}</button>` : `<button class="btn small primary" data-skill="${k}">Buy · ${cost} gold</button>`;
+        } else act = `<span class="hint">${cost} gold</span>`;
+      } else {
+        act = Game.skillVisible(m, side, i, k) || (phase !== 'deploy' && Game.hasSkill(m, side, i, k))
+          ? `<span class="chip" style="color:var(--foe);border:1px solid currentColor;border-radius:99px;padding:1px 8px;font-size:12px">${mode === 'ai' ? 'Enemy' : 'Opponent'} has it</span>` : `<span class="hint">Not bought</span>`;
+      }
+      return `<div style="display:grid;gap:4px;border-top:1px solid var(--line);padding-top:8px">
+        <div class="bar"><b style="font-family:var(--font-display)">${esc(d.name)}</b><span>${act}</span></div>
+        <span class="hint">${esc(Engine.describeSkill(d))}</span></div>`;
+    });
+    return `<div style="display:grid;gap:8px"><h4 style="margin:0;font-size:12px;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted)">Skills${mine ? ' · for all your squads of this unit' : ''}</h4>${rows.join('')}</div>`;
+  }
+
   function openSheet(i, sq, side) {
     const base = units[i];
-    const u = sq ? Engine.leveled(base, sq.level) : base;
+    const owner = side === undefined ? me : side;
+    const u = Engine.leveled(m ? Game.unitFor(m, owner, i) : base, sq ? sq.level : 0);
     let lvl = '';
     if (sq) {
       const next = sq.level < Engine.MAX_LEVEL ? Math.round(Game.xpNeeded(base, sq.level)) : null;
@@ -723,6 +767,7 @@ a { color: var(--you); }
           ? `<button class="btn primary" id="lvl-up">Level up · ${cost} gold</button>`
           : `<button class="btn primary" disabled>${editable() ? `Need ${cost} gold` : `Level up · ${cost} gold`}</button>`);
         if (boughtNow && editable()) btns.push(`<button class="btn" id="lvl-undo">Undo level-up</button>`);
+        if (sq.round < m.round && editable()) btns.push(`<button class="btn" id="sell">Sell · ${Game.sellValue(m, sq)} gold</button>`);
         if (btns.length) lvl += `<div style="display:flex;gap:8px;flex-wrap:wrap">${btns.join('')}</div>`;
         else if (next) lvl += `<p class="hint" style="margin:0">Earns XP from damage it deals and takes. Killing leveled enemies pays extra.</p>`;
       }
@@ -748,6 +793,7 @@ a { color: var(--you); }
       <p class="role" style="margin:0">${ROLES[u.name] && !customSet ? ROLES[u.name] : customSet ? `From a Counter Lab roster · ${Game.unitCostOf(base)} gold` : ''}</p>
       ${lvl}
       ${tr.length ? `<div class="traits">${tr.map(x => `<span>${x}</span>`).join('')}</div>` : ''}
+      ${skillBlock(i, side)}
       <div class="stats num">
         <div><span>Bodies</span>${u.bodies}</div><div><span>Health</span>${Math.round(u.hp)}</div>
         <div><span>Hit</span>${Math.round(u.hit)}</div><div><span>Attacks/s</span>${u.aps}</div>
@@ -762,6 +808,13 @@ a { color: var(--you); }
     const after = () => { changed(); openSheet(i, sq, side); };
     if ($('lvl-up')) $('lvl-up').addEventListener('click', () => { if (editable() && Game.levelUp(m, me, sq.id)) after(); });
     if ($('lvl-undo')) $('lvl-undo').addEventListener('click', () => { if (editable() && Game.undoLevel(m, me, sq.id)) after(); });
+    $('sheet').querySelectorAll('[data-skill]').forEach(b => b.addEventListener('click', () => { if (editable() && Game.buySkill(m, me, i, +b.dataset.skill)) after(); }));
+    $('sheet').querySelectorAll('[data-unskill]').forEach(b => b.addEventListener('click', () => { if (editable() && Game.undoSkill(m, me, i, +b.dataset.unskill)) after(); }));
+    if ($('sell')) $('sell').addEventListener('click', () => {
+      const btn = $('sell');
+      if (!btn.dataset.sure) { btn.dataset.sure = '1'; btn.textContent = `Tap again to sell for ${Game.sellValue(m, sq)}`; btn.classList.add('primary'); return; }
+      if (editable() && Game.sell(m, me, sq.id)) { closeSheet(); changed(); }
+    });
     ($('lvl-up') || $('close')).focus();
   }
   function closeSheet() { $('sheet-back').hidden = true; loaderRun++; }
@@ -821,7 +874,7 @@ a { color: var(--you); }
         while (performance.now() - t0 < 30) {
           r = gen.next();
           if (r.done) {
-            const set = { units: clean, matrix: r.value };
+            const set = { units: clean, matrix: r.value, skills: (p && Array.isArray(p.skills)) ? p.skills : [] };
             try { localStorage.setItem(STORE, JSON.stringify(set)); } catch (e) {}
             useSet(set, true);
             closeSheet(); showStart();
@@ -975,12 +1028,16 @@ a { color: var(--you); }
   // What the guest may see: the host's squads from this round stay hidden until the fight
   function syncState() {
     const s = snapshot(m);
-    if (phase === 'deploy') s.armies[0] = s.armies[0].filter(q => q.round < m.round);
+    if (phase === 'deploy') {
+      s.armies[0] = s.armies[0].filter(q => q.round < m.round);
+      // skills bought this round stay hidden too
+      for (const ui in (s.tech && s.tech[0]) || {}) s.tech[0][ui] = s.tech[0][ui].map(r => r === m.round ? 0 : r);
+    }
     return s;
   }
   function sendSync() {
     if (!net.connected) return;
-    const base = { t: 'sync', proto: 1, set: { units: rawSet.units, matrix: rawSet.matrix }, custom: customSet, config: { levelCostPerTier: Game.CONFIG.levelCostPerTier } };
+    const base = { t: 'sync', proto: 1, set: { units: rawSet.units, matrix: rawSet.matrix, skills: rawSet.skills || [] }, custom: customSet, config: { levelCostPerTier: Game.CONFIG.levelCostPerTier } };
     if (!m) { send({ ...base, phase: 'lobby' }); return; }
     const ph = phase === 'battle' ? 'result' : phase;
     send({ ...base, phase: ph, m: syncState(), remaining: phase === 'deploy' && deadline ? deadline - now() : 0, ready, nextReady, rematch, summary: lastSummary });
@@ -1019,6 +1076,13 @@ a { color: var(--you); }
     m.extraDeploys[1] = Math.max(0, d.extra | 0);
     m.nextId[1] = Math.max(m.nextId[1], d.nextId | 0);
     ready[1] = !!d.ready;
+    const tech = {};
+    if (d.tech && typeof d.tech === 'object') for (const ui in d.tech) {
+      const i = +ui, t = d.tech[ui];
+      if (Number.isInteger(i) && i >= 0 && i < n && Array.isArray(t)) tech[i] = [0, 1].map(k => Math.max(0, Math.min(m.round, t[k] | 0)));
+    }
+    if (!m.tech) m.tech = [{}, {}];
+    m.tech[1] = tech;
   }
 
   function checkNext() {
@@ -1132,7 +1196,7 @@ a { color: var(--you); }
 
   function sendSide() {
     if (mode !== 'guest' || !m || phase !== 'deploy') return;
-    send({ t: 'side', round: m.round, army: m.armies[1], gold: m.gold[1], extra: m.extraDeploys[1], nextId: m.nextId[1], ready: ready[1] || timeUp });
+    send({ t: 'side', round: m.round, army: m.armies[1], gold: m.gold[1], extra: m.extraDeploys[1], nextId: m.nextId[1], tech: (m.tech && m.tech[1]) || {}, ready: ready[1] || timeUp });
   }
 
   function guestRecv(d) {
@@ -1148,7 +1212,8 @@ a { color: var(--you); }
       if (d.phase === 'deploy') {
         if (phase === 'deploy' && m && m.round === incoming.round) {
           // same round after a reconnect: keep our own side as it is here, take everything else from the host
-          for (const k of ['armies', 'gold', 'extraDeploys', 'nextId']) incoming[k][1] = m[k][1];
+          if (!incoming.tech) incoming.tech = [{}, {}];
+          for (const k of ['armies', 'gold', 'extraDeploys', 'nextId', 'tech']) incoming[k][1] = (m[k] || [{}, {}])[1];
           m = incoming; ready[0] = theirReady;
           deadline = d.remaining > 0 ? now() + d.remaining - 300 : 0;
           timeUp = false;

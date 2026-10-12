@@ -27,6 +27,87 @@ const Engine = (() => {
     return { ...u, level: L, hp: u.hp * k, hit: u.hit * k };
   }
 
+  // ---------- skills ----------
+  // Each skill type and its settings (key, label, default, step). Shared by Counter Lab and the game.
+  const SKILL_TYPES = {
+    regen:   { label: 'Regeneration', params: [['pct', 'Health regained per second (% of max)', 2, 0.5]] },
+    poison:  { label: 'Poison shot', params: [['pct', 'Poison damage (% of hit, in total)', 100, 10], ['duration', 'Poison lasts (s)', 4, 0.5], ['slow', 'Longer time between attacks (%)', 30, 5]] },
+    stealth: { label: 'Stealth', params: [] },
+    armorHp: { label: 'Armor and health', params: [['armor', 'Armor (blocked from every hit)', 8, 1], ['hp', 'Health (+%)', 25, 5]] },
+    spawn:   { label: 'Spawn goblins', params: [['unit', 'Spawns (unit name)', 'Goblin Swarm', null], ['count', 'Bodies per spawn', 2, 1], ['every', 'Every (s)', 4, 0.5], ['max', 'Most alive at once', 6, 1]] },
+    rapid:   { label: 'Rapid fire', params: [['aps', 'Attack speed (+%)', 50, 5], ['range', 'Range (−%)', 30, 5]] },
+    swift:   { label: 'Swift strikes', params: [['speed', 'Move speed (+%)', 30, 5], ['hit', 'Hit size (+%)', 25, 5]] },
+    heavy:   { label: 'Heavy shot', params: [['slow', 'Projectile speed (−%)', 40, 5], ['instant', 'Projectile speed if the unit hits instantly (m/s)', 30, 5], ['hit', 'Hit size (+%)', 40, 5]] },
+    healer:  { label: 'Healing touch', params: [['pct', 'Heal per attack (% of hit)', 50, 5]] },
+    range:   { label: 'Long reach', params: [['m', 'Range (+m)', 5, 1]] },
+    shrink:  { label: 'Shortsight', params: [['m', 'Enemy range (−m)', 4, 0.5], ['duration', 'Lasts (s)', 3, 0.5]] },
+  };
+  const skillParam = (d, k) => {
+    const v = d.params && d.params[k];
+    if (v !== undefined && v !== null && v !== '') return v;
+    const def = (SKILL_TYPES[d.type].params.find(p => p[0] === k) || [])[2];
+    return def;
+  };
+
+  // One plain sentence describing what a skill does with its current settings
+  function describeSkill(d) {
+    if (!d || !SKILL_TYPES[d.type]) return '';
+    const P = (k) => skillParam(d, k);
+    const n = (k) => { const v = +P(k); return isFinite(v) ? String(Math.round(v * 100) / 100) : '0'; };
+    switch (d.type) {
+      case 'regen': return `Regains ${n('pct')}% of its max health every second.`;
+      case 'poison': return `Hits poison the target for ${n('pct')}% of the hit over ${n('duration')} s, ignoring armor and ward. ${n('slow')}% more time between attacks.`;
+      case 'stealth': return 'Can’t be targeted until it attacks for the first time. Splash and piercing shots can still hit it.';
+      case 'armorHp': return `+${n('armor')} armor and +${n('hp')}% health.`;
+      case 'spawn': return `Every ${n('every')} s, spawns ${n('count')} ${String(P('unit'))} ${+P('count') === 1 ? 'body' : 'bodies'}, up to ${n('max')} alive at once.`;
+      case 'rapid': return `+${n('aps')}% attack speed, −${n('range')}% range.`;
+      case 'swift': return `+${n('speed')}% move speed and +${n('hit')}% hit size.`;
+      case 'heavy': return `Projectiles fly ${n('slow')}% slower (${n('instant')} m/s if it normally hits instantly), +${n('hit')}% hit size.`;
+      case 'healer': return `Each attack heals a random wounded ally for ${n('pct')}% of its hit.`;
+      case 'range': return `+${n('m')} m range.`;
+      case 'shrink': return `Hits cut the target’s range by ${n('m')} m for ${n('duration')} s, but not below 1 m.`;
+    }
+    return '';
+  }
+
+  // A unit with skills applied. defs = the skill definitions that are active; roster = all units (for spawns).
+  function applySkills(unit, defs, roster) {
+    const u = withTraits(unit);
+    for (const d of defs || []) {
+      if (!d || !SKILL_TYPES[d.type]) continue;
+      const P = (k) => { const v = +skillParam(d, k); return isFinite(v) ? v : 0; };
+      switch (d.type) {
+        case 'regen': u.regen = (u.regen || 0) + Math.max(0, P('pct')); break;
+        case 'poison':
+          u.poisonPct = (u.poisonPct || 0) + Math.max(0, P('pct'));
+          u.poisonDur = Math.max(u.poisonDur || 0, Math.max(0.5, P('duration')));
+          u.aps = u.aps / (1 + Math.max(0, P('slow')) / 100);
+          break;
+        case 'stealth': u.stealth = true; break;
+        case 'armorHp': u.bonusArmor = (u.bonusArmor || 0) + Math.max(0, P('armor')); u.hp = u.hp * (1 + P('hp') / 100); break;
+        case 'spawn': {
+          const name = String(skillParam(d, 'unit'));
+          const src = (roster || []).find(r => r && r.name === name);
+          if (src) {
+            const { skills, skillDefs, skillsOn, ...plain } = src;
+            u.spawn = { unit: withTraits({ ...plain, level: 0 }), count: Math.max(1, Math.round(P('count'))), every: Math.max(0.5, P('every')), max: Math.max(1, Math.round(P('max'))) };
+          }
+          break;
+        }
+        case 'rapid': u.aps = u.aps * (1 + P('aps') / 100); u.range = Math.max(0.5, u.range * (1 - Math.min(90, P('range')) / 100)); break;
+        case 'swift': u.speed = u.speed * (1 + P('speed') / 100); u.hit = u.hit * (1 + P('hit') / 100); break;
+        case 'heavy':
+          u.projSpeed = u.projSpeed > 0 ? Math.max(2, u.projSpeed * (1 - Math.min(90, P('slow')) / 100)) : Math.max(2, P('instant'));
+          u.hit = u.hit * (1 + P('hit') / 100);
+          break;
+        case 'healer': u.healPct = (u.healPct || 0) + Math.max(0, P('pct')); break;
+        case 'range': u.range = u.range + P('m'); break;
+        case 'shrink': u.shrinkM = Math.max(u.shrinkM || 0, P('m')); u.shrinkDur = Math.max(u.shrinkDur || 0, Math.max(0.5, P('duration'))); break;
+      }
+    }
+    return u;
+  }
+
   function squadsFor(unit, g) {
     return Math.max(1, Math.floor(g.budget / Math.max(0.0001, unit.cost) + 1e-9));
   }
@@ -43,9 +124,11 @@ const Engine = (() => {
   }
 
   function damageAfterDefense(hit, target, g) {
-    if (target.u.defense === 'armor') return Math.max(hit - target.u.defVal, hit * g.minDmgPct / 100);
-    if (target.u.defense === 'ward') return Math.min(hit, target.u.defVal);
-    return hit;
+    const u = target.u;
+    const armor = (u.defense === 'armor' ? u.defVal : 0) + (u.bonusArmor || 0);
+    let d = armor > 0 ? Math.max(hit - armor, hit * g.minDmgPct / 100) : hit;
+    if (u.defense === 'ward') d = Math.min(d, u.defVal);
+    return d;
   }
 
   function makeSide(unit, side, g) {
@@ -84,6 +167,8 @@ const Engine = (() => {
       u, side, x, y, hp: u.hp, alive: true, squad, level: u.level || 0, xp: 0,
       cd: ((i * 7) % 11) / 11 * interval, // deterministic stagger
       moved: 0, firing: -1, burstLeft: 0, burstTimer: 0, burstDir: [0, 1], windTarget: null, windT: 0, setUp: false,
+      hidden: !!u.stealth, poison: null, shrinkM: 0, shrinkT: 0,
+      spawnT: u.spawn ? u.spawn.every : 0, kids: null,
     };
   }
 
@@ -128,6 +213,23 @@ const Engine = (() => {
     let projectiles = [];
     let t = 0, shots = [], over = false;
     const dist = (a, b) => hyp(a.x - b.x, a.y - b.y);
+    // current range: shortsight can shrink it for a while, but never below 1 m (or the unit's own range if shorter)
+    const R = (b) => b.shrinkT > 0 ? Math.max(Math.min(b.u.range, 1), b.u.range - b.shrinkM) : b.u.range;
+    // deterministic random numbers for healing targets (same on every device)
+    let seed = (A.length * 7919 + B.length * 104729 + 1) >>> 0;
+    const rnd = () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let x = Math.imul(seed ^ seed >>> 15, 1 | seed); x = x + Math.imul(x ^ x >>> 7, 61 | x) ^ x; return ((x ^ x >>> 14) >>> 0) / 4294967296; };
+    let spawnIdx = A.length + B.length;
+    const SPAWN_SPOTS = [[1, 0], [-1, 0], [0, 1], [0, -1], [0.7, 0.7], [-0.7, 0.7], [0.7, -0.7], [-0.7, -0.7]];
+    // damage that skips armor and ward (poison)
+    function direct(owner, v, amount) {
+      const applied = Math.min(amount, v.hp);
+      if (applied <= 0) return;
+      stats[owner.side].dealt += applied;
+      owner.xp += applied;
+      v.xp += applied * (g.absorbXp == null ? 0.5 : g.absorbXp);
+      v.hp -= applied;
+      if (v.hp <= 1e-9) { v.hp = 0; v.alive = false; owner.xp += v.u.hp * v.level; }
+    }
     const aliveCount = (arr) => { let c = 0; for (const b of arr) if (b.alive) c++; return c; };
 
     function hurt(owner, v, hit, fromX, fromY) {
@@ -142,6 +244,18 @@ const Engine = (() => {
       v.xp += applied * (g.absorbXp == null ? 0.5 : g.absorbXp);
       v.hp -= dmg;
       if (v.hp <= 0) { v.hp = 0; v.alive = false; owner.xp += v.u.hp * v.level; return; }
+      if (owner.u.poisonPct > 0) {
+        // poison: a share of the hit, spread over its duration. Each attacker keeps one dose on the target;
+        // its next hit refreshes that dose. Doses from different attackers add up.
+        const dps = hit * owner.u.poisonPct / 100 / owner.u.poisonDur;
+        const list = v.poison || (v.poison = []);
+        const dose = list.find(p => p.src === owner);
+        if (dose) { dose.dps = dps; dose.t = owner.u.poisonDur; } else list.push({ src: owner, dps, t: owner.u.poisonDur });
+      }
+      if (owner.u.shrinkM > 0) {
+        v.shrinkM = v.shrinkT > 0 ? Math.max(v.shrinkM, owner.u.shrinkM) : owner.u.shrinkM;
+        v.shrinkT = Math.max(v.shrinkT, owner.u.shrinkDur);
+      }
       if (owner.u.knockback > 0) {
         // big hits on small bodies push the full distance; on big bodies barely at all
         const push = owner.u.knockback * Math.min(1, hit / v.u.hp);
@@ -186,9 +300,9 @@ const Engine = (() => {
     function validTargets(b) {
       const valid = [];
       for (const f of sides[1 - b.side]) {
-        if (!f.alive) continue;
+        if (!f.alive || f.hidden) continue;
         const d = dist(f, b);
-        if (d <= b.u.range + 0.01 && d >= b.u.minRange) valid.push([d, f]);
+        if (d <= R(b) + 0.01 && d >= b.u.minRange) valid.push([d, f]);
       }
       valid.sort((p, q) => p[0] - q[0]);
       return valid.map(v => v[1]);
@@ -213,6 +327,16 @@ const Engine = (() => {
     function fire(b, targets, canCharge) {
       const charged = canCharge && b.u.charge > 1 && b.moved >= CHARGE_RUN;
       b.moved = 0;
+      b.hidden = false; // stealth ends with the first attack
+      if (b.u.healPct > 0) {
+        // heal a random wounded ally (not itself)
+        const hurtAllies = sides[b.side].filter(a => a.alive && a !== b && a.hp < a.u.hp);
+        if (hurtAllies.length) {
+          const a = hurtAllies[Math.min(hurtAllies.length - 1, Math.floor(rnd() * hurtAllies.length))];
+          a.hp = Math.min(a.u.hp, a.hp + b.u.hit * b.u.healPct / 100);
+          if (opts.record) shots.push([b.x, b.y, a.x, a.y, b.side, 0, 0, 1]);
+        }
+      }
       const hit = b.u.hit * (charged ? b.u.charge : 1);
       for (const tgt of targets) {
         const dx = tgt.x - b.x, dy = tgt.y - b.y, d = hyp(dx, dy) || 1;
@@ -236,14 +360,15 @@ const Engine = (() => {
         const foes = sides[1 - b.side];
         let near = null, nd = Infinity;
         for (const f of foes) {
-          if (!f.alive) continue;
+          if (!f.alive || f.hidden) continue;
           const d = dist(f, b);
           if (d < nd) { nd = d; near = f; }
         }
         b.near = near;
-        if (near && nd > b.u.range) {
+        const rg = R(b);
+        if (near && nd > rg) {
           // walk a little inside max range, so being nudged by allies doesn't leave the unit just out of reach
-          const mv = Math.min(b.u.speed * dt, nd - (b.u.range - Math.min(APPROACH, b.u.range * 0.25)));
+          const mv = Math.min(b.u.speed * dt, nd - (rg - Math.min(APPROACH, rg * 0.25)));
           b.x += (near.x - b.x) / nd * mv;
           b.y += (near.y - b.y) / nd * mv;
           b.moved += mv;
@@ -274,6 +399,37 @@ const Engine = (() => {
           }
         }
       }
+      // ongoing effects: poison, regeneration, shortsight wearing off, spawns
+      const n0 = all.length;
+      for (let i = 0; i < n0; i++) {
+        const b = all[i];
+        if (!b.alive) continue;
+        if (b.poison && b.poison.length) {
+          for (const p of b.poison) {
+            if (!b.alive) break;
+            direct(p.src, b, p.dps * Math.min(dt, p.t));
+            p.t -= dt;
+          }
+          b.poison = b.poison.filter(p => p.t > 0);
+          if (!b.alive) continue;
+        }
+        if (b.u.regen > 0 && b.hp < b.u.hp) b.hp = Math.min(b.u.hp, b.hp + b.u.hp * b.u.regen / 100 * dt);
+        if (b.shrinkT > 0) { b.shrinkT -= dt; if (b.shrinkT <= 0) { b.shrinkT = 0; b.shrinkM = 0; } }
+        if (b.u.spawn) {
+          b.spawnT -= dt;
+          if (b.spawnT <= 0) {
+            b.spawnT += b.u.spawn.every;
+            b.kids = (b.kids || []).filter(k => k.alive);
+            const n = Math.min(b.u.spawn.count, b.u.spawn.max - b.kids.length);
+            for (let k = 0; k < n; k++) {
+              const [ox, oy] = SPAWN_SPOTS[(b.kids.length + k) % SPAWN_SPOTS.length];
+              const kid = newBody(b.u.spawn.unit, b.side, b.x + ox * g.spacing * 0.7, b.y + oy * g.spacing * 0.7, spawnIdx++, -1);
+              b.kids.push(kid); all.push(kid); sides[b.side].push(kid);
+              stats[b.side].totalHp += kid.u.hp;
+            }
+          }
+        }
+      }
       // attacks
       for (const b of all) {
         if (!b.alive) continue;
@@ -291,12 +447,12 @@ const Engine = (() => {
               const rx = f.x - b.x, ry = f.y - b.y;
               const along = rx * ux + ry * uy;
               const across = Math.abs(rx * uy - ry * ux);
-              if (along >= b.u.minRange && along <= b.u.range + 0.01 && across <= PIERCE_WIDTH && along < fa) { fa = along; first = f; }
+              if (along >= b.u.minRange && along <= R(b) + 0.01 && across <= PIERCE_WIDTH && along < fa) { fa = along; first = f; }
             }
             if (first) {
               fire(b, aim(b, first, validTargets(b)), false);
             } else {
-              const end = { x: b.x + ux * b.u.range, y: b.y + uy * b.u.range };
+              const end = { x: b.x + ux * R(b), y: b.y + uy * R(b) };
               if (b.u.projSpeed > 0) fire(b, [end], false); // the projectile flies on and can still clip someone
               else {
                 stats[b.side].missed += b.u.hit * Math.max(1, Math.round(b.u.pellets));
@@ -377,7 +533,7 @@ const Engine = (() => {
       return {
         t, shots: final ? [] : shots,
         p: final ? [] : projectiles.map(p => [p.x, p.y, p.owner.side]),
-        b: all.map(x => [x.x, x.y, x.alive ? x.hp / x.u.hp : 0, x.side, x.windTarget && x.u.windUp > 0 ? 1 - x.windT / x.u.windUp : 0]),
+        b: all.map(x => [x.x, x.y, x.alive ? x.hp / x.u.hp : 0, x.side, x.windTarget && x.u.windUp > 0 ? 1 - x.windT / x.u.windUp : 0, x.hidden ? 1 : 0, x.poison && x.poison.length ? 1 : 0]),
       };
     }
 
@@ -426,6 +582,6 @@ const Engine = (() => {
     return m;
   }
 
-  return { battle, makeArmy, matrix, createBattle, buildSquad, rawStrength, squadsFor, withTraits, leveled, TRAIT_DEFAULTS, SPIN_CAP, CHARGE_RUN, LEVEL_BONUS, MAX_LEVEL };
+  return { SKILL_TYPES, skillParam, describeSkill, applySkills, battle, makeArmy, matrix, createBattle, buildSquad, rawStrength, squadsFor, withTraits, leveled, TRAIT_DEFAULTS, SPIN_CAP, CHARGE_RUN, LEVEL_BONUS, MAX_LEVEL };
 })();
 if (typeof module !== 'undefined') module.exports = Engine;

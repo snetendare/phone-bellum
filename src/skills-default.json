@@ -1,0 +1,135 @@
+{
+ "skills": [
+  {
+   "id": "regen",
+   "type": "regen",
+   "name": "Regeneration",
+   "cost": 100,
+   "params": {}
+  },
+  {
+   "id": "poison",
+   "type": "poison",
+   "name": "Poison shot",
+   "cost": 100,
+   "params": {}
+  },
+  {
+   "id": "stealth",
+   "type": "stealth",
+   "name": "Stealth",
+   "cost": 100,
+   "params": {}
+  },
+  {
+   "id": "armorHp",
+   "type": "armorHp",
+   "name": "Armor and health",
+   "cost": 100,
+   "params": {}
+  },
+  {
+   "id": "spawn",
+   "type": "spawn",
+   "name": "Spawn goblins",
+   "cost": 100,
+   "params": {}
+  },
+  {
+   "id": "rapid",
+   "type": "rapid",
+   "name": "Rapid fire",
+   "cost": 100,
+   "params": {}
+  },
+  {
+   "id": "swift",
+   "type": "swift",
+   "name": "Swift strikes",
+   "cost": 100,
+   "params": {}
+  },
+  {
+   "id": "heavy",
+   "type": "heavy",
+   "name": "Heavy shot",
+   "cost": 100,
+   "params": {}
+  },
+  {
+   "id": "healer",
+   "type": "healer",
+   "name": "Healing touch",
+   "cost": 100,
+   "params": {}
+  },
+  {
+   "id": "range",
+   "type": "range",
+   "name": "Long reach",
+   "cost": 100,
+   "params": {}
+  },
+  {
+   "id": "shrink",
+   "type": "shrink",
+   "name": "Shortsight",
+   "cost": 100,
+   "params": {}
+  }
+ ],
+ "assign": {
+  "Goblin Swarm": [
+   "swift",
+   "regen"
+  ],
+  "Skeleton Archers": [
+   "rapid",
+   "poison"
+  ],
+  "Ember Imps": [
+   "stealth",
+   "swift"
+  ],
+  "Fire Mage": [
+   "range",
+   "shrink"
+  ],
+  "Sniper": [
+   "stealth",
+   "range"
+  ],
+  "Brute": [
+   "armorHp",
+   "spawn"
+  ],
+  "Wisps": [
+   "healer",
+   "regen"
+  ],
+  "Crossbow Volley": [
+   "rapid",
+   "heavy"
+  ],
+  "Ballista": [
+   "heavy",
+   "range"
+  ],
+  "Boar Riders": [
+   "armorHp",
+   "swift"
+  ],
+  "Spinning Golem": [
+   "armorHp",
+   "regen"
+  ],
+  "Blunderbuss Crew": [
+   "swift",
+   "poison"
+  ],
+  "Ogre Smasher": [
+   "spawn",
+   "armorHp"
+  ]
+ }
+}

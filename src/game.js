@@ -21,7 +21,7 @@ const Game = (() => {
   const unitCostOf = (unit) => Math.max(10, Math.round((unit.cost || 1) * SQUAD_COST / 10) * 10);
   // Upgrades cost half the unit's price at the default setting (50 for a 100-gold squad)
   const levelCost = (unit) => Math.max(10, Math.round(CONFIG.levelCostPerTier * (unit.cost || 1) / 5) * 5);
-  const AI = { levelPolicy: 'smart', maxExtraDeploys: 3 }; // levelPolicy: smart | never | all (for experiments)
+  const AI = { levelPolicy: 'smart', maxExtraDeploys: 3, skills: true }; // levelPolicy: smart | never | all (for experiments)
 
   // rows 0-3: enemy zone (row 3 is its front), rows 4-7: no man's land, rows 8-11: player zone (row 8 is its front)
   const zoneRows = (side) => side === 0 ? [8, 9, 10, 11] : [3, 2, 1, 0];
@@ -39,7 +39,54 @@ const Game = (() => {
       round: 1, hp: [START_HP, START_HP], gold: [START_GOLD, START_GOLD],
       armies: [[], []], nextId: [1, 1], history: [], over: false, winner: -1,
       extraDeploys: [0, 0],
+      tech: [{}, {}], // skills bought per unit type: tech[side][unitIdx] = [round bought or 0, round bought or 0]
     };
+  }
+
+  // ---------- skills (bought per unit type, for all squads of that type) ----------
+  // m.units[i].skillDefs = [def or null, def or null], resolved from the unit's two skill slots
+  const skillDef = (m, ui, k) => (m.units[ui].skillDefs || [])[k] || null;
+  const skillCost = (m, ui, k) => { const d = skillDef(m, ui, k); return d ? Math.max(0, Math.round(+d.cost || 0)) : 0; };
+  const hasSkill = (m, side, ui, k) => !!(m.tech && m.tech[side] && m.tech[side][ui] && m.tech[side][ui][k] > 0);
+  // a skill bought this round is hidden from the opponent until the fight
+  const skillVisible = (m, side, ui, k) => hasSkill(m, side, ui, k) && m.tech[side][ui][k] < m.round;
+  function unitFor(m, side, ui) {
+    const base = m.units[ui];
+    const defs = [0, 1].filter(k => hasSkill(m, side, ui, k)).map(k => skillDef(m, ui, k));
+    return defs.length ? E.applySkills(base, defs, m.units) : base;
+  }
+  function canBuySkill(m, side, ui, k) {
+    const d = skillDef(m, ui, k);
+    if (!d || hasSkill(m, side, ui, k)) return false;
+    if (!m.armies[side].some(s => s.unit === ui)) return false; // needs a squad of that type on the board
+    return m.gold[side] >= skillCost(m, ui, k);
+  }
+  function buySkill(m, side, ui, k) {
+    if (!canBuySkill(m, side, ui, k)) return false;
+    m.gold[side] -= skillCost(m, ui, k);
+    if (!m.tech) m.tech = [{}, {}];
+    const t = m.tech[side][ui] || (m.tech[side][ui] = [0, 0]);
+    t[k] = m.round;
+    return true;
+  }
+  function undoSkill(m, side, ui, k) {
+    const t = m.tech && m.tech[side][ui];
+    if (!t || t[k] !== m.round) return false;
+    t[k] = 0;
+    m.gold[side] += skillCost(m, ui, k);
+    return true;
+  }
+
+  // ---------- selling ----------
+  // Squads from earlier rounds sell for half the unit's price (squads placed this round are taken back in full)
+  const sellValue = (m, sq) => Math.floor(unitCostOf(m.units[sq.unit]) / 2 / 5) * 5;
+  function sell(m, side, sqId) {
+    const i = m.armies[side].findIndex(s => s.id === sqId && s.round < m.round);
+    if (i < 0) return 0;
+    const [sq] = m.armies[side].splice(i, 1);
+    const v = sellValue(m, sq);
+    m.gold[side] += v;
+    return v;
   }
 
   function buyDeploy(m, side) {
@@ -85,7 +132,7 @@ const Game = (() => {
     let idx = 0;
     for (const sq of m.armies[side]) {
       const w = tileToWorld(sq.col, sq.row);
-      const b = E.buildSquad(m.units[sq.unit], side, w.x, w.y, sq.id, TILE, idx, sq.level);
+      const b = E.buildSquad(unitFor(m, side, sq.unit), side, w.x, w.y, sq.id, TILE, idx, sq.level);
       idx += b.length;
       out.push(...b);
     }
@@ -101,7 +148,7 @@ const Game = (() => {
     let sum = 0;
     for (const k in res.squads) {
       const s = res.squads[k];
-      if (s.side !== side || s.alive <= 0) continue;
+      if (s.side !== side || s.alive <= 0 || s.squad < 0) continue; // spawned bodies don't count
       const sq = m.armies[side].find(q => q.id === s.squad);
       const value = sq ? (m.units[sq.unit].cost || 1) : 1; // pricier squads hit harder, like their price
       sum += SQUAD_POINTS * value * s.alive / s.total;
@@ -208,8 +255,17 @@ const Game = (() => {
         reserve += levelCost(m.units[sq.unit]);
       }
     }
-    let guard = 0;
     const minCost = Math.min(...m.units.map(unitCostOf));
+    // skills: for unit types it has 2 or more squads of, sometimes buy a skill if a squad is still affordable after
+    if (AI.skills) {
+      const types = Object.keys(own).map(Number).filter(ui => own[ui] >= 2).sort((a, b) => own[b] - own[a]);
+      for (const ui of types) for (const k of [0, 1]) {
+        if (!skillDef(m, ui, k) || hasSkill(m, side, ui, k)) continue;
+        if (m.gold[side] - reserve - skillCost(m, ui, k) < minCost) continue;
+        if (r() < 0.5) buySkill(m, side, ui, k);
+      }
+    }
+    let guard = 0;
     while (m.gold[side] - reserve >= minCost && guard++ < 60) {
       if (deploysLeft(m, side) <= 0) {
         // out of deployments: buy one more only if a squad is still affordable after it
@@ -266,6 +322,7 @@ const Game = (() => {
     COLS, ROWS, TILE, START_HP, START_GOLD, INCOME, LOSER_BONUS, SQUAD_COST, SQUAD_POINTS, SETTINGS, XP_STEPS, xpNeeded, unitCostOf,
     levelCost, isReady, levelUp, undoLevel, aiLevel, AI, CONFIG,
     deploysAllowed, deploysLeft, deployedThisRound, buyDeploy, refundDeploy,
+    skillDef, skillCost, hasSkill, skillVisible, unitFor, canBuySkill, buySkill, undoSkill, sellValue, sell,
     zoneRows, inZone, tileToWorld, createMatch, place, unplace, bodiesFor, startBattle, resolve, aiDeploy, occupied,
   };
 })();
