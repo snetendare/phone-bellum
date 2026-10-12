@@ -911,7 +911,9 @@ const Game = (() => {
   const XP_STEPS = [5, 12, 24];
   const xpNeeded = (unit, level) => unit.bodies * unit.hp * XP_STEPS[level];
   // deployments: how many new squads a side may place per round; extra ones can be bought for the round
-  const CONFIG = { levelCostPerTier: 50, firstRoundDeploys: 3, deploysPerRound: 2, extraDeployCost: 50, deployCap: true };
+  const CONFIG = { incomeStep: 100, levelCostPerTier: 50, firstRoundDeploys: 3, deploysPerRound: 2, extraDeployCost: 50, deployCap: true };
+  // Gold both players get at the start of a round: 250 going into round 2, then 100 more each round (like Mechabellum)
+  const incomeFor = (round) => INCOME + CONFIG.incomeStep * Math.max(0, round - 2);
   const deploysAllowed = (m, side) => CONFIG.deployCap
     ? (m.round === 1 ? CONFIG.firstRoundDeploys : CONFIG.deploysPerRound) + m.extraDeploys[side]
     : Infinity;
@@ -1088,7 +1090,9 @@ const Game = (() => {
     // next round
     m.round++;
     m.extraDeploys = [0, 0];
-    m.gold[0] += INCOME; m.gold[1] += INCOME;
+    const income = incomeFor(m.round);
+    m.gold[0] += income; m.gold[1] += income;
+    summary.income = income;
     const loser = dmg[0] > dmg[1] ? 0 : dmg[1] > dmg[0] ? 1 : -1;
     if (loser >= 0) m.gold[loser] += LOSER_BONUS;
     summary.bonusTo = loser;
@@ -1219,7 +1223,7 @@ const Game = (() => {
   }
 
   return {
-    COLS, ROWS, TILE, START_HP, START_GOLD, INCOME, LOSER_BONUS, SQUAD_COST, SQUAD_POINTS, SETTINGS, XP_STEPS, xpNeeded, unitCostOf,
+    COLS, ROWS, TILE, START_HP, START_GOLD, INCOME, incomeFor, LOSER_BONUS, SQUAD_COST, SQUAD_POINTS, SETTINGS, XP_STEPS, xpNeeded, unitCostOf,
     levelCost, isReady, levelUp, undoLevel, aiLevel, AI, CONFIG,
     deploysAllowed, deploysLeft, deployedThisRound, buyDeploy, refundDeploy,
     skillDef, skillCost, hasSkill, skillVisible, unitFor, canBuySkill, buySkill, undoSkill, sellValue, sell,
@@ -1646,7 +1650,7 @@ if (typeof module !== 'undefined') module.exports = Game;
       <span class="eyebrow">A small auto-battler</span>
       <h2>Phone Bellum</h2>
       <ul>
-        <li>Buy squads with gold each round. A standard squad costs ${Game.SQUAD_COST}.</li>
+        <li>Buy squads with gold each round. A standard squad costs ${Game.SQUAD_COST}. Income grows by ${Game.CONFIG.incomeStep} every round.</li>
         <li>Place them in the bottom four rows. They stay for the whole match.</li>
         <li>You have ${DEPLOY_SECONDS} seconds to deploy, then the armies fight on their own.</li>
         <li>The loser takes damage from every enemy squad still standing.</li>
@@ -1754,7 +1758,7 @@ if (typeof module !== 'undefined') module.exports = Game;
       <h2 class="${cls}">${head}</h2>
       <p class="big">${lines.join(' ')}</p>
       ${lvLines.join('')}
-      <p>Next round: +${Game.INCOME} gold each.${bonus}</p>
+      <p>Next round: +${sum.income || Game.incomeFor(sum.round + 1)} gold each.${bonus}</p>
       ${waiting ? '<p class="status wait">Waiting for your opponent</p>' : `<button class="btn primary" id="next">Next round</button>`}
     </div>`);
     if (waiting) panelInfo('The next round starts when your opponent is ready too.', '', null);
@@ -1901,7 +1905,7 @@ RULES
 - Board: columns 0-11, rows 0-11, tiles 6 m wide. Your zone is rows 0-3; row 3 is your front line, nearest the enemy, and row 0 is the back. The enemy zone is rows 8-11; row 8 is their front. One squad per tile. Squads keep their tile for the whole match.
 - The fight is automatic. Every body walks toward the nearest enemy and attacks once it is in range. Short-range units in front shield long-range units behind. Spreading out limits splash damage; columns decide which enemies you meet first.
 - The round's loser loses health: for each surviving enemy squad, 2 x (its price / 100), scaled by the share of its bodies alive. If time runs out, both sides take damage. Health starts at 40 and the match ends at 0.
-- Gold: +${Game.INCOME} per round for both, +${Game.LOSER_BONUS} extra for the round's loser. Unspent gold carries over.
+- Gold: both players get ${Game.incomeFor(2)} going into round 2, and ${Game.CONFIG.incomeStep} more every round after that (next round: +${Game.incomeFor(m.round + 1)}). The round's loser gets +${Game.LOSER_BONUS} extra. Unspent gold carries over.
 - This round you may place ${Game.deploysAllowed(m, 1)} new squad(s). Each extra deployment costs ${Game.CONFIG.extraDeployCost} gold.
 - Squads earn XP by dealing and taking damage. A squad marked READY TO LEVEL UP can be upgraded for its unit's level-up cost: level 2 doubles health and hit, level 3 triples them. Leveling up chaff (many cheap bodies) gives the enemy lots of XP when they die.
 - Skills: each unit has 2. Buying one (its price) gives it to ALL your squads of that unit, now and later. You need at least one squad of that unit on the board (placing one this round counts).

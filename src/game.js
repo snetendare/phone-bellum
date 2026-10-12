@@ -11,7 +11,9 @@ const Game = (() => {
   const XP_STEPS = [5, 12, 24];
   const xpNeeded = (unit, level) => unit.bodies * unit.hp * XP_STEPS[level];
   // deployments: how many new squads a side may place per round; extra ones can be bought for the round
-  const CONFIG = { levelCostPerTier: 50, firstRoundDeploys: 3, deploysPerRound: 2, extraDeployCost: 50, deployCap: true };
+  const CONFIG = { incomeStep: 100, levelCostPerTier: 50, firstRoundDeploys: 3, deploysPerRound: 2, extraDeployCost: 50, deployCap: true };
+  // Gold both players get at the start of a round: 250 going into round 2, then 100 more each round (like Mechabellum)
+  const incomeFor = (round) => INCOME + CONFIG.incomeStep * Math.max(0, round - 2);
   const deploysAllowed = (m, side) => CONFIG.deployCap
     ? (m.round === 1 ? CONFIG.firstRoundDeploys : CONFIG.deploysPerRound) + m.extraDeploys[side]
     : Infinity;
@@ -188,7 +190,9 @@ const Game = (() => {
     // next round
     m.round++;
     m.extraDeploys = [0, 0];
-    m.gold[0] += INCOME; m.gold[1] += INCOME;
+    const income = incomeFor(m.round);
+    m.gold[0] += income; m.gold[1] += income;
+    summary.income = income;
     const loser = dmg[0] > dmg[1] ? 0 : dmg[1] > dmg[0] ? 1 : -1;
     if (loser >= 0) m.gold[loser] += LOSER_BONUS;
     summary.bonusTo = loser;
@@ -319,7 +323,7 @@ const Game = (() => {
   }
 
   return {
-    COLS, ROWS, TILE, START_HP, START_GOLD, INCOME, LOSER_BONUS, SQUAD_COST, SQUAD_POINTS, SETTINGS, XP_STEPS, xpNeeded, unitCostOf,
+    COLS, ROWS, TILE, START_HP, START_GOLD, INCOME, incomeFor, LOSER_BONUS, SQUAD_COST, SQUAD_POINTS, SETTINGS, XP_STEPS, xpNeeded, unitCostOf,
     levelCost, isReady, levelUp, undoLevel, aiLevel, AI, CONFIG,
     deploysAllowed, deploysLeft, deployedThisRound, buyDeploy, refundDeploy,
     skillDef, skillCost, hasSkill, skillVisible, unitFor, canBuySkill, buySkill, undoSkill, sellValue, sell,
