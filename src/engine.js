@@ -1,11 +1,18 @@
 // ===== Battle engine (shared by headless tests and the page) =====
 const Engine = (() => {
-  const TRAIT_DEFAULTS = { burst: 1, pellets: 1, spinUp: 0, pierce: 0, projSpeed: 0, minRange: 0, charge: 1, knockback: 0, windUp: 0 };
+  const TRAIT_DEFAULTS = { burst: 1, pellets: 1, spinUp: 0, pierce: 0, projSpeed: 0, minRange: 0, charge: 1, knockback: 0, windUp: 0, flame: 0 };
   const BURST_GAP = 0.15;      // seconds between shots in a burst
   const SHOTGUN_COS = Math.sqrt(3) / 2; // pellets spread 30 degrees to each side of the target (cos 30)
   // Only + - * / and sqrt from here on: those give identical results in every browser,
   // so two players' phones run exactly the same battle.
   const hyp = (x, y) => Math.sqrt(x * x + y * y);
+  // cosine of an angle in degrees from a Taylor series (Math.cos may differ between browsers)
+  function cosDeg(deg) {
+    const a = Math.max(0, Math.min(180, deg)) * 3.141592653589793 / 180;
+    let term = 1, sum = 1;
+    for (let k = 1; k <= 12; k++) { term = -term * a * a / ((2 * k - 1) * (2 * k)); sum += term; }
+    return sum;
+  }
   const SPIN_CAP = 3;          // spin-up tops out at 3x attack speed
   const CHARGE_RUN = 5;        // metres a unit must run before its next attack counts as a charge
   const PIERCE_DEPTH = 10;     // metres a piercing shot travels past its target
@@ -129,7 +136,7 @@ const Engine = (() => {
     const n = s * u.bodies;
     const hp = n * u.hp;
     const cycle = 1 / Math.max(0.01, u.aps); // wind-up only happens when the unit sets up after moving, so it isn't counted per attack
-    const dps = n * u.hit / cycle * Math.max(1, u.burst) * Math.max(1, u.pellets);
+    const dps = n * u.hit / cycle * Math.max(1, u.burst) * (u.flame > 0 ? 1 : Math.max(1, u.pellets));
     return { squads: s, bodies: n, hp, dps, strength: hp * dps };
   }
 
@@ -328,6 +335,7 @@ const Engine = (() => {
 
     // one shot, or a spread of shotgun pellets each at a different body in the cone
     function aim(b, primary, valid) {
+      if (b.u.flame > 0) return flameTargets(b, primary);
       const n = Math.max(1, Math.round(b.u.pellets));
       if (n === 1) return [primary];
       const ax = primary.x - b.x, ay = primary.y - b.y, al = hyp(ax, ay);
@@ -339,6 +347,22 @@ const Engine = (() => {
       if (!cone.length) cone.push(primary);
       const out = [];
       for (let k = 0; k < n; k++) out.push(cone[k % cone.length]);
+      return out;
+    }
+
+    // flame cone: every enemy in range inside the cone toward the target, hidden ones too
+    function flameTargets(b, primary) {
+      const ax = primary.x - b.x, ay = primary.y - b.y, al = hyp(ax, ay);
+      const c = cosDeg(b.u.flame), reach = R(b) + 0.01;
+      const out = [];
+      for (const f of sides[1 - b.side]) {
+        if (!f.alive) continue;
+        const fx = f.x - b.x, fy = f.y - b.y, fl = hyp(fx, fy);
+        if (fl > reach || fl < b.u.minRange) continue;
+        if (f === primary || !al || !fl || (ax * fx + ay * fy) / (al * fl) >= c - 1e-12) out.push(f);
+      }
+      if (!out.includes(primary)) out.push(primary);
+      out.flame = [ax, ay, al];
       return out;
     }
 
@@ -359,12 +383,19 @@ const Engine = (() => {
       for (const tgt of targets) {
         const dx = tgt.x - b.x, dy = tgt.y - b.y, d = hyp(dx, dy) || 1;
         const dirX = dx / d, dirY = dy / d;
-        if (b.u.projSpeed > 0) {
+        if (targets.flame) {
+          hurt(b, tgt, hit, b.x, b.y); // flames land at once, no splash or pierce
+        } else if (b.u.projSpeed > 0) {
           projectiles.push({ owner: b, x: b.x, y: b.y, fx: b.x, fy: b.y, tx: tgt.x, ty: tgt.y, dirX, dirY, left: d, hit });
         } else {
           impact(b, tgt.x, tgt.y, tgt, hit, dirX, dirY, b.x, b.y);
         }
-        if (opts.record) shots.push([b.x, b.y, tgt.x, tgt.y, b.side, b.u.splash, charged ? 1 : 0]);
+        if (opts.record && !targets.flame) shots.push([b.x, b.y, tgt.x, tgt.y, b.side, b.u.splash, charged ? 1 : 0]);
+      }
+      // a flame is drawn once, as a wedge from the unit out to its range
+      if (opts.record && targets.flame) {
+        const [ax, ay, al] = targets.flame, r = R(b), k = al ? r / al : 0;
+        shots.push([b.x, b.y, b.x + ax * k, b.y + ay * k, b.side, 0, charged ? 1 : 0, 0, b.u.flame]);
       }
     }
 

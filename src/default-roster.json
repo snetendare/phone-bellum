@@ -442,10 +442,10 @@
   },
   {
    "burst": 1,
-   "pellets": 10,
+   "pellets": 1,
    "spinUp": 0,
-   "pierce": 5,
-   "projSpeed": 39,
+   "pierce": 0,
+   "projSpeed": 0,
    "minRange": 0,
    "charge": 1,
    "knockback": 0,
@@ -457,11 +457,11 @@
    "cost": 400,
    "bodies": 1,
    "hp": 2000,
-   "hit": 1,
+   "hit": 20,
    "aps": 4,
    "range": 15,
    "speed": 2,
-   "splash": 2.5,
+   "splash": 0,
    "shape": "bar",
    "color": "#b95018",
    "skills": [
@@ -475,7 +475,8 @@
    "skillMods": [
     null,
     null
-   ]
+   ],
+   "flame": 30
   },
   {
    "burst": 1,

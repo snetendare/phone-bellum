@@ -256,6 +256,14 @@ a { color: var(--you); }
     const muted = css('--muted'), gold = css('--gold');
     for (const e of fx) {
       const a = 1 - e.age / e.life;
+      if (e.kind === 'flame') { // fire cone, drawn under the bodies
+        const cx = PX(e.x1), cy = PY(e.y1), ex = PX(e.x2), ey = PY(e.y2);
+        const ang = Math.atan2(ey - cy, ex - cx), half = e.half * Math.PI / 180, rr = Math.hypot(ex - cx, ey - cy);
+        const grd = ctx.createRadialGradient(cx, cy, 0, cx, cy, rr);
+        grd.addColorStop(0, 'rgba(255,210,90,0.6)'); grd.addColorStop(0.6, 'rgba(255,120,40,0.35)'); grd.addColorStop(1, 'rgba(255,70,20,0.05)');
+        ctx.fillStyle = grd; ctx.globalAlpha = 0.4 + 0.6 * a;
+        ctx.beginPath(); ctx.moveTo(cx, cy); ctx.arc(cx, cy, rr, ang - half, ang + half); ctx.closePath(); ctx.fill();
+      }
       if (e.kind === 'death') {
         ctx.strokeStyle = teamCol(e.side); ctx.globalAlpha = 0.5 * a; ctx.lineWidth = 1;
         ctx.beginPath(); ctx.arc(PX(e.x), PY(e.y), e.r * (1 + e.age / e.life), 0, Math.PI * 2); ctx.stroke();
@@ -717,7 +725,8 @@ a { color: var(--you); }
       if (u.defense === 'armor') t.push(`armor ${u.defVal}`);
       if (u.defense === 'ward') t.push(`ward ${u.defVal} (max damage per hit)`);
       if (u.burst > 1) t.push(`burst ${u.burst}`);
-      if (u.pellets > 1) t.push(`shotgun ${u.pellets}`);
+      if (u.flame > 0) t.push(`flamethrower: every attack hits all enemies in range within ${u.flame}° to each side of its target`);
+      else if (u.pellets > 1) t.push(`shotgun ${u.pellets}`);
       if (u.spinUp > 0) t.push(`spin-up ${u.spinUp}%/s`);
       if (u.pierce > 0) t.push(`pierce ${u.pierce}`);
       if (u.projSpeed > 0) t.push(`projectile ${u.projSpeed} m/s`);
@@ -883,7 +892,8 @@ Actions run in this order: sell, levelUp, skills, extraDeployments, place. Anyth
   }
 
   function absorb() {
-    for (const s of bt.lastShots()) fx.push({ kind: s[7] === 1 ? 'heal' : 'shot', x1: s[0], y1: s[1], x2: s[2], y2: s[3], side: s[4], splash: s[5], charged: s[6], age: 0, life: s[7] === 1 ? 0.35 : 0.18 });
+    for (const s of bt.lastShots()) if (s[8] > 0) fx.push({ kind: 'flame', x1: s[0], y1: s[1], x2: s[2], y2: s[3], side: s[4], half: s[8], age: 0, life: 0.3 });
+    else fx.push({ kind: s[7] === 1 ? 'heal' : 'shot', x1: s[0], y1: s[1], x2: s[2], y2: s[3], side: s[4], splash: s[5], charged: s[6], age: 0, life: s[7] === 1 ? 0.35 : 0.18 });
     for (const b of bt.bodies) if (!b.alive && !b._gone) { b._gone = true; fx.push({ kind: 'death', x: b.x, y: b.y, r: radius(b.u), side: b.side, age: 0, life: 0.5 }); }
   }
 
@@ -1005,7 +1015,8 @@ Actions run in this order: sell, levelUp, skills, extraDeployments, place. Anyth
     const bad = units.map((v, j) => [row[j], v.name]).filter(x => x[0] < -0.3).sort((a, b) => a[0] - b[0]).slice(0, 3);
     const tr = [];
     if (u.burst > 1) tr.push(`Burst ${u.burst}`);
-    if (u.pellets > 1) tr.push(`Shotgun ${u.pellets}`);
+    if (u.flame > 0) tr.push(`Flame cone ${u.flame}°`);
+    else if (u.pellets > 1) tr.push(`Shotgun ${u.pellets}`);
     if (u.spinUp > 0) tr.push(`Spin-up ${u.spinUp}%/s`);
     if (u.pierce > 0) tr.push(`Pierce ${u.pierce}`);
     if (u.projSpeed > 0) tr.push(`Bolts ${u.projSpeed} m/s`);

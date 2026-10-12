@@ -321,6 +321,7 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
       <div class="rule"><h3>Ward</h3><p>No single hit can deal more than the ward value. It shuts down big hits and ignores small ones.</p></div>
       <div class="rule"><h3>Range vs speed</h3><p>A ranged unit gets free shots while the enemy closes the gap. Fast units shrink that window.</p></div>
       <div class="rule"><h3>Burst and shotgun</h3><p>A burst fires its shots 0.15 s apart along the line toward its first target. Each shot hits the first body in its path: the target while it lives, then whoever stands behind it. If the line is empty, the shot misses. A shotgun fires all its pellets at once into a 60° cone, each at a different body, wrapping back to bodies already hit when it runs out.</p></div>
+      <div class="rule"><h3>Flame cone</h3><p>Like the Vulcan: every attack hits all enemies in range inside a cone toward the target, stealthed ones too, instantly. Damage grows with how many enemies stand in the fire, so it melts swarms, while armor eats a big share of each small tick and longer-ranged units can shoot it before it gets close.</p></div>
       <div class="rule"><h3>Wind-up</h3><p>The first time an enemy is in range, the unit sets up for the wind-up time, like a sniper lying down. Once set up, it fires at its normal rate at anything in range. If it has to move, it gets up, and it sets up again when an enemy is next in range. Moving during the setup cancels it.</p></div>
       <div class="rule"><h3>Spin-up</h3><p>Raises attack speed every second the unit keeps firing, up to three times its base speed.</p></div>
       <div class="rule"><h3>Pierce and projectiles</h3><p>A piercing shot also hits bodies lined up behind its target. A projectile with a speed travels in a straight line and hits the first enemy it touches, so units moving sideways can dodge it while units charging straight at it get hit.</p></div>
@@ -350,6 +351,7 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
     ['minRange', 'Minimum range (m)', 1, 'Can’t hit anything closer than this.'],
     ['charge', 'Charge (× damage)', 0.5, 'Next hit after running 5 m. 1 = off.'],
     ['knockback', 'Knockback (m)', 0.5, 'How far a big hit pushes a small body.'],
+    ['flame', 'Flame cone (°)', 5, 'Sprays fire this many degrees to each side, hitting every enemy in range inside the cone at once. Pellets, splash, pierce and projectile speed are ignored. 0 = off.'],
     ['windUp', 'Wind-up (s)', 0.1, 'Sets up this long when an enemy first comes in range, then fires normally. Has to set up again after moving.'],
   ];
   const LEVERS = [
@@ -523,6 +525,7 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
             if (k === 'level') v = Math.min(2, Math.round(v));
             if (k === 'pierce') v = Math.round(v);
             if (k === 'charge') v = Math.max(1, v);
+            if (k === 'flame') v = Math.min(90, v);
             u[k] = Math.max(0, v);
           }
           save(); renderUnitSummaries(); scheduleRun();
@@ -564,7 +567,8 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
       const def = u.defense === 'armor' ? ` · armor ${u.defVal}` : u.defense === 'ward' ? ` · ward ${u.defVal}` : '';
       const tr = [];
       if (u.burst > 1) tr.push(`burst ${u.burst}`);
-      if (u.pellets > 1) tr.push(`shotgun ${u.pellets}`);
+      if (u.flame > 0) tr.push(`flame ${fmt(u.flame)}°`);
+      else if (u.pellets > 1) tr.push(`shotgun ${u.pellets}`);
       if (u.spinUp > 0) tr.push(`spin-up ${fmt(u.spinUp)}%/s`);
       if (u.pierce > 0) tr.push(`pierce ${u.pierce}`);
       if (u.projSpeed > 0) tr.push(`shot ${fmt(u.projSpeed)} m/s`);
@@ -577,8 +581,8 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
       d.querySelector('.sum-line').textContent =
         `${u.bodies} × ${fmt(u.hp)} hp · ${fmt(u.hit)} dmg × ${fmt(u.aps, 2)}/s · ${fmt(u.range)} m${u.splash ? ` · splash ${u.splash}` : ''}${def}${tr.length ? ' · ' + tr.join(' · ') : ''}`;
       d.querySelector('.bar i').style.width = (r.strength / max * 100).toFixed(1) + '%';
-      const squadHp = u.bodies * u.hp, squadDps = u.bodies * u.hit * u.aps * Math.max(1, u.burst) * Math.max(1, u.pellets);
-      const uncounted = (u.spinUp > 0 || u.pierce > 0 || u.charge > 1) ? '<span>Spin-up, pierce and charge are not counted in raw strength.</span>' : '';
+      const squadHp = u.bodies * u.hp, squadDps = u.bodies * u.hit * u.aps * Math.max(1, u.burst) * (u.flame > 0 ? 1 : Math.max(1, u.pellets));
+      const uncounted = (u.spinUp > 0 || u.pierce > 0 || u.charge > 1 || u.flame > 0) ? '<span>Spin-up, pierce, charge and flame are not counted in raw strength (damage/s is per body hit).</span>' : '';
       d.querySelector('.derived').innerHTML =
         `<span>One squad: <b>${fmt(squadHp)}</b> health, <b>${fmt(squadDps, 1)}</b> damage/s</span>
          <span>With ${fmt(g.budget)} gold: <b>${r.squads}</b> squad${r.squads === 1 ? '' : 's'}, <b>${r.bodies}</b> bodies</span>
@@ -1002,6 +1006,15 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
       if (sh[7] === 1) { // a heal
         ctx.strokeStyle = css('--win'); ctx.globalAlpha = 0.7; ctx.lineWidth = 1.5; ctx.setLineDash([2, 3]);
         ctx.beginPath(); ctx.moveTo(X(sh[0]), Y(sh[1])); ctx.lineTo(X(sh[2]), Y(sh[3])); ctx.stroke(); ctx.setLineDash([]);
+        continue;
+      }
+      if (sh[8] > 0) { // a flame cone
+        const cx = X(sh[0]), cy = Y(sh[1]), ex = X(sh[2]), ey = Y(sh[3]);
+        const ang = Math.atan2(ey - cy, ex - cx), half = sh[8] * Math.PI / 180, rr = Math.hypot(ex - cx, ey - cy);
+        const grd = ctx.createRadialGradient(cx, cy, 0, cx, cy, rr);
+        grd.addColorStop(0, 'rgba(255,200,80,0.55)'); grd.addColorStop(1, 'rgba(255,90,30,0.08)');
+        ctx.fillStyle = grd; ctx.globalAlpha = 1;
+        ctx.beginPath(); ctx.moveTo(cx, cy); ctx.arc(cx, cy, rr, ang - half, ang + half); ctx.closePath(); ctx.fill();
         continue;
       }
       ctx.strokeStyle = sh[4] === 0 ? colA : colB; ctx.globalAlpha = 0.55; ctx.lineWidth = sh[6] ? 3 : 1;

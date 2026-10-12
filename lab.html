@@ -332,6 +332,7 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
       <div class="rule"><h3>Ward</h3><p>No single hit can deal more than the ward value. It shuts down big hits and ignores small ones.</p></div>
       <div class="rule"><h3>Range vs speed</h3><p>A ranged unit gets free shots while the enemy closes the gap. Fast units shrink that window.</p></div>
       <div class="rule"><h3>Burst and shotgun</h3><p>A burst fires its shots 0.15 s apart along the line toward its first target. Each shot hits the first body in its path: the target while it lives, then whoever stands behind it. If the line is empty, the shot misses. A shotgun fires all its pellets at once into a 60° cone, each at a different body, wrapping back to bodies already hit when it runs out.</p></div>
+      <div class="rule"><h3>Flame cone</h3><p>Like the Vulcan: every attack hits all enemies in range inside a cone toward the target, stealthed ones too, instantly. Damage grows with how many enemies stand in the fire, so it melts swarms, while armor eats a big share of each small tick and longer-ranged units can shoot it before it gets close.</p></div>
       <div class="rule"><h3>Wind-up</h3><p>The first time an enemy is in range, the unit sets up for the wind-up time, like a sniper lying down. Once set up, it fires at its normal rate at anything in range. If it has to move, it gets up, and it sets up again when an enemy is next in range. Moving during the setup cancels it.</p></div>
       <div class="rule"><h3>Spin-up</h3><p>Raises attack speed every second the unit keeps firing, up to three times its base speed.</p></div>
       <div class="rule"><h3>Pierce and projectiles</h3><p>A piercing shot also hits bodies lined up behind its target. A projectile with a speed travels in a straight line and hits the first enemy it touches, so units moving sideways can dodge it while units charging straight at it get hit.</p></div>
@@ -475,12 +476,19 @@ const Shapes = (() => {
 
 // ===== Battle engine (shared by headless tests and the page) =====
 const Engine = (() => {
-  const TRAIT_DEFAULTS = { burst: 1, pellets: 1, spinUp: 0, pierce: 0, projSpeed: 0, minRange: 0, charge: 1, knockback: 0, windUp: 0 };
+  const TRAIT_DEFAULTS = { burst: 1, pellets: 1, spinUp: 0, pierce: 0, projSpeed: 0, minRange: 0, charge: 1, knockback: 0, windUp: 0, flame: 0 };
   const BURST_GAP = 0.15;      // seconds between shots in a burst
   const SHOTGUN_COS = Math.sqrt(3) / 2; // pellets spread 30 degrees to each side of the target (cos 30)
   // Only + - * / and sqrt from here on: those give identical results in every browser,
   // so two players' phones run exactly the same battle.
   const hyp = (x, y) => Math.sqrt(x * x + y * y);
+  // cosine of an angle in degrees from a Taylor series (Math.cos may differ between browsers)
+  function cosDeg(deg) {
+    const a = Math.max(0, Math.min(180, deg)) * 3.141592653589793 / 180;
+    let term = 1, sum = 1;
+    for (let k = 1; k <= 12; k++) { term = -term * a * a / ((2 * k - 1) * (2 * k)); sum += term; }
+    return sum;
+  }
   const SPIN_CAP = 3;          // spin-up tops out at 3x attack speed
   const CHARGE_RUN = 5;        // metres a unit must run before its next attack counts as a charge
   const PIERCE_DEPTH = 10;     // metres a piercing shot travels past its target
@@ -604,7 +612,7 @@ const Engine = (() => {
     const n = s * u.bodies;
     const hp = n * u.hp;
     const cycle = 1 / Math.max(0.01, u.aps); // wind-up only happens when the unit sets up after moving, so it isn't counted per attack
-    const dps = n * u.hit / cycle * Math.max(1, u.burst) * Math.max(1, u.pellets);
+    const dps = n * u.hit / cycle * Math.max(1, u.burst) * (u.flame > 0 ? 1 : Math.max(1, u.pellets));
     return { squads: s, bodies: n, hp, dps, strength: hp * dps };
   }
 
@@ -803,6 +811,7 @@ const Engine = (() => {
 
     // one shot, or a spread of shotgun pellets each at a different body in the cone
     function aim(b, primary, valid) {
+      if (b.u.flame > 0) return flameTargets(b, primary);
       const n = Math.max(1, Math.round(b.u.pellets));
       if (n === 1) return [primary];
       const ax = primary.x - b.x, ay = primary.y - b.y, al = hyp(ax, ay);
@@ -814,6 +823,22 @@ const Engine = (() => {
       if (!cone.length) cone.push(primary);
       const out = [];
       for (let k = 0; k < n; k++) out.push(cone[k % cone.length]);
+      return out;
+    }
+
+    // flame cone: every enemy in range inside the cone toward the target, hidden ones too
+    function flameTargets(b, primary) {
+      const ax = primary.x - b.x, ay = primary.y - b.y, al = hyp(ax, ay);
+      const c = cosDeg(b.u.flame), reach = R(b) + 0.01;
+      const out = [];
+      for (const f of sides[1 - b.side]) {
+        if (!f.alive) continue;
+        const fx = f.x - b.x, fy = f.y - b.y, fl = hyp(fx, fy);
+        if (fl > reach || fl < b.u.minRange) continue;
+        if (f === primary || !al || !fl || (ax * fx + ay * fy) / (al * fl) >= c - 1e-12) out.push(f);
+      }
+      if (!out.includes(primary)) out.push(primary);
+      out.flame = [ax, ay, al];
       return out;
     }
 
@@ -834,12 +859,19 @@ const Engine = (() => {
       for (const tgt of targets) {
         const dx = tgt.x - b.x, dy = tgt.y - b.y, d = hyp(dx, dy) || 1;
         const dirX = dx / d, dirY = dy / d;
-        if (b.u.projSpeed > 0) {
+        if (targets.flame) {
+          hurt(b, tgt, hit, b.x, b.y); // flames land at once, no splash or pierce
+        } else if (b.u.projSpeed > 0) {
           projectiles.push({ owner: b, x: b.x, y: b.y, fx: b.x, fy: b.y, tx: tgt.x, ty: tgt.y, dirX, dirY, left: d, hit });
         } else {
           impact(b, tgt.x, tgt.y, tgt, hit, dirX, dirY, b.x, b.y);
         }
-        if (opts.record) shots.push([b.x, b.y, tgt.x, tgt.y, b.side, b.u.splash, charged ? 1 : 0]);
+        if (opts.record && !targets.flame) shots.push([b.x, b.y, tgt.x, tgt.y, b.side, b.u.splash, charged ? 1 : 0]);
+      }
+      // a flame is drawn once, as a wedge from the unit out to its range
+      if (opts.record && targets.flame) {
+        const [ax, ay, al] = targets.flame, r = R(b), k = al ? r / al : 0;
+        shots.push([b.x, b.y, b.x + ax * k, b.y + ay * k, b.side, 0, charged ? 1 : 0, 0, b.u.flame]);
       }
     }
 
@@ -1082,7 +1114,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
 
 
 (() => {
-  const SAMPLE = {"goldCosts":true,"settings":{"budget":100,"distance":40,"spacing":3.2,"minDmgPct":0,"timeCap":60,"dt":0.05},"skills":[{"id":"regen","type":"regen","name":"Regeneration","cost":100,"params":{}},{"id":"poison","type":"poison","name":"Poison shot","cost":100,"params":{"pct":150}},{"id":"stealth","type":"stealth","name":"Stealth","cost":100,"params":{}},{"id":"armorHp","type":"armorHp","name":"Armor and health","cost":200,"params":{}},{"id":"spawn","type":"spawn","name":"Spawn goblins","cost":200,"params":{}},{"id":"rapid","type":"rapid","name":"Rapid fire","cost":100,"params":{}},{"id":"swift","type":"swift","name":"Swift strikes","cost":100,"params":{}},{"id":"heavy","type":"heavy","name":"Heavy shot","cost":100,"params":{}},{"id":"healer","type":"healer","name":"Healing touch","cost":200,"params":{}},{"id":"range","type":"range","name":"Long reach","cost":200,"params":{}},{"id":"shrink","type":"shrink","name":"Shortsight","cost":100,"params":{}},{"id":"skmv5oxj501","type":"ward","name":"Ward","cost":100,"params":{}},{"id":"skmv5oxpgk2","type":"slow","name":"Slow","cost":100,"params":{}}],"units":[{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"none","defVal":0,"level":0,"name":"Goblin Swarm","cost":100,"bodies":12,"hp":28,"hit":16,"aps":1.2,"range":2,"speed":12,"splash":0,"shape":"triangle","color":"#9BD35A","skills":["swift","shrink"],"skillsOn":[false,false],"skillMods":[null,null]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"none","defVal":0,"level":0,"name":"Skeleton Archers","cost":100,"bodies":8,"hp":32,"hit":12,"aps":0.8,"range":20,"speed":2.5,"splash":0,"shape":"triangle","color":"#E9E3CF","skills":["range","rapid"],"skillsOn":[false,false],"skillMods":[null,null]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"none","defVal":0,"level":0,"name":"Ember Imps","cost":100,"bodies":4,"hp":110,"hit":20,"aps":0.8,"range":10,"speed":4,"splash":3,"shape":"pentagon","color":"#FFA94D","skills":["swift","heavy"],"skillsOn":[false,false],"skillMods":[null,null]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"none","defVal":0,"level":0,"name":"Fire Mage","cost":100,"bodies":1,"hp":150,"hit":35,"aps":0.8,"range":26,"speed":3,"splash":4,"shape":"hexagon","color":"#fb0022","skills":["range","armorHp"],"skillsOn":[false,false],"skillMods":[null,null]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":1,"defense":"none","defVal":0,"level":0,"name":"Sniper","cost":100,"bodies":1,"hp":200,"hit":230,"aps":0.25,"range":35,"speed":2,"splash":0,"shape":"cross","color":"#F7D154","skills":["rapid","spawn"],"skillsOn":[false,false],"skillMods":[null,null]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"armor","defVal":6,"level":0,"name":"Brute","cost":200,"bodies":1,"hp":1100,"hit":98,"aps":0.5,"range":2,"speed":5,"splash":2.1,"shape":"square","color":"#8D99AE","skills":["armorHp","swift"],"skillsOn":[false,false],"skillMods":[null,null]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":20,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"none","defVal":40,"level":0,"name":"Wisps","cost":100,"bodies":3,"hp":80,"hit":70,"aps":0.8,"range":15,"speed":5,"splash":0,"shape":"ring","color":"#ff90ff","skills":["stealth","skmv5oxj501"],"skillsOn":[false,false],"skillMods":[null,{"params":{},"cost":200}]},{"burst":6,"pellets":2,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0.2,"defense":"none","defVal":0,"level":0,"name":"Leaf Wizard","cost":200,"bodies":1,"hp":300,"hit":21,"aps":0.45,"range":27,"speed":8,"splash":0,"shape":"hexagon","color":"#00d200","skills":["rapid","range"],"skillsOn":[false,false],"skillMods":[null,null]},{"burst":1,"pellets":1,"spinUp":0,"pierce":5,"projSpeed":35,"minRange":0,"charge":1,"knockback":0,"windUp":0.5,"defense":"none","defVal":0,"level":0,"name":"Earth Wizard","cost":200,"bodies":1,"hp":650,"hit":440,"aps":0.2,"range":20,"speed":3,"splash":2,"shape":"circle","color":"#24590d","skills":["regen","range"],"skillsOn":[false,false],"skillMods":[null,null]},{"burst":1,"pellets":10,"spinUp":0,"pierce":5,"projSpeed":39,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"none","defVal":0,"level":0,"name":"Flame Wizard","cost":400,"bodies":1,"hp":2000,"hit":1,"aps":4,"range":15,"speed":2,"splash":2.5,"shape":"bar","color":"#b95018","skills":["armorHp","range"],"skillsOn":[false,false],"skillMods":[null,null]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"none","defVal":0,"level":0,"name":"Steel Wizard","cost":400,"bodies":1,"hp":1800,"hit":150,"aps":0.9,"range":15,"speed":2,"splash":2,"shape":"bar","color":"#57535a","skills":["range","heavy"],"skillsOn":[false,false],"skillMods":[null,{"params":{"slow":20,"hit":20}}]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"none","defVal":0,"level":0,"name":"Slime Wizard","cost":400,"bodies":1,"hp":700,"hit":450,"aps":0.15,"range":20,"speed":4,"splash":5,"shape":"ring","color":"#81f038","skills":["skmv5oxpgk2","range"],"skillsOn":[false,false],"skillMods":[null,null]}]};
+  const SAMPLE = {"goldCosts":true,"settings":{"budget":100,"distance":40,"spacing":3.2,"minDmgPct":0,"timeCap":60,"dt":0.05},"skills":[{"id":"regen","type":"regen","name":"Regeneration","cost":100,"params":{}},{"id":"poison","type":"poison","name":"Poison shot","cost":100,"params":{"pct":150}},{"id":"stealth","type":"stealth","name":"Stealth","cost":100,"params":{}},{"id":"armorHp","type":"armorHp","name":"Armor and health","cost":200,"params":{}},{"id":"spawn","type":"spawn","name":"Spawn goblins","cost":200,"params":{}},{"id":"rapid","type":"rapid","name":"Rapid fire","cost":100,"params":{}},{"id":"swift","type":"swift","name":"Swift strikes","cost":100,"params":{}},{"id":"heavy","type":"heavy","name":"Heavy shot","cost":100,"params":{}},{"id":"healer","type":"healer","name":"Healing touch","cost":200,"params":{}},{"id":"range","type":"range","name":"Long reach","cost":200,"params":{}},{"id":"shrink","type":"shrink","name":"Shortsight","cost":100,"params":{}},{"id":"skmv5oxj501","type":"ward","name":"Ward","cost":100,"params":{}},{"id":"skmv5oxpgk2","type":"slow","name":"Slow","cost":100,"params":{}}],"units":[{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"none","defVal":0,"level":0,"name":"Goblin Swarm","cost":100,"bodies":12,"hp":28,"hit":16,"aps":1.2,"range":2,"speed":12,"splash":0,"shape":"triangle","color":"#9BD35A","skills":["swift","shrink"],"skillsOn":[false,false],"skillMods":[null,null]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"none","defVal":0,"level":0,"name":"Skeleton Archers","cost":100,"bodies":8,"hp":32,"hit":12,"aps":0.8,"range":20,"speed":2.5,"splash":0,"shape":"triangle","color":"#E9E3CF","skills":["range","rapid"],"skillsOn":[false,false],"skillMods":[null,null]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"none","defVal":0,"level":0,"name":"Ember Imps","cost":100,"bodies":4,"hp":110,"hit":20,"aps":0.8,"range":10,"speed":4,"splash":3,"shape":"pentagon","color":"#FFA94D","skills":["swift","heavy"],"skillsOn":[false,false],"skillMods":[null,null]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"none","defVal":0,"level":0,"name":"Fire Mage","cost":100,"bodies":1,"hp":150,"hit":35,"aps":0.8,"range":26,"speed":3,"splash":4,"shape":"hexagon","color":"#fb0022","skills":["range","armorHp"],"skillsOn":[false,false],"skillMods":[null,null]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":1,"defense":"none","defVal":0,"level":0,"name":"Sniper","cost":100,"bodies":1,"hp":200,"hit":230,"aps":0.25,"range":35,"speed":2,"splash":0,"shape":"cross","color":"#F7D154","skills":["rapid","spawn"],"skillsOn":[false,false],"skillMods":[null,null]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"armor","defVal":6,"level":0,"name":"Brute","cost":200,"bodies":1,"hp":1100,"hit":98,"aps":0.5,"range":2,"speed":5,"splash":2.1,"shape":"square","color":"#8D99AE","skills":["armorHp","swift"],"skillsOn":[false,false],"skillMods":[null,null]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":20,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"none","defVal":40,"level":0,"name":"Wisps","cost":100,"bodies":3,"hp":80,"hit":70,"aps":0.8,"range":15,"speed":5,"splash":0,"shape":"ring","color":"#ff90ff","skills":["stealth","skmv5oxj501"],"skillsOn":[false,false],"skillMods":[null,{"params":{},"cost":200}]},{"burst":6,"pellets":2,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0.2,"defense":"none","defVal":0,"level":0,"name":"Leaf Wizard","cost":200,"bodies":1,"hp":300,"hit":21,"aps":0.45,"range":27,"speed":8,"splash":0,"shape":"hexagon","color":"#00d200","skills":["rapid","range"],"skillsOn":[false,false],"skillMods":[null,null]},{"burst":1,"pellets":1,"spinUp":0,"pierce":5,"projSpeed":35,"minRange":0,"charge":1,"knockback":0,"windUp":0.5,"defense":"none","defVal":0,"level":0,"name":"Earth Wizard","cost":200,"bodies":1,"hp":650,"hit":440,"aps":0.2,"range":20,"speed":3,"splash":2,"shape":"circle","color":"#24590d","skills":["regen","range"],"skillsOn":[false,false],"skillMods":[null,null]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"none","defVal":0,"level":0,"name":"Flame Wizard","cost":400,"bodies":1,"hp":2000,"hit":20,"aps":4,"range":15,"speed":2,"splash":0,"shape":"bar","color":"#b95018","skills":["armorHp","range"],"skillsOn":[false,false],"skillMods":[null,null],"flame":30},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"none","defVal":0,"level":0,"name":"Steel Wizard","cost":400,"bodies":1,"hp":1800,"hit":150,"aps":0.9,"range":15,"speed":2,"splash":2,"shape":"bar","color":"#57535a","skills":["range","heavy"],"skillsOn":[false,false],"skillMods":[null,{"params":{"slow":20,"hit":20}}]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"none","defVal":0,"level":0,"name":"Slime Wizard","cost":400,"bodies":1,"hp":700,"hit":450,"aps":0.15,"range":20,"speed":4,"splash":5,"shape":"ring","color":"#81f038","skills":["skmv5oxpgk2","range"],"skillsOn":[false,false],"skillMods":[null,null]}]};
   const EXAMPLES = [{"name":"Crossbow Volley","cost":100,"bodies":2,"hp":300,"hit":52,"aps":0.35,"range":30,"speed":4,"splash":0,"defense":"none","defVal":0,"burst":4,"skills":["rapid","heavy"],"skillsOn":[false,false]},{"name":"Ballista","cost":100,"bodies":1,"hp":750,"hit":220,"aps":0.6,"range":40,"speed":3,"splash":0,"defense":"none","defVal":0,"pierce":3,"minRange":6,"projSpeed":45,"skills":["heavy","range"],"skillsOn":[false,false]},{"name":"Spinning Golem","cost":100,"bodies":1,"hp":1300,"hit":22,"aps":1.2,"range":12,"speed":4,"splash":0,"defense":"none","defVal":0,"spinUp":25,"skills":["armorHp","regen"],"skillsOn":[false,false]},{"name":"Boar Riders","cost":100,"bodies":3,"hp":310,"hit":30,"aps":0.8,"range":2,"speed":11,"splash":0,"defense":"none","defVal":0,"charge":2.5,"knockback":3,"skills":["armorHp","swift"],"skillsOn":[false,false]},{"name":"Blunderbuss Crew","cost":100,"bodies":2,"hp":380,"hit":18,"aps":0.6,"range":12,"speed":5,"splash":0,"defense":"none","defVal":0,"pellets":6,"skills":["swift","poison"],"skillsOn":[false,false]},{"name":"Ogre Smasher","cost":100,"bodies":1,"hp":1100,"hit":260,"aps":0.5,"range":3,"speed":7,"splash":2.5,"defense":"none","defVal":0,"windUp":1,"knockback":4,"skills":["spawn","armorHp"],"skillsOn":[false,false]}];
   const KEY = 'counterlab.v1';
   const TRAITS = [
@@ -1094,6 +1126,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
     ['minRange', 'Minimum range (m)', 1, 'Can’t hit anything closer than this.'],
     ['charge', 'Charge (× damage)', 0.5, 'Next hit after running 5 m. 1 = off.'],
     ['knockback', 'Knockback (m)', 0.5, 'How far a big hit pushes a small body.'],
+    ['flame', 'Flame cone (°)', 5, 'Sprays fire this many degrees to each side, hitting every enemy in range inside the cone at once. Pellets, splash, pierce and projectile speed are ignored. 0 = off.'],
     ['windUp', 'Wind-up (s)', 0.1, 'Sets up this long when an enemy first comes in range, then fires normally. Has to set up again after moving.'],
   ];
   const LEVERS = [
@@ -1267,6 +1300,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
             if (k === 'level') v = Math.min(2, Math.round(v));
             if (k === 'pierce') v = Math.round(v);
             if (k === 'charge') v = Math.max(1, v);
+            if (k === 'flame') v = Math.min(90, v);
             u[k] = Math.max(0, v);
           }
           save(); renderUnitSummaries(); scheduleRun();
@@ -1308,7 +1342,8 @@ if (typeof module !== 'undefined') module.exports = Engine;
       const def = u.defense === 'armor' ? ` · armor ${u.defVal}` : u.defense === 'ward' ? ` · ward ${u.defVal}` : '';
       const tr = [];
       if (u.burst > 1) tr.push(`burst ${u.burst}`);
-      if (u.pellets > 1) tr.push(`shotgun ${u.pellets}`);
+      if (u.flame > 0) tr.push(`flame ${fmt(u.flame)}°`);
+      else if (u.pellets > 1) tr.push(`shotgun ${u.pellets}`);
       if (u.spinUp > 0) tr.push(`spin-up ${fmt(u.spinUp)}%/s`);
       if (u.pierce > 0) tr.push(`pierce ${u.pierce}`);
       if (u.projSpeed > 0) tr.push(`shot ${fmt(u.projSpeed)} m/s`);
@@ -1321,8 +1356,8 @@ if (typeof module !== 'undefined') module.exports = Engine;
       d.querySelector('.sum-line').textContent =
         `${u.bodies} × ${fmt(u.hp)} hp · ${fmt(u.hit)} dmg × ${fmt(u.aps, 2)}/s · ${fmt(u.range)} m${u.splash ? ` · splash ${u.splash}` : ''}${def}${tr.length ? ' · ' + tr.join(' · ') : ''}`;
       d.querySelector('.bar i').style.width = (r.strength / max * 100).toFixed(1) + '%';
-      const squadHp = u.bodies * u.hp, squadDps = u.bodies * u.hit * u.aps * Math.max(1, u.burst) * Math.max(1, u.pellets);
-      const uncounted = (u.spinUp > 0 || u.pierce > 0 || u.charge > 1) ? '<span>Spin-up, pierce and charge are not counted in raw strength.</span>' : '';
+      const squadHp = u.bodies * u.hp, squadDps = u.bodies * u.hit * u.aps * Math.max(1, u.burst) * (u.flame > 0 ? 1 : Math.max(1, u.pellets));
+      const uncounted = (u.spinUp > 0 || u.pierce > 0 || u.charge > 1 || u.flame > 0) ? '<span>Spin-up, pierce, charge and flame are not counted in raw strength (damage/s is per body hit).</span>' : '';
       d.querySelector('.derived').innerHTML =
         `<span>One squad: <b>${fmt(squadHp)}</b> health, <b>${fmt(squadDps, 1)}</b> damage/s</span>
          <span>With ${fmt(g.budget)} gold: <b>${r.squads}</b> squad${r.squads === 1 ? '' : 's'}, <b>${r.bodies}</b> bodies</span>
@@ -1746,6 +1781,15 @@ if (typeof module !== 'undefined') module.exports = Engine;
       if (sh[7] === 1) { // a heal
         ctx.strokeStyle = css('--win'); ctx.globalAlpha = 0.7; ctx.lineWidth = 1.5; ctx.setLineDash([2, 3]);
         ctx.beginPath(); ctx.moveTo(X(sh[0]), Y(sh[1])); ctx.lineTo(X(sh[2]), Y(sh[3])); ctx.stroke(); ctx.setLineDash([]);
+        continue;
+      }
+      if (sh[8] > 0) { // a flame cone
+        const cx = X(sh[0]), cy = Y(sh[1]), ex = X(sh[2]), ey = Y(sh[3]);
+        const ang = Math.atan2(ey - cy, ex - cx), half = sh[8] * Math.PI / 180, rr = Math.hypot(ex - cx, ey - cy);
+        const grd = ctx.createRadialGradient(cx, cy, 0, cx, cy, rr);
+        grd.addColorStop(0, 'rgba(255,200,80,0.55)'); grd.addColorStop(1, 'rgba(255,90,30,0.08)');
+        ctx.fillStyle = grd; ctx.globalAlpha = 1;
+        ctx.beginPath(); ctx.moveTo(cx, cy); ctx.arc(cx, cy, rr, ang - half, ang + half); ctx.closePath(); ctx.fill();
         continue;
       }
       ctx.strokeStyle = sh[4] === 0 ? colA : colB; ctx.globalAlpha = 0.55; ctx.lineWidth = sh[6] ? 3 : 1;
