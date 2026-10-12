@@ -80,6 +80,8 @@ a { color: var(--you); }
     'Brute': 'Heavy melee bruiser whose blows splash across nearby enemies.',
     'Leaf Wizard': 'Fast caster that fires six-shot volleys of twin leaves.',
     'Earth Wizard': 'Slow, crushing boulders that roll through every enemy in their path.',
+    'Flame Wizard': 'A slow fortress that sprays fire across everything in front of it.',
+    'Steel Wizard': 'Heavy-armoured caster that sets up, then hammers anything in reach.',
     'Wisps': 'Warded spirits firing slow bolts. No single hit can deal more than 40 to them.',
     'Crossbow Volley': 'Fires 4-bolt bursts down one line. Lined-up targets take every bolt.',
     'Ballista': 'Slow piercing bolts from long range. Can’t hit anything close.',
@@ -1050,8 +1052,10 @@ Actions run in this order: sell, levelUp, skills, extraDeployments, place. Anyth
     const n = us.length, out = us.map(() => Array(n).fill(0));
     const total = n * (n - 1) / 2;
     let done = 0;
+    // enough gold per side that even the priciest unit fields a full squad
+    const g = { ...MATRIX_SETTINGS, budget: Math.max(MATRIX_SETTINGS.budget, ...us.map(u => u.cost)) };
     for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) {
-      const r = Engine.battle(us[i], us[j], MATRIX_SETTINGS);
+      const r = Engine.battle(us[i], us[j], g);
       out[i][j] = +r.score.toFixed(3); out[j][i] = -out[i][j];
       yield [++done, total];
     }

@@ -161,7 +161,7 @@
    "hit": 12,
    "aps": 0.8,
    "range": 20,
-   "speed": 4,
+   "speed": 2.5,
    "splash": 0,
    "shape": "triangle",
    "color": "#E9E3CF",
@@ -198,7 +198,7 @@
    "hit": 20,
    "aps": 0.8,
    "range": 10,
-   "speed": 5,
+   "speed": 4,
    "splash": 3,
    "shape": "pentagon",
    "color": "#FFA94D",
@@ -235,7 +235,7 @@
    "hit": 35,
    "aps": 0.8,
    "range": 26,
-   "speed": 4,
+   "speed": 3,
    "splash": 4,
    "shape": "hexagon",
    "color": "#fb0022",
@@ -272,7 +272,7 @@
    "hit": 250,
    "aps": 0.3,
    "range": 40,
-   "speed": 4,
+   "speed": 2,
    "splash": 0,
    "shape": "cross",
    "color": "#F7D154",
@@ -309,7 +309,7 @@
    "hit": 98,
    "aps": 0.6,
    "range": 2,
-   "speed": 6,
+   "speed": 5,
    "splash": 2.1,
    "shape": "square",
    "color": "#8D99AE",
@@ -346,7 +346,7 @@
    "hit": 70,
    "aps": 0.8,
    "range": 15,
-   "speed": 7,
+   "speed": 5,
    "splash": 0,
    "shape": "ring",
    "color": "#ff90ff",
@@ -386,7 +386,7 @@
    "hit": 21,
    "aps": 0.45,
    "range": 27,
-   "speed": 10,
+   "speed": 8,
    "splash": 0,
    "shape": "hexagon",
    "color": "#00d200",
@@ -420,10 +420,10 @@
    "cost": 200,
    "bodies": 1,
    "hp": 600,
-   "hit": 420,
+   "hit": 440,
    "aps": 0.2,
    "range": 20,
-   "speed": 6,
+   "speed": 3,
    "splash": 2,
    "shape": "circle",
    "color": "#24590d",
@@ -438,6 +438,85 @@
    "skillMods": [
     null,
     null
+   ]
+  },
+  {
+   "burst": 1,
+   "pellets": 10,
+   "spinUp": 0,
+   "pierce": 5,
+   "projSpeed": 39,
+   "minRange": 0,
+   "charge": 1,
+   "knockback": 0,
+   "windUp": 0,
+   "defense": "none",
+   "defVal": 0,
+   "level": 0,
+   "name": "Flame Wizard",
+   "cost": 400,
+   "bodies": 1,
+   "hp": 3000,
+   "hit": 1,
+   "aps": 4,
+   "range": 15,
+   "speed": 2,
+   "splash": 2.5,
+   "shape": "bar",
+   "color": "#b95018",
+   "skills": [
+    "armorHp",
+    "range"
+   ],
+   "skillsOn": [
+    false,
+    false
+   ],
+   "skillMods": [
+    null,
+    null
+   ]
+  },
+  {
+   "burst": 1,
+   "pellets": 1,
+   "spinUp": 0,
+   "pierce": 0,
+   "projSpeed": 0,
+   "minRange": 0,
+   "charge": 1,
+   "knockback": 0,
+   "windUp": 2,
+   "defense": "none",
+   "defVal": 0,
+   "level": 0,
+   "name": "Steel Wizard",
+   "cost": 400,
+   "bodies": 1,
+   "hp": 1800,
+   "hit": 100,
+   "aps": 0.9,
+   "range": 15,
+   "speed": 2,
+   "splash": 2,
+   "shape": "bar",
+   "color": "#57535a",
+   "skills": [
+    "range",
+    "heavy"
+   ],
+   "skillsOn": [
+    false,
+    false
+   ],
+   "skillMods": [
+    null,
+    {
+     "params": {
+      "slow": 20,
+      "hit": 20
+     }
+    }
    ]
   }
  ]
