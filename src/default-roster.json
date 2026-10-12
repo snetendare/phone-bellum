@@ -1,0 +1,356 @@
+{
+ "goldCosts": true,
+ "settings": {
+  "budget": 100,
+  "distance": 40,
+  "spacing": 3.2,
+  "minDmgPct": 0,
+  "timeCap": 60,
+  "dt": 0.05
+ },
+ "skills": [
+  {
+   "id": "regen",
+   "type": "regen",
+   "name": "Regeneration",
+   "cost": 100,
+   "params": {}
+  },
+  {
+   "id": "poison",
+   "type": "poison",
+   "name": "Poison shot",
+   "cost": 100,
+   "params": {}
+  },
+  {
+   "id": "stealth",
+   "type": "stealth",
+   "name": "Stealth",
+   "cost": 100,
+   "params": {}
+  },
+  {
+   "id": "armorHp",
+   "type": "armorHp",
+   "name": "Armor and health",
+   "cost": 100,
+   "params": {}
+  },
+  {
+   "id": "spawn",
+   "type": "spawn",
+   "name": "Spawn goblins",
+   "cost": 100,
+   "params": {}
+  },
+  {
+   "id": "rapid",
+   "type": "rapid",
+   "name": "Rapid fire",
+   "cost": 100,
+   "params": {}
+  },
+  {
+   "id": "swift",
+   "type": "swift",
+   "name": "Swift strikes",
+   "cost": 100,
+   "params": {}
+  },
+  {
+   "id": "heavy",
+   "type": "heavy",
+   "name": "Heavy shot",
+   "cost": 100,
+   "params": {}
+  },
+  {
+   "id": "healer",
+   "type": "healer",
+   "name": "Healing touch",
+   "cost": 100,
+   "params": {}
+  },
+  {
+   "id": "range",
+   "type": "range",
+   "name": "Long reach",
+   "cost": 100,
+   "params": {}
+  },
+  {
+   "id": "shrink",
+   "type": "shrink",
+   "name": "Shortsight",
+   "cost": 100,
+   "params": {}
+  }
+ ],
+ "units": [
+  {
+   "burst": 1,
+   "pellets": 1,
+   "spinUp": 0,
+   "pierce": 0,
+   "projSpeed": 0,
+   "minRange": 0,
+   "charge": 1,
+   "knockback": 0,
+   "windUp": 0,
+   "defense": "none",
+   "defVal": 0,
+   "level": 0,
+   "name": "Goblin Swarm",
+   "cost": 100,
+   "bodies": 12,
+   "hp": 28,
+   "hit": 16,
+   "aps": 1.2,
+   "range": 2,
+   "speed": 12,
+   "splash": 0,
+   "shape": "triangle",
+   "color": "#9BD35A",
+   "skills": [
+    "swift",
+    "poison"
+   ],
+   "skillsOn": [
+    false,
+    false
+   ]
+  },
+  {
+   "burst": 1,
+   "pellets": 1,
+   "spinUp": 0,
+   "pierce": 0,
+   "projSpeed": 0,
+   "minRange": 0,
+   "charge": 1,
+   "knockback": 0,
+   "windUp": 0,
+   "defense": "none",
+   "defVal": 0,
+   "level": 0,
+   "name": "Skeleton Archers",
+   "cost": 100,
+   "bodies": 8,
+   "hp": 32,
+   "hit": 12,
+   "aps": 0.9,
+   "range": 22,
+   "speed": 4,
+   "splash": 0,
+   "shape": "triangle",
+   "color": "#E9E3CF",
+   "skills": [
+    "range",
+    "rapid"
+   ],
+   "skillsOn": [
+    false,
+    false
+   ]
+  },
+  {
+   "burst": 1,
+   "pellets": 1,
+   "spinUp": 0,
+   "pierce": 0,
+   "projSpeed": 0,
+   "minRange": 0,
+   "charge": 1,
+   "knockback": 0,
+   "windUp": 0,
+   "defense": "none",
+   "defVal": 0,
+   "level": 0,
+   "name": "Ember Imps",
+   "cost": 100,
+   "bodies": 4,
+   "hp": 160,
+   "hit": 20,
+   "aps": 0.8,
+   "range": 10,
+   "speed": 5,
+   "splash": 3,
+   "shape": "pentagon",
+   "color": "#FFA94D",
+   "skills": [
+    "swift",
+    "heavy"
+   ],
+   "skillsOn": [
+    false,
+    false
+   ]
+  },
+  {
+   "burst": 1,
+   "pellets": 1,
+   "spinUp": 0,
+   "pierce": 0,
+   "projSpeed": 0,
+   "minRange": 0,
+   "charge": 1,
+   "knockback": 0,
+   "windUp": 0,
+   "defense": "none",
+   "defVal": 0,
+   "level": 0,
+   "name": "Fire Mage",
+   "cost": 100,
+   "bodies": 1,
+   "hp": 320,
+   "hit": 35,
+   "aps": 0.8,
+   "range": 26,
+   "speed": 4,
+   "splash": 4,
+   "shape": "hexagon",
+   "color": "#fb0022",
+   "skills": [
+    "range",
+    "heavy"
+   ],
+   "skillsOn": [
+    false,
+    false
+   ]
+  },
+  {
+   "burst": 1,
+   "pellets": 1,
+   "spinUp": 0,
+   "pierce": 0,
+   "projSpeed": 0,
+   "minRange": 0,
+   "charge": 1,
+   "knockback": 0,
+   "windUp": 1,
+   "defense": "none",
+   "defVal": 0,
+   "level": 0,
+   "name": "Sniper",
+   "cost": 100,
+   "bodies": 1,
+   "hp": 200,
+   "hit": 300,
+   "aps": 0.3,
+   "range": 40,
+   "speed": 4,
+   "splash": 0,
+   "shape": "cross",
+   "color": "#F7D154",
+   "skills": [
+    "rapid",
+    "spawn"
+   ],
+   "skillsOn": [
+    false,
+    false
+   ]
+  },
+  {
+   "burst": 1,
+   "pellets": 1,
+   "spinUp": 0,
+   "pierce": 0,
+   "projSpeed": 0,
+   "minRange": 0,
+   "charge": 1,
+   "knockback": 0,
+   "windUp": 0,
+   "defense": "none",
+   "defVal": 12,
+   "level": 0,
+   "name": "Brute",
+   "cost": 200,
+   "bodies": 1,
+   "hp": 1200,
+   "hit": 98,
+   "aps": 0.6,
+   "range": 2,
+   "speed": 6,
+   "splash": 2.1,
+   "shape": "square",
+   "color": "#8D99AE",
+   "skills": [
+    "armorHp",
+    "swift"
+   ],
+   "skillsOn": [
+    false,
+    false
+   ]
+  },
+  {
+   "burst": 1,
+   "pellets": 1,
+   "spinUp": 0,
+   "pierce": 0,
+   "projSpeed": 20,
+   "minRange": 0,
+   "charge": 1,
+   "knockback": 0,
+   "windUp": 0,
+   "defense": "ward",
+   "defVal": 40,
+   "level": 0,
+   "name": "Wisps",
+   "cost": 100,
+   "bodies": 3,
+   "hp": 80,
+   "hit": 70,
+   "aps": 0.8,
+   "range": 15,
+   "speed": 7,
+   "splash": 0,
+   "shape": "ring",
+   "color": "#ff90ff",
+   "skills": [
+    "stealth",
+    "swift"
+   ],
+   "skillsOn": [
+    false,
+    false
+   ]
+  },
+  {
+   "burst": 6,
+   "pellets": 2,
+   "spinUp": 0,
+   "pierce": 0,
+   "projSpeed": 0,
+   "minRange": 0,
+   "charge": 1,
+   "knockback": 0,
+   "windUp": 0.2,
+   "defense": "none",
+   "defVal": 0,
+   "level": 0,
+   "name": "Leaf Wizard",
+   "cost": 200,
+   "bodies": 1,
+   "hp": 300,
+   "hit": 21,
+   "aps": 0.45,
+   "range": 27,
+   "speed": 10,
+   "splash": 0,
+   "shape": "hexagon",
+   "color": "#00d200",
+   "skills": [
+    "rapid",
+    "range"
+   ],
+   "skillsOn": [
+    false,
+    false
+   ]
+  }
+ ]
+}
