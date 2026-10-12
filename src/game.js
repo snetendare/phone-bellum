@@ -1,0 +1,272 @@
+// ===== Match rules and AI (shared by headless tests and the page) =====
+const Game = (() => {
+  const E = (typeof Engine !== 'undefined') ? Engine : require('./engine.js');
+
+  const COLS = 12, ROWS = 12, TILE = 6;
+  const START_HP = 40, START_GOLD = 300, INCOME = 250, LOSER_BONUS = 100;
+  const SQUAD_COST = 100, SQUAD_POINTS = 2;
+  const SETTINGS = { dt: 0.05, timeCap: 60, spacing: 3.5, minDmgPct: 15, absorbXp: 1 };
+  // XP a squad needs in total to reach level 1, 2, 3, as multiples of its own starting health.
+  // XP = damage dealt + damage absorbed + bounty for killing leveled bodies.
+  const XP_STEPS = [5, 12, 24];
+  const xpNeeded = (unit, level) => unit.bodies * unit.hp * XP_STEPS[level];
+  // deployments: how many new squads a side may place per round; extra ones can be bought for the round
+  const CONFIG = { levelCostPerTier: 50, firstRoundDeploys: 3, deploysPerRound: 2, extraDeployCost: 50, deployCap: true };
+  const deploysAllowed = (m, side) => CONFIG.deployCap
+    ? (m.round === 1 ? CONFIG.firstRoundDeploys : CONFIG.deploysPerRound) + m.extraDeploys[side]
+    : Infinity;
+  const deployedThisRound = (m, side) => m.armies[side].filter(s => s.round === m.round).length;
+  const deploysLeft = (m, side) => deploysAllowed(m, side) - deployedThisRound(m, side);
+  // A unit's `cost` is in lab units: 1 = one standard squad (SQUAD_COST gold)
+  const unitCostOf = (unit) => Math.max(10, Math.round((unit.cost || 1) * SQUAD_COST / 10) * 10);
+  // Upgrades cost half the unit's price at the default setting (50 for a 100-gold squad)
+  const levelCost = (unit) => Math.max(10, Math.round(CONFIG.levelCostPerTier * (unit.cost || 1) / 5) * 5);
+  const AI = { levelPolicy: 'smart', maxExtraDeploys: 3 }; // levelPolicy: smart | never | all (for experiments)
+
+  // rows 0-3: enemy zone (row 3 is its front), rows 4-7: no man's land, rows 8-11: player zone (row 8 is its front)
+  const zoneRows = (side) => side === 0 ? [8, 9, 10, 11] : [3, 2, 1, 0];
+  const inZone = (side, row) => side === 0 ? row >= 8 && row <= 11 : row >= 0 && row <= 3;
+  const tileToWorld = (col, row) => ({ x: (col - (COLS - 1) / 2) * TILE, y: ((ROWS - 1) / 2 - row) * TILE });
+
+  function rng(seed) { // mulberry32
+    let a = seed >>> 0;
+    return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+  }
+
+  function createMatch(units, matrix, seed) {
+    return {
+      units, matrix, seed: seed >>> 0,
+      round: 1, hp: [START_HP, START_HP], gold: [START_GOLD, START_GOLD],
+      armies: [[], []], nextId: [1, 1], history: [], over: false, winner: -1,
+      extraDeploys: [0, 0],
+    };
+  }
+
+  function buyDeploy(m, side) {
+    if (!CONFIG.deployCap || m.gold[side] < CONFIG.extraDeployCost) return false;
+    m.gold[side] -= CONFIG.extraDeployCost;
+    m.extraDeploys[side]++;
+    return true;
+  }
+
+  // Refund an extra deployment bought this round that hasn't been used
+  function refundDeploy(m, side) {
+    if (m.extraDeploys[side] <= 0 || deploysLeft(m, side) <= 0) return false;
+    m.extraDeploys[side]--;
+    m.gold[side] += CONFIG.extraDeployCost;
+    return true;
+  }
+
+  const occupied = (m, side, col, row) => m.armies[side].some(s => s.col === col && s.row === row);
+
+  function place(m, side, unitIdx, col, row) {
+    if (!inZone(side, row) || col < 0 || col >= COLS) return null;
+    if (occupied(m, side, col, row)) return null;
+    const cost = unitCostOf(m.units[unitIdx]);
+    if (m.gold[side] < cost) return null;
+    if (deploysLeft(m, side) <= 0) return null;
+    const sq = { id: m.nextId[side]++, unit: unitIdx, col, row, round: m.round, xp: 0, level: 0, cost };
+    m.armies[side].push(sq);
+    m.gold[side] -= cost;
+    return sq;
+  }
+
+  // Only squads bought this round can be taken back
+  function unplace(m, side, col, row) {
+    const i = m.armies[side].findIndex(s => s.col === col && s.row === row && s.round === m.round);
+    if (i < 0) return false;
+    const [sq] = m.armies[side].splice(i, 1);
+    m.gold[side] += sq.cost;
+    return true;
+  }
+
+  function bodiesFor(m, side) {
+    const out = [];
+    let idx = 0;
+    for (const sq of m.armies[side]) {
+      const w = tileToWorld(sq.col, sq.row);
+      const b = E.buildSquad(m.units[sq.unit], side, w.x, w.y, sq.id, TILE, idx, sq.level);
+      idx += b.length;
+      out.push(...b);
+    }
+    return out;
+  }
+
+  function startBattle(m) {
+    return E.createBattle(bodiesFor(m, 0), bodiesFor(m, 1), SETTINGS, { record: true });
+  }
+
+  // Damage a side deals = points of its squads, scaled by how much of each squad is still alive
+  function survivorDamage(m, res, side) {
+    let sum = 0;
+    for (const k in res.squads) {
+      const s = res.squads[k];
+      if (s.side !== side || s.alive <= 0) continue;
+      const sq = m.armies[side].find(q => q.id === s.squad);
+      const value = sq ? (m.units[sq.unit].cost || 1) : 1; // pricier squads hit harder, like their price
+      sum += SQUAD_POINTS * value * s.alive / s.total;
+    }
+    return sum > 0 ? Math.max(1, Math.round(sum)) : 0;
+  }
+
+  // Apply a finished battle to the match. Returns a summary for the results screen.
+  function resolve(m, res) {
+    const dmg = [0, 0]; // damage taken by each side
+    let roundWinner = res.winner;
+    if (res.timeout) {
+      dmg[0] = survivorDamage(m, res, 1);
+      dmg[1] = survivorDamage(m, res, 0);
+    } else if (res.winner === 0) dmg[1] = survivorDamage(m, res, 0);
+    else if (res.winner === 1) dmg[0] = survivorDamage(m, res, 1);
+    m.hp[0] = Math.max(0, m.hp[0] - dmg[0]);
+    m.hp[1] = Math.max(0, m.hp[1] - dmg[1]);
+    // experience carries over between rounds; squads that reach the next threshold become ready to level up
+    const newlyReady = [[], []];
+    for (let side = 0; side < 2; side++) {
+      for (const sq of m.armies[side]) {
+        const r = res.squads[side + ':' + sq.id];
+        if (!r) continue;
+        const was = isReady(m, sq);
+        sq.xp += r.xp;
+        if (!was && isReady(m, sq)) newlyReady[side].push({ id: sq.id, unit: sq.unit, level: sq.level + 1 });
+      }
+    }
+    const summary = { round: m.round, winner: roundWinner, timeout: res.timeout, dmg, time: res.time, newlyReady };
+    m.history.push(summary);
+    if (m.hp[0] <= 0 || m.hp[1] <= 0) {
+      m.over = true;
+      m.winner = m.hp[0] > 0 ? 0 : m.hp[1] > 0 ? 1 : -1;
+      return summary;
+    }
+    // next round
+    m.round++;
+    m.extraDeploys = [0, 0];
+    m.gold[0] += INCOME; m.gold[1] += INCOME;
+    const loser = dmg[0] > dmg[1] ? 0 : dmg[1] > dmg[0] ? 1 : -1;
+    if (loser >= 0) m.gold[loser] += LOSER_BONUS;
+    summary.bonusTo = loser;
+    return summary;
+  }
+
+  // ---------- leveling (manual, costs gold) ----------
+  const isReady = (m, sq) => sq.level < E.MAX_LEVEL && sq.xp >= xpNeeded(m.units[sq.unit], sq.level);
+
+  function levelUp(m, side, sqId) {
+    const sq = m.armies[side].find(s => s.id === sqId);
+    if (!sq || !isReady(m, sq)) return false;
+    const cost = levelCost(m.units[sq.unit]);
+    if (m.gold[side] < cost) return false;
+    m.gold[side] -= cost;
+    sq.level++;
+    (sq.boughtLevels = sq.boughtLevels || {})[m.round] = ((sq.boughtLevels || {})[m.round] || 0) + 1;
+    return true;
+  }
+
+  // Undo a level bought this round (full refund)
+  function undoLevel(m, side, sqId) {
+    const sq = m.armies[side].find(s => s.id === sqId);
+    if (!sq || !sq.boughtLevels || !sq.boughtLevels[m.round]) return false;
+    sq.boughtLevels[m.round]--;
+    sq.level--;
+    m.gold[side] += levelCost(m.units[sq.unit]);
+    return true;
+  }
+
+  // AI levels up at fight time, using only what it knew at the start of the round.
+  // It skips chaff (8+ bodies): feeding leveled chaff to the enemy gives away XP.
+  function aiLevel(m, side) {
+    const done = [];
+    if (AI.levelPolicy === 'never') return done;
+    const ready = m.armies[side].filter(s => isReady(m, s))
+      .sort((a, b) => E.withTraits(m.units[b.unit]).range - E.withTraits(m.units[a.unit]).range);
+    for (const sq of ready) {
+      const u = m.units[sq.unit];
+      if (AI.levelPolicy === 'smart' && u.bodies >= 8) continue;
+      while (isReady(m, sq) && levelUp(m, side, sq.id)) done.push({ id: sq.id, unit: sq.unit, level: sq.level });
+    }
+    return done;
+  }
+
+  // ---------- AI ----------
+  // Buys units that counter the opponent's army as it stood at the start of the round,
+  // using the counter table, with a nudge toward variety and a little randomness.
+  function aiDeploy(m, side) {
+    const r = rng(m.seed + m.round * 7919 + side * 104729);
+    const opp = 1 - side;
+    const oppArmy = m.armies[opp].filter(s => s.round < m.round);
+    const oppCount = {};
+    for (const s of oppArmy) oppCount[s.unit] = (oppCount[s.unit] || 0) + 1;
+    const own = {};
+    for (const s of m.armies[side]) own[s.unit] = (own[s.unit] || 0) + 1;
+    const bought = [];
+    // keep gold back for the level-ups it will buy at fight time
+    let reserve = 0;
+    if (AI.levelPolicy !== 'never') {
+      for (const sq of m.armies[side]) {
+        if (!isReady(m, sq)) continue;
+        if (AI.levelPolicy === 'smart' && m.units[sq.unit].bodies >= 8) continue;
+        reserve += levelCost(m.units[sq.unit]);
+      }
+    }
+    let guard = 0;
+    const minCost = Math.min(...m.units.map(unitCostOf));
+    while (m.gold[side] - reserve >= minCost && guard++ < 60) {
+      if (deploysLeft(m, side) <= 0) {
+        // out of deployments: buy one more only if a squad is still affordable after it
+        if (m.extraDeploys[side] >= AI.maxExtraDeploys || m.gold[side] - reserve < minCost + CONFIG.extraDeployCost) break;
+        if (!buyDeploy(m, side)) break;
+      }
+      const budget = m.gold[side] - reserve;
+      let best = -1, bs = -Infinity;
+      m.units.forEach((u, i) => {
+        if (unitCostOf(u) > budget) return;
+        let s = 0, tot = 0;
+        for (const t in oppCount) { s += oppCount[t] * (m.matrix[i][t] || 0); tot += oppCount[t]; }
+        s = tot ? s / tot : 0;
+        s -= 0.12 * (own[i] || 0);
+        s += (r() - 0.5) * 0.35;
+        if (s > bs) { bs = s; best = i; }
+      });
+      if (best < 0) break;
+      const spot = aiSpot(m, side, best, oppArmy, r);
+      if (!spot) break;
+      const sq = place(m, side, best, spot.col, spot.row);
+      if (!sq) break;
+      own[best] = (own[best] || 0) + 1;
+      bought.push(sq);
+    }
+    return bought;
+  }
+
+  function aiSpot(m, side, unitIdx, oppArmy, r) {
+    const u = E.withTraits(m.units[unitIdx]);
+    const rows = zoneRows(side);
+    const band = u.range <= 12 ? [0, 1] : u.range <= 30 ? [1, 2] : [2, 3];
+    // aim at the columns of the enemy squads this unit counters
+    let wsum = 0, csum = 0;
+    for (const s of oppArmy) {
+      const w = Math.max(0, m.matrix[unitIdx][s.unit] || 0);
+      wsum += w; csum += w * s.col;
+    }
+    const target = wsum > 0 ? csum / wsum : (COLS - 1) / 2 + (r() - 0.5) * 6;
+    let best = null, bc = Infinity;
+    for (let zi = 0; zi < rows.length; zi++) {
+      for (let col = 0; col < COLS; col++) {
+        const row = rows[zi];
+        if (occupied(m, side, col, row)) continue;
+        const rowCost = band.includes(zi) ? 0 : 3 * Math.min(Math.abs(zi - band[0]), Math.abs(zi - band[1]));
+        const c = Math.abs(col - target) + rowCost + r() * 0.8;
+        if (c < bc) { bc = c; best = { col, row }; }
+      }
+    }
+    return best;
+  }
+
+  return {
+    COLS, ROWS, TILE, START_HP, START_GOLD, INCOME, LOSER_BONUS, SQUAD_COST, SQUAD_POINTS, SETTINGS, XP_STEPS, xpNeeded, unitCostOf,
+    levelCost, isReady, levelUp, undoLevel, aiLevel, AI, CONFIG,
+    deploysAllowed, deploysLeft, deployedThisRound, buyDeploy, refundDeploy,
+    zoneRows, inZone, tileToWorld, createMatch, place, unplace, bodiesFor, startBattle, resolve, aiDeploy, occupied,
+  };
+})();
+if (typeof module !== 'undefined') module.exports = Game;

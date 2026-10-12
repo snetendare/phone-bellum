@@ -1,0 +1,1205 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0D1315">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Phone Bellum">
+<meta name="description" content="A small auto-battler. Deploy squads, counter your opponent, watch the armies fight. Play the AI or challenge a friend.">
+<link rel="icon" href="icon.png">
+<link rel="apple-touch-icon" href="icon.png">
+<title>Phone Bellum</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/*BASECSS*/
+[hidden] { display: none !important; }
+body { padding-top: calc(12px + env(safe-area-inset-top, 0px)); padding-bottom: calc(28px + env(safe-area-inset-bottom, 0px)); margin: 0; }
+.net { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 8px; justify-content: center; min-height: 18px; }
+.net i { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); display: inline-block; }
+.net.ok i { background: #6FD08C; }
+.net.bad { color: var(--foe); }
+.net.bad i { background: var(--foe); }
+.timer { font-family: var(--font-data); font-size: 20px; font-weight: 500; color: var(--ink); font-variant-numeric: tabular-nums; }
+.timer.low { color: var(--foe); }
+.code { font-family: var(--font-data); font-size: clamp(30px, 10vw, 44px); letter-spacing: 0.22em; color: var(--gold); padding-left: 0.22em; }
+.linkbox { font-family: var(--font-data); font-size: 12px; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 8px 10px; word-break: break-all; user-select: all; -webkit-user-select: all; }
+.btnrow { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+.joinrow { display: flex; gap: 8px; justify-content: center; }
+.joinrow input { width: 9ch; font: 500 18px var(--font-data); letter-spacing: 0.16em; text-transform: uppercase; text-align: center; background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 4px; padding: 8px; }
+.card .stack { display: grid; gap: 8px; justify-items: center; width: 100%; }
+.card hr { width: 100%; border: 0; border-top: 1px solid var(--line); margin: 4px 0; }
+.status { font-size: 14px; color: var(--ink); }
+.status.wait::after { content: ""; display: inline-block; width: 1.2em; text-align: left; animation: dots 1.4s steps(4) infinite; }
+@keyframes dots { 0% { content: ""; } 25% { content: "."; } 50% { content: ".."; } 75% { content: "..."; } }
+a { color: var(--you); }
+@media (prefers-reduced-motion: reduce) { .status.wait::after { animation: none; content: "…"; } }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="hud" aria-label="Match status">
+    <div class="side you"><div class="lbl"><span>You</span><span class="num" id="hp-you">40</span></div><div class="hp"><i id="hpbar-you" style="width:100%"></i></div></div>
+    <div class="round"><b class="num" id="round">1</b><span id="phase">Deploy</span></div>
+    <div class="side foe"><div class="lbl"><span id="foe-name">Enemy</span><span class="num" id="hp-foe">40</span></div><div class="hp"><i id="hpbar-foe" style="width:100%"></i></div></div>
+  </div>
+  <div class="net" id="net" hidden aria-live="polite"><i></i><span id="net-text"></span></div>
+
+  <div class="board-wrap" id="wrap">
+    <canvas id="board" aria-label="Battlefield. Your zone is the bottom four rows, the enemy zone the top four."></canvas>
+    <span class="tag-clock" id="clock"></span>
+    <div class="overlay" id="overlay"></div>
+  </div>
+
+  <div class="panel" id="panel"></div>
+</div>
+
+<div class="sheet-back" id="sheet-back" hidden><div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-h"></div></div>
+
+<script src="peerjs.min.js"></script>
+<script>
+/*SHAPES*/
+/*ENGINE*/
+</script>
+<script>
+/*GAME*/
+</script>
+<script>
+(() => {
+  const DATA = /*DATA*/;
+  const ROLES = {
+    'Goblin Swarm': 'Fast melee swarm. Soaks shots and overwhelms single-target units.',
+    'Skeleton Archers': 'Cheap ranged squad that deals steady damage from behind.',
+    'Ember Imps': 'Short-range brawlers whose small splash eats swarms up close.',
+    'Fire Mage': 'A lone caster whose medium-range splash clears clumps.',
+    'Sniper': 'Huge single shots from very far away. Wasted on swarms.',
+    'Brute': 'Armored melee bruiser. Small hits barely scratch it.',
+    'Wisps': 'Warded spirits. No single hit can deal more than 40 to them.',
+    'Crossbow Volley': 'Fires 4-bolt bursts down one line. Lined-up targets take every bolt.',
+    'Ballista': 'Slow piercing bolts from long range. Can’t hit anything close.',
+    'Boar Riders': 'Fast chargers whose first hit doubles and knocks small bodies back.',
+  };
+  const DEPLOY_SECONDS = 30;   // deploy countdown each round
+  const NEXT_SECONDS = 20;     // results screen moves on by itself after this long
+  const PEER_PREFIX = 'phonebellum-v1-';
+  const CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  const HOST_STORE = 'phonebellum.host.v1';
+  const LAB_STORE = 'counterlab.v1';
+  const qs = new URLSearchParams(location.search);
+
+  // ---------- unit sets: built-in, or loaded from Counter Lab ----------
+  const BUILTIN = { units: DATA.units, matrix: DATA.matrix };
+  const STORE = 'phonebellum.units.v1';
+  const MATRIX_SETTINGS = { budget: 2, distance: 40, spacing: 3.5, minDmgPct: 15, timeCap: 60, dt: 0.05 };
+  const LEVERS = ['cost', 'bodies', 'hp', 'hit', 'aps', 'range', 'speed', 'splash'];
+  let units, M, customSet = false, rawSet = BUILTIN;
+  const validUnits = (list) => Array.isArray(list) && list.length >= 2 && list.length <= 30 &&
+    list.every(u => u && typeof u.name === 'string' && u.name.trim() && LEVERS.every(k => typeof u[k] === 'number' && isFinite(u[k]) && u[k] >= 0) && u.bodies >= 1 && u.aps > 0 && u.cost > 0);
+  const validSet = (s) => s && validUnits(s.units) && Array.isArray(s.matrix) && s.matrix.length === s.units.length;
+  function useSet(set, custom) {
+    units = Shapes.assign(set.units).map(u => ({ ...Engine.withTraits(u), name: String(u.name).replace(/[<>&"]/g, '').trim().slice(0, 40) || 'Unit', level: 0, bodies: Math.max(1, Math.round(u.bodies)) }));
+    M = set.matrix; customSet = custom; rawSet = set;
+  }
+  try {
+    const raw = localStorage.getItem(STORE);
+    const p = raw && JSON.parse(raw);
+    if (validSet(p)) useSet(p, true); else useSet(BUILTIN, false);
+  } catch (e) { useSet(BUILTIN, false); }
+  const tag = (u) => (u.name.replace(/[^A-Za-z]/g, '').slice(0, 3) || 'UNT').toUpperCase();
+  const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const $ = (id) => document.getElementById(id);
+  const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const now = () => Date.now();
+
+  // ---------- state ----------
+  let mode = 'ai';          // ai | host | guest
+  let me = 0;               // which side of the match this screen plays (the guest is side 1)
+  const foe = () => 1 - me;
+  let m = null;             // match state (on the guest: a copy kept in step by the host)
+  let phase = 'start';      // start | lobby | deploy | battle | result | end
+  let selected = null;      // unit index chosen in the shop
+  let bt = null;            // battle being played back
+  let battlePre = null;     // match as it stood when the running battle began (for the HUD)
+  let speed = 2, lastTs = 0, acc = 0, raf = 0;
+  let fx = [];
+  let lastSummary = null;
+  let lastAiLevels = [];
+  let hoverTile = null;
+  let timerOn = true;       // vs AI: deploy countdown on or off
+  let deadline = 0;         // local time the deploy phase ends (0 = no countdown running)
+  let pausedLeft = 0;       // host: countdown time left while the opponent is away
+  let timeUp = false;       // guest: countdown ran out, waiting for the host to start the fight
+  let ready = [false, false];
+  let nextReady = [false, false];
+  let rematch = [false, false];
+  let resultShownAt = 0;
+  let shopScroll = 0;
+
+  // ---------- canvas ----------
+  const cv = $('board'), ctx = cv.getContext('2d');
+  let W = 0, S = 0;
+  function size() {
+    const r = cv.getBoundingClientRect();
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    W = r.width;
+    cv.width = Math.round(r.width * dpr); cv.height = Math.round(r.width * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    S = W / (Game.COLS * Game.TILE);
+  }
+  const half = Game.COLS * Game.TILE / 2;
+  // The board is turned around for side 1, so both players see their own zone at the bottom
+  const flip = () => me === 1 ? -1 : 1;
+  const PX = (x) => (half + x * flip()) * S;
+  const PY = (y) => (half - y * flip()) * S;
+  const scol = (c) => me === 1 ? Game.COLS - 1 - c : c;   // model column -> screen column (and back)
+  const srow = (r) => me === 1 ? Game.ROWS - 1 - r : r;
+  const tilePx = () => Game.TILE * S;
+  const radius = (u) => Math.max(0.6, Math.min(2.4, 0.55 + Math.sqrt(u.hp) / 30)) * S;
+  const teamCol = (side) => side === me ? css('--you') : css('--foe');
+  const upOf = (side) => side === me ? 1 : -1;
+
+  function drawBoard() {
+    const t = tilePx();
+    ctx.fillStyle = css('--board'); ctx.fillRect(0, 0, W, W);
+    ctx.globalAlpha = 0.08;
+    ctx.fillStyle = css('--foe'); ctx.fillRect(0, 0, W, t * 4);
+    ctx.fillStyle = css('--you'); ctx.fillRect(0, t * 8, W, t * 4);
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = 'rgba(200, 230, 225, 0.06)'; ctx.lineWidth = 1;
+    for (let i = 1; i < Game.COLS; i++) {
+      ctx.beginPath(); ctx.moveTo(i * t, 0); ctx.lineTo(i * t, W); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, i * t); ctx.lineTo(W, i * t); ctx.stroke();
+    }
+    ctx.setLineDash([5, 6]); ctx.lineWidth = 1.2;
+    ctx.strokeStyle = css('--foe'); ctx.globalAlpha = 0.5;
+    ctx.beginPath(); ctx.moveTo(0, t * 4); ctx.lineTo(W, t * 4); ctx.stroke();
+    ctx.strokeStyle = css('--you');
+    ctx.beginPath(); ctx.moveTo(0, t * 8); ctx.lineTo(W, t * 8); ctx.stroke();
+    ctx.setLineDash([]); ctx.globalAlpha = 1;
+  }
+
+  function drawSquad(sq, side, fresh) {
+    const u = units[sq.unit];
+    const w = Game.tileToWorld(sq.col, sq.row);
+    const bodies = Engine.buildSquad(u, side, w.x, w.y, sq.id, Game.TILE);
+    const col = teamCol(side);
+    const t = tilePx(), c = scol(sq.col), r0 = srow(sq.row);
+    if (fresh) {
+      ctx.strokeStyle = col; ctx.setLineDash([3, 3]); ctx.lineWidth = 1;
+      ctx.strokeRect(c * t + 1.5, r0 * t + 1.5, t - 3, t - 3); ctx.setLineDash([]);
+    }
+    const r = radius(u);
+    for (const b of bodies) Shapes.body(ctx, u.shape, PX(b.x), PY(b.y), r, upOf(side), u.color, col, 0.95);
+    ctx.globalAlpha = 1;
+    if (side === me && phase === 'deploy' && Game.isReady(m, sq)) { // ready to level up: gold plus badge
+      const br = Math.max(5, t * 0.17), bx = (c + 1) * t - br - 2, by = r0 * t + br + 2;
+      ctx.fillStyle = css('--gold'); ctx.beginPath(); ctx.arc(bx, by, br, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = css('--bg'); ctx.lineWidth = Math.max(1.5, br * 0.3);
+      ctx.beginPath(); ctx.moveTo(bx - br * 0.5, by); ctx.lineTo(bx + br * 0.5, by); ctx.moveTo(bx, by - br * 0.5); ctx.lineTo(bx, by + br * 0.5); ctx.stroke();
+    }
+    if (sq.level > 0) {
+      ctx.fillStyle = css('--gold');
+      const pr = Math.max(2, t * 0.07);
+      for (let k = 0; k < sq.level; k++) {
+        ctx.beginPath(); ctx.arc(c * t + pr + 3 + k * (pr * 2.6), r0 * t + pr + 3, pr, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+    if (t >= 26) {
+      ctx.font = `500 ${Math.max(8, Math.round(t * 0.26))}px "IBM Plex Mono", monospace`;
+      ctx.fillStyle = css('--ink'); ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+      ctx.globalAlpha = 0.85; ctx.fillText(tag(u), (c + 0.5) * t, (r0 + 1) * t - 1); ctx.globalAlpha = 1;
+    }
+  }
+
+  function drawDeploy() {
+    drawBoard();
+    const t = tilePx();
+    if (selected !== null && phase === 'deploy') {
+      ctx.strokeStyle = css('--you'); ctx.globalAlpha = 0.25; ctx.lineWidth = 1;
+      for (const row of Game.zoneRows(me)) for (let c = 0; c < Game.COLS; c++) {
+        if (!Game.occupied(m, me, c, row)) ctx.strokeRect(scol(c) * t + 3, srow(row) * t + 3, t - 6, t - 6);
+      }
+      ctx.globalAlpha = 1;
+    }
+    if (hoverTile && selected !== null && Game.inZone(me, hoverTile.row) && !Game.occupied(m, me, hoverTile.col, hoverTile.row)) {
+      ctx.fillStyle = css('--you'); ctx.globalAlpha = 0.18;
+      ctx.fillRect(scol(hoverTile.col) * t, srow(hoverTile.row) * t, t, t); ctx.globalAlpha = 1;
+    }
+    // the opponent's squads from this round stay hidden until the fight
+    for (const sq of m.armies[foe()]) if (sq.round < m.round || phase !== 'deploy') drawSquad(sq, foe(), false);
+    for (const sq of m.armies[me]) drawSquad(sq, me, sq.round === m.round && phase === 'deploy');
+  }
+
+  function drawBattle() {
+    drawBoard();
+    const muted = css('--muted'), gold = css('--gold');
+    for (const e of fx) {
+      const a = 1 - e.age / e.life;
+      if (e.kind === 'death') {
+        ctx.strokeStyle = teamCol(e.side); ctx.globalAlpha = 0.5 * a; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.arc(PX(e.x), PY(e.y), e.r * (1 + e.age / e.life), 0, Math.PI * 2); ctx.stroke();
+      }
+    }
+    ctx.globalAlpha = 1;
+    for (const b of bt.bodies) {
+      if (b.alive) continue;
+      ctx.fillStyle = muted; ctx.globalAlpha = 0.18;
+      ctx.beginPath(); ctx.arc(PX(b.x), PY(b.y), Math.max(1.5, radius(b.u) * 0.45), 0, Math.PI * 2); ctx.fill();
+    }
+    for (const b of bt.bodies) {
+      if (!b.alive) continue;
+      const c = teamCol(b.side), r = radius(b.u), hpr = b.hp / b.u.hp;
+      Shapes.body(ctx, b.u.shape, PX(b.x), PY(b.y), r, upOf(b.side), b.u.color, c, 0.35 + 0.65 * hpr);
+      if (b.u.hp >= 500 && hpr < 1) {
+        ctx.strokeStyle = c; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(PX(b.x), PY(b.y), r + 2.5, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * hpr); ctx.stroke();
+      }
+      if (b.windTarget && b.u.windUp > 0) {
+        ctx.strokeStyle = c; ctx.lineWidth = 2.5;
+        ctx.beginPath(); ctx.arc(PX(b.x), PY(b.y), r + 4, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * (1 - b.windT / b.u.windUp)); ctx.stroke();
+      }
+      if (b.level > 0) {
+        ctx.strokeStyle = gold; ctx.lineWidth = Math.min(2.5, 0.8 + b.level * 0.5);
+        Shapes.outline(ctx, b.u.shape, PX(b.x), PY(b.y), r + 3.5, upOf(b.side));
+      }
+    }
+    for (const e of fx) {
+      const a = 1 - e.age / e.life;
+      if (e.kind === 'shot') {
+        ctx.strokeStyle = teamCol(e.side); ctx.globalAlpha = 0.7 * a; ctx.lineWidth = e.charged ? 3 : 1;
+        ctx.beginPath(); ctx.moveTo(PX(e.x1), PY(e.y1)); ctx.lineTo(PX(e.x2), PY(e.y2)); ctx.stroke();
+        if (e.splash > 0) { ctx.globalAlpha = 0.4 * a; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(PX(e.x2), PY(e.y2), e.splash * S, 0, Math.PI * 2); ctx.stroke(); }
+      }
+    }
+    ctx.globalAlpha = 1;
+    for (const p of bt.projectiles()) {
+      ctx.fillStyle = teamCol(p.owner.side);
+      ctx.fillRect(PX(p.x) - 2.5, PY(p.y) - 2.5, 5, 5);
+    }
+  }
+
+  function render() {
+    if (!m) { drawBoard(); return; }
+    if (bt && (phase === 'battle' || phase === 'result' || phase === 'end')) drawBattle();
+    else drawDeploy();
+  }
+
+  // ---------- HUD ----------
+  function hud() {
+    const v = phase === 'battle' && battlePre ? battlePre : m;
+    const hpMe = v ? v.hp[me] : Game.START_HP, hpFoe = v ? v.hp[foe()] : Game.START_HP;
+    $('hp-you').textContent = hpMe; $('hp-foe').textContent = hpFoe;
+    $('hpbar-you').style.width = (hpMe / Game.START_HP * 100) + '%';
+    $('hpbar-foe').style.width = (hpFoe / Game.START_HP * 100) + '%';
+    $('round').textContent = v ? v.round : 1;
+    $('phase').textContent = { start: 'Ready', lobby: 'Lobby', deploy: 'Deploy', battle: 'Battle', result: 'Result', end: 'Match over' }[phase];
+    $('foe-name').textContent = mode === 'ai' ? 'Enemy' : 'Opponent';
+  }
+
+  function setNet(text, state) {
+    const n = $('net');
+    if (!text) { n.hidden = true; return; }
+    n.hidden = false; n.className = 'net' + (state ? ' ' + state : '');
+    $('net-text').textContent = text;
+  }
+  function netStatus() {
+    if (mode === 'ai') { setNet(''); return; }
+    if (net.connected) setNet(mode === 'host' ? `Match ${net.code} · opponent connected` : `Match ${net.code} · connected`, 'ok');
+    else if (phase === 'lobby') setNet('');
+    else setNet(mode === 'host' ? `Opponent disconnected. Waiting for them to come back…` : 'Connection lost. Reconnecting…', 'bad');
+  }
+
+  // ---------- countdown ----------
+  const fmtClock = (ms) => { const s = Math.max(0, Math.ceil(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+  const editable = () => phase === 'deploy' && !ready[me] && !timeUp;
+
+  function tick() {
+    const t = now();
+    if (phase === 'deploy') {
+      // host: the countdown waits while the opponent is away
+      if (mode === 'host' && !net.connected && deadline) { pausedLeft = Math.max(5000, deadline - t); deadline = 0; panelDeploy(); }
+      const el = $('timer');
+      if (deadline) {
+        const left = deadline - t;
+        if (el) { el.textContent = fmtClock(left); el.classList.toggle('low', left <= 5000); }
+        $('clock').textContent = left > 0 ? `${fmtClock(left)} to deploy` : 'Time’s up';
+        if (mode !== 'guest' && left <= (mode === 'host' ? -500 : 0)) runFight();
+        else if (mode === 'guest' && left <= 0 && !timeUp) { timeUp = true; selected = null; closeSheet(); sendSide(); panelDeploy(); render(); }
+      } else if (el) { el.textContent = mode === 'ai' ? '' : 'paused'; el.classList.remove('low'); }
+    }
+    if ((phase === 'result' || phase === 'end') && resultShownAt) {
+      const left = resultShownAt + NEXT_SECONDS * 1000 - t;
+      const nb = $('pbtn');
+      if (phase === 'result' && !nextReady[me]) {
+        if (left <= 0) tapNext();
+        else if (nb && mode !== 'ai') nb.textContent = `Next round · ${Math.ceil(left / 1000)}`;
+      }
+    }
+  }
+  setInterval(tick, 200);
+
+  // ---------- panel ----------
+  function panelDeploy() {
+    if (phase !== 'deploy') return;
+    const g = m.gold[me];
+    const fresh = m.armies[me].filter(s => s.round === m.round).length;
+    const readyN = m.armies[me].filter(s => Game.isReady(m, s)).length;
+    const left = Game.deploysLeft(m, me), allowed = Game.deploysAllowed(m, me);
+    const price = (i) => Game.unitCostOf(units[i]);
+    const can = editable();
+    const canBuy = (i) => can && g >= price(i) && left > 0;
+    let hint;
+    if (!can) hint = timeUp ? 'Time’s up. The fight is about to start.' : 'You’re ready. Tap Not ready to make changes.';
+    else {
+      hint = selected !== null
+        ? (canBuy(selected) ? `Tap a tile in your zone to place ${esc(units[selected].name)}.` : left <= 0 ? 'No deployments left this round.' : `Not enough gold for ${esc(units[selected].name)}.`)
+        : (fresh ? 'Tap a squad you placed this round to take it back.' : 'Pick a unit, then tap a tile in the bottom four rows.');
+      if (left <= 0 && selected === null) hint = `No deployments left. Buy one more for ${Game.CONFIG.extraDeployCost} gold, or spend gold on upgrades.`;
+      if (readyN && selected === null) hint = `${readyN} squad${readyN === 1 ? ' is' : 's are'} ready to level up. Tap ${readyN === 1 ? 'it' : 'one'} to upgrade.`;
+    }
+    const extraBtns = `<span style="display:flex;gap:6px;flex-wrap:wrap">
+        <button class="btn small" id="buy-deploy" ${can && g >= Game.CONFIG.extraDeployCost ? '' : 'disabled'}>+1 deployment · ${Game.CONFIG.extraDeployCost}</button>
+        ${can && m.extraDeploys[me] > 0 && left > 0 ? `<button class="btn small" id="refund-deploy">Refund unused</button>` : ''}
+      </span>`;
+    let action, status;
+    if (mode === 'ai') {
+      status = `${m.armies[me].length} squad${m.armies[me].length === 1 ? '' : 's'} on the board`;
+      action = `<button class="btn primary" id="fight" ${m.armies[me].length ? '' : 'disabled'}>${deadline ? 'Fight now' : 'Fight'}</button>`;
+    } else {
+      const away = mode === 'host' && !net.connected;
+      status = away ? 'Opponent is away. The clock is paused.' : ready[foe()] ? 'Opponent is ready.' : 'Opponent is deploying.';
+      action = `<button class="btn ${ready[me] ? '' : 'primary'}" id="ready" ${timeUp ? 'disabled' : ''}>${ready[me] ? 'Not ready' : 'Ready'}</button>`;
+    }
+    $('panel').innerHTML = `
+      <div class="bar"><span class="gold num">${g} gold</span><span class="deploys num">${Math.max(0, left)} of ${allowed} deployments left</span><span class="timer" id="timer">${deadline ? fmtClock(deadline - now()) : ''}</span></div>
+      <div class="bar"><span class="hint">${hint}</span>${extraBtns}</div>
+      <div class="shop" id="shop">${units.map((u, i) => `
+        <div class="uwrap">
+          <button class="ucard" data-i="${i}" aria-pressed="${selected === i}" aria-disabled="${!canBuy(i)}">
+            <span class="t"><span style="color:${u.color};display:inline-flex">${Shapes.svg(u.shape, 13)}</span> ${tag(u)}</span><span class="n">${esc(u.name)}</span>
+            <span class="c">${price(i)} · ${u.bodies} ${u.bodies === 1 ? 'body' : 'bodies'}</span>
+          </button>
+          <button class="info" data-info="${i}" aria-label="About ${esc(u.name)}">i</button>
+        </div>`).join('')}</div>
+      <div class="bar"><span class="hint">${status}</span>${action}</div>`;
+    const shop = $('shop');
+    shop.scrollLeft = shopScroll;
+    shop.addEventListener('scroll', () => { shopScroll = shop.scrollLeft; }, { passive: true });
+    shop.querySelectorAll('.ucard').forEach(b => b.addEventListener('click', () => {
+      if (b.getAttribute('aria-disabled') === 'true') return;
+      const i = +b.dataset.i;
+      selected = selected === i ? null : i;
+      panelDeploy(); render();
+    }));
+    shop.querySelectorAll('[data-info]').forEach(el => el.addEventListener('click', () => openSheet(+el.dataset.info)));
+    if ($('fight')) $('fight').addEventListener('click', runFight);
+    if ($('ready')) $('ready').addEventListener('click', toggleReady);
+    $('buy-deploy').addEventListener('click', () => { if (editable() && Game.buyDeploy(m, me)) changed(); });
+    if ($('refund-deploy')) $('refund-deploy').addEventListener('click', () => { if (editable() && Game.refundDeploy(m, me)) changed(); });
+    tick();
+  }
+
+  // After the player changes their own side
+  function changed() {
+    panelDeploy(); render();
+    if (mode === 'guest') sendSide();
+    if (mode === 'host') saveHost();
+  }
+
+  function toggleReady() {
+    if (phase !== 'deploy' || timeUp) return;
+    ready[me] = !ready[me];
+    if (ready[me]) { selected = null; closeSheet(); }
+    if (mode === 'guest') sendSide();
+    if (mode === 'host') { sendStatus(); if (ready[0] && ready[1] && net.connected) { runFight(); return; } }
+    panelDeploy(); render();
+  }
+
+  function panelBattle() {
+    $('panel').innerHTML = `
+      <div class="bar">
+        <div class="seg" role="group" aria-label="Playback speed">
+          ${[1, 2, 4].map(s => `<button data-s="${s}" aria-pressed="${speed === s}">${s}×</button>`).join('')}
+        </div>
+        <button class="btn small" id="skip">Skip to result</button>
+      </div>
+      <span class="hint">Blue is you, red is the ${mode === 'ai' ? 'enemy' : 'opponent'}. Battles speed up on their own after 20 seconds.</span>`;
+    $('panel').querySelectorAll('[data-s]').forEach(b => b.addEventListener('click', () => {
+      speed = +b.dataset.s;
+      $('panel').querySelectorAll('[data-s]').forEach(x => x.setAttribute('aria-pressed', String(+x.dataset.s === speed)));
+    }));
+    $('skip').addEventListener('click', () => { while (bt.step()) {} finishBattle(); });
+  }
+
+  function panelInfo(text, btnLabel, onClick, extra = '') {
+    $('panel').innerHTML = `<div class="bar"><span class="hint">${text}</span><span class="btnrow">${extra}${btnLabel ? `<button class="btn primary" id="pbtn">${btnLabel}</button>` : ''}</span></div>`;
+    if (btnLabel) $('pbtn').addEventListener('click', onClick);
+  }
+
+  // ---------- overlays ----------
+  function overlay(html) {
+    const o = $('overlay');
+    if (!html) { o.hidden = true; o.innerHTML = ''; return; }
+    o.hidden = false; o.innerHTML = html;
+  }
+
+  function showStart() {
+    leaveNet();
+    mode = 'ai'; me = 0; phase = 'start'; m = null; bt = null; battlePre = null; deadline = 0; resultShownAt = 0;
+    hud(); netStatus(); $('clock').textContent = '';
+    let resume = null;
+    try { resume = JSON.parse(localStorage.getItem(HOST_STORE) || 'null'); } catch (e) {}
+    if (resume && !(resume.m && now() - resume.ts < 6 * 3600e3)) resume = null;
+    overlay(`<div class="card">
+      <span class="eyebrow">A small auto-battler</span>
+      <h2>Phone Bellum</h2>
+      <ul>
+        <li>Buy squads with gold each round. A standard squad costs ${Game.SQUAD_COST}.</li>
+        <li>Place them in the bottom four rows. They stay for the whole match.</li>
+        <li>You have ${DEPLOY_SECONDS} seconds to deploy, then the armies fight on their own.</li>
+        <li>The loser takes damage from every enemy squad still standing.</li>
+        <li>You see the enemy’s earlier squads while you deploy, so build counters.</li>
+        <li>3 deployments in round 1, then 2 per round. Extra ones cost ${Game.CONFIG.extraDeployCost} gold.</li>
+        <li>Squads earn experience. A gold + means you can upgrade it: level 2 doubles health and attack, level 3 triples them.</li>
+      </ul>
+    </div>`);
+    $('panel').innerHTML = `
+      ${resume ? `<button class="btn primary" id="resume">Resume match ${esc(resume.code)}</button>` : ''}
+      <div class="bar">
+        <button class="btn ${resume ? '' : 'primary'}" id="friend" style="flex:1">Challenge a friend</button>
+        <button class="btn" id="go" style="flex:1">Play vs AI</button>
+      </div>
+      <div class="bar">
+        <span class="hint">Got a code from a friend?</span>
+        <span class="joinrow"><input id="code-in" maxlength="5" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-label="Match code" placeholder="CODE"><button class="btn" id="join">Join</button></span>
+      </div>
+      <span class="hint" id="join-msg" aria-live="polite" hidden></span>
+      <div class="bar">
+        <span class="hint">Playing with ${customSet ? `your ${units.length} units from Counter Lab` : `the ${units.length} built-in units`}.</span>
+        <span class="btnrow"><button class="btn small" id="load-units">Load units</button><a class="btn small" href="lab.html" style="text-decoration:none;color:inherit;display:inline-block">Counter Lab</a></span>
+      </div>
+      <div class="bar">
+        <span class="hint">Deploy timer vs AI</span>
+        <div class="seg" role="group" aria-label="Deploy timer vs AI">
+          <button data-tm="1" aria-pressed="${timerOn}">${DEPLOY_SECONDS} s</button><button data-tm="0" aria-pressed="${!timerOn}">Off</button>
+        </div>
+      </div>
+      <div class="bar">
+        <span class="hint">Level-up cost (test setting)</span>
+        <div class="seg" role="group" aria-label="Level-up cost">
+          ${[50, 75].map(c => `<button data-c="${c}" aria-pressed="${Game.CONFIG.levelCostPerTier === c}">${c} gold</button>`).join('')}
+        </div>
+      </div>`;
+    $('friend').addEventListener('click', hostLobby);
+    $('go').addEventListener('click', startAiMatch);
+    if ($('resume')) $('resume').addEventListener('click', () => resumeHost(resume));
+    $('load-units').addEventListener('click', openLoader);
+    const joinNow = () => {
+      const c = $('code-in').value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+      if (c.length !== 5) { $('join-msg').hidden = false; $('join-msg').textContent = 'Codes are 5 letters and numbers.'; return; }
+      joinMatch(c);
+    };
+    $('join').addEventListener('click', joinNow);
+    $('code-in').addEventListener('keydown', (e) => { if (e.key === 'Enter') joinNow(); });
+    $('panel').querySelectorAll('[data-c]').forEach(b => b.addEventListener('click', () => {
+      Game.CONFIG.levelCostPerTier = +b.dataset.c;
+      $('panel').querySelectorAll('[data-c]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+    }));
+    $('panel').querySelectorAll('[data-tm]').forEach(b => b.addEventListener('click', () => {
+      timerOn = b.dataset.tm === '1';
+      $('panel').querySelectorAll('[data-tm]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+    }));
+    size(); render();
+  }
+
+  function showResult(sum) {
+    const iWon = sum.winner === me && !sum.timeout, iLost = sum.winner === foe() && !sum.timeout;
+    const head = sum.timeout ? 'Time ran out' : iWon ? `Round ${sum.round} won` : iLost ? `Round ${sum.round} lost` : 'Draw';
+    const cls = iWon ? 'you' : iLost ? 'foe' : '';
+    const them = mode === 'ai' ? 'Enemy' : 'Opponent';
+    const lines = [];
+    if (sum.dmg[foe()]) lines.push(`${them} takes <b class="num">${sum.dmg[foe()]}</b> damage.`);
+    if (sum.dmg[me]) lines.push(`You take <b class="num">${sum.dmg[me]}</b> damage.`);
+    if (!sum.dmg[0] && !sum.dmg[1]) lines.push('Nobody takes damage.');
+    const lv = (list) => list.map(x => `${esc(units[x.unit].name)} (to level ${x.level + 1})`).join(', ');
+    const lvLines = [];
+    if (mode === 'ai' && lastAiLevels.length) lvLines.push(`<p><span style="color:var(--gold)">Enemy leveled up before the fight:</span> ${lv(lastAiLevels)}.</p>`);
+    if (sum.newlyReady[me].length) lvLines.push(`<p><span style="color:var(--gold)">Ready to level up:</span> ${lv(sum.newlyReady[me])}.</p>`);
+    resultShownAt = now();
+    if (m.over) {
+      const win = m.winner === me, loss = m.winner === foe();
+      phase = 'end'; hud(); netStatus();
+      const wait = mode !== 'ai' && rematch[me];
+      overlay(`<div class="card">
+        <span class="eyebrow">After ${m.history.length} rounds</span>
+        <h2 class="${win ? 'you' : loss ? 'foe' : ''}">${win ? 'Victory' : loss ? 'Defeat' : 'Draw'}</h2>
+        <p class="big">${lines.join(' ')}</p>
+        ${mode !== 'ai' && rematch[foe()] && !rematch[me] ? '<p>Your opponent wants a rematch.</p>' : ''}
+        <div class="btnrow">
+          ${mode === 'ai' ? '<button class="btn primary" id="again">Play again</button>'
+            : `<button class="btn primary" id="again" ${wait ? 'disabled' : ''}>${wait ? 'Waiting for opponent…' : 'Rematch'}</button>`}
+          <button class="btn" id="menu">Main menu</button>
+        </div>
+      </div>`);
+      if (mode === 'ai') panelInfo('The AI buys units that counter what you fielded last round.', 'Play again', startAiMatch);
+      else panelInfo(wait ? 'Waiting for your opponent to accept the rematch.' : 'A rematch starts when you both tap Rematch.', wait ? '' : 'Rematch', askRematch);
+      $('again').addEventListener('click', mode === 'ai' ? startAiMatch : askRematch);
+      $('menu').addEventListener('click', () => { if (mode === 'host') clearHost(); showStart(); });
+      return;
+    }
+    phase = 'result'; hud(); netStatus();
+    const bonus = sum.bonusTo === me ? ` You get ${Game.LOSER_BONUS} extra for losing the round.` : sum.bonusTo === foe() ? ` The ${them.toLowerCase()} gets ${Game.LOSER_BONUS} extra for losing the round.` : '';
+    const waiting = mode !== 'ai' && nextReady[me];
+    overlay(`<div class="card">
+      <span class="eyebrow">${Math.round(sum.time)} s of fighting</span>
+      <h2 class="${cls}">${head}</h2>
+      <p class="big">${lines.join(' ')}</p>
+      ${lvLines.join('')}
+      <p>Next round: +${Game.INCOME} gold each.${bonus}</p>
+      ${waiting ? '<p class="status wait">Waiting for your opponent</p>' : `<button class="btn primary" id="next">Next round</button>`}
+    </div>`);
+    if (waiting) panelInfo('The next round starts when your opponent is ready too.', '', null);
+    else panelInfo('Your squads keep their tiles. Add more to counter what you just saw.', 'Next round', tapNext);
+    if ($('next')) $('next').addEventListener('click', tapNext);
+  }
+
+  // ---------- flow: vs AI ----------
+  function startAiMatch() {
+    leaveNet();
+    mode = 'ai'; me = 0;
+    m = Game.createMatch(units, M, (now() ^ (Math.random() * 1e9)) >>> 0);
+    nextReady = [false, false]; rematch = [false, false];
+    beginAiRound();
+  }
+
+  function beginAiRound() {
+    Game.aiDeploy(m, 1);       // the AI commits first; its new squads stay hidden until the fight
+    enterDeploy(timerOn ? DEPLOY_SECONDS * 1000 : 0);
+  }
+
+  function enterDeploy(ms) {
+    phase = 'deploy'; bt = null; battlePre = null; fx = []; selected = null; timeUp = false; resultShownAt = 0;
+    ready = [false, false];
+    deadline = ms > 0 ? now() + ms : 0;
+    $('clock').textContent = '';
+    closeSheet(); overlay(null); hud(); netStatus(); panelDeploy(); size(); render();
+  }
+
+  function tapNext() {
+    if (phase !== 'result') return;
+    if (mode === 'ai') { beginAiRound(); return; }
+    nextReady[me] = true;
+    if (mode === 'guest') send({ t: 'next', round: lastSummary && lastSummary.round });
+    else { sendStatus(); saveHost(); if (!checkNext()) showResult(lastSummary); return; }
+    showResult(lastSummary);
+  }
+
+  function askRematch() {
+    if (phase !== 'end' || mode === 'ai') return;
+    rematch[me] = true;
+    if (mode === 'guest') send({ t: 'rematch' });
+    else { sendStatus(); if (checkRematch()) return; }
+    showResult(lastSummary);
+  }
+
+  // ---------- the fight (vs AI and host) ----------
+  const snapshot = (match) => JSON.parse(JSON.stringify({ ...match, units: null, matrix: null }));
+  const withUnits = (s) => ({ ...s, units, matrix: M });
+
+  function runFight() {
+    if (phase !== 'deploy' || !m) return;
+    if (mode === 'guest') return;
+    closeSheet(); selected = null;
+    lastAiLevels = mode === 'ai' ? Game.aiLevel(m, 1) : []; // the AI spends its level-ups now
+    const pre = snapshot(m);
+    // work out the result first; both screens then play the same battle back
+    const sim = Game.startBattle(m);
+    while (sim.step()) {}
+    const summary = Game.resolve(m, sim.result());
+    lastSummary = summary; nextReady = [false, false]; rematch = [false, false];
+    if (mode === 'host') { send({ t: 'fight', pre, post: snapshot(m), summary }); saveHost(); }
+    playBattle(pre);
+  }
+
+  function playBattle(pre) {
+    phase = 'battle'; selected = null; deadline = 0; timeUp = false;
+    battlePre = withUnits(pre);
+    bt = Game.startBattle(battlePre);
+    fx = []; acc = 0; lastTs = 0;
+    closeSheet(); overlay(null); hud(); panelBattle(); render();
+    cancelAnimationFrame(raf);
+    if (reduced) { while (bt.step()) {} finishBattle(); return; }
+    raf = requestAnimationFrame(loop);
+  }
+
+  function absorb() {
+    for (const s of bt.lastShots()) fx.push({ kind: 'shot', x1: s[0], y1: s[1], x2: s[2], y2: s[3], side: s[4], splash: s[5], charged: s[6], age: 0, life: 0.18 });
+    for (const b of bt.bodies) if (!b.alive && !b._gone) { b._gone = true; fx.push({ kind: 'death', x: b.x, y: b.y, r: radius(b.u), side: b.side, age: 0, life: 0.5 }); }
+  }
+
+  function loop(ts) {
+    if (phase !== 'battle') return;
+    const dtReal = lastTs ? Math.min(0.1, (ts - lastTs) / 1000) : 0.016; lastTs = ts;
+    const boost = bt.time() > 20 ? 2 : 1;
+    acc += dtReal * speed * boost;
+    while (acc >= Game.SETTINGS.dt) {
+      acc -= Game.SETTINGS.dt;
+      if (!bt.step()) break;
+      absorb();
+    }
+    for (const e of fx) e.age += dtReal * speed * boost;
+    fx = fx.filter(e => e.age < e.life);
+    $('clock').textContent = `${bt.time().toFixed(1)} s${boost > 1 ? ' · speeding up' : ''}`;
+    render();
+    if (bt.isOver()) { finishBattle(); return; }
+    raf = requestAnimationFrame(loop);
+  }
+
+  function finishBattle() {
+    if (phase !== 'battle') return;
+    cancelAnimationFrame(raf);
+    fx = [];
+    const res = bt.result();
+    $('clock').textContent = `${res.time.toFixed(1)} s`;
+    if (lastSummary && (res.winner !== lastSummary.winner || Math.abs(res.time - lastSummary.time) > 1e-6)) {
+      console.warn('Phone Bellum: this screen’s replay differs from the host’s result; the host’s result counts.');
+    }
+    battlePre = null;
+    render();
+    showResult(lastSummary);
+  }
+
+  // ---------- board input ----------
+  function tileAt(ev) {
+    const r = cv.getBoundingClientRect();
+    const c = Math.floor((ev.clientX - r.left) / r.width * Game.COLS);
+    const rw = Math.floor((ev.clientY - r.top) / r.height * Game.ROWS);
+    if (c < 0 || rw < 0 || c >= Game.COLS || rw >= Game.ROWS) return null;
+    return { col: scol(c), row: srow(rw) }; // screen -> model (the flip is its own inverse)
+  }
+  cv.addEventListener('pointermove', (ev) => {
+    if (phase !== 'deploy' || ev.pointerType !== 'mouse') return;
+    hoverTile = tileAt(ev); render();
+  });
+  cv.addEventListener('pointerleave', () => { hoverTile = null; if (phase === 'deploy') render(); });
+  cv.addEventListener('click', (ev) => {
+    if (phase !== 'deploy') return;
+    const t = tileAt(ev); if (!t) return;
+    const own = m.armies[me].find(s => s.col === t.col && s.row === t.row);
+    if (own) {
+      if (own.round === m.round) { if (editable() && Game.unplace(m, me, t.col, t.row)) changed(); }
+      else openSheet(own.unit, own, me);
+      return;
+    }
+    const enemy = m.armies[foe()].find(s => s.col === t.col && s.row === t.row && s.round < m.round);
+    if (enemy) { openSheet(enemy.unit, enemy, foe()); return; }
+    if (selected !== null && editable() && Game.inZone(me, t.row)) {
+      if (Game.place(m, me, selected, t.col, t.row)) {
+        if (m.gold[me] < Game.unitCostOf(units[selected]) || Game.deploysLeft(m, me) <= 0) selected = null;
+        changed();
+      }
+    }
+  });
+
+  // ---------- unit sheet ----------
+  function openSheet(i, sq, side) {
+    const base = units[i];
+    const u = sq ? Engine.leveled(base, sq.level) : base;
+    let lvl = '';
+    if (sq) {
+      const next = sq.level < Engine.MAX_LEVEL ? Math.round(Game.xpNeeded(base, sq.level)) : null;
+      const shown = next ? Math.min(Math.round(sq.xp), next) : 0;
+      lvl = `<p style="margin:0"><span style="color:var(--gold)">Level ${sq.level + 1}${sq.level ? ` · ${sq.level + 1}× health and attack` : ''}</span> · ${next ? `${shown.toLocaleString('en-US')} / ${next.toLocaleString('en-US')} XP to level ${sq.level + 2}` : 'max level'}</p>`;
+      if (side === me && phase === 'deploy') {
+        const cost = Game.levelCost(base);
+        const boughtNow = sq.boughtLevels && sq.boughtLevels[m.round] > 0;
+        const btns = [];
+        if (Game.isReady(m, sq)) btns.push(m.gold[me] >= cost && editable()
+          ? `<button class="btn primary" id="lvl-up">Level up · ${cost} gold</button>`
+          : `<button class="btn primary" disabled>${editable() ? `Need ${cost} gold` : `Level up · ${cost} gold`}</button>`);
+        if (boughtNow && editable()) btns.push(`<button class="btn" id="lvl-undo">Undo level-up</button>`);
+        if (btns.length) lvl += `<div style="display:flex;gap:8px;flex-wrap:wrap">${btns.join('')}</div>`;
+        else if (next) lvl += `<p class="hint" style="margin:0">Earns XP from damage it deals and takes. Killing leveled enemies pays extra.</p>`;
+      }
+    }
+    const row = M[i];
+    const good = units.map((v, j) => [row[j], v.name]).filter(x => x[0] > 0.3).sort((a, b) => b[0] - a[0]).slice(0, 3);
+    const bad = units.map((v, j) => [row[j], v.name]).filter(x => x[0] < -0.3).sort((a, b) => a[0] - b[0]).slice(0, 3);
+    const tr = [];
+    if (u.burst > 1) tr.push(`Burst ${u.burst}`);
+    if (u.pellets > 1) tr.push(`Shotgun ${u.pellets}`);
+    if (u.spinUp > 0) tr.push(`Spin-up ${u.spinUp}%/s`);
+    if (u.pierce > 0) tr.push(`Pierce ${u.pierce}`);
+    if (u.projSpeed > 0) tr.push(`Bolts ${u.projSpeed} m/s`);
+    if (u.minRange > 0) tr.push(`Min range ${u.minRange} m`);
+    if (u.charge > 1) tr.push(`Charge ×${u.charge}`);
+    if (u.knockback > 0) tr.push(`Knockback ${u.knockback} m`);
+    if (u.windUp > 0) tr.push(`Wind-up ${u.windUp} s`);
+    if (u.defense === 'armor') tr.push(`Armor ${u.defVal}`);
+    if (u.defense === 'ward') tr.push(`Ward ${u.defVal}`);
+    if (u.splash > 0) tr.push(`Splash ${u.splash} m`);
+    $('sheet').innerHTML = `
+      <div class="bar"><h3 id="sheet-h"><span style="color:${u.color}">${Shapes.svg(u.shape, 18)}</span> ${esc(u.name)}</h3><button class="btn small" id="close">Close</button></div>
+      <p class="role" style="margin:0">${ROLES[u.name] && !customSet ? ROLES[u.name] : customSet ? `From a Counter Lab roster · ${Game.unitCostOf(base)} gold` : ''}</p>
+      ${lvl}
+      ${tr.length ? `<div class="traits">${tr.map(x => `<span>${x}</span>`).join('')}</div>` : ''}
+      <div class="stats num">
+        <div><span>Bodies</span>${u.bodies}</div><div><span>Health</span>${Math.round(u.hp)}</div>
+        <div><span>Hit</span>${Math.round(u.hit)}</div><div><span>Attacks/s</span>${u.aps}</div>
+        <div><span>Range</span>${u.range} m</div><div><span>Speed</span>${u.speed} m/s</div>
+      </div>
+      <div class="vs">
+        <div class="good"><h4>Strong against</h4><ul>${good.length ? good.map(x => `<li>${esc(x[1])}</li>`).join('') : '<li>No hard counters</li>'}</ul></div>
+        <div class="bad"><h4>Weak against</h4><ul>${bad.length ? bad.map(x => `<li>${esc(x[1])}</li>`).join('') : '<li>No hard counters</li>'}</ul></div>
+      </div>`;
+    $('sheet-back').hidden = false;
+    $('close').addEventListener('click', closeSheet);
+    const after = () => { changed(); openSheet(i, sq, side); };
+    if ($('lvl-up')) $('lvl-up').addEventListener('click', () => { if (editable() && Game.levelUp(m, me, sq.id)) after(); });
+    if ($('lvl-undo')) $('lvl-undo').addEventListener('click', () => { if (editable() && Game.undoLevel(m, me, sq.id)) after(); });
+    ($('lvl-up') || $('close')).focus();
+  }
+  function closeSheet() { $('sheet-back').hidden = true; loaderRun++; }
+
+  // ---------- load units from Counter Lab ----------
+  let loaderRun = 0;
+  function* matrixGen(us) {
+    const n = us.length, out = us.map(() => Array(n).fill(0));
+    const total = n * (n - 1) / 2;
+    let done = 0;
+    for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) {
+      const r = Engine.battle(us[i], us[j], MATRIX_SETTINGS);
+      out[i][j] = +r.score.toFixed(3); out[j][i] = -out[i][j];
+      yield [++done, total];
+    }
+    return out;
+  }
+  function labRoster() {
+    try { const p = JSON.parse(localStorage.getItem(LAB_STORE) || 'null'); return p && validUnits(p.units) ? p : null; } catch (e) { return null; }
+  }
+  function openLoader() {
+    const lab = labRoster();
+    $('sheet').innerHTML = `
+      <div class="bar"><h3 id="sheet-h">Load units</h3><button class="btn small" id="close">Close</button></div>
+      ${lab ? `<p class="role" style="margin:0">Counter Lab on this device has ${lab.units.length} units.</p>
+      <div class="bar"><span></span><button class="btn primary" id="use-lab">Use my Counter Lab units</button></div>
+      <p class="role" style="margin:0">Or paste a roster copied with Copy roster:</p>`
+      : `<p class="role" style="margin:0">Open <a href="lab.html">Counter Lab</a> on this device and your units show up here. Or paste a roster copied with Copy roster:</p>`}
+      <textarea id="roster-in" spellcheck="false" placeholder="Paste your roster here" aria-label="Roster text"
+        style="min-height:110px;font:12px var(--font-data);background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:4px;padding:8px;width:100%"></textarea>
+      <div class="bar">
+        ${customSet ? '<button class="btn" id="builtin">Use built-in units</button>' : '<span></span>'}
+        <button class="btn ${lab ? '' : 'primary'}" id="use-roster">Use pasted units</button>
+      </div>
+      <p class="hint" id="load-msg" aria-live="polite" style="margin:0"></p>`;
+    $('sheet-back').hidden = false;
+    $('close').addEventListener('click', closeSheet);
+    if ($('builtin')) $('builtin').addEventListener('click', () => {
+      try { localStorage.removeItem(STORE); } catch (e) {}
+      useSet(BUILTIN, false); closeSheet(); showStart();
+    });
+    const msg = $('load-msg');
+    const load = (p) => {
+      const list = Array.isArray(p) ? p : p && p.units;
+      if (!validUnits(list)) { msg.textContent = 'The roster needs 2 to 30 units, each with a name, a cost above 0 and all eight levers.'; return; }
+      // Counter Lab costs are in gold (100 = one standard squad); older rosters used 1 = one squad
+      const gold = (p && p.goldCosts) || list.some(u => u.cost >= 10);
+      const clean = list.map(u => ({ ...u, level: 0, cost: gold ? u.cost / 100 : u.cost }));
+      const prepared = clean.map(u => ({ ...Engine.withTraits(u), level: 0, bodies: Math.max(1, Math.round(u.bodies)) }));
+      const id = ++loaderRun;
+      $('use-roster').disabled = true; if ($('use-lab')) $('use-lab').disabled = true;
+      const gen = matrixGen(prepared);
+      (function step() {
+        if (id !== loaderRun) return;
+        const t0 = performance.now();
+        let r;
+        while (performance.now() - t0 < 30) {
+          r = gen.next();
+          if (r.done) {
+            const set = { units: clean, matrix: r.value };
+            try { localStorage.setItem(STORE, JSON.stringify(set)); } catch (e) {}
+            useSet(set, true);
+            closeSheet(); showStart();
+            return;
+          }
+        }
+        msg.textContent = `Building the AI’s counter table: ${r.value[0]} of ${r.value[1]} matchups…`;
+        setTimeout(step, 0);
+      })();
+    };
+    if ($('use-lab')) $('use-lab').addEventListener('click', () => load(lab));
+    $('use-roster').addEventListener('click', () => {
+      let p;
+      try { p = JSON.parse($('roster-in').value); } catch (e) { msg.textContent = 'That text isn’t a roster. Copy it again with Copy roster in Counter Lab.'; return; }
+      load(p);
+    });
+  }
+  $('sheet-back').addEventListener('click', (e) => { if (e.target.id === 'sheet-back') closeSheet(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSheet(); });
+
+  // =====================================================================
+  // Live matches: PeerJS (WebRTC). The host runs the match and decides results;
+  // the guest sends its own deployments and plays back the same battle.
+  // =====================================================================
+  const net = { peer: null, conn: null, code: '', connected: false, retryTimer: 0, tries: 0, alive: false };
+  const peerOpts = () => {
+    const o = { debug: 1 };
+    if (qs.get('peerhost')) { o.host = qs.get('peerhost'); o.port = +qs.get('peerport') || 9000; o.path = qs.get('peerpath') || '/'; o.secure = qs.get('peersecure') === '1'; }
+    return o;
+  };
+  const shareLink = () => {
+    const u = new URL(location.href.split('#')[0]);
+    const keep = ['peerhost', 'peerport', 'peerpath', 'peersecure'];
+    [...u.searchParams.keys()].forEach(k => { if (!keep.includes(k)) u.searchParams.delete(k); });
+    u.searchParams.set('join', net.code);
+    return u.toString();
+  };
+  const newCode = () => Array.from({ length: 5 }, () => CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]).join('');
+  const send = (msg) => { if (net.conn && net.connected) { try { net.conn.send(msg); } catch (e) { console.warn(e); } } };
+  const peerAvailable = () => typeof Peer === 'function';
+
+  function leaveNet() {
+    net.alive = false;
+    clearTimeout(net.retryTimer);
+    try { if (net.conn) net.conn.close(); } catch (e) {}
+    try { if (net.peer) net.peer.destroy(); } catch (e) {}
+    net.peer = null; net.conn = null; net.connected = false; net.code = ''; net.tries = 0;
+    if (qs.has('join')) { qs.delete('join'); history.replaceState(null, '', location.pathname + (qs.toString() ? '?' + qs : '')); }
+  }
+
+  // ----- host -----
+  function hostLobby() {
+    if (!peerAvailable()) { overlayMsg('Couldn’t load the multiplayer code', 'Check your connection and reload the page.'); return; }
+    leaveNet();
+    mode = 'host'; me = 0; m = null; phase = 'lobby';
+    net.code = newCode();
+    clearHost();
+    hud(); netStatus(); render();
+    drawLobby();
+    hostOpen(true);
+  }
+
+  function hostOpen(fresh) {
+    net.alive = true;
+    const peer = new Peer(PEER_PREFIX + net.code, peerOpts());
+    net.peer = peer;
+    peer.on('open', () => { net.tries = 0; if (phase === 'lobby') drawLobby(); });
+    peer.on('connection', (c) => {
+      c.on('open', () => {
+        if (net.conn && net.conn !== c) { const old = net.conn; net.conn = null; try { old.close(); } catch (e) {} }
+        net.conn = c; net.connected = true;
+        onFriendConnected();
+      });
+      c.on('data', (d) => { if (c === net.conn) hostRecv(d); });
+      c.on('close', () => { if (c === net.conn) { net.connected = false; onFriendLost(); } });
+      c.on('error', (e) => console.warn('connection', e));
+    });
+    peer.on('disconnected', () => { if (net.alive && !peer.destroyed) setTimeout(() => { if (net.alive && !peer.destroyed && peer.disconnected) peer.reconnect(); }, 1500); });
+    peer.on('error', (err) => {
+      console.warn('peer', err.type, err);
+      if (!net.alive) return;
+      if (err.type === 'unavailable-id') {
+        // fresh lobby: pick another code. Resumed match: the old page may still hold the code for a moment
+        try { peer.destroy(); } catch (e) {}
+        if (fresh && phase === 'lobby' && !m) { net.code = newCode(); drawLobby(); hostOpen(true); }
+        else if (net.tries++ < 40) net.retryTimer = setTimeout(() => hostOpen(false), 3000);
+      } else if (['network', 'server-error', 'socket-error', 'socket-closed'].includes(err.type)) {
+        if (phase === 'lobby') drawLobby('Can’t reach the match server. Retrying…');
+        clearTimeout(net.retryTimer);
+        net.retryTimer = setTimeout(() => { if (!net.alive) return; if (peer.destroyed) hostOpen(fresh); else if (peer.disconnected) peer.reconnect(); }, 3000);
+      }
+    });
+  }
+
+  function drawLobby(problem) {
+    const link = shareLink();
+    const here = net.connected;
+    overlay(`<div class="card">
+      <span class="eyebrow">Challenge a friend · match code</span>
+      <span class="code" aria-label="Match code">${net.code}</span>
+      <p class="status ${here ? '' : 'wait'}" id="lobby-status">${problem ? esc(problem) : here ? 'Your friend is here!' : (net.peer && net.peer.open ? 'Waiting for your friend to open the link' : 'Setting up the match')}</p>
+      <button class="btn primary" id="start" ${here ? '' : 'disabled'}>Start match</button>
+    </div>`);
+    $('panel').innerHTML = `
+      <span class="hint">Send your friend this link. It works in any browser and nobody needs an account. Keep this page open while they join.</span>
+      <div class="linkbox" id="link">${esc(link)}</div>
+      <div class="bar">
+        <span class="btnrow">
+          ${navigator.share ? '<button class="btn primary" id="share">Share link</button>' : ''}
+          <button class="btn ${navigator.share ? '' : 'primary'}" id="copy">Copy link</button>
+        </span>
+        <button class="btn" id="cancel">Cancel</button>
+      </div>
+      <span class="hint">You both play with the units on this device: ${customSet ? `your ${units.length} Counter Lab units` : `the ${units.length} built-in units`}.</span>`;
+    if ($('share')) $('share').addEventListener('click', () => { navigator.share({ title: 'Phone Bellum', text: `Fight me in Phone Bellum! Code ${net.code}`, url: link }).catch(() => {}); });
+    $('copy').addEventListener('click', () => {
+      const done = () => { $('copy').textContent = 'Copied'; setTimeout(() => { if ($('copy')) $('copy').textContent = 'Copy link'; }, 1500); };
+      if (navigator.clipboard) navigator.clipboard.writeText(link).then(done, () => selectLink());
+      else selectLink();
+    });
+    $('cancel').addEventListener('click', () => { clearHost(); showStart(); });
+    $('start').addEventListener('click', hostStartMatch);
+  }
+  function selectLink() { const r = document.createRange(); r.selectNodeContents($('link')); const s = getSelection(); s.removeAllRanges(); s.addRange(r); }
+
+  function hostStartMatch() {
+    if (!net.connected) return;
+    m = Game.createMatch(units, M, (now() ^ (Math.random() * 1e9)) >>> 0);
+    lastSummary = null; nextReady = [false, false]; rematch = [false, false];
+    hostBeginRound();
+  }
+
+  function hostBeginRound() {
+    enterDeploy(DEPLOY_SECONDS * 1000);
+    sendSync(); saveHost();
+  }
+
+  function onFriendConnected() {
+    if (phase === 'deploy' && !deadline) { deadline = now() + Math.max(10000, pausedLeft || DEPLOY_SECONDS * 1000); pausedLeft = 0; }
+    sendSync();
+    netStatus();
+    if (phase === 'lobby') drawLobby();
+    else if (phase === 'deploy') panelDeploy();
+  }
+  function onFriendLost() {
+    netStatus();
+    if (phase === 'lobby') drawLobby();
+    else if (phase === 'deploy') tick();
+  }
+
+  // What the guest may see: the host's squads from this round stay hidden until the fight
+  function syncState() {
+    const s = snapshot(m);
+    if (phase === 'deploy') s.armies[0] = s.armies[0].filter(q => q.round < m.round);
+    return s;
+  }
+  function sendSync() {
+    if (!net.connected) return;
+    const base = { t: 'sync', proto: 1, set: { units: rawSet.units, matrix: rawSet.matrix }, custom: customSet, config: { levelCostPerTier: Game.CONFIG.levelCostPerTier } };
+    if (!m) { send({ ...base, phase: 'lobby' }); return; }
+    const ph = phase === 'battle' ? 'result' : phase;
+    send({ ...base, phase: ph, m: syncState(), remaining: phase === 'deploy' && deadline ? deadline - now() : 0, ready, nextReady, rematch, summary: lastSummary });
+  }
+  const sendStatus = () => send({ t: 'status', ready, nextReady, rematch });
+
+  function hostRecv(d) {
+    if (!d || typeof d !== 'object') return;
+    if (d.t === 'side') {
+      if (!m || phase !== 'deploy' || d.round !== m.round) return;
+      applySide(d);
+      saveHost();
+      if (ready[0] && ready[1]) { runFight(); return; }
+      panelDeploy();
+    } else if (d.t === 'next') {
+      if (!lastSummary || d.round !== lastSummary.round) return;
+      nextReady[1] = true; sendStatus(); saveHost();
+      if (!checkNext() && phase === 'result') showResult(lastSummary);
+    } else if (d.t === 'rematch') {
+      rematch[1] = true; sendStatus();
+      if (!checkRematch() && phase === 'end') showResult(lastSummary);
+    }
+  }
+
+  function applySide(d) {
+    if (!Array.isArray(d.army)) return;
+    const n = units.length;
+    const army = d.army.filter(s => s && Number.isInteger(s.unit) && s.unit >= 0 && s.unit < n && Number.isInteger(s.col) && s.col >= 0 && s.col < Game.COLS && Number.isInteger(s.row) && Game.inZone(1, s.row));
+    const seen = new Set();
+    m.armies[1] = army.filter(s => { const k = s.col + ',' + s.row; if (seen.has(k)) return false; seen.add(k); return true; }).map(s => ({
+      id: s.id | 0, unit: s.unit, col: s.col, row: s.row, round: s.round | 0, xp: Math.max(0, +s.xp || 0),
+      level: Math.max(0, Math.min(Engine.MAX_LEVEL, s.level | 0)), cost: Math.max(0, +s.cost || 0),
+      ...(s.boughtLevels && typeof s.boughtLevels === 'object' ? { boughtLevels: s.boughtLevels } : {}),
+    }));
+    m.gold[1] = Math.max(0, +d.gold || 0);
+    m.extraDeploys[1] = Math.max(0, d.extra | 0);
+    m.nextId[1] = Math.max(m.nextId[1], d.nextId | 0);
+    ready[1] = !!d.ready;
+  }
+
+  function checkNext() {
+    if (mode !== 'host' || phase !== 'result' || !(nextReady[0] && nextReady[1])) return false;
+    hostBeginRound();
+    return true;
+  }
+  function checkRematch() {
+    if (mode !== 'host' || phase !== 'end' || !(rematch[0] && rematch[1])) return false;
+    hostStartMatch();
+    return true;
+  }
+
+  // The host's match survives a reload (iPhone Safari drops background tabs)
+  function saveHost() {
+    if (mode !== 'host' || !m) return;
+    try {
+      localStorage.setItem(HOST_STORE, JSON.stringify({
+        code: net.code, ts: now(), set: rawSet, custom: customSet, config: { levelCostPerTier: Game.CONFIG.levelCostPerTier },
+        m: snapshot(m), phase: phase === 'battle' ? 'result' : phase, summary: lastSummary, nextReady, rematch,
+        left: phase === 'deploy' ? (deadline ? deadline - now() : pausedLeft) : 0,
+      }));
+    } catch (e) {}
+  }
+  function clearHost() { try { localStorage.removeItem(HOST_STORE); } catch (e) {} }
+
+  function resumeHost(s) {
+    if (!peerAvailable()) { overlayMsg('Couldn’t load the multiplayer code', 'Check your connection and reload the page.'); return; }
+    leaveNet();
+    mode = 'host'; me = 0;
+    useSet(validSet(s.set) ? s.set : BUILTIN, !!s.custom);
+    Game.CONFIG.levelCostPerTier = (s.config && s.config.levelCostPerTier) || Game.CONFIG.levelCostPerTier;
+    net.code = s.code;
+    m = withUnits(s.m); lastSummary = s.summary || null;
+    nextReady = s.nextReady || [false, false]; rematch = s.rematch || [false, false];
+    if (s.phase === 'deploy') {
+      enterDeploy(0); pausedLeft = Math.max(10000, s.left || DEPLOY_SECONDS * 1000);
+      // squads placed this round are kept; ready flags reset
+    } else if (lastSummary) { bt = null; showResult(lastSummary); }
+    else { phase = 'lobby'; drawLobby(); }
+    hud(); netStatus(); render();
+    hostOpen(false);
+  }
+
+  // ----- guest -----
+  function joinMatch(code) {
+    if (!peerAvailable()) { overlayMsg('Couldn’t load the multiplayer code', 'Check your connection and reload the page.'); return; }
+    leaveNet();
+    mode = 'guest'; me = 1; m = null; phase = 'lobby'; bt = null;
+    net.code = code; net.alive = true;
+    history.replaceState(null, '', shareLink());
+    hud(); netStatus(); render();
+    guestWaiting('Connecting to match ' + code);
+    const peer = new Peer(peerOpts());
+    net.peer = peer;
+    peer.on('open', () => connectToHost());
+    peer.on('disconnected', () => { if (net.alive && !peer.destroyed) setTimeout(() => { if (net.alive && !peer.destroyed && peer.disconnected) peer.reconnect(); }, 1500); });
+    peer.on('error', (err) => {
+      console.warn('peer', err.type, err);
+      if (!net.alive) return;
+      if (err.type === 'peer-unavailable') {
+        if (!m) guestWaiting(net.tries > 2 ? `Can’t find match ${code}. Make sure your friend still has it open. Retrying` : 'Connecting to match ' + code);
+        retryConnect(2500);
+      } else if (['network', 'server-error', 'socket-error', 'socket-closed'].includes(err.type)) {
+        if (!m) guestWaiting('Can’t reach the match server. Retrying');
+        clearTimeout(net.retryTimer);
+        net.retryTimer = setTimeout(() => { if (net.alive && !peer.destroyed && peer.disconnected) peer.reconnect(); retryConnect(500); }, 3000);
+      }
+    });
+  }
+
+  function retryConnect(ms) {
+    clearTimeout(net.retryTimer);
+    net.retryTimer = setTimeout(() => { if (net.alive && !net.connected) connectToHost(); }, ms);
+  }
+
+  function connectToHost() {
+    const peer = net.peer;
+    if (!net.alive || !peer || peer.destroyed || net.connected) return;
+    if (peer.disconnected) { peer.reconnect(); return; }
+    net.tries++;
+    const c = peer.connect(PEER_PREFIX + net.code, { reliable: true });
+    let opened = false;
+    const giveUp = setTimeout(() => { if (!opened) { try { c.close(); } catch (e) {} retryConnect(500); } }, 9000);
+    c.on('open', () => {
+      opened = true; clearTimeout(giveUp);
+      if (net.conn && net.conn !== c) { try { net.conn.close(); } catch (e) {} }
+      net.conn = c; net.connected = true; net.tries = 0;
+      netStatus();
+      if (phase === 'deploy') { sendSide(); panelDeploy(); }
+      if (phase === 'lobby' && !m) guestWaiting('Connected. Waiting for your friend to start the match');
+    });
+    c.on('data', (d) => { if (c === net.conn) guestRecv(d); });
+    c.on('close', () => {
+      clearTimeout(giveUp);
+      if (c === net.conn) { net.connected = false; net.conn = null; netStatus(); if (phase === 'deploy') panelDeploy(); retryConnect(1500); }
+    });
+    c.on('error', (e) => console.warn('connection', e));
+  }
+
+  function guestWaiting(text) {
+    overlay(`<div class="card">
+      <span class="eyebrow">Live match</span>
+      <span class="code">${esc(net.code)}</span>
+      <p class="status wait">${esc(text)}</p>
+      <button class="btn" id="leave">Leave</button>
+    </div>`);
+    panelInfo('Keep this page open.', '', null);
+    $('leave').addEventListener('click', showStart);
+  }
+
+  function sendSide() {
+    if (mode !== 'guest' || !m || phase !== 'deploy') return;
+    send({ t: 'side', round: m.round, army: m.armies[1], gold: m.gold[1], extra: m.extraDeploys[1], nextId: m.nextId[1], ready: ready[1] || timeUp });
+  }
+
+  function guestRecv(d) {
+    if (!d || typeof d !== 'object') return;
+    if (d.t === 'sync') {
+      if (validSet(d.set)) useSet(d.set, !!d.custom);
+      if (d.config && d.config.levelCostPerTier) Game.CONFIG.levelCostPerTier = d.config.levelCostPerTier;
+      if (d.phase === 'lobby' || !d.m) { m = null; phase = 'lobby'; hud(); render(); guestWaiting('Connected. Waiting for your friend to start the match'); return; }
+      const incoming = withUnits(d.m);
+      const theirReady = d.ready ? !!d.ready[0] : false;
+      nextReady[0] = d.nextReady ? !!d.nextReady[0] : false;
+      rematch[0] = d.rematch ? !!d.rematch[0] : false;
+      if (d.phase === 'deploy') {
+        if (phase === 'deploy' && m && m.round === incoming.round) {
+          // same round after a reconnect: keep our own side as it is here, take everything else from the host
+          for (const k of ['armies', 'gold', 'extraDeploys', 'nextId']) incoming[k][1] = m[k][1];
+          m = incoming; ready[0] = theirReady;
+          deadline = d.remaining > 0 ? now() + d.remaining - 300 : 0;
+          timeUp = false;
+          sendSide(); panelDeploy(); render(); hud();
+        } else {
+          m = incoming; lastSummary = d.summary || lastSummary;
+          nextReady = [false, false]; rematch = [false, false];
+          enterDeploy(d.remaining > 0 ? d.remaining - 300 : 0);
+          ready[0] = theirReady; panelDeploy();
+        }
+        return;
+      }
+      // result or end
+      if (phase === 'battle' && d.summary && lastSummary && d.summary.round === lastSummary.round) return; // still watching this battle
+      m = incoming; lastSummary = d.summary;
+      nextReady[1] = d.nextReady ? !!d.nextReady[1] : false;
+      rematch[1] = d.rematch ? !!d.rematch[1] : false;
+      if (lastSummary) { if (phase !== 'result' && phase !== 'end') bt = null; showResult(lastSummary); }
+      render();
+    } else if (d.t === 'fight') {
+      if (!d.pre || !d.post || !d.summary) return;
+      m = withUnits(d.post); lastSummary = d.summary;
+      nextReady = [false, false]; rematch = [false, false];
+      playBattle(d.pre);
+    } else if (d.t === 'status') {
+      if (d.ready) ready[0] = !!d.ready[0];
+      if (d.nextReady) nextReady[0] = !!d.nextReady[0];
+      if (d.rematch) rematch[0] = !!d.rematch[0];
+      if (phase === 'deploy') panelDeploy();
+      else if (phase === 'end') showResult(lastSummary);
+    }
+  }
+
+  function overlayMsg(head, text) {
+    overlay(`<div class="card"><h2>${esc(head)}</h2><p>${esc(text)}</p><button class="btn primary" id="ok">OK</button></div>`);
+    $('ok').addEventListener('click', showStart);
+  }
+
+  // Phones pause pages in the background; reconnect when the page comes back
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden || !net.alive || !net.peer) return;
+    if (net.peer.disconnected && !net.peer.destroyed) net.peer.reconnect();
+    if (mode === 'guest' && !net.connected) retryConnect(300);
+  });
+
+  window.addEventListener('resize', () => { size(); render(); });
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { size(); render(); });
+  const joinCode = (qs.get('join') || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (joinCode.length === 5) { showStart(); joinMatch(joinCode); }
+  else showStart();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,2113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0D1315">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Phone Bellum">
+<meta name="description" content="A small auto-battler. Deploy squads, counter your opponent, watch the armies fight. Play the AI or challenge a friend.">
+<link rel="icon" href="icon.png">
+<link rel="apple-touch-icon" href="icon.png">
+<title>Phone Bellum</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+
+/* Layout: one column, a war table at night. HUD on top, square board, controls under the thumb. Single dark look by choice. */
+:root {
+  --bg: #0D1315;
+  --panel: #152125;
+  --board: #13201F;
+  --line: #27393D;
+  --ink: #E5ECE9;
+  --muted: #8DA1A1;
+  --you: #5CC6DF;
+  --foe: #EE6E5C;
+  --gold: #E6B84A;
+  --font-display: "Chakra Petch", "Arial Narrow", system-ui, sans-serif;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-data: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { background: var(--bg); color: var(--ink); }
+body { font-family: var(--font-body); font-size: 15px; line-height: 1.45; padding-inline: 16px; padding-block: 12px 28px; -webkit-tap-highlight-color: transparent; }
+.app { max-width: 560px; margin: 0 auto; display: grid; gap: 12px; }
+h1, h2, h3 { font-family: var(--font-display); margin: 0; text-wrap: balance; letter-spacing: 0.02em; }
+button { font: inherit; cursor: pointer; color: inherit; }
+button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.num { font-family: var(--font-data); font-variant-numeric: tabular-nums; }
+
+/* HUD */
+.hud { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 12px; }
+.side { display: grid; gap: 4px; min-width: 0; }
+.side.foe { text-align: right; }
+.side .lbl { font-family: var(--font-display); font-weight: 600; font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; display: flex; justify-content: space-between; gap: 8px; }
+.side.you .lbl { color: var(--you); }
+.side.foe .lbl { color: var(--foe); flex-direction: row-reverse; }
+.side .lbl .num { color: var(--ink); font-weight: 500; }
+.hp { height: 8px; border-radius: 4px; background: var(--panel); border: 1px solid var(--line); overflow: hidden; }
+.hp i { display: block; height: 100%; transition: width 0.6s ease; }
+.side.you .hp i { background: var(--you); }
+.side.foe .hp i { background: var(--foe); margin-left: auto; }
+.round { text-align: center; font-family: var(--font-display); }
+.round b { display: block; font-size: 22px; font-weight: 700; line-height: 1; }
+.round span { font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); }
+
+/* Board */
+.board-wrap { position: relative; width: 100%; max-width: 100%; aspect-ratio: 1 / 1; border-radius: 6px; overflow: hidden; border: 1px solid var(--line); background: var(--board); touch-action: manipulation; }
+canvas { display: block; width: 100%; height: 100%; }
+.tag-clock { position: absolute; top: 8px; left: 10px; font-family: var(--font-data); font-size: 12px; color: var(--muted); pointer-events: none; }
+.overlay { position: absolute; inset: 0; display: flex; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 16px; background: rgba(13, 19, 21, 0.86); text-align: center; }
+.card { margin: auto; display: grid; gap: 10px; justify-items: center; max-width: 36ch; }
+.card h2 { font-size: clamp(26px, 8vw, 38px); font-weight: 700; text-transform: uppercase; line-height: 1; }
+.card h2.you { color: var(--you); }
+.card h2.foe { color: var(--foe); }
+.card p { margin: 0; color: var(--muted); }
+.card .big { color: var(--ink); font-size: 17px; }
+.card ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 5px; text-align: left; color: var(--muted); font-size: 13px; line-height: 1.35; }
+.card ul li::before { content: "▸ "; color: var(--gold); }
+.eyebrow { font-family: var(--font-data); font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--gold); }
+
+/* Controls */
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 12px; display: grid; gap: 10px; }
+.bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; }
+.gold { font-family: var(--font-data); font-size: 16px; color: var(--gold); font-weight: 500; }
+.deploys { font-size: 13px; color: var(--ink); }
+.btn:disabled { opacity: 0.4; cursor: default; }
+.hint { font-size: 13px; color: var(--muted); }
+.btn { border-radius: 4px; border: 1px solid var(--line); background: transparent; padding: 10px 16px; font-weight: 600; font-size: 15px; }
+.btn.primary { background: var(--gold); border-color: var(--gold); color: var(--bg); }
+.btn.primary:disabled { opacity: 0.4; cursor: default; }
+.btn.small { padding: 6px 12px; font-size: 13px; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
+.seg button { border: 0; background: transparent; padding: 7px 12px; font-family: var(--font-data); font-size: 13px; }
+.seg button[aria-pressed="true"] { background: var(--line); color: var(--gold); }
+
+.shop { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; scroll-snap-type: x proximity; -webkit-overflow-scrolling: touch; }
+.uwrap { flex: 0 0 132px; scroll-snap-align: start; position: relative; display: grid; }
+.ucard { text-align: left; border: 1px solid var(--line); border-radius: 6px; padding: 10px 34px 9px 10px; background: var(--bg); display: grid; gap: 3px; align-content: start; }
+.ucard[aria-pressed="true"] { border-color: var(--you); box-shadow: inset 0 0 0 1px var(--you); }
+.ucard[aria-disabled="true"] { opacity: 0.45; cursor: default; }
+.ucard .t { font-family: var(--font-data); font-size: 12px; color: var(--you); letter-spacing: 0.06em; display: inline-flex; align-items: center; gap: 5px; }
+.ucard .n { font-family: var(--font-display); font-weight: 600; font-size: 15px; line-height: 1.15; }
+.ucard .r { font-size: 12px; color: var(--muted); line-height: 1.3; }
+.ucard .c { font-family: var(--font-data); font-size: 12px; color: var(--gold); }
+.uwrap .info { position: absolute; top: 6px; right: 6px; width: 24px; height: 24px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel); font-family: var(--font-display); font-size: 12px; display: grid; place-items: center; }
+
+/* Unit sheet */
+.sheet-back { position: fixed; inset: 0; background: color-mix(in srgb, var(--bg) 70%, transparent); display: grid; align-items: end; justify-items: center; z-index: 5; }
+.sheet { width: 100%; max-width: 560px; background: var(--panel); border: 1px solid var(--line); border-bottom: 0; border-radius: 10px 10px 0 0; padding: 18px 16px calc(18px + env(safe-area-inset-bottom, 0px)); display: grid; gap: 12px; max-height: 80vh; overflow-y: auto; }
+.sheet h3 { font-size: 22px; }
+.sheet .role { color: var(--muted); }
+.stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 6px 14px; font-size: 13px; }
+.stats div { display: flex; justify-content: space-between; gap: 8px; border-bottom: 1px solid var(--line); padding: 4px 0; }
+.stats span { color: var(--muted); }
+.vs { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-size: 13px; }
+.vs h4 { margin: 0 0 4px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; }
+.vs .good h4 { color: var(--you); }
+.vs .bad h4 { color: var(--foe); }
+.vs ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; }
+.traits { display: flex; flex-wrap: wrap; gap: 6px; }
+.traits span { font-size: 12px; border: 1px solid var(--line); border-radius: 99px; padding: 2px 9px; color: var(--ink); }
+@media (prefers-reduced-motion: reduce) { .hp i { transition: none; } }
+
+[hidden] { display: none !important; }
+body { padding-top: calc(12px + env(safe-area-inset-top, 0px)); padding-bottom: calc(28px + env(safe-area-inset-bottom, 0px)); margin: 0; }
+.net { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 8px; justify-content: center; min-height: 18px; }
+.net i { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); display: inline-block; }
+.net.ok i { background: #6FD08C; }
+.net.bad { color: var(--foe); }
+.net.bad i { background: var(--foe); }
+.timer { font-family: var(--font-data); font-size: 20px; font-weight: 500; color: var(--ink); font-variant-numeric: tabular-nums; }
+.timer.low { color: var(--foe); }
+.code { font-family: var(--font-data); font-size: clamp(30px, 10vw, 44px); letter-spacing: 0.22em; color: var(--gold); padding-left: 0.22em; }
+.linkbox { font-family: var(--font-data); font-size: 12px; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 8px 10px; word-break: break-all; user-select: all; -webkit-user-select: all; }
+.btnrow { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+.joinrow { display: flex; gap: 8px; justify-content: center; }
+.joinrow input { width: 9ch; font: 500 18px var(--font-data); letter-spacing: 0.16em; text-transform: uppercase; text-align: center; background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 4px; padding: 8px; }
+.card .stack { display: grid; gap: 8px; justify-items: center; width: 100%; }
+.card hr { width: 100%; border: 0; border-top: 1px solid var(--line); margin: 4px 0; }
+.status { font-size: 14px; color: var(--ink); }
+.status.wait::after { content: ""; display: inline-block; width: 1.2em; text-align: left; animation: dots 1.4s steps(4) infinite; }
+@keyframes dots { 0% { content: ""; } 25% { content: "."; } 50% { content: ".."; } 75% { content: "..."; } }
+a { color: var(--you); }
+@media (prefers-reduced-motion: reduce) { .status.wait::after { animation: none; content: "…"; } }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="hud" aria-label="Match status">
+    <div class="side you"><div class="lbl"><span>You</span><span class="num" id="hp-you">40</span></div><div class="hp"><i id="hpbar-you" style="width:100%"></i></div></div>
+    <div class="round"><b class="num" id="round">1</b><span id="phase">Deploy</span></div>
+    <div class="side foe"><div class="lbl"><span id="foe-name">Enemy</span><span class="num" id="hp-foe">40</span></div><div class="hp"><i id="hpbar-foe" style="width:100%"></i></div></div>
+  </div>
+  <div class="net" id="net" hidden aria-live="polite"><i></i><span id="net-text"></span></div>
+
+  <div class="board-wrap" id="wrap">
+    <canvas id="board" aria-label="Battlefield. Your zone is the bottom four rows, the enemy zone the top four."></canvas>
+    <span class="tag-clock" id="clock"></span>
+    <div class="overlay" id="overlay"></div>
+  </div>
+
+  <div class="panel" id="panel"></div>
+</div>
+
+<div class="sheet-back" id="sheet-back" hidden><div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-h"></div></div>
+
+<script src="peerjs.min.js"></script>
+<script>
+// ===== Unit shapes (shared by Counter Lab and the demo) =====
+const Shapes = (() => {
+  const LIST = ['circle', 'ring', 'square', 'triangle', 'diamond', 'pentagon', 'hexagon', 'star', 'cross', 'bar'];
+  const LABELS = { circle: 'Circle', ring: 'Ring', square: 'Square', triangle: 'Triangle', diamond: 'Diamond', pentagon: 'Pentagon', hexagon: 'Hexagon', star: 'Star', cross: 'Cross', bar: 'Bar' };
+  const DEFAULTS = {
+    'Goblin Swarm': 'triangle', 'Skeleton Archers': 'diamond', 'Ember Imps': 'star', 'Fire Mage': 'hexagon',
+    'Sniper': 'cross', 'Brute': 'square', 'Wisps': 'ring', 'Crossbow Volley': 'pentagon', 'Ballista': 'bar',
+    'Boar Riders': 'circle', 'Spinning Golem': 'hexagon', 'Blunderbuss Crew': 'star', 'Ogre Smasher': 'square',
+  };
+  const valid = (s) => LIST.includes(s);
+  // Unit colours: picked to stay clear of the team colours (blue and red), which outline every body
+  const PALETTE = ['#9BD35A', '#E9E3CF', '#FFA94D', '#C77DFF', '#F7D154', '#8D99AE', '#E07A9B', '#B08155', '#3FD39A', '#B4A7F5', '#D9C49A', '#7FA650'];
+  const DEFAULT_COLORS = {
+    'Goblin Swarm': '#9BD35A', 'Skeleton Archers': '#E9E3CF', 'Ember Imps': '#FFA94D', 'Fire Mage': '#C77DFF',
+    'Sniper': '#F7D154', 'Brute': '#8D99AE', 'Wisps': '#B4A7F5', 'Crossbow Volley': '#B08155', 'Ballista': '#D9C49A',
+    'Boar Riders': '#E07A9B', 'Spinning Golem': '#7FA650', 'Blunderbuss Crew': '#3FD39A', 'Ogre Smasher': '#B08155',
+  };
+  const validColor = (c) => typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c);
+
+  // Give every unit a shape and a colour: keep valid ones, else a known default, else the first one not used yet
+  function assign(units) {
+    const used = new Set(units.filter(u => valid(u.shape)).map(u => u.shape));
+    const usedC = new Set(units.filter(u => validColor(u.color)).map(u => u.color.toUpperCase()));
+    return units.map((u) => {
+      let out = u;
+      if (!valid(u.shape)) {
+        let s = DEFAULTS[u.name];
+        if (!s || used.has(s)) s = LIST.find(x => !used.has(x)) || LIST[used.size % LIST.length];
+        used.add(s);
+        out = { ...out, shape: s };
+      }
+      if (!validColor(u.color)) {
+        let c = DEFAULT_COLORS[u.name];
+        if (!c || usedC.has(c)) c = PALETTE.find(x => !usedC.has(x)) || PALETTE[usedC.size % PALETTE.length];
+        usedC.add(c);
+        out = { ...out, color: c };
+      }
+      return out;
+    });
+  }
+
+  // Points of a regular polygon; up = 1 points toward the top of the screen, -1 toward the bottom
+  function poly(ctx, x, y, r, n, rot) {
+    ctx.beginPath();
+    for (let i = 0; i < n; i++) {
+      const a = rot + i * Math.PI * 2 / n;
+      const px = x + Math.cos(a) * r, py = y + Math.sin(a) * r;
+      i ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+    }
+    ctx.closePath();
+  }
+
+  // Builds the path for a shape. Returns true if the shape should be stroked instead of filled (ring).
+  function path(ctx, shape, x, y, r, up = 1) {
+    const top = up >= 0 ? -Math.PI / 2 : Math.PI / 2;
+    switch (shape) {
+      case 'square': ctx.beginPath(); ctx.rect(x - r * 0.88, y - r * 0.88, r * 1.76, r * 1.76); return false;
+      case 'triangle': poly(ctx, x, y + (up >= 0 ? r * 0.15 : -r * 0.15), r * 1.25, 3, top); return false;
+      case 'diamond': poly(ctx, x, y, r * 1.2, 4, top); return false;
+      case 'pentagon': poly(ctx, x, y, r * 1.08, 5, top); return false;
+      case 'hexagon': poly(ctx, x, y, r * 1.05, 6, 0); return false;
+      case 'star': {
+        ctx.beginPath();
+        for (let i = 0; i < 10; i++) {
+          const a = top + i * Math.PI / 5, rr = i % 2 ? r * 0.55 : r * 1.3;
+          const px = x + Math.cos(a) * rr, py = y + Math.sin(a) * rr;
+          i ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+        }
+        ctx.closePath(); return false;
+      }
+      case 'cross': {
+        const a = r * 1.15, b = r * 0.42;
+        ctx.beginPath();
+        ctx.moveTo(x - b, y - a); ctx.lineTo(x + b, y - a); ctx.lineTo(x + b, y - b); ctx.lineTo(x + a, y - b);
+        ctx.lineTo(x + a, y + b); ctx.lineTo(x + b, y + b); ctx.lineTo(x + b, y + a); ctx.lineTo(x - b, y + a);
+        ctx.lineTo(x - b, y + b); ctx.lineTo(x - a, y + b); ctx.lineTo(x - a, y - b); ctx.lineTo(x - b, y - b);
+        ctx.closePath(); return false;
+      }
+      case 'bar': ctx.beginPath(); ctx.rect(x - r * 1.3, y - r * 0.55, r * 2.6, r * 1.1); return false;
+      case 'ring': ctx.beginPath(); ctx.arc(x, y, r * 0.8, 0, Math.PI * 2); return true;
+      default: ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); return false;
+    }
+  }
+
+  // Draw a filled shape (a ring is drawn as a thick outline)
+  function draw(ctx, shape, x, y, r, up = 1) {
+    if (path(ctx, shape, x, y, r, up)) {
+      const lw = ctx.lineWidth; ctx.lineWidth = Math.max(1.5, r * 0.45);
+      ctx.strokeStyle = ctx.fillStyle; ctx.stroke(); ctx.lineWidth = lw;
+    } else ctx.fill();
+  }
+
+  // Outline only, for highlights (level outline, health ring use their own arcs)
+  function outline(ctx, shape, x, y, r, up = 1) { path(ctx, shape, x, y, r, up); ctx.stroke(); }
+
+  // Small inline SVG icon in the current text colour
+  function svg(shape, size = 14) {
+    const c = size / 2, r = size * 0.36;
+    const pts = (n, rr, rot, cy = c) => Array.from({ length: n }, (_, i) => {
+      const a = rot + i * Math.PI * 2 / n; return `${(c + Math.cos(a) * rr).toFixed(2)},${(cy + Math.sin(a) * rr).toFixed(2)}`;
+    }).join(' ');
+    let body;
+    switch (shape) {
+      case 'square': body = `<rect x="${c - r * 0.88}" y="${c - r * 0.88}" width="${r * 1.76}" height="${r * 1.76}"/>`; break;
+      case 'triangle': body = `<polygon points="${pts(3, r * 1.25, -Math.PI / 2, c + r * 0.15)}"/>`; break;
+      case 'diamond': body = `<polygon points="${pts(4, r * 1.2, -Math.PI / 2)}"/>`; break;
+      case 'pentagon': body = `<polygon points="${pts(5, r * 1.08, -Math.PI / 2)}"/>`; break;
+      case 'hexagon': body = `<polygon points="${pts(6, r * 1.05, 0)}"/>`; break;
+      case 'star': body = `<polygon points="${Array.from({ length: 10 }, (_, i) => { const a = -Math.PI / 2 + i * Math.PI / 5, rr = i % 2 ? r * 0.55 : r * 1.3; return `${(c + Math.cos(a) * rr).toFixed(2)},${(c + Math.sin(a) * rr).toFixed(2)}`; }).join(' ')}"/>`; break;
+      case 'cross': { const a = r * 1.15, b = r * 0.42; body = `<polygon points="${[[-b, -a], [b, -a], [b, -b], [a, -b], [a, b], [b, b], [b, a], [-b, a], [-b, b], [-a, b], [-a, -b], [-b, -b]].map(([px, py]) => `${(c + px).toFixed(2)},${(c + py).toFixed(2)}`).join(' ')}"/>`; break; }
+      case 'bar': body = `<rect x="${c - r * 1.3}" y="${c - r * 0.55}" width="${r * 2.6}" height="${r * 1.1}"/>`; break;
+      case 'ring': body = `<circle cx="${c}" cy="${c}" r="${r * 0.8}" fill="none" stroke="currentColor" stroke-width="${Math.max(1.5, r * 0.45)}"/>`; break;
+      default: body = `<circle cx="${c}" cy="${c}" r="${r}"/>`;
+    }
+    return `<svg class="shape-icon" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" fill="currentColor" aria-hidden="true">${body}</svg>`;
+  }
+
+  // A body: filled with the unit's colour, outlined in its team colour
+  function body(ctx, shape, x, y, r, up, fill, team, fillAlpha = 1) {
+    ctx.globalAlpha = fillAlpha; ctx.fillStyle = fill;
+    draw(ctx, shape, x, y, r, up);
+    ctx.globalAlpha = 1; ctx.strokeStyle = team; ctx.lineWidth = Math.max(1.5, Math.min(2.5, r * 0.32));
+    outline(ctx, shape, x, y, shape === 'ring' ? r * 1.05 : r + 0.6, up);
+  }
+
+  return { LIST, LABELS, PALETTE, valid, validColor, assign, draw, outline, path, svg, body };
+})();
+
+// ===== Battle engine (shared by headless tests and the page) =====
+const Engine = (() => {
+  const TRAIT_DEFAULTS = { burst: 1, pellets: 1, spinUp: 0, pierce: 0, projSpeed: 0, minRange: 0, charge: 1, knockback: 0, windUp: 0 };
+  const BURST_GAP = 0.15;      // seconds between shots in a burst
+  const SHOTGUN_COS = Math.sqrt(3) / 2; // pellets spread 30 degrees to each side of the target (cos 30)
+  // Only + - * / and sqrt from here on: those give identical results in every browser,
+  // so two players' phones run exactly the same battle.
+  const hyp = (x, y) => Math.sqrt(x * x + y * y);
+  const SPIN_CAP = 3;          // spin-up tops out at 3x attack speed
+  const CHARGE_RUN = 5;        // metres a unit must run before its next attack counts as a charge
+  const PIERCE_DEPTH = 10;     // metres a piercing shot travels past its target
+  const PIERCE_WIDTH = 1;      // half-width of the pierce corridor (m)
+  const PROJ_HIT_RADIUS = 1;   // a projectile hits a body within this distance of where it lands
+
+  const LEVEL_BONUS = 1;       // each upgrade adds +100% of starting health and hit (2x, then 3x)
+  const MAX_LEVEL = 2;         // two upgrades on top of the base unit
+
+  const withTraits = (u) => ({ ...TRAIT_DEFAULTS, defense: 'none', defVal: 0, level: 0, ...u });
+
+  // Unit stats at a given level (defaults to the unit's own level field)
+  function leveled(unit, level) {
+    const u = withTraits(unit);
+    const L = Math.max(0, Math.min(MAX_LEVEL, Math.round(level == null ? u.level : level)));
+    if (!L) return { ...u, level: 0 };
+    const k = 1 + LEVEL_BONUS * L;
+    return { ...u, level: L, hp: u.hp * k, hit: u.hit * k };
+  }
+
+  function squadsFor(unit, g) {
+    return Math.max(1, Math.floor(g.budget / Math.max(0.0001, unit.cost) + 1e-9));
+  }
+
+  // Raw strength of what the budget buys: total health x total damage per second
+  function rawStrength(unit, g) {
+    const u = leveled(unit);
+    const s = squadsFor(u, g);
+    const n = s * u.bodies;
+    const hp = n * u.hp;
+    const cycle = 1 / Math.max(0.01, u.aps) + Math.max(0, u.windUp); // wind-up adds to every attack cycle
+    const dps = n * u.hit / cycle * Math.max(1, u.burst) * Math.max(1, u.pellets);
+    return { squads: s, bodies: n, hp, dps, strength: hp * dps };
+  }
+
+  function damageAfterDefense(hit, target, g) {
+    if (target.u.defense === 'armor') return Math.max(hit - target.u.defVal, hit * g.minDmgPct / 100);
+    if (target.u.defense === 'ward') return Math.min(hit, target.u.defVal);
+    return hit;
+  }
+
+  function makeSide(unit, side, g) {
+    const u = leveled(unit);
+    const s = squadsFor(u, g);
+    const n = s * u.bodies;
+    const cols = Math.max(1, Math.min(n, Math.ceil(Math.sqrt(n * 2.5))));
+    const sp = g.spacing;
+    const bodies = [];
+    for (let i = 0; i < n; i++) {
+      const c = i % cols, r = Math.floor(i / cols);
+      const x = (c - (cols - 1) / 2) * sp;
+      const y = (g.distance / 2 + r * sp) * (side === 0 ? -1 : 1);
+      bodies.push(newBody(u, side, x, y, i, 0));
+    }
+    return bodies;
+  }
+
+  // `unit` must already be leveled (see leveled())
+  function newBody(unit, side, x, y, i, squad) {
+    const u = unit;
+    const interval = 1 / Math.max(0.01, u.aps);
+    return {
+      u, side, x, y, hp: u.hp, alive: true, squad, level: u.level || 0, xp: 0,
+      cd: ((i * 7) % 11) / 11 * interval, // deterministic stagger
+      moved: 0, firing: -1, burstLeft: 0, burstTimer: 0, burstDir: [0, 1], windTarget: null, windT: 0,
+    };
+  }
+
+  // Bodies of one squad placed around a point on the board (footprint about `size` metres)
+  function buildSquad(unit, side, cx, cy, squad, size, startIndex = 0, level = 0) {
+    const u = leveled(unit, level);
+    const n = Math.max(1, Math.round(u.bodies));
+    const cols = Math.ceil(Math.sqrt(n)), rows = Math.ceil(n / cols);
+    const sp = n === 1 ? 0 : Math.min(2.2, (size * 0.9) / Math.max(cols, rows));
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      const c = i % cols, r = Math.floor(i / cols);
+      out.push(newBody(u, side, cx + (c - (cols - 1) / 2) * sp, cy + (r - (rows - 1) / 2) * sp, startIndex + i, squad));
+    }
+    return out;
+  }
+
+  // Lab battle: one unit type per side in a standard formation
+  function battle(uA, uB, g, opts = {}) {
+    const bt = createBattle(makeSide(uA, 0, g), makeSide(uB, 1, g), g, opts);
+    const frames = [];
+    while (bt.step()) if (opts.record) frames.push(bt.frame());
+    const r = bt.result();
+    if (opts.record) frames.push(bt.frame(true));
+    r.frames = frames;
+    r.shapes = bt.bodies.map(b => b.u.shape || "circle");
+    r.colors = bt.bodies.map(b => b.u.color || null);
+    return r;
+  }
+
+  // A steppable battle between two lists of bodies (side 0 and side 1)
+  function createBattle(A, B, g, opts = {}) {
+    const all = A.concat(B);
+    const sides = [A, B];
+    const stats = [
+      { dealt: 0, wasted: 0, blocked: 0, missed: 0, windLost: 0, winds: 0, totalHp: A.reduce((s, b) => s + b.u.hp, 0) },
+      { dealt: 0, wasted: 0, blocked: 0, missed: 0, windLost: 0, winds: 0, totalHp: B.reduce((s, b) => s + b.u.hp, 0) },
+    ];
+    const dt = g.dt;
+    let projectiles = [];
+    let t = 0, shots = [], over = false;
+    const dist = (a, b) => hyp(a.x - b.x, a.y - b.y);
+    const aliveCount = (arr) => { let c = 0; for (const b of arr) if (b.alive) c++; return c; };
+
+    function hurt(owner, v, hit, fromX, fromY) {
+      const st = stats[owner.side];
+      const dmg = damageAfterDefense(hit, v, g);
+      st.blocked += hit - dmg;
+      const applied = Math.min(dmg, v.hp);
+      st.dealt += applied;
+      st.wasted += dmg - applied;
+      // experience: damage dealt, half of damage absorbed, and a bounty for killing leveled bodies
+      owner.xp += applied;
+      v.xp += applied * (g.absorbXp == null ? 0.5 : g.absorbXp);
+      v.hp -= dmg;
+      if (v.hp <= 0) { v.hp = 0; v.alive = false; owner.xp += v.u.hp * v.level; return; }
+      if (owner.u.knockback > 0) {
+        // big hits on small bodies push the full distance; on big bodies barely at all
+        const push = owner.u.knockback * Math.min(1, hit / v.u.hp);
+        const dx = v.x - fromX, dy = v.y - fromY, d = hyp(dx, dy) || 1;
+        v.x += dx / d * push; v.y += dy / d * push;
+      }
+    }
+
+    // Damage lands at point (px, py). direct = intended body for instant hits.
+    function impact(owner, px, py, direct, hit, dirX, dirY, fromX, fromY) {
+      const foes = sides[1 - owner.side];
+      const hitSet = new Set();
+      if (owner.u.splash > 0) {
+        for (const f of foes) if (f.alive && hyp(f.x - px, f.y - py) <= owner.u.splash) hitSet.add(f);
+      } else {
+        let v = null;
+        if (direct && direct.alive && !owner.u.projSpeed) v = direct;
+        else {
+          let bd = PROJ_HIT_RADIUS;
+          for (const f of foes) { if (!f.alive) continue; const d = hyp(f.x - px, f.y - py); if (d <= bd) { bd = d; v = f; } }
+        }
+        if (v) hitSet.add(v);
+      }
+      if (!hitSet.size && owner.u.projSpeed > 0) stats[owner.side].missed += hit;
+      // pierce: keep going along the shot line and hit the next bodies behind
+      if (owner.u.pierce > 0) {
+        const cand = [];
+        for (const f of foes) {
+          if (!f.alive || hitSet.has(f)) continue;
+          const rx = f.x - px, ry = f.y - py;
+          const along = rx * dirX + ry * dirY;
+          const across = Math.abs(rx * dirY - ry * dirX);
+          if (along > 0 && along <= PIERCE_DEPTH && across <= PIERCE_WIDTH) cand.push([along, f]);
+        }
+        cand.sort((a, b) => a[0] - b[0]);
+        for (let k = 0; k < Math.min(owner.u.pierce, cand.length); k++) hitSet.add(cand[k][1]);
+      }
+      for (const v of hitSet) hurt(owner, v, hit, fromX, fromY);
+    }
+
+    // enemies the unit may attack right now, nearest first
+    function validTargets(b) {
+      const valid = [];
+      for (const f of sides[1 - b.side]) {
+        if (!f.alive) continue;
+        const d = dist(f, b);
+        if (d <= b.u.range + 0.01 && d >= b.u.minRange) valid.push([d, f]);
+      }
+      valid.sort((p, q) => p[0] - q[0]);
+      return valid.map(v => v[1]);
+    }
+
+    // one shot, or a spread of shotgun pellets each at a different body in the cone
+    function aim(b, primary, valid) {
+      const n = Math.max(1, Math.round(b.u.pellets));
+      if (n === 1) return [primary];
+      const ax = primary.x - b.x, ay = primary.y - b.y, al = hyp(ax, ay);
+      const cone = valid.filter(f => {
+        const fx = f.x - b.x, fy = f.y - b.y, fl = hyp(fx, fy);
+        if (!al || !fl) return true;
+        return (ax * fx + ay * fy) / (al * fl) >= SHOTGUN_COS - 1e-12;
+      });
+      if (!cone.length) cone.push(primary);
+      const out = [];
+      for (let k = 0; k < n; k++) out.push(cone[k % cone.length]);
+      return out;
+    }
+
+    function fire(b, targets, canCharge) {
+      const charged = canCharge && b.u.charge > 1 && b.moved >= CHARGE_RUN;
+      b.moved = 0;
+      const hit = b.u.hit * (charged ? b.u.charge : 1);
+      for (const tgt of targets) {
+        const dx = tgt.x - b.x, dy = tgt.y - b.y, d = hyp(dx, dy) || 1;
+        const dirX = dx / d, dirY = dy / d;
+        if (b.u.projSpeed > 0) {
+          projectiles.push({ owner: b, x: b.x, y: b.y, fx: b.x, fy: b.y, tx: tgt.x, ty: tgt.y, dirX, dirY, left: d, hit });
+        } else {
+          impact(b, tgt.x, tgt.y, tgt, hit, dirX, dirY, b.x, b.y);
+        }
+        if (opts.record) shots.push([b.x, b.y, tgt.x, tgt.y, b.side, b.u.splash, charged ? 1 : 0]);
+      }
+    }
+
+    function step() {
+      if (over) return false;
+      if (t >= g.timeCap || !aliveCount(A) || !aliveCount(B)) { over = true; return false; }
+      shots = [];
+      // movement + targeting
+      for (const b of all) {
+        if (!b.alive) continue;
+        const foes = sides[1 - b.side];
+        let near = null, nd = Infinity;
+        for (const f of foes) {
+          if (!f.alive) continue;
+          const d = dist(f, b);
+          if (d < nd) { nd = d; near = f; }
+        }
+        b.near = near;
+        if (near && nd > b.u.range) {
+          const mv = Math.min(b.u.speed * dt, nd - b.u.range);
+          b.x += (near.x - b.x) / nd * mv;
+          b.y += (near.y - b.y) / nd * mv;
+          b.moved += mv;
+        }
+      }
+      // separation between allies
+      const minSep = g.spacing * 0.7;
+      for (let s = 0; s < 2; s++) {
+        const arr = sides[s];
+        for (let i = 0; i < arr.length; i++) {
+          const a = arr[i]; if (!a.alive) continue;
+          for (let j = i + 1; j < arr.length; j++) {
+            const c = arr[j]; if (!c.alive) continue;
+            const dx = c.x - a.x, dy = c.y - a.y;
+            const d = hyp(dx, dy);
+            if (d > 0 && d < minSep) {
+              const push = (minSep - d) / 2;
+              a.x -= dx / d * push; a.y -= dy / d * push;
+              c.x += dx / d * push; c.y += dy / d * push;
+            } else if (d === 0) {
+              a.x -= minSep / 2; c.x += minSep / 2;
+            }
+          }
+        }
+      }
+      // attacks
+      for (const b of all) {
+        if (!b.alive) continue;
+        b.cd -= dt;
+        if (b.firing >= 0) b.firing += dt;
+        // follow-up shots of a running burst fly along the direction locked at the start
+        // and hit the first enemy on that line; if the line is empty the shot misses
+        if (b.burstLeft > 0) {
+          b.burstTimer -= dt;
+          if (b.burstTimer <= 0) {
+            const [ux, uy] = b.burstDir;
+            let first = null, fa = Infinity;
+            for (const f of sides[1 - b.side]) {
+              if (!f.alive) continue;
+              const rx = f.x - b.x, ry = f.y - b.y;
+              const along = rx * ux + ry * uy;
+              const across = Math.abs(rx * uy - ry * ux);
+              if (along >= b.u.minRange && along <= b.u.range + 0.01 && across <= PIERCE_WIDTH && along < fa) { fa = along; first = f; }
+            }
+            if (first) {
+              fire(b, aim(b, first, validTargets(b)), false);
+            } else {
+              const end = { x: b.x + ux * b.u.range, y: b.y + uy * b.u.range };
+              if (b.u.projSpeed > 0) fire(b, [end], false); // the projectile flies on and can still clip someone
+              else {
+                stats[b.side].missed += b.u.hit * Math.max(1, Math.round(b.u.pellets));
+                if (opts.record) shots.push([b.x, b.y, end.x, end.y, b.side, 0, 0]);
+              }
+            }
+            b.burstLeft--; b.burstTimer += BURST_GAP;
+          }
+        }
+        let valid, primary;
+        if (b.u.windUp > 0) {
+          // wind-up: lock a target, charge, then hit. Lost if the target dies or escapes first.
+          if (b.windTarget) {
+            b.windT -= dt;
+            if (b.windT > 0) continue;
+            const tg = b.windTarget;
+            b.windTarget = null;
+            const d = tg.alive ? dist(tg, b) : Infinity;
+            if (!(d <= b.u.range + 0.01 && d >= b.u.minRange)) { stats[b.side].windLost++; continue; }
+            primary = tg;
+            valid = validTargets(b);
+            b.cd = 0; // reload starts after the hit
+          } else {
+            if (b.cd > 0) continue;
+            valid = validTargets(b);
+            if (!valid.length) continue;
+            b.windTarget = valid[0]; b.windT = b.u.windUp; stats[b.side].winds++;
+            continue;
+          }
+        } else {
+          if (b.cd > 0) continue;
+          valid = validTargets(b);
+          if (!valid.length) continue;
+          primary = valid[0];
+        }
+        if (b.firing < 0) b.firing = 0;
+        const spin = b.u.spinUp > 0 ? Math.min(SPIN_CAP, 1 + b.u.spinUp / 100 * b.firing) : 1;
+        b.cd += 1 / Math.max(0.01, b.u.aps * spin);
+        const n = Math.max(1, Math.round(b.u.burst));
+        if (n > 1) {
+          const dx = primary.x - b.x, dy = primary.y - b.y, d = hyp(dx, dy) || 1;
+          b.burstLeft = n - 1; b.burstTimer = BURST_GAP; b.burstDir = [dx / d, dy / d];
+          b.cd = Math.max(b.cd, (n - 1) * BURST_GAP + dt); // the next attack waits for the burst to finish
+        }
+        fire(b, aim(b, primary, valid), true);
+      }
+      // projectiles in flight
+      if (projectiles.length) {
+        // direct fire: a projectile hits the first enemy body it flies into;
+        // if it reaches its aim point without touching anyone, it lands there (and may miss)
+        const next = [];
+        for (const p of projectiles) {
+          const foes = sides[1 - p.owner.side];
+          let mv = p.owner.u.projSpeed * dt, done = false;
+          while (mv > 0 && !done) {
+            const sub = Math.min(0.5, mv, p.left);
+            p.x += p.dirX * sub; p.y += p.dirY * sub; p.left -= sub; mv -= sub;
+            for (const f of foes) {
+              if (f.alive && hyp(f.x - p.x, f.y - p.y) <= PROJ_HIT_RADIUS) {
+                impact(p.owner, p.x, p.y, null, p.hit, p.dirX, p.dirY, p.fx, p.fy);
+                done = true; break;
+              }
+            }
+            if (!done && p.left <= 1e-6) {
+              impact(p.owner, p.x, p.y, null, p.hit, p.dirX, p.dirY, p.fx, p.fy);
+              done = true;
+            }
+          }
+          if (!done) next.push(p);
+        }
+        projectiles = next;
+      }
+      t += dt;
+      return true;
+    }
+
+    function frame(final) {
+      return {
+        t, shots: final ? [] : shots,
+        p: final ? [] : projectiles.map(p => [p.x, p.y, p.owner.side]),
+        b: all.map(x => [x.x, x.y, x.alive ? x.hp / x.u.hp : 0, x.side, x.windTarget && x.u.windUp > 0 ? 1 - x.windT / x.u.windUp : 0]),
+      };
+    }
+
+    function result() {
+      const remHp = sides.map(arr => arr.reduce((s, b) => s + (b.alive ? b.hp : 0), 0));
+      const frac = [remHp[0] / stats[0].totalHp, remHp[1] / stats[1].totalHp];
+      const aliveA = aliveCount(A), aliveB = aliveCount(B);
+      let winner = -1, timeout = false;
+      if (aliveA && !aliveB) winner = 0;
+      else if (aliveB && !aliveA) winner = 1;
+      else if (aliveA && aliveB) { timeout = true; winner = frac[0] > frac[1] ? 0 : frac[1] > frac[0] ? 1 : -1; }
+      // survivors per squad: { squadId: { side, total, alive } }
+      const squads = {};
+      for (const b of all) {
+        const k = b.side + ':' + b.squad;
+        const s = squads[k] || (squads[k] = { side: b.side, squad: b.squad, total: 0, alive: 0, xp: 0 });
+        s.total++; if (b.alive) s.alive++;
+        s.xp += b.xp;
+      }
+      return {
+        winner, timeout, time: t, frac,
+        score: frac[0] - frac[1],
+        survivors: [aliveA, aliveB], counts: [A.length, B.length],
+        stats, squads,
+      };
+    }
+
+    return { step, frame, result, bodies: all, isOver: () => over, time: () => t, lastShots: () => shots, projectiles: () => projectiles };
+  }
+
+  function matrix(units, g) {
+    const n = units.length;
+    const m = [];
+    for (let i = 0; i < n; i++) {
+      m.push([]);
+      for (let j = 0; j < n; j++) {
+        if (i === j) { m[i].push(null); continue; }
+        if (j < i && m[j][i]) {
+          const r = m[j][i];
+          m[i].push({ ...r, score: -r.score, winner: r.winner === -1 ? -1 : 1 - r.winner, frac: [r.frac[1], r.frac[0]], mirrored: true });
+        } else {
+          m[i].push(battle(units[i], units[j], g));
+        }
+      }
+    }
+    return m;
+  }
+
+  return { battle, matrix, createBattle, buildSquad, rawStrength, squadsFor, withTraits, leveled, TRAIT_DEFAULTS, SPIN_CAP, CHARGE_RUN, LEVEL_BONUS, MAX_LEVEL };
+})();
+if (typeof module !== 'undefined') module.exports = Engine;
+
+</script>
+<script>
+// ===== Match rules and AI (shared by headless tests and the page) =====
+const Game = (() => {
+  const E = (typeof Engine !== 'undefined') ? Engine : require('./engine.js');
+
+  const COLS = 12, ROWS = 12, TILE = 6;
+  const START_HP = 40, START_GOLD = 300, INCOME = 250, LOSER_BONUS = 100;
+  const SQUAD_COST = 100, SQUAD_POINTS = 2;
+  const SETTINGS = { dt: 0.05, timeCap: 60, spacing: 3.5, minDmgPct: 15, absorbXp: 1 };
+  // XP a squad needs in total to reach level 1, 2, 3, as multiples of its own starting health.
+  // XP = damage dealt + damage absorbed + bounty for killing leveled bodies.
+  const XP_STEPS = [5, 12, 24];
+  const xpNeeded = (unit, level) => unit.bodies * unit.hp * XP_STEPS[level];
+  // deployments: how many new squads a side may place per round; extra ones can be bought for the round
+  const CONFIG = { levelCostPerTier: 50, firstRoundDeploys: 3, deploysPerRound: 2, extraDeployCost: 50, deployCap: true };
+  const deploysAllowed = (m, side) => CONFIG.deployCap
+    ? (m.round === 1 ? CONFIG.firstRoundDeploys : CONFIG.deploysPerRound) + m.extraDeploys[side]
+    : Infinity;
+  const deployedThisRound = (m, side) => m.armies[side].filter(s => s.round === m.round).length;
+  const deploysLeft = (m, side) => deploysAllowed(m, side) - deployedThisRound(m, side);
+  // A unit's `cost` is in lab units: 1 = one standard squad (SQUAD_COST gold)
+  const unitCostOf = (unit) => Math.max(10, Math.round((unit.cost || 1) * SQUAD_COST / 10) * 10);
+  // Upgrades cost half the unit's price at the default setting (50 for a 100-gold squad)
+  const levelCost = (unit) => Math.max(10, Math.round(CONFIG.levelCostPerTier * (unit.cost || 1) / 5) * 5);
+  const AI = { levelPolicy: 'smart', maxExtraDeploys: 3 }; // levelPolicy: smart | never | all (for experiments)
+
+  // rows 0-3: enemy zone (row 3 is its front), rows 4-7: no man's land, rows 8-11: player zone (row 8 is its front)
+  const zoneRows = (side) => side === 0 ? [8, 9, 10, 11] : [3, 2, 1, 0];
+  const inZone = (side, row) => side === 0 ? row >= 8 && row <= 11 : row >= 0 && row <= 3;
+  const tileToWorld = (col, row) => ({ x: (col - (COLS - 1) / 2) * TILE, y: ((ROWS - 1) / 2 - row) * TILE });
+
+  function rng(seed) { // mulberry32
+    let a = seed >>> 0;
+    return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+  }
+
+  function createMatch(units, matrix, seed) {
+    return {
+      units, matrix, seed: seed >>> 0,
+      round: 1, hp: [START_HP, START_HP], gold: [START_GOLD, START_GOLD],
+      armies: [[], []], nextId: [1, 1], history: [], over: false, winner: -1,
+      extraDeploys: [0, 0],
+    };
+  }
+
+  function buyDeploy(m, side) {
+    if (!CONFIG.deployCap || m.gold[side] < CONFIG.extraDeployCost) return false;
+    m.gold[side] -= CONFIG.extraDeployCost;
+    m.extraDeploys[side]++;
+    return true;
+  }
+
+  // Refund an extra deployment bought this round that hasn't been used
+  function refundDeploy(m, side) {
+    if (m.extraDeploys[side] <= 0 || deploysLeft(m, side) <= 0) return false;
+    m.extraDeploys[side]--;
+    m.gold[side] += CONFIG.extraDeployCost;
+    return true;
+  }
+
+  const occupied = (m, side, col, row) => m.armies[side].some(s => s.col === col && s.row === row);
+
+  function place(m, side, unitIdx, col, row) {
+    if (!inZone(side, row) || col < 0 || col >= COLS) return null;
+    if (occupied(m, side, col, row)) return null;
+    const cost = unitCostOf(m.units[unitIdx]);
+    if (m.gold[side] < cost) return null;
+    if (deploysLeft(m, side) <= 0) return null;
+    const sq = { id: m.nextId[side]++, unit: unitIdx, col, row, round: m.round, xp: 0, level: 0, cost };
+    m.armies[side].push(sq);
+    m.gold[side] -= cost;
+    return sq;
+  }
+
+  // Only squads bought this round can be taken back
+  function unplace(m, side, col, row) {
+    const i = m.armies[side].findIndex(s => s.col === col && s.row === row && s.round === m.round);
+    if (i < 0) return false;
+    const [sq] = m.armies[side].splice(i, 1);
+    m.gold[side] += sq.cost;
+    return true;
+  }
+
+  function bodiesFor(m, side) {
+    const out = [];
+    let idx = 0;
+    for (const sq of m.armies[side]) {
+      const w = tileToWorld(sq.col, sq.row);
+      const b = E.buildSquad(m.units[sq.unit], side, w.x, w.y, sq.id, TILE, idx, sq.level);
+      idx += b.length;
+      out.push(...b);
+    }
+    return out;
+  }
+
+  function startBattle(m) {
+    return E.createBattle(bodiesFor(m, 0), bodiesFor(m, 1), SETTINGS, { record: true });
+  }
+
+  // Damage a side deals = points of its squads, scaled by how much of each squad is still alive
+  function survivorDamage(m, res, side) {
+    let sum = 0;
+    for (const k in res.squads) {
+      const s = res.squads[k];
+      if (s.side !== side || s.alive <= 0) continue;
+      const sq = m.armies[side].find(q => q.id === s.squad);
+      const value = sq ? (m.units[sq.unit].cost || 1) : 1; // pricier squads hit harder, like their price
+      sum += SQUAD_POINTS * value * s.alive / s.total;
+    }
+    return sum > 0 ? Math.max(1, Math.round(sum)) : 0;
+  }
+
+  // Apply a finished battle to the match. Returns a summary for the results screen.
+  function resolve(m, res) {
+    const dmg = [0, 0]; // damage taken by each side
+    let roundWinner = res.winner;
+    if (res.timeout) {
+      dmg[0] = survivorDamage(m, res, 1);
+      dmg[1] = survivorDamage(m, res, 0);
+    } else if (res.winner === 0) dmg[1] = survivorDamage(m, res, 0);
+    else if (res.winner === 1) dmg[0] = survivorDamage(m, res, 1);
+    m.hp[0] = Math.max(0, m.hp[0] - dmg[0]);
+    m.hp[1] = Math.max(0, m.hp[1] - dmg[1]);
+    // experience carries over between rounds; squads that reach the next threshold become ready to level up
+    const newlyReady = [[], []];
+    for (let side = 0; side < 2; side++) {
+      for (const sq of m.armies[side]) {
+        const r = res.squads[side + ':' + sq.id];
+        if (!r) continue;
+        const was = isReady(m, sq);
+        sq.xp += r.xp;
+        if (!was && isReady(m, sq)) newlyReady[side].push({ id: sq.id, unit: sq.unit, level: sq.level + 1 });
+      }
+    }
+    const summary = { round: m.round, winner: roundWinner, timeout: res.timeout, dmg, time: res.time, newlyReady };
+    m.history.push(summary);
+    if (m.hp[0] <= 0 || m.hp[1] <= 0) {
+      m.over = true;
+      m.winner = m.hp[0] > 0 ? 0 : m.hp[1] > 0 ? 1 : -1;
+      return summary;
+    }
+    // next round
+    m.round++;
+    m.extraDeploys = [0, 0];
+    m.gold[0] += INCOME; m.gold[1] += INCOME;
+    const loser = dmg[0] > dmg[1] ? 0 : dmg[1] > dmg[0] ? 1 : -1;
+    if (loser >= 0) m.gold[loser] += LOSER_BONUS;
+    summary.bonusTo = loser;
+    return summary;
+  }
+
+  // ---------- leveling (manual, costs gold) ----------
+  const isReady = (m, sq) => sq.level < E.MAX_LEVEL && sq.xp >= xpNeeded(m.units[sq.unit], sq.level);
+
+  function levelUp(m, side, sqId) {
+    const sq = m.armies[side].find(s => s.id === sqId);
+    if (!sq || !isReady(m, sq)) return false;
+    const cost = levelCost(m.units[sq.unit]);
+    if (m.gold[side] < cost) return false;
+    m.gold[side] -= cost;
+    sq.level++;
+    (sq.boughtLevels = sq.boughtLevels || {})[m.round] = ((sq.boughtLevels || {})[m.round] || 0) + 1;
+    return true;
+  }
+
+  // Undo a level bought this round (full refund)
+  function undoLevel(m, side, sqId) {
+    const sq = m.armies[side].find(s => s.id === sqId);
+    if (!sq || !sq.boughtLevels || !sq.boughtLevels[m.round]) return false;
+    sq.boughtLevels[m.round]--;
+    sq.level--;
+    m.gold[side] += levelCost(m.units[sq.unit]);
+    return true;
+  }
+
+  // AI levels up at fight time, using only what it knew at the start of the round.
+  // It skips chaff (8+ bodies): feeding leveled chaff to the enemy gives away XP.
+  function aiLevel(m, side) {
+    const done = [];
+    if (AI.levelPolicy === 'never') return done;
+    const ready = m.armies[side].filter(s => isReady(m, s))
+      .sort((a, b) => E.withTraits(m.units[b.unit]).range - E.withTraits(m.units[a.unit]).range);
+    for (const sq of ready) {
+      const u = m.units[sq.unit];
+      if (AI.levelPolicy === 'smart' && u.bodies >= 8) continue;
+      while (isReady(m, sq) && levelUp(m, side, sq.id)) done.push({ id: sq.id, unit: sq.unit, level: sq.level });
+    }
+    return done;
+  }
+
+  // ---------- AI ----------
+  // Buys units that counter the opponent's army as it stood at the start of the round,
+  // using the counter table, with a nudge toward variety and a little randomness.
+  function aiDeploy(m, side) {
+    const r = rng(m.seed + m.round * 7919 + side * 104729);
+    const opp = 1 - side;
+    const oppArmy = m.armies[opp].filter(s => s.round < m.round);
+    const oppCount = {};
+    for (const s of oppArmy) oppCount[s.unit] = (oppCount[s.unit] || 0) + 1;
+    const own = {};
+    for (const s of m.armies[side]) own[s.unit] = (own[s.unit] || 0) + 1;
+    const bought = [];
+    // keep gold back for the level-ups it will buy at fight time
+    let reserve = 0;
+    if (AI.levelPolicy !== 'never') {
+      for (const sq of m.armies[side]) {
+        if (!isReady(m, sq)) continue;
+        if (AI.levelPolicy === 'smart' && m.units[sq.unit].bodies >= 8) continue;
+        reserve += levelCost(m.units[sq.unit]);
+      }
+    }
+    let guard = 0;
+    const minCost = Math.min(...m.units.map(unitCostOf));
+    while (m.gold[side] - reserve >= minCost && guard++ < 60) {
+      if (deploysLeft(m, side) <= 0) {
+        // out of deployments: buy one more only if a squad is still affordable after it
+        if (m.extraDeploys[side] >= AI.maxExtraDeploys || m.gold[side] - reserve < minCost + CONFIG.extraDeployCost) break;
+        if (!buyDeploy(m, side)) break;
+      }
+      const budget = m.gold[side] - reserve;
+      let best = -1, bs = -Infinity;
+      m.units.forEach((u, i) => {
+        if (unitCostOf(u) > budget) return;
+        let s = 0, tot = 0;
+        for (const t in oppCount) { s += oppCount[t] * (m.matrix[i][t] || 0); tot += oppCount[t]; }
+        s = tot ? s / tot : 0;
+        s -= 0.12 * (own[i] || 0);
+        s += (r() - 0.5) * 0.35;
+        if (s > bs) { bs = s; best = i; }
+      });
+      if (best < 0) break;
+      const spot = aiSpot(m, side, best, oppArmy, r);
+      if (!spot) break;
+      const sq = place(m, side, best, spot.col, spot.row);
+      if (!sq) break;
+      own[best] = (own[best] || 0) + 1;
+      bought.push(sq);
+    }
+    return bought;
+  }
+
+  function aiSpot(m, side, unitIdx, oppArmy, r) {
+    const u = E.withTraits(m.units[unitIdx]);
+    const rows = zoneRows(side);
+    const band = u.range <= 12 ? [0, 1] : u.range <= 30 ? [1, 2] : [2, 3];
+    // aim at the columns of the enemy squads this unit counters
+    let wsum = 0, csum = 0;
+    for (const s of oppArmy) {
+      const w = Math.max(0, m.matrix[unitIdx][s.unit] || 0);
+      wsum += w; csum += w * s.col;
+    }
+    const target = wsum > 0 ? csum / wsum : (COLS - 1) / 2 + (r() - 0.5) * 6;
+    let best = null, bc = Infinity;
+    for (let zi = 0; zi < rows.length; zi++) {
+      for (let col = 0; col < COLS; col++) {
+        const row = rows[zi];
+        if (occupied(m, side, col, row)) continue;
+        const rowCost = band.includes(zi) ? 0 : 3 * Math.min(Math.abs(zi - band[0]), Math.abs(zi - band[1]));
+        const c = Math.abs(col - target) + rowCost + r() * 0.8;
+        if (c < bc) { bc = c; best = { col, row }; }
+      }
+    }
+    return best;
+  }
+
+  return {
+    COLS, ROWS, TILE, START_HP, START_GOLD, INCOME, LOSER_BONUS, SQUAD_COST, SQUAD_POINTS, SETTINGS, XP_STEPS, xpNeeded, unitCostOf,
+    levelCost, isReady, levelUp, undoLevel, aiLevel, AI, CONFIG,
+    deploysAllowed, deploysLeft, deployedThisRound, buyDeploy, refundDeploy,
+    zoneRows, inZone, tileToWorld, createMatch, place, unplace, bodiesFor, startBattle, resolve, aiDeploy, occupied,
+  };
+})();
+if (typeof module !== 'undefined') module.exports = Game;
+
+</script>
+<script>
+(() => {
+  const DATA = {"units":[{"name":"Goblin Swarm","cost":1,"bodies":12,"hp":100,"hit":8,"aps":1,"range":2,"speed":12,"splash":0,"defense":"none","defVal":0},{"name":"Skeleton Archers","cost":1,"bodies":8,"hp":95,"hit":16,"aps":1,"range":32,"speed":4,"splash":0,"defense":"none","defVal":0},{"name":"Ember Imps","cost":1,"bodies":4,"hp":260,"hit":22,"aps":0.6,"range":10,"speed":5,"splash":3,"defense":"none","defVal":0},{"name":"Fire Mage","cost":1,"bodies":1,"hp":750,"hit":50,"aps":0.6,"range":28,"speed":4,"splash":4,"defense":"none","defVal":0},{"name":"Sniper","cost":1,"bodies":1,"hp":500,"hit":400,"aps":0.5,"range":45,"speed":4,"splash":0,"defense":"none","defVal":0},{"name":"Brute","cost":1,"bodies":1,"hp":800,"hit":35,"aps":1.2,"range":2,"speed":6,"splash":0,"defense":"armor","defVal":12},{"name":"Wisps","cost":1,"bodies":3,"hp":320,"hit":18,"aps":1.5,"range":15,"speed":7,"splash":0,"defense":"ward","defVal":40},{"name":"Crossbow Volley","cost":1,"bodies":2,"hp":300,"hit":52,"aps":0.35,"range":30,"speed":4,"splash":0,"defense":"none","defVal":0,"burst":4},{"name":"Ballista","cost":1,"bodies":1,"hp":750,"hit":220,"aps":0.6,"range":40,"speed":3,"splash":0,"defense":"none","defVal":0,"pierce":3,"minRange":6,"projSpeed":45},{"name":"Boar Riders","cost":1,"bodies":3,"hp":310,"hit":30,"aps":0.8,"range":2,"speed":11,"splash":0,"defense":"none","defVal":0,"charge":2.5,"knockback":3}],"matrix":[[0,0.213,-0.488,-0.685,0.5,-0.704,0.138,-0.247,-0.134,0.142],[-0.213,0,0.557,-0.328,0.625,-0.545,0.402,0.528,-0.371,0.332],[0.488,-0.557,0,-0.384,-0.89,-0.487,0.323,-0.585,-0.853,-0.145],[0.685,0.328,0.384,0,-0.8,0.01,-0.104,-0.208,-0.467,0.06],[-0.5,-0.625,0.89,0.8,0,1,-0.875,0.792,0.34,0.805],[0.704,0.545,0.487,-0.01,-1,0,0.475,-0.533,0.11,-0.089],[-0.138,-0.402,-0.323,0.104,0.875,-0.475,0,-0.07,0.646,-0.045],[0.247,-0.528,0.585,0.208,-0.792,0.533,0.07,0,-0.237,0.163],[0.134,0.371,0.853,0.467,-0.34,-0.11,-0.646,0.237,0,-0.263],[-0.142,-0.332,0.145,-0.06,-0.805,0.089,0.045,-0.163,0.263,0]]};
+  const ROLES = {
+    'Goblin Swarm': 'Fast melee swarm. Soaks shots and overwhelms single-target units.',
+    'Skeleton Archers': 'Cheap ranged squad that deals steady damage from behind.',
+    'Ember Imps': 'Short-range brawlers whose small splash eats swarms up close.',
+    'Fire Mage': 'A lone caster whose medium-range splash clears clumps.',
+    'Sniper': 'Huge single shots from very far away. Wasted on swarms.',
+    'Brute': 'Armored melee bruiser. Small hits barely scratch it.',
+    'Wisps': 'Warded spirits. No single hit can deal more than 40 to them.',
+    'Crossbow Volley': 'Fires 4-bolt bursts down one line. Lined-up targets take every bolt.',
+    'Ballista': 'Slow piercing bolts from long range. Can’t hit anything close.',
+    'Boar Riders': 'Fast chargers whose first hit doubles and knocks small bodies back.',
+  };
+  const DEPLOY_SECONDS = 30;   // deploy countdown each round
+  const NEXT_SECONDS = 20;     // results screen moves on by itself after this long
+  const PEER_PREFIX = 'phonebellum-v1-';
+  const CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  const HOST_STORE = 'phonebellum.host.v1';
+  const LAB_STORE = 'counterlab.v1';
+  const qs = new URLSearchParams(location.search);
+
+  // ---------- unit sets: built-in, or loaded from Counter Lab ----------
+  const BUILTIN = { units: DATA.units, matrix: DATA.matrix };
+  const STORE = 'phonebellum.units.v1';
+  const MATRIX_SETTINGS = { budget: 2, distance: 40, spacing: 3.5, minDmgPct: 15, timeCap: 60, dt: 0.05 };
+  const LEVERS = ['cost', 'bodies', 'hp', 'hit', 'aps', 'range', 'speed', 'splash'];
+  let units, M, customSet = false, rawSet = BUILTIN;
+  const validUnits = (list) => Array.isArray(list) && list.length >= 2 && list.length <= 30 &&
+    list.every(u => u && typeof u.name === 'string' && u.name.trim() && LEVERS.every(k => typeof u[k] === 'number' && isFinite(u[k]) && u[k] >= 0) && u.bodies >= 1 && u.aps > 0 && u.cost > 0);
+  const validSet = (s) => s && validUnits(s.units) && Array.isArray(s.matrix) && s.matrix.length === s.units.length;
+  function useSet(set, custom) {
+    units = Shapes.assign(set.units).map(u => ({ ...Engine.withTraits(u), name: String(u.name).replace(/[<>&"]/g, '').trim().slice(0, 40) || 'Unit', level: 0, bodies: Math.max(1, Math.round(u.bodies)) }));
+    M = set.matrix; customSet = custom; rawSet = set;
+  }
+  try {
+    const raw = localStorage.getItem(STORE);
+    const p = raw && JSON.parse(raw);
+    if (validSet(p)) useSet(p, true); else useSet(BUILTIN, false);
+  } catch (e) { useSet(BUILTIN, false); }
+  const tag = (u) => (u.name.replace(/[^A-Za-z]/g, '').slice(0, 3) || 'UNT').toUpperCase();
+  const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const $ = (id) => document.getElementById(id);
+  const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const now = () => Date.now();
+
+  // ---------- state ----------
+  let mode = 'ai';          // ai | host | guest
+  let me = 0;               // which side of the match this screen plays (the guest is side 1)
+  const foe = () => 1 - me;
+  let m = null;             // match state (on the guest: a copy kept in step by the host)
+  let phase = 'start';      // start | lobby | deploy | battle | result | end
+  let selected = null;      // unit index chosen in the shop
+  let bt = null;            // battle being played back
+  let battlePre = null;     // match as it stood when the running battle began (for the HUD)
+  let speed = 2, lastTs = 0, acc = 0, raf = 0;
+  let fx = [];
+  let lastSummary = null;
+  let lastAiLevels = [];
+  let hoverTile = null;
+  let timerOn = true;       // vs AI: deploy countdown on or off
+  let deadline = 0;         // local time the deploy phase ends (0 = no countdown running)
+  let pausedLeft = 0;       // host: countdown time left while the opponent is away
+  let timeUp = false;       // guest: countdown ran out, waiting for the host to start the fight
+  let ready = [false, false];
+  let nextReady = [false, false];
+  let rematch = [false, false];
+  let resultShownAt = 0;
+  let shopScroll = 0;
+
+  // ---------- canvas ----------
+  const cv = $('board'), ctx = cv.getContext('2d');
+  let W = 0, S = 0;
+  function size() {
+    const r = cv.getBoundingClientRect();
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    W = r.width;
+    cv.width = Math.round(r.width * dpr); cv.height = Math.round(r.width * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    S = W / (Game.COLS * Game.TILE);
+  }
+  const half = Game.COLS * Game.TILE / 2;
+  // The board is turned around for side 1, so both players see their own zone at the bottom
+  const flip = () => me === 1 ? -1 : 1;
+  const PX = (x) => (half + x * flip()) * S;
+  const PY = (y) => (half - y * flip()) * S;
+  const scol = (c) => me === 1 ? Game.COLS - 1 - c : c;   // model column -> screen column (and back)
+  const srow = (r) => me === 1 ? Game.ROWS - 1 - r : r;
+  const tilePx = () => Game.TILE * S;
+  const radius = (u) => Math.max(0.6, Math.min(2.4, 0.55 + Math.sqrt(u.hp) / 30)) * S;
+  const teamCol = (side) => side === me ? css('--you') : css('--foe');
+  const upOf = (side) => side === me ? 1 : -1;
+
+  function drawBoard() {
+    const t = tilePx();
+    ctx.fillStyle = css('--board'); ctx.fillRect(0, 0, W, W);
+    ctx.globalAlpha = 0.08;
+    ctx.fillStyle = css('--foe'); ctx.fillRect(0, 0, W, t * 4);
+    ctx.fillStyle = css('--you'); ctx.fillRect(0, t * 8, W, t * 4);
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = 'rgba(200, 230, 225, 0.06)'; ctx.lineWidth = 1;
+    for (let i = 1; i < Game.COLS; i++) {
+      ctx.beginPath(); ctx.moveTo(i * t, 0); ctx.lineTo(i * t, W); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, i * t); ctx.lineTo(W, i * t); ctx.stroke();
+    }
+    ctx.setLineDash([5, 6]); ctx.lineWidth = 1.2;
+    ctx.strokeStyle = css('--foe'); ctx.globalAlpha = 0.5;
+    ctx.beginPath(); ctx.moveTo(0, t * 4); ctx.lineTo(W, t * 4); ctx.stroke();
+    ctx.strokeStyle = css('--you');
+    ctx.beginPath(); ctx.moveTo(0, t * 8); ctx.lineTo(W, t * 8); ctx.stroke();
+    ctx.setLineDash([]); ctx.globalAlpha = 1;
+  }
+
+  function drawSquad(sq, side, fresh) {
+    const u = units[sq.unit];
+    const w = Game.tileToWorld(sq.col, sq.row);
+    const bodies = Engine.buildSquad(u, side, w.x, w.y, sq.id, Game.TILE);
+    const col = teamCol(side);
+    const t = tilePx(), c = scol(sq.col), r0 = srow(sq.row);
+    if (fresh) {
+      ctx.strokeStyle = col; ctx.setLineDash([3, 3]); ctx.lineWidth = 1;
+      ctx.strokeRect(c * t + 1.5, r0 * t + 1.5, t - 3, t - 3); ctx.setLineDash([]);
+    }
+    const r = radius(u);
+    for (const b of bodies) Shapes.body(ctx, u.shape, PX(b.x), PY(b.y), r, upOf(side), u.color, col, 0.95);
+    ctx.globalAlpha = 1;
+    if (side === me && phase === 'deploy' && Game.isReady(m, sq)) { // ready to level up: gold plus badge
+      const br = Math.max(5, t * 0.17), bx = (c + 1) * t - br - 2, by = r0 * t + br + 2;
+      ctx.fillStyle = css('--gold'); ctx.beginPath(); ctx.arc(bx, by, br, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = css('--bg'); ctx.lineWidth = Math.max(1.5, br * 0.3);
+      ctx.beginPath(); ctx.moveTo(bx - br * 0.5, by); ctx.lineTo(bx + br * 0.5, by); ctx.moveTo(bx, by - br * 0.5); ctx.lineTo(bx, by + br * 0.5); ctx.stroke();
+    }
+    if (sq.level > 0) {
+      ctx.fillStyle = css('--gold');
+      const pr = Math.max(2, t * 0.07);
+      for (let k = 0; k < sq.level; k++) {
+        ctx.beginPath(); ctx.arc(c * t + pr + 3 + k * (pr * 2.6), r0 * t + pr + 3, pr, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+    if (t >= 26) {
+      ctx.font = `500 ${Math.max(8, Math.round(t * 0.26))}px "IBM Plex Mono", monospace`;
+      ctx.fillStyle = css('--ink'); ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+      ctx.globalAlpha = 0.85; ctx.fillText(tag(u), (c + 0.5) * t, (r0 + 1) * t - 1); ctx.globalAlpha = 1;
+    }
+  }
+
+  function drawDeploy() {
+    drawBoard();
+    const t = tilePx();
+    if (selected !== null && phase === 'deploy') {
+      ctx.strokeStyle = css('--you'); ctx.globalAlpha = 0.25; ctx.lineWidth = 1;
+      for (const row of Game.zoneRows(me)) for (let c = 0; c < Game.COLS; c++) {
+        if (!Game.occupied(m, me, c, row)) ctx.strokeRect(scol(c) * t + 3, srow(row) * t + 3, t - 6, t - 6);
+      }
+      ctx.globalAlpha = 1;
+    }
+    if (hoverTile && selected !== null && Game.inZone(me, hoverTile.row) && !Game.occupied(m, me, hoverTile.col, hoverTile.row)) {
+      ctx.fillStyle = css('--you'); ctx.globalAlpha = 0.18;
+      ctx.fillRect(scol(hoverTile.col) * t, srow(hoverTile.row) * t, t, t); ctx.globalAlpha = 1;
+    }
+    // the opponent's squads from this round stay hidden until the fight
+    for (const sq of m.armies[foe()]) if (sq.round < m.round || phase !== 'deploy') drawSquad(sq, foe(), false);
+    for (const sq of m.armies[me]) drawSquad(sq, me, sq.round === m.round && phase === 'deploy');
+  }
+
+  function drawBattle() {
+    drawBoard();
+    const muted = css('--muted'), gold = css('--gold');
+    for (const e of fx) {
+      const a = 1 - e.age / e.life;
+      if (e.kind === 'death') {
+        ctx.strokeStyle = teamCol(e.side); ctx.globalAlpha = 0.5 * a; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.arc(PX(e.x), PY(e.y), e.r * (1 + e.age / e.life), 0, Math.PI * 2); ctx.stroke();
+      }
+    }
+    ctx.globalAlpha = 1;
+    for (const b of bt.bodies) {
+      if (b.alive) continue;
+      ctx.fillStyle = muted; ctx.globalAlpha = 0.18;
+      ctx.beginPath(); ctx.arc(PX(b.x), PY(b.y), Math.max(1.5, radius(b.u) * 0.45), 0, Math.PI * 2); ctx.fill();
+    }
+    for (const b of bt.bodies) {
+      if (!b.alive) continue;
+      const c = teamCol(b.side), r = radius(b.u), hpr = b.hp / b.u.hp;
+      Shapes.body(ctx, b.u.shape, PX(b.x), PY(b.y), r, upOf(b.side), b.u.color, c, 0.35 + 0.65 * hpr);
+      if (b.u.hp >= 500 && hpr < 1) {
+        ctx.strokeStyle = c; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(PX(b.x), PY(b.y), r + 2.5, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * hpr); ctx.stroke();
+      }
+      if (b.windTarget && b.u.windUp > 0) {
+        ctx.strokeStyle = c; ctx.lineWidth = 2.5;
+        ctx.beginPath(); ctx.arc(PX(b.x), PY(b.y), r + 4, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * (1 - b.windT / b.u.windUp)); ctx.stroke();
+      }
+      if (b.level > 0) {
+        ctx.strokeStyle = gold; ctx.lineWidth = Math.min(2.5, 0.8 + b.level * 0.5);
+        Shapes.outline(ctx, b.u.shape, PX(b.x), PY(b.y), r + 3.5, upOf(b.side));
+      }
+    }
+    for (const e of fx) {
+      const a = 1 - e.age / e.life;
+      if (e.kind === 'shot') {
+        ctx.strokeStyle = teamCol(e.side); ctx.globalAlpha = 0.7 * a; ctx.lineWidth = e.charged ? 3 : 1;
+        ctx.beginPath(); ctx.moveTo(PX(e.x1), PY(e.y1)); ctx.lineTo(PX(e.x2), PY(e.y2)); ctx.stroke();
+        if (e.splash > 0) { ctx.globalAlpha = 0.4 * a; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(PX(e.x2), PY(e.y2), e.splash * S, 0, Math.PI * 2); ctx.stroke(); }
+      }
+    }
+    ctx.globalAlpha = 1;
+    for (const p of bt.projectiles()) {
+      ctx.fillStyle = teamCol(p.owner.side);
+      ctx.fillRect(PX(p.x) - 2.5, PY(p.y) - 2.5, 5, 5);
+    }
+  }
+
+  function render() {
+    if (!m) { drawBoard(); return; }
+    if (bt && (phase === 'battle' || phase === 'result' || phase === 'end')) drawBattle();
+    else drawDeploy();
+  }
+
+  // ---------- HUD ----------
+  function hud() {
+    const v = phase === 'battle' && battlePre ? battlePre : m;
+    const hpMe = v ? v.hp[me] : Game.START_HP, hpFoe = v ? v.hp[foe()] : Game.START_HP;
+    $('hp-you').textContent = hpMe; $('hp-foe').textContent = hpFoe;
+    $('hpbar-you').style.width = (hpMe / Game.START_HP * 100) + '%';
+    $('hpbar-foe').style.width = (hpFoe / Game.START_HP * 100) + '%';
+    $('round').textContent = v ? v.round : 1;
+    $('phase').textContent = { start: 'Ready', lobby: 'Lobby', deploy: 'Deploy', battle: 'Battle', result: 'Result', end: 'Match over' }[phase];
+    $('foe-name').textContent = mode === 'ai' ? 'Enemy' : 'Opponent';
+  }
+
+  function setNet(text, state) {
+    const n = $('net');
+    if (!text) { n.hidden = true; return; }
+    n.hidden = false; n.className = 'net' + (state ? ' ' + state : '');
+    $('net-text').textContent = text;
+  }
+  function netStatus() {
+    if (mode === 'ai') { setNet(''); return; }
+    if (net.connected) setNet(mode === 'host' ? `Match ${net.code} · opponent connected` : `Match ${net.code} · connected`, 'ok');
+    else if (phase === 'lobby') setNet('');
+    else setNet(mode === 'host' ? `Opponent disconnected. Waiting for them to come back…` : 'Connection lost. Reconnecting…', 'bad');
+  }
+
+  // ---------- countdown ----------
+  const fmtClock = (ms) => { const s = Math.max(0, Math.ceil(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+  const editable = () => phase === 'deploy' && !ready[me] && !timeUp;
+
+  function tick() {
+    const t = now();
+    if (phase === 'deploy') {
+      // host: the countdown waits while the opponent is away
+      if (mode === 'host' && !net.connected && deadline) { pausedLeft = Math.max(5000, deadline - t); deadline = 0; panelDeploy(); }
+      const el = $('timer');
+      if (deadline) {
+        const left = deadline - t;
+        if (el) { el.textContent = fmtClock(left); el.classList.toggle('low', left <= 5000); }
+        $('clock').textContent = left > 0 ? `${fmtClock(left)} to deploy` : 'Time’s up';
+        if (mode !== 'guest' && left <= (mode === 'host' ? -500 : 0)) runFight();
+        else if (mode === 'guest' && left <= 0 && !timeUp) { timeUp = true; selected = null; closeSheet(); sendSide(); panelDeploy(); render(); }
+      } else if (el) { el.textContent = mode === 'ai' ? '' : 'paused'; el.classList.remove('low'); }
+    }
+    if ((phase === 'result' || phase === 'end') && resultShownAt) {
+      const left = resultShownAt + NEXT_SECONDS * 1000 - t;
+      const nb = $('pbtn');
+      if (phase === 'result' && !nextReady[me]) {
+        if (left <= 0) tapNext();
+        else if (nb && mode !== 'ai') nb.textContent = `Next round · ${Math.ceil(left / 1000)}`;
+      }
+    }
+  }
+  setInterval(tick, 200);
+
+  // ---------- panel ----------
+  function panelDeploy() {
+    if (phase !== 'deploy') return;
+    const g = m.gold[me];
+    const fresh = m.armies[me].filter(s => s.round === m.round).length;
+    const readyN = m.armies[me].filter(s => Game.isReady(m, s)).length;
+    const left = Game.deploysLeft(m, me), allowed = Game.deploysAllowed(m, me);
+    const price = (i) => Game.unitCostOf(units[i]);
+    const can = editable();
+    const canBuy = (i) => can && g >= price(i) && left > 0;
+    let hint;
+    if (!can) hint = timeUp ? 'Time’s up. The fight is about to start.' : 'You’re ready. Tap Not ready to make changes.';
+    else {
+      hint = selected !== null
+        ? (canBuy(selected) ? `Tap a tile in your zone to place ${esc(units[selected].name)}.` : left <= 0 ? 'No deployments left this round.' : `Not enough gold for ${esc(units[selected].name)}.`)
+        : (fresh ? 'Tap a squad you placed this round to take it back.' : 'Pick a unit, then tap a tile in the bottom four rows.');
+      if (left <= 0 && selected === null) hint = `No deployments left. Buy one more for ${Game.CONFIG.extraDeployCost} gold, or spend gold on upgrades.`;
+      if (readyN && selected === null) hint = `${readyN} squad${readyN === 1 ? ' is' : 's are'} ready to level up. Tap ${readyN === 1 ? 'it' : 'one'} to upgrade.`;
+    }
+    const extraBtns = `<span style="display:flex;gap:6px;flex-wrap:wrap">
+        <button class="btn small" id="buy-deploy" ${can && g >= Game.CONFIG.extraDeployCost ? '' : 'disabled'}>+1 deployment · ${Game.CONFIG.extraDeployCost}</button>
+        ${can && m.extraDeploys[me] > 0 && left > 0 ? `<button class="btn small" id="refund-deploy">Refund unused</button>` : ''}
+      </span>`;
+    let action, status;
+    if (mode === 'ai') {
+      status = `${m.armies[me].length} squad${m.armies[me].length === 1 ? '' : 's'} on the board`;
+      action = `<button class="btn primary" id="fight" ${m.armies[me].length ? '' : 'disabled'}>${deadline ? 'Fight now' : 'Fight'}</button>`;
+    } else {
+      const away = mode === 'host' && !net.connected;
+      status = away ? 'Opponent is away. The clock is paused.' : ready[foe()] ? 'Opponent is ready.' : 'Opponent is deploying.';
+      action = `<button class="btn ${ready[me] ? '' : 'primary'}" id="ready" ${timeUp ? 'disabled' : ''}>${ready[me] ? 'Not ready' : 'Ready'}</button>`;
+    }
+    $('panel').innerHTML = `
+      <div class="bar"><span class="gold num">${g} gold</span><span class="deploys num">${Math.max(0, left)} of ${allowed} deployments left</span><span class="timer" id="timer">${deadline ? fmtClock(deadline - now()) : ''}</span></div>
+      <div class="bar"><span class="hint">${hint}</span>${extraBtns}</div>
+      <div class="shop" id="shop">${units.map((u, i) => `
+        <div class="uwrap">
+          <button class="ucard" data-i="${i}" aria-pressed="${selected === i}" aria-disabled="${!canBuy(i)}">
+            <span class="t"><span style="color:${u.color};display:inline-flex">${Shapes.svg(u.shape, 13)}</span> ${tag(u)}</span><span class="n">${esc(u.name)}</span>
+            <span class="c">${price(i)} · ${u.bodies} ${u.bodies === 1 ? 'body' : 'bodies'}</span>
+          </button>
+          <button class="info" data-info="${i}" aria-label="About ${esc(u.name)}">i</button>
+        </div>`).join('')}</div>
+      <div class="bar"><span class="hint">${status}</span>${action}</div>`;
+    const shop = $('shop');
+    shop.scrollLeft = shopScroll;
+    shop.addEventListener('scroll', () => { shopScroll = shop.scrollLeft; }, { passive: true });
+    shop.querySelectorAll('.ucard').forEach(b => b.addEventListener('click', () => {
+      if (b.getAttribute('aria-disabled') === 'true') return;
+      const i = +b.dataset.i;
+      selected = selected === i ? null : i;
+      panelDeploy(); render();
+    }));
+    shop.querySelectorAll('[data-info]').forEach(el => el.addEventListener('click', () => openSheet(+el.dataset.info)));
+    if ($('fight')) $('fight').addEventListener('click', runFight);
+    if ($('ready')) $('ready').addEventListener('click', toggleReady);
+    $('buy-deploy').addEventListener('click', () => { if (editable() && Game.buyDeploy(m, me)) changed(); });
+    if ($('refund-deploy')) $('refund-deploy').addEventListener('click', () => { if (editable() && Game.refundDeploy(m, me)) changed(); });
+    tick();
+  }
+
+  // After the player changes their own side
+  function changed() {
+    panelDeploy(); render();
+    if (mode === 'guest') sendSide();
+    if (mode === 'host') saveHost();
+  }
+
+  function toggleReady() {
+    if (phase !== 'deploy' || timeUp) return;
+    ready[me] = !ready[me];
+    if (ready[me]) { selected = null; closeSheet(); }
+    if (mode === 'guest') sendSide();
+    if (mode === 'host') { sendStatus(); if (ready[0] && ready[1] && net.connected) { runFight(); return; } }
+    panelDeploy(); render();
+  }
+
+  function panelBattle() {
+    $('panel').innerHTML = `
+      <div class="bar">
+        <div class="seg" role="group" aria-label="Playback speed">
+          ${[1, 2, 4].map(s => `<button data-s="${s}" aria-pressed="${speed === s}">${s}×</button>`).join('')}
+        </div>
+        <button class="btn small" id="skip">Skip to result</button>
+      </div>
+      <span class="hint">Blue is you, red is the ${mode === 'ai' ? 'enemy' : 'opponent'}. Battles speed up on their own after 20 seconds.</span>`;
+    $('panel').querySelectorAll('[data-s]').forEach(b => b.addEventListener('click', () => {
+      speed = +b.dataset.s;
+      $('panel').querySelectorAll('[data-s]').forEach(x => x.setAttribute('aria-pressed', String(+x.dataset.s === speed)));
+    }));
+    $('skip').addEventListener('click', () => { while (bt.step()) {} finishBattle(); });
+  }
+
+  function panelInfo(text, btnLabel, onClick, extra = '') {
+    $('panel').innerHTML = `<div class="bar"><span class="hint">${text}</span><span class="btnrow">${extra}${btnLabel ? `<button class="btn primary" id="pbtn">${btnLabel}</button>` : ''}</span></div>`;
+    if (btnLabel) $('pbtn').addEventListener('click', onClick);
+  }
+
+  // ---------- overlays ----------
+  function overlay(html) {
+    const o = $('overlay');
+    if (!html) { o.hidden = true; o.innerHTML = ''; return; }
+    o.hidden = false; o.innerHTML = html;
+  }
+
+  function showStart() {
+    leaveNet();
+    mode = 'ai'; me = 0; phase = 'start'; m = null; bt = null; battlePre = null; deadline = 0; resultShownAt = 0;
+    hud(); netStatus(); $('clock').textContent = '';
+    let resume = null;
+    try { resume = JSON.parse(localStorage.getItem(HOST_STORE) || 'null'); } catch (e) {}
+    if (resume && !(resume.m && now() - resume.ts < 6 * 3600e3)) resume = null;
+    overlay(`<div class="card">
+      <span class="eyebrow">A small auto-battler</span>
+      <h2>Phone Bellum</h2>
+      <ul>
+        <li>Buy squads with gold each round. A standard squad costs ${Game.SQUAD_COST}.</li>
+        <li>Place them in the bottom four rows. They stay for the whole match.</li>
+        <li>You have ${DEPLOY_SECONDS} seconds to deploy, then the armies fight on their own.</li>
+        <li>The loser takes damage from every enemy squad still standing.</li>
+        <li>You see the enemy’s earlier squads while you deploy, so build counters.</li>
+        <li>3 deployments in round 1, then 2 per round. Extra ones cost ${Game.CONFIG.extraDeployCost} gold.</li>
+        <li>Squads earn experience. A gold + means you can upgrade it: level 2 doubles health and attack, level 3 triples them.</li>
+      </ul>
+    </div>`);
+    $('panel').innerHTML = `
+      ${resume ? `<button class="btn primary" id="resume">Resume match ${esc(resume.code)}</button>` : ''}
+      <div class="bar">
+        <button class="btn ${resume ? '' : 'primary'}" id="friend" style="flex:1">Challenge a friend</button>
+        <button class="btn" id="go" style="flex:1">Play vs AI</button>
+      </div>
+      <div class="bar">
+        <span class="hint">Got a code from a friend?</span>
+        <span class="joinrow"><input id="code-in" maxlength="5" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-label="Match code" placeholder="CODE"><button class="btn" id="join">Join</button></span>
+      </div>
+      <span class="hint" id="join-msg" aria-live="polite" hidden></span>
+      <div class="bar">
+        <span class="hint">Playing with ${customSet ? `your ${units.length} units from Counter Lab` : `the ${units.length} built-in units`}.</span>
+        <span class="btnrow"><button class="btn small" id="load-units">Load units</button><a class="btn small" href="lab.html" style="text-decoration:none;color:inherit;display:inline-block">Counter Lab</a></span>
+      </div>
+      <div class="bar">
+        <span class="hint">Deploy timer vs AI</span>
+        <div class="seg" role="group" aria-label="Deploy timer vs AI">
+          <button data-tm="1" aria-pressed="${timerOn}">${DEPLOY_SECONDS} s</button><button data-tm="0" aria-pressed="${!timerOn}">Off</button>
+        </div>
+      </div>
+      <div class="bar">
+        <span class="hint">Level-up cost (test setting)</span>
+        <div class="seg" role="group" aria-label="Level-up cost">
+          ${[50, 75].map(c => `<button data-c="${c}" aria-pressed="${Game.CONFIG.levelCostPerTier === c}">${c} gold</button>`).join('')}
+        </div>
+      </div>`;
+    $('friend').addEventListener('click', hostLobby);
+    $('go').addEventListener('click', startAiMatch);
+    if ($('resume')) $('resume').addEventListener('click', () => resumeHost(resume));
+    $('load-units').addEventListener('click', openLoader);
+    const joinNow = () => {
+      const c = $('code-in').value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+      if (c.length !== 5) { $('join-msg').hidden = false; $('join-msg').textContent = 'Codes are 5 letters and numbers.'; return; }
+      joinMatch(c);
+    };
+    $('join').addEventListener('click', joinNow);
+    $('code-in').addEventListener('keydown', (e) => { if (e.key === 'Enter') joinNow(); });
+    $('panel').querySelectorAll('[data-c]').forEach(b => b.addEventListener('click', () => {
+      Game.CONFIG.levelCostPerTier = +b.dataset.c;
+      $('panel').querySelectorAll('[data-c]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+    }));
+    $('panel').querySelectorAll('[data-tm]').forEach(b => b.addEventListener('click', () => {
+      timerOn = b.dataset.tm === '1';
+      $('panel').querySelectorAll('[data-tm]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+    }));
+    size(); render();
+  }
+
+  function showResult(sum) {
+    const iWon = sum.winner === me && !sum.timeout, iLost = sum.winner === foe() && !sum.timeout;
+    const head = sum.timeout ? 'Time ran out' : iWon ? `Round ${sum.round} won` : iLost ? `Round ${sum.round} lost` : 'Draw';
+    const cls = iWon ? 'you' : iLost ? 'foe' : '';
+    const them = mode === 'ai' ? 'Enemy' : 'Opponent';
+    const lines = [];
+    if (sum.dmg[foe()]) lines.push(`${them} takes <b class="num">${sum.dmg[foe()]}</b> damage.`);
+    if (sum.dmg[me]) lines.push(`You take <b class="num">${sum.dmg[me]}</b> damage.`);
+    if (!sum.dmg[0] && !sum.dmg[1]) lines.push('Nobody takes damage.');
+    const lv = (list) => list.map(x => `${esc(units[x.unit].name)} (to level ${x.level + 1})`).join(', ');
+    const lvLines = [];
+    if (mode === 'ai' && lastAiLevels.length) lvLines.push(`<p><span style="color:var(--gold)">Enemy leveled up before the fight:</span> ${lv(lastAiLevels)}.</p>`);
+    if (sum.newlyReady[me].length) lvLines.push(`<p><span style="color:var(--gold)">Ready to level up:</span> ${lv(sum.newlyReady[me])}.</p>`);
+    resultShownAt = now();
+    if (m.over) {
+      const win = m.winner === me, loss = m.winner === foe();
+      phase = 'end'; hud(); netStatus();
+      const wait = mode !== 'ai' && rematch[me];
+      overlay(`<div class="card">
+        <span class="eyebrow">After ${m.history.length} rounds</span>
+        <h2 class="${win ? 'you' : loss ? 'foe' : ''}">${win ? 'Victory' : loss ? 'Defeat' : 'Draw'}</h2>
+        <p class="big">${lines.join(' ')}</p>
+        ${mode !== 'ai' && rematch[foe()] && !rematch[me] ? '<p>Your opponent wants a rematch.</p>' : ''}
+        <div class="btnrow">
+          ${mode === 'ai' ? '<button class="btn primary" id="again">Play again</button>'
+            : `<button class="btn primary" id="again" ${wait ? 'disabled' : ''}>${wait ? 'Waiting for opponent…' : 'Rematch'}</button>`}
+          <button class="btn" id="menu">Main menu</button>
+        </div>
+      </div>`);
+      if (mode === 'ai') panelInfo('The AI buys units that counter what you fielded last round.', 'Play again', startAiMatch);
+      else panelInfo(wait ? 'Waiting for your opponent to accept the rematch.' : 'A rematch starts when you both tap Rematch.', wait ? '' : 'Rematch', askRematch);
+      $('again').addEventListener('click', mode === 'ai' ? startAiMatch : askRematch);
+      $('menu').addEventListener('click', () => { if (mode === 'host') clearHost(); showStart(); });
+      return;
+    }
+    phase = 'result'; hud(); netStatus();
+    const bonus = sum.bonusTo === me ? ` You get ${Game.LOSER_BONUS} extra for losing the round.` : sum.bonusTo === foe() ? ` The ${them.toLowerCase()} gets ${Game.LOSER_BONUS} extra for losing the round.` : '';
+    const waiting = mode !== 'ai' && nextReady[me];
+    overlay(`<div class="card">
+      <span class="eyebrow">${Math.round(sum.time)} s of fighting</span>
+      <h2 class="${cls}">${head}</h2>
+      <p class="big">${lines.join(' ')}</p>
+      ${lvLines.join('')}
+      <p>Next round: +${Game.INCOME} gold each.${bonus}</p>
+      ${waiting ? '<p class="status wait">Waiting for your opponent</p>' : `<button class="btn primary" id="next">Next round</button>`}
+    </div>`);
+    if (waiting) panelInfo('The next round starts when your opponent is ready too.', '', null);
+    else panelInfo('Your squads keep their tiles. Add more to counter what you just saw.', 'Next round', tapNext);
+    if ($('next')) $('next').addEventListener('click', tapNext);
+  }
+
+  // ---------- flow: vs AI ----------
+  function startAiMatch() {
+    leaveNet();
+    mode = 'ai'; me = 0;
+    m = Game.createMatch(units, M, (now() ^ (Math.random() * 1e9)) >>> 0);
+    nextReady = [false, false]; rematch = [false, false];
+    beginAiRound();
+  }
+
+  function beginAiRound() {
+    Game.aiDeploy(m, 1);       // the AI commits first; its new squads stay hidden until the fight
+    enterDeploy(timerOn ? DEPLOY_SECONDS * 1000 : 0);
+  }
+
+  function enterDeploy(ms) {
+    phase = 'deploy'; bt = null; battlePre = null; fx = []; selected = null; timeUp = false; resultShownAt = 0;
+    ready = [false, false];
+    deadline = ms > 0 ? now() + ms : 0;
+    $('clock').textContent = '';
+    closeSheet(); overlay(null); hud(); netStatus(); panelDeploy(); size(); render();
+  }
+
+  function tapNext() {
+    if (phase !== 'result') return;
+    if (mode === 'ai') { beginAiRound(); return; }
+    nextReady[me] = true;
+    if (mode === 'guest') send({ t: 'next', round: lastSummary && lastSummary.round });
+    else { sendStatus(); saveHost(); if (!checkNext()) showResult(lastSummary); return; }
+    showResult(lastSummary);
+  }
+
+  function askRematch() {
+    if (phase !== 'end' || mode === 'ai') return;
+    rematch[me] = true;
+    if (mode === 'guest') send({ t: 'rematch' });
+    else { sendStatus(); if (checkRematch()) return; }
+    showResult(lastSummary);
+  }
+
+  // ---------- the fight (vs AI and host) ----------
+  const snapshot = (match) => JSON.parse(JSON.stringify({ ...match, units: null, matrix: null }));
+  const withUnits = (s) => ({ ...s, units, matrix: M });
+
+  function runFight() {
+    if (phase !== 'deploy' || !m) return;
+    if (mode === 'guest') return;
+    closeSheet(); selected = null;
+    lastAiLevels = mode === 'ai' ? Game.aiLevel(m, 1) : []; // the AI spends its level-ups now
+    const pre = snapshot(m);
+    // work out the result first; both screens then play the same battle back
+    const sim = Game.startBattle(m);
+    while (sim.step()) {}
+    const summary = Game.resolve(m, sim.result());
+    lastSummary = summary; nextReady = [false, false]; rematch = [false, false];
+    if (mode === 'host') { send({ t: 'fight', pre, post: snapshot(m), summary }); saveHost(); }
+    playBattle(pre);
+  }
+
+  function playBattle(pre) {
+    phase = 'battle'; selected = null; deadline = 0; timeUp = false;
+    battlePre = withUnits(pre);
+    bt = Game.startBattle(battlePre);
+    fx = []; acc = 0; lastTs = 0;
+    closeSheet(); overlay(null); hud(); panelBattle(); render();
+    cancelAnimationFrame(raf);
+    if (reduced) { while (bt.step()) {} finishBattle(); return; }
+    raf = requestAnimationFrame(loop);
+  }
+
+  function absorb() {
+    for (const s of bt.lastShots()) fx.push({ kind: 'shot', x1: s[0], y1: s[1], x2: s[2], y2: s[3], side: s[4], splash: s[5], charged: s[6], age: 0, life: 0.18 });
+    for (const b of bt.bodies) if (!b.alive && !b._gone) { b._gone = true; fx.push({ kind: 'death', x: b.x, y: b.y, r: radius(b.u), side: b.side, age: 0, life: 0.5 }); }
+  }
+
+  function loop(ts) {
+    if (phase !== 'battle') return;
+    const dtReal = lastTs ? Math.min(0.1, (ts - lastTs) / 1000) : 0.016; lastTs = ts;
+    const boost = bt.time() > 20 ? 2 : 1;
+    acc += dtReal * speed * boost;
+    while (acc >= Game.SETTINGS.dt) {
+      acc -= Game.SETTINGS.dt;
+      if (!bt.step()) break;
+      absorb();
+    }
+    for (const e of fx) e.age += dtReal * speed * boost;
+    fx = fx.filter(e => e.age < e.life);
+    $('clock').textContent = `${bt.time().toFixed(1)} s${boost > 1 ? ' · speeding up' : ''}`;
+    render();
+    if (bt.isOver()) { finishBattle(); return; }
+    raf = requestAnimationFrame(loop);
+  }
+
+  function finishBattle() {
+    if (phase !== 'battle') return;
+    cancelAnimationFrame(raf);
+    fx = [];
+    const res = bt.result();
+    $('clock').textContent = `${res.time.toFixed(1)} s`;
+    if (lastSummary && (res.winner !== lastSummary.winner || Math.abs(res.time - lastSummary.time) > 1e-6)) {
+      console.warn('Phone Bellum: this screen’s replay differs from the host’s result; the host’s result counts.');
+    }
+    battlePre = null;
+    render();
+    showResult(lastSummary);
+  }
+
+  // ---------- board input ----------
+  function tileAt(ev) {
+    const r = cv.getBoundingClientRect();
+    const c = Math.floor((ev.clientX - r.left) / r.width * Game.COLS);
+    const rw = Math.floor((ev.clientY - r.top) / r.height * Game.ROWS);
+    if (c < 0 || rw < 0 || c >= Game.COLS || rw >= Game.ROWS) return null;
+    return { col: scol(c), row: srow(rw) }; // screen -> model (the flip is its own inverse)
+  }
+  cv.addEventListener('pointermove', (ev) => {
+    if (phase !== 'deploy' || ev.pointerType !== 'mouse') return;
+    hoverTile = tileAt(ev); render();
+  });
+  cv.addEventListener('pointerleave', () => { hoverTile = null; if (phase === 'deploy') render(); });
+  cv.addEventListener('click', (ev) => {
+    if (phase !== 'deploy') return;
+    const t = tileAt(ev); if (!t) return;
+    const own = m.armies[me].find(s => s.col === t.col && s.row === t.row);
+    if (own) {
+      if (own.round === m.round) { if (editable() && Game.unplace(m, me, t.col, t.row)) changed(); }
+      else openSheet(own.unit, own, me);
+      return;
+    }
+    const enemy = m.armies[foe()].find(s => s.col === t.col && s.row === t.row && s.round < m.round);
+    if (enemy) { openSheet(enemy.unit, enemy, foe()); return; }
+    if (selected !== null && editable() && Game.inZone(me, t.row)) {
+      if (Game.place(m, me, selected, t.col, t.row)) {
+        if (m.gold[me] < Game.unitCostOf(units[selected]) || Game.deploysLeft(m, me) <= 0) selected = null;
+        changed();
+      }
+    }
+  });
+
+  // ---------- unit sheet ----------
+  function openSheet(i, sq, side) {
+    const base = units[i];
+    const u = sq ? Engine.leveled(base, sq.level) : base;
+    let lvl = '';
+    if (sq) {
+      const next = sq.level < Engine.MAX_LEVEL ? Math.round(Game.xpNeeded(base, sq.level)) : null;
+      const shown = next ? Math.min(Math.round(sq.xp), next) : 0;
+      lvl = `<p style="margin:0"><span style="color:var(--gold)">Level ${sq.level + 1}${sq.level ? ` · ${sq.level + 1}× health and attack` : ''}</span> · ${next ? `${shown.toLocaleString('en-US')} / ${next.toLocaleString('en-US')} XP to level ${sq.level + 2}` : 'max level'}</p>`;
+      if (side === me && phase === 'deploy') {
+        const cost = Game.levelCost(base);
+        const boughtNow = sq.boughtLevels && sq.boughtLevels[m.round] > 0;
+        const btns = [];
+        if (Game.isReady(m, sq)) btns.push(m.gold[me] >= cost && editable()
+          ? `<button class="btn primary" id="lvl-up">Level up · ${cost} gold</button>`
+          : `<button class="btn primary" disabled>${editable() ? `Need ${cost} gold` : `Level up · ${cost} gold`}</button>`);
+        if (boughtNow && editable()) btns.push(`<button class="btn" id="lvl-undo">Undo level-up</button>`);
+        if (btns.length) lvl += `<div style="display:flex;gap:8px;flex-wrap:wrap">${btns.join('')}</div>`;
+        else if (next) lvl += `<p class="hint" style="margin:0">Earns XP from damage it deals and takes. Killing leveled enemies pays extra.</p>`;
+      }
+    }
+    const row = M[i];
+    const good = units.map((v, j) => [row[j], v.name]).filter(x => x[0] > 0.3).sort((a, b) => b[0] - a[0]).slice(0, 3);
+    const bad = units.map((v, j) => [row[j], v.name]).filter(x => x[0] < -0.3).sort((a, b) => a[0] - b[0]).slice(0, 3);
+    const tr = [];
+    if (u.burst > 1) tr.push(`Burst ${u.burst}`);
+    if (u.pellets > 1) tr.push(`Shotgun ${u.pellets}`);
+    if (u.spinUp > 0) tr.push(`Spin-up ${u.spinUp}%/s`);
+    if (u.pierce > 0) tr.push(`Pierce ${u.pierce}`);
+    if (u.projSpeed > 0) tr.push(`Bolts ${u.projSpeed} m/s`);
+    if (u.minRange > 0) tr.push(`Min range ${u.minRange} m`);
+    if (u.charge > 1) tr.push(`Charge ×${u.charge}`);
+    if (u.knockback > 0) tr.push(`Knockback ${u.knockback} m`);
+    if (u.windUp > 0) tr.push(`Wind-up ${u.windUp} s`);
+    if (u.defense === 'armor') tr.push(`Armor ${u.defVal}`);
+    if (u.defense === 'ward') tr.push(`Ward ${u.defVal}`);
+    if (u.splash > 0) tr.push(`Splash ${u.splash} m`);
+    $('sheet').innerHTML = `
+      <div class="bar"><h3 id="sheet-h"><span style="color:${u.color}">${Shapes.svg(u.shape, 18)}</span> ${esc(u.name)}</h3><button class="btn small" id="close">Close</button></div>
+      <p class="role" style="margin:0">${ROLES[u.name] && !customSet ? ROLES[u.name] : customSet ? `From a Counter Lab roster · ${Game.unitCostOf(base)} gold` : ''}</p>
+      ${lvl}
+      ${tr.length ? `<div class="traits">${tr.map(x => `<span>${x}</span>`).join('')}</div>` : ''}
+      <div class="stats num">
+        <div><span>Bodies</span>${u.bodies}</div><div><span>Health</span>${Math.round(u.hp)}</div>
+        <div><span>Hit</span>${Math.round(u.hit)}</div><div><span>Attacks/s</span>${u.aps}</div>
+        <div><span>Range</span>${u.range} m</div><div><span>Speed</span>${u.speed} m/s</div>
+      </div>
+      <div class="vs">
+        <div class="good"><h4>Strong against</h4><ul>${good.length ? good.map(x => `<li>${esc(x[1])}</li>`).join('') : '<li>No hard counters</li>'}</ul></div>
+        <div class="bad"><h4>Weak against</h4><ul>${bad.length ? bad.map(x => `<li>${esc(x[1])}</li>`).join('') : '<li>No hard counters</li>'}</ul></div>
+      </div>`;
+    $('sheet-back').hidden = false;
+    $('close').addEventListener('click', closeSheet);
+    const after = () => { changed(); openSheet(i, sq, side); };
+    if ($('lvl-up')) $('lvl-up').addEventListener('click', () => { if (editable() && Game.levelUp(m, me, sq.id)) after(); });
+    if ($('lvl-undo')) $('lvl-undo').addEventListener('click', () => { if (editable() && Game.undoLevel(m, me, sq.id)) after(); });
+    ($('lvl-up') || $('close')).focus();
+  }
+  function closeSheet() { $('sheet-back').hidden = true; loaderRun++; }
+
+  // ---------- load units from Counter Lab ----------
+  let loaderRun = 0;
+  function* matrixGen(us) {
+    const n = us.length, out = us.map(() => Array(n).fill(0));
+    const total = n * (n - 1) / 2;
+    let done = 0;
+    for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) {
+      const r = Engine.battle(us[i], us[j], MATRIX_SETTINGS);
+      out[i][j] = +r.score.toFixed(3); out[j][i] = -out[i][j];
+      yield [++done, total];
+    }
+    return out;
+  }
+  function labRoster() {
+    try { const p = JSON.parse(localStorage.getItem(LAB_STORE) || 'null'); return p && validUnits(p.units) ? p : null; } catch (e) { return null; }
+  }
+  function openLoader() {
+    const lab = labRoster();
+    $('sheet').innerHTML = `
+      <div class="bar"><h3 id="sheet-h">Load units</h3><button class="btn small" id="close">Close</button></div>
+      ${lab ? `<p class="role" style="margin:0">Counter Lab on this device has ${lab.units.length} units.</p>
+      <div class="bar"><span></span><button class="btn primary" id="use-lab">Use my Counter Lab units</button></div>
+      <p class="role" style="margin:0">Or paste a roster copied with Copy roster:</p>`
+      : `<p class="role" style="margin:0">Open <a href="lab.html">Counter Lab</a> on this device and your units show up here. Or paste a roster copied with Copy roster:</p>`}
+      <textarea id="roster-in" spellcheck="false" placeholder="Paste your roster here" aria-label="Roster text"
+        style="min-height:110px;font:12px var(--font-data);background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:4px;padding:8px;width:100%"></textarea>
+      <div class="bar">
+        ${customSet ? '<button class="btn" id="builtin">Use built-in units</button>' : '<span></span>'}
+        <button class="btn ${lab ? '' : 'primary'}" id="use-roster">Use pasted units</button>
+      </div>
+      <p class="hint" id="load-msg" aria-live="polite" style="margin:0"></p>`;
+    $('sheet-back').hidden = false;
+    $('close').addEventListener('click', closeSheet);
+    if ($('builtin')) $('builtin').addEventListener('click', () => {
+      try { localStorage.removeItem(STORE); } catch (e) {}
+      useSet(BUILTIN, false); closeSheet(); showStart();
+    });
+    const msg = $('load-msg');
+    const load = (p) => {
+      const list = Array.isArray(p) ? p : p && p.units;
+      if (!validUnits(list)) { msg.textContent = 'The roster needs 2 to 30 units, each with a name, a cost above 0 and all eight levers.'; return; }
+      // Counter Lab costs are in gold (100 = one standard squad); older rosters used 1 = one squad
+      const gold = (p && p.goldCosts) || list.some(u => u.cost >= 10);
+      const clean = list.map(u => ({ ...u, level: 0, cost: gold ? u.cost / 100 : u.cost }));
+      const prepared = clean.map(u => ({ ...Engine.withTraits(u), level: 0, bodies: Math.max(1, Math.round(u.bodies)) }));
+      const id = ++loaderRun;
+      $('use-roster').disabled = true; if ($('use-lab')) $('use-lab').disabled = true;
+      const gen = matrixGen(prepared);
+      (function step() {
+        if (id !== loaderRun) return;
+        const t0 = performance.now();
+        let r;
+        while (performance.now() - t0 < 30) {
+          r = gen.next();
+          if (r.done) {
+            const set = { units: clean, matrix: r.value };
+            try { localStorage.setItem(STORE, JSON.stringify(set)); } catch (e) {}
+            useSet(set, true);
+            closeSheet(); showStart();
+            return;
+          }
+        }
+        msg.textContent = `Building the AI’s counter table: ${r.value[0]} of ${r.value[1]} matchups…`;
+        setTimeout(step, 0);
+      })();
+    };
+    if ($('use-lab')) $('use-lab').addEventListener('click', () => load(lab));
+    $('use-roster').addEventListener('click', () => {
+      let p;
+      try { p = JSON.parse($('roster-in').value); } catch (e) { msg.textContent = 'That text isn’t a roster. Copy it again with Copy roster in Counter Lab.'; return; }
+      load(p);
+    });
+  }
+  $('sheet-back').addEventListener('click', (e) => { if (e.target.id === 'sheet-back') closeSheet(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSheet(); });
+
+  // =====================================================================
+  // Live matches: PeerJS (WebRTC). The host runs the match and decides results;
+  // the guest sends its own deployments and plays back the same battle.
+  // =====================================================================
+  const net = { peer: null, conn: null, code: '', connected: false, retryTimer: 0, tries: 0, alive: false };
+  const peerOpts = () => {
+    const o = { debug: 1 };
+    if (qs.get('peerhost')) { o.host = qs.get('peerhost'); o.port = +qs.get('peerport') || 9000; o.path = qs.get('peerpath') || '/'; o.secure = qs.get('peersecure') === '1'; }
+    return o;
+  };
+  const shareLink = () => {
+    const u = new URL(location.href.split('#')[0]);
+    const keep = ['peerhost', 'peerport', 'peerpath', 'peersecure'];
+    [...u.searchParams.keys()].forEach(k => { if (!keep.includes(k)) u.searchParams.delete(k); });
+    u.searchParams.set('join', net.code);
+    return u.toString();
+  };
+  const newCode = () => Array.from({ length: 5 }, () => CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]).join('');
+  const send = (msg) => { if (net.conn && net.connected) { try { net.conn.send(msg); } catch (e) { console.warn(e); } } };
+  const peerAvailable = () => typeof Peer === 'function';
+
+  function leaveNet() {
+    net.alive = false;
+    clearTimeout(net.retryTimer);
+    try { if (net.conn) net.conn.close(); } catch (e) {}
+    try { if (net.peer) net.peer.destroy(); } catch (e) {}
+    net.peer = null; net.conn = null; net.connected = false; net.code = ''; net.tries = 0;
+    if (qs.has('join')) { qs.delete('join'); history.replaceState(null, '', location.pathname + (qs.toString() ? '?' + qs : '')); }
+  }
+
+  // ----- host -----
+  function hostLobby() {
+    if (!peerAvailable()) { overlayMsg('Couldn’t load the multiplayer code', 'Check your connection and reload the page.'); return; }
+    leaveNet();
+    mode = 'host'; me = 0; m = null; phase = 'lobby';
+    net.code = newCode();
+    clearHost();
+    hud(); netStatus(); render();
+    drawLobby();
+    hostOpen(true);
+  }
+
+  function hostOpen(fresh) {
+    net.alive = true;
+    const peer = new Peer(PEER_PREFIX + net.code, peerOpts());
+    net.peer = peer;
+    peer.on('open', () => { net.tries = 0; if (phase === 'lobby') drawLobby(); });
+    peer.on('connection', (c) => {
+      c.on('open', () => {
+        if (net.conn && net.conn !== c) { const old = net.conn; net.conn = null; try { old.close(); } catch (e) {} }
+        net.conn = c; net.connected = true;
+        onFriendConnected();
+      });
+      c.on('data', (d) => { if (c === net.conn) hostRecv(d); });
+      c.on('close', () => { if (c === net.conn) { net.connected = false; onFriendLost(); } });
+      c.on('error', (e) => console.warn('connection', e));
+    });
+    peer.on('disconnected', () => { if (net.alive && !peer.destroyed) setTimeout(() => { if (net.alive && !peer.destroyed && peer.disconnected) peer.reconnect(); }, 1500); });
+    peer.on('error', (err) => {
+      console.warn('peer', err.type, err);
+      if (!net.alive) return;
+      if (err.type === 'unavailable-id') {
+        // fresh lobby: pick another code. Resumed match: the old page may still hold the code for a moment
+        try { peer.destroy(); } catch (e) {}
+        if (fresh && phase === 'lobby' && !m) { net.code = newCode(); drawLobby(); hostOpen(true); }
+        else if (net.tries++ < 40) net.retryTimer = setTimeout(() => hostOpen(false), 3000);
+      } else if (['network', 'server-error', 'socket-error', 'socket-closed'].includes(err.type)) {
+        if (phase === 'lobby') drawLobby('Can’t reach the match server. Retrying…');
+        clearTimeout(net.retryTimer);
+        net.retryTimer = setTimeout(() => { if (!net.alive) return; if (peer.destroyed) hostOpen(fresh); else if (peer.disconnected) peer.reconnect(); }, 3000);
+      }
+    });
+  }
+
+  function drawLobby(problem) {
+    const link = shareLink();
+    const here = net.connected;
+    overlay(`<div class="card">
+      <span class="eyebrow">Challenge a friend · match code</span>
+      <span class="code" aria-label="Match code">${net.code}</span>
+      <p class="status ${here ? '' : 'wait'}" id="lobby-status">${problem ? esc(problem) : here ? 'Your friend is here!' : (net.peer && net.peer.open ? 'Waiting for your friend to open the link' : 'Setting up the match')}</p>
+      <button class="btn primary" id="start" ${here ? '' : 'disabled'}>Start match</button>
+    </div>`);
+    $('panel').innerHTML = `
+      <span class="hint">Send your friend this link. It works in any browser and nobody needs an account. Keep this page open while they join.</span>
+      <div class="linkbox" id="link">${esc(link)}</div>
+      <div class="bar">
+        <span class="btnrow">
+          ${navigator.share ? '<button class="btn primary" id="share">Share link</button>' : ''}
+          <button class="btn ${navigator.share ? '' : 'primary'}" id="copy">Copy link</button>
+        </span>
+        <button class="btn" id="cancel">Cancel</button>
+      </div>
+      <span class="hint">You both play with the units on this device: ${customSet ? `your ${units.length} Counter Lab units` : `the ${units.length} built-in units`}.</span>`;
+    if ($('share')) $('share').addEventListener('click', () => { navigator.share({ title: 'Phone Bellum', text: `Fight me in Phone Bellum! Code ${net.code}`, url: link }).catch(() => {}); });
+    $('copy').addEventListener('click', () => {
+      const done = () => { $('copy').textContent = 'Copied'; setTimeout(() => { if ($('copy')) $('copy').textContent = 'Copy link'; }, 1500); };
+      if (navigator.clipboard) navigator.clipboard.writeText(link).then(done, () => selectLink());
+      else selectLink();
+    });
+    $('cancel').addEventListener('click', () => { clearHost(); showStart(); });
+    $('start').addEventListener('click', hostStartMatch);
+  }
+  function selectLink() { const r = document.createRange(); r.selectNodeContents($('link')); const s = getSelection(); s.removeAllRanges(); s.addRange(r); }
+
+  function hostStartMatch() {
+    if (!net.connected) return;
+    m = Game.createMatch(units, M, (now() ^ (Math.random() * 1e9)) >>> 0);
+    lastSummary = null; nextReady = [false, false]; rematch = [false, false];
+    hostBeginRound();
+  }
+
+  function hostBeginRound() {
+    enterDeploy(DEPLOY_SECONDS * 1000);
+    sendSync(); saveHost();
+  }
+
+  function onFriendConnected() {
+    if (phase === 'deploy' && !deadline) { deadline = now() + Math.max(10000, pausedLeft || DEPLOY_SECONDS * 1000); pausedLeft = 0; }
+    sendSync();
+    netStatus();
+    if (phase === 'lobby') drawLobby();
+    else if (phase === 'deploy') panelDeploy();
+  }
+  function onFriendLost() {
+    netStatus();
+    if (phase === 'lobby') drawLobby();
+    else if (phase === 'deploy') tick();
+  }
+
+  // What the guest may see: the host's squads from this round stay hidden until the fight
+  function syncState() {
+    const s = snapshot(m);
+    if (phase === 'deploy') s.armies[0] = s.armies[0].filter(q => q.round < m.round);
+    return s;
+  }
+  function sendSync() {
+    if (!net.connected) return;
+    const base = { t: 'sync', proto: 1, set: { units: rawSet.units, matrix: rawSet.matrix }, custom: customSet, config: { levelCostPerTier: Game.CONFIG.levelCostPerTier } };
+    if (!m) { send({ ...base, phase: 'lobby' }); return; }
+    const ph = phase === 'battle' ? 'result' : phase;
+    send({ ...base, phase: ph, m: syncState(), remaining: phase === 'deploy' && deadline ? deadline - now() : 0, ready, nextReady, rematch, summary: lastSummary });
+  }
+  const sendStatus = () => send({ t: 'status', ready, nextReady, rematch });
+
+  function hostRecv(d) {
+    if (!d || typeof d !== 'object') return;
+    if (d.t === 'side') {
+      if (!m || phase !== 'deploy' || d.round !== m.round) return;
+      applySide(d);
+      saveHost();
+      if (ready[0] && ready[1]) { runFight(); return; }
+      panelDeploy();
+    } else if (d.t === 'next') {
+      if (!lastSummary || d.round !== lastSummary.round) return;
+      nextReady[1] = true; sendStatus(); saveHost();
+      if (!checkNext() && phase === 'result') showResult(lastSummary);
+    } else if (d.t === 'rematch') {
+      rematch[1] = true; sendStatus();
+      if (!checkRematch() && phase === 'end') showResult(lastSummary);
+    }
+  }
+
+  function applySide(d) {
+    if (!Array.isArray(d.army)) return;
+    const n = units.length;
+    const army = d.army.filter(s => s && Number.isInteger(s.unit) && s.unit >= 0 && s.unit < n && Number.isInteger(s.col) && s.col >= 0 && s.col < Game.COLS && Number.isInteger(s.row) && Game.inZone(1, s.row));
+    const seen = new Set();
+    m.armies[1] = army.filter(s => { const k = s.col + ',' + s.row; if (seen.has(k)) return false; seen.add(k); return true; }).map(s => ({
+      id: s.id | 0, unit: s.unit, col: s.col, row: s.row, round: s.round | 0, xp: Math.max(0, +s.xp || 0),
+      level: Math.max(0, Math.min(Engine.MAX_LEVEL, s.level | 0)), cost: Math.max(0, +s.cost || 0),
+      ...(s.boughtLevels && typeof s.boughtLevels === 'object' ? { boughtLevels: s.boughtLevels } : {}),
+    }));
+    m.gold[1] = Math.max(0, +d.gold || 0);
+    m.extraDeploys[1] = Math.max(0, d.extra | 0);
+    m.nextId[1] = Math.max(m.nextId[1], d.nextId | 0);
+    ready[1] = !!d.ready;
+  }
+
+  function checkNext() {
+    if (mode !== 'host' || phase !== 'result' || !(nextReady[0] && nextReady[1])) return false;
+    hostBeginRound();
+    return true;
+  }
+  function checkRematch() {
+    if (mode !== 'host' || phase !== 'end' || !(rematch[0] && rematch[1])) return false;
+    hostStartMatch();
+    return true;
+  }
+
+  // The host's match survives a reload (iPhone Safari drops background tabs)
+  function saveHost() {
+    if (mode !== 'host' || !m) return;
+    try {
+      localStorage.setItem(HOST_STORE, JSON.stringify({
+        code: net.code, ts: now(), set: rawSet, custom: customSet, config: { levelCostPerTier: Game.CONFIG.levelCostPerTier },
+        m: snapshot(m), phase: phase === 'battle' ? 'result' : phase, summary: lastSummary, nextReady, rematch,
+        left: phase === 'deploy' ? (deadline ? deadline - now() : pausedLeft) : 0,
+      }));
+    } catch (e) {}
+  }
+  function clearHost() { try { localStorage.removeItem(HOST_STORE); } catch (e) {} }
+
+  function resumeHost(s) {
+    if (!peerAvailable()) { overlayMsg('Couldn’t load the multiplayer code', 'Check your connection and reload the page.'); return; }
+    leaveNet();
+    mode = 'host'; me = 0;
+    useSet(validSet(s.set) ? s.set : BUILTIN, !!s.custom);
+    Game.CONFIG.levelCostPerTier = (s.config && s.config.levelCostPerTier) || Game.CONFIG.levelCostPerTier;
+    net.code = s.code;
+    m = withUnits(s.m); lastSummary = s.summary || null;
+    nextReady = s.nextReady || [false, false]; rematch = s.rematch || [false, false];
+    if (s.phase === 'deploy') {
+      enterDeploy(0); pausedLeft = Math.max(10000, s.left || DEPLOY_SECONDS * 1000);
+      // squads placed this round are kept; ready flags reset
+    } else if (lastSummary) { bt = null; showResult(lastSummary); }
+    else { phase = 'lobby'; drawLobby(); }
+    hud(); netStatus(); render();
+    hostOpen(false);
+  }
+
+  // ----- guest -----
+  function joinMatch(code) {
+    if (!peerAvailable()) { overlayMsg('Couldn’t load the multiplayer code', 'Check your connection and reload the page.'); return; }
+    leaveNet();
+    mode = 'guest'; me = 1; m = null; phase = 'lobby'; bt = null;
+    net.code = code; net.alive = true;
+    history.replaceState(null, '', shareLink());
+    hud(); netStatus(); render();
+    guestWaiting('Connecting to match ' + code);
+    const peer = new Peer(peerOpts());
+    net.peer = peer;
+    peer.on('open', () => connectToHost());
+    peer.on('disconnected', () => { if (net.alive && !peer.destroyed) setTimeout(() => { if (net.alive && !peer.destroyed && peer.disconnected) peer.reconnect(); }, 1500); });
+    peer.on('error', (err) => {
+      console.warn('peer', err.type, err);
+      if (!net.alive) return;
+      if (err.type === 'peer-unavailable') {
+        if (!m) guestWaiting(net.tries > 2 ? `Can’t find match ${code}. Make sure your friend still has it open. Retrying` : 'Connecting to match ' + code);
+        retryConnect(2500);
+      } else if (['network', 'server-error', 'socket-error', 'socket-closed'].includes(err.type)) {
+        if (!m) guestWaiting('Can’t reach the match server. Retrying');
+        clearTimeout(net.retryTimer);
+        net.retryTimer = setTimeout(() => { if (net.alive && !peer.destroyed && peer.disconnected) peer.reconnect(); retryConnect(500); }, 3000);
+      }
+    });
+  }
+
+  function retryConnect(ms) {
+    clearTimeout(net.retryTimer);
+    net.retryTimer = setTimeout(() => { if (net.alive && !net.connected) connectToHost(); }, ms);
+  }
+
+  function connectToHost() {
+    const peer = net.peer;
+    if (!net.alive || !peer || peer.destroyed || net.connected) return;
+    if (peer.disconnected) { peer.reconnect(); return; }
+    net.tries++;
+    const c = peer.connect(PEER_PREFIX + net.code, { reliable: true });
+    let opened = false;
+    const giveUp = setTimeout(() => { if (!opened) { try { c.close(); } catch (e) {} retryConnect(500); } }, 9000);
+    c.on('open', () => {
+      opened = true; clearTimeout(giveUp);
+      if (net.conn && net.conn !== c) { try { net.conn.close(); } catch (e) {} }
+      net.conn = c; net.connected = true; net.tries = 0;
+      netStatus();
+      if (phase === 'deploy') { sendSide(); panelDeploy(); }
+      if (phase === 'lobby' && !m) guestWaiting('Connected. Waiting for your friend to start the match');
+    });
+    c.on('data', (d) => { if (c === net.conn) guestRecv(d); });
+    c.on('close', () => {
+      clearTimeout(giveUp);
+      if (c === net.conn) { net.connected = false; net.conn = null; netStatus(); if (phase === 'deploy') panelDeploy(); retryConnect(1500); }
+    });
+    c.on('error', (e) => console.warn('connection', e));
+  }
+
+  function guestWaiting(text) {
+    overlay(`<div class="card">
+      <span class="eyebrow">Live match</span>
+      <span class="code">${esc(net.code)}</span>
+      <p class="status wait">${esc(text)}</p>
+      <button class="btn" id="leave">Leave</button>
+    </div>`);
+    panelInfo('Keep this page open.', '', null);
+    $('leave').addEventListener('click', showStart);
+  }
+
+  function sendSide() {
+    if (mode !== 'guest' || !m || phase !== 'deploy') return;
+    send({ t: 'side', round: m.round, army: m.armies[1], gold: m.gold[1], extra: m.extraDeploys[1], nextId: m.nextId[1], ready: ready[1] || timeUp });
+  }
+
+  function guestRecv(d) {
+    if (!d || typeof d !== 'object') return;
+    if (d.t === 'sync') {
+      if (validSet(d.set)) useSet(d.set, !!d.custom);
+      if (d.config && d.config.levelCostPerTier) Game.CONFIG.levelCostPerTier = d.config.levelCostPerTier;
+      if (d.phase === 'lobby' || !d.m) { m = null; phase = 'lobby'; hud(); render(); guestWaiting('Connected. Waiting for your friend to start the match'); return; }
+      const incoming = withUnits(d.m);
+      const theirReady = d.ready ? !!d.ready[0] : false;
+      nextReady[0] = d.nextReady ? !!d.nextReady[0] : false;
+      rematch[0] = d.rematch ? !!d.rematch[0] : false;
+      if (d.phase === 'deploy') {
+        if (phase === 'deploy' && m && m.round === incoming.round) {
+          // same round after a reconnect: keep our own side as it is here, take everything else from the host
+          for (const k of ['armies', 'gold', 'extraDeploys', 'nextId']) incoming[k][1] = m[k][1];
+          m = incoming; ready[0] = theirReady;
+          deadline = d.remaining > 0 ? now() + d.remaining - 300 : 0;
+          timeUp = false;
+          sendSide(); panelDeploy(); render(); hud();
+        } else {
+          m = incoming; lastSummary = d.summary || lastSummary;
+          nextReady = [false, false]; rematch = [false, false];
+          enterDeploy(d.remaining > 0 ? d.remaining - 300 : 0);
+          ready[0] = theirReady; panelDeploy();
+        }
+        return;
+      }
+      // result or end
+      if (phase === 'battle' && d.summary && lastSummary && d.summary.round === lastSummary.round) return; // still watching this battle
+      m = incoming; lastSummary = d.summary;
+      nextReady[1] = d.nextReady ? !!d.nextReady[1] : false;
+      rematch[1] = d.rematch ? !!d.rematch[1] : false;
+      if (lastSummary) { if (phase !== 'result' && phase !== 'end') bt = null; showResult(lastSummary); }
+      render();
+    } else if (d.t === 'fight') {
+      if (!d.pre || !d.post || !d.summary) return;
+      m = withUnits(d.post); lastSummary = d.summary;
+      nextReady = [false, false]; rematch = [false, false];
+      playBattle(d.pre);
+    } else if (d.t === 'status') {
+      if (d.ready) ready[0] = !!d.ready[0];
+      if (d.nextReady) nextReady[0] = !!d.nextReady[0];
+      if (d.rematch) rematch[0] = !!d.rematch[0];
+      if (phase === 'deploy') panelDeploy();
+      else if (phase === 'end') showResult(lastSummary);
+    }
+  }
+
+  function overlayMsg(head, text) {
+    overlay(`<div class="card"><h2>${esc(head)}</h2><p>${esc(text)}</p><button class="btn primary" id="ok">OK</button></div>`);
+    $('ok').addEventListener('click', showStart);
+  }
+
+  // Phones pause pages in the background; reconnect when the page comes back
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden || !net.alive || !net.peer) return;
+    if (net.peer.disconnected && !net.peer.destroyed) net.peer.reconnect();
+    if (mode === 'guest' && !net.connected) retryConnect(300);
+  });
+
+  window.addEventListener('resize', () => { size(); render(); });
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { size(); render(); });
+  const joinCode = (qs.get('join') || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (joinCode.length === 5) { showStart(); joinMatch(joinCode); }
+  else showStart();
+})();
+</script>
+</body>
+</html>

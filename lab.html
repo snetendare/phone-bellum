@@ -1,0 +1,1355 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0D1315">
+<link rel="icon" href="icon.png">
+<link rel="apple-touch-icon" href="icon.png">
+<title>Counter Lab</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: a tactics board on graph paper. Counter table and replay lead, unit editor below, rules last. */
+:root {
+  --bg: #EBEFE9;
+  --surface: #F7F9F5;
+  --ink: #17202B;
+  --muted: #56626C;
+  --line: #C6CFC6;
+  --accent: #2E55C7;
+  --win: #1D8656;
+  --loss: #C2452D;
+  --side-a: #2E55C7;
+  --side-b: #D07A22;
+  --grid: rgba(23, 32, 43, 0.055);
+  --font-display: "Chakra Petch", "Arial Narrow", system-ui, sans-serif;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-data: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #10151B; --surface: #18202A; --ink: #E4EAE4; --muted: #95A2AC; --line: #2B3644;
+    --accent: #87A2FF; --win: #3EC184; --loss: #F2745B; --side-a: #87A2FF; --side-b: #F2A65A;
+    --grid: rgba(228, 234, 228, 0.045); color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #10151B; --surface: #18202A; --ink: #E4EAE4; --muted: #95A2AC; --line: #2B3644;
+  --accent: #87A2FF; --win: #3EC184; --loss: #F2745B; --side-a: #87A2FF; --side-b: #F2A65A;
+  --grid: rgba(228, 234, 228, 0.045); color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  background-color: var(--bg);
+  background-image:
+    linear-gradient(var(--grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size: 24px 24px;
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.5;
+  padding-inline: 16px;
+  padding-block: 20px 48px;
+}
+.wrap { max-width: 1120px; margin: 0 auto; display: grid; gap: 28px; }
+h1, h2, h3 { font-family: var(--font-display); text-wrap: balance; margin: 0; letter-spacing: 0.01em; }
+h1 { font-size: clamp(30px, 7vw, 44px); font-weight: 700; line-height: 1.05; text-transform: uppercase; }
+h2 { font-size: 20px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+p { margin: 0; max-width: 65ch; }
+.muted { color: var(--muted); }
+.num { font-family: var(--font-data); font-variant-numeric: tabular-nums; }
+
+header { display: grid; gap: 8px; padding-top: 4px; }
+header .eyebrow { font-family: var(--font-data); font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); }
+
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 16px; display: grid; gap: 14px; min-width: 0; }
+.panel-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 16px; }
+.status { font-family: var(--font-data); font-size: 12px; color: var(--muted); }
+
+/* settings */
+.settings { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+.field { display: grid; gap: 4px; min-width: 0; }
+.field label { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.field .hint { font-size: 12px; color: var(--muted); line-height: 1.35; }
+input[type="number"], input[type="text"], select, textarea {
+  font: inherit; font-family: var(--font-data); font-size: 15px; color: var(--ink);
+  background: var(--bg); border: 1px solid var(--line); border-radius: 4px;
+  padding: 7px 9px; width: 100%; min-width: 0;
+}
+input[type="text"] { font-family: var(--font-body); font-weight: 600; }
+input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-visible, summary:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px;
+}
+
+/* buttons */
+button { font: inherit; cursor: pointer; }
+.btn { font-family: var(--font-body); font-weight: 600; font-size: 14px; padding: 8px 14px; border-radius: 4px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); }
+.btn:hover { border-color: var(--accent); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--surface); }
+.btn.danger { color: var(--loss); }
+.btn.small { padding: 5px 10px; font-size: 13px; }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+/* main grid */
+.duo { display: grid; gap: 28px; grid-template-columns: 1fr; }
+@media (min-width: 960px) { .duo { grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr); align-items: start; } }
+
+/* matrix */
+.scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+table.matrix { border-collapse: separate; border-spacing: 3px; font-family: var(--font-data); font-variant-numeric: tabular-nums; }
+.matrix th { font-weight: 500; font-size: 12px; color: var(--muted); padding: 2px 4px; white-space: nowrap; }
+.matrix thead th { text-align: center; letter-spacing: 0.06em; }
+.matrix tbody th { text-align: left; }
+.matrix tbody th .tag { color: var(--ink); font-weight: 500; margin-right: 6px; }
+.matrix tbody th .nm { font-family: var(--font-body); font-size: 12px; }
+.cell {
+  width: 50px; height: 40px; border: 1px solid transparent; border-radius: 4px;
+  font-family: var(--font-data); font-size: 13px; font-weight: 500; color: var(--ink);
+  background: var(--bg); display: grid; place-items: center; padding: 0;
+}
+.cell.self { color: var(--muted); cursor: default; background: transparent; border: 1px dashed var(--line); }
+.cell.timeout { border-style: dashed; border-color: var(--muted); }
+.cell.sel { outline: 2px solid var(--ink); outline-offset: 1px; }
+.overall { padding-left: 8px !important; }
+.chip { display: inline-block; font-family: var(--font-body); font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; padding: 2px 7px; border-radius: 99px; border: 1px solid currentColor; white-space: nowrap; }
+.chip.strong { color: var(--win); }
+.chip.weak { color: var(--loss); }
+.chip.ok { color: var(--muted); }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.sw { width: 14px; height: 14px; border-radius: 3px; display: inline-block; border: 1px solid var(--line); }
+
+/* replay */
+.vs { font-family: var(--font-display); font-size: 18px; font-weight: 600; display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
+.vs .a { color: var(--side-a); }
+.vs .b { color: var(--side-b); }
+.vs .x { color: var(--muted); font-size: 14px; }
+.canvas-box { position: relative; width: 100%; aspect-ratio: 4 / 3; max-width: 100%; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); overflow: hidden; }
+.canvas-box canvas { width: 100%; height: 100%; display: block; }
+.clock { position: absolute; top: 8px; right: 10px; font-family: var(--font-data); font-size: 12px; color: var(--muted); }
+.verdict { font-weight: 600; }
+.verdict.a { color: var(--side-a); }
+.verdict.b { color: var(--side-b); }
+table.stats { width: 100%; border-collapse: collapse; font-size: 13px; }
+.stats th, .stats td { padding: 6px 4px; border-bottom: 1px solid var(--line); text-align: right; }
+.stats th:first-child, .stats td:first-child { text-align: left; color: var(--muted); font-weight: 500; }
+.stats thead th { font-family: var(--font-body); font-weight: 600; }
+.stats thead th.a { color: var(--side-a); }
+.stats thead th.b { color: var(--side-b); }
+.stats td { font-family: var(--font-data); font-variant-numeric: tabular-nums; }
+
+/* units */
+.units { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); align-items: start; }
+@media (max-width: 400px) { .units { grid-template-columns: 1fr; } }
+details.unit { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; min-width: 0; }
+details.unit[open] { border-color: var(--muted); }
+details.unit summary { list-style: none; cursor: pointer; padding: 12px 14px; display: grid; gap: 6px; }
+details.unit summary::-webkit-details-marker { display: none; }
+.sum-top { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.sum-name { font-family: var(--font-display); font-weight: 600; font-size: 16px; display: flex; gap: 8px; align-items: baseline; min-width: 0; }
+.sum-name .ico, .matrix .ico { color: var(--accent); display: inline-flex; align-self: center; }
+.sum-name .tag { font-family: var(--font-data); font-size: 12px; color: var(--accent); }
+.sum-name .n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sum-cost { font-family: var(--font-data); font-size: 13px; color: var(--muted); white-space: nowrap; }
+.sum-line { font-family: var(--font-data); font-size: 12px; color: var(--muted); }
+.bar { height: 6px; border-radius: 3px; background: var(--bg); overflow: hidden; border: 1px solid var(--line); }
+.bar i { display: block; height: 100%; background: var(--accent); }
+.unit-body { padding: 4px 14px 14px; display: grid; gap: 12px; }
+.levers { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 12px; }
+.levers .full { grid-column: 1 / -1; }
+.price { display: grid; gap: 8px; }
+.price-out { display: grid; gap: 6px; }
+.price-line { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.price-line b { font-size: 20px; font-weight: 500; }
+table.vals { font-size: 13px; }
+.vals td, .vals th { padding: 5px 4px; }
+h3.sub { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--accent); padding-top: 10px; border-top: 1px solid var(--line); }
+.derived { font-size: 13px; color: var(--muted); display: grid; gap: 2px; }
+.derived b { color: var(--ink); font-family: var(--font-data); font-weight: 500; }
+.confirm { font-size: 13px; }
+
+/* data + rules */
+textarea { min-height: 110px; resize: vertical; font-size: 12px; }
+.msg { font-size: 13px; color: var(--muted); min-height: 1.4em; }
+.rules { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+.rule { display: grid; gap: 4px; }
+.rule h3 { font-size: 15px; font-weight: 600; }
+.rule p { font-size: 14px; color: var(--muted); }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+</style>
+</head>
+<body>
+
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow"><a href="./" style="color:inherit">Phone Bellum</a> · balance sandbox</div>
+    <h1>Counter Lab</h1>
+    <p class="muted">Every unit fights every other unit with the same gold. Change any lever and the whole table re-runs. Tap a cell to watch that fight. Units you make here show up in the game under Load units on this device.</p>
+  </header>
+
+  <section class="panel" aria-labelledby="set-h">
+    <div class="panel-head">
+      <h2 id="set-h">Battle settings</h2>
+      <span class="status" id="status">Ready</span>
+    </div>
+    <div class="settings">
+      <div class="field"><label for="s-budget">Gold per side</label><input id="s-budget" type="number" min="100" step="100" data-s="budget"><span class="hint">Each side buys as many squads as this affords.</span></div>
+      <div class="field"><label for="s-distance">Starting gap (m)</label><input id="s-distance" type="number" min="0" step="1" data-s="distance"><span class="hint">Distance between the two front lines.</span></div>
+      <div class="field"><label for="s-spacing">Body spacing (m)</label><input id="s-spacing" type="number" min="0.5" step="0.5" data-s="spacing"><span class="hint">How tightly squads stand. Tighter means more splash hits.</span></div>
+      <div class="field"><label for="s-floor">Armor floor (%)</label><input id="s-floor" type="number" min="0" max="100" step="1" data-s="minDmgPct"><span class="hint">Share of a hit that always gets through armor.</span></div>
+      <div class="field"><label for="s-cap">Time limit (s)</label><input id="s-cap" type="number" min="5" step="5" data-s="timeCap"><span class="hint">After this, the side with more health left wins.</span></div>
+    </div>
+  </section>
+
+  <div class="duo">
+    <section class="panel" aria-labelledby="tab-h">
+      <div class="panel-head">
+        <h2 id="tab-h">Counter table</h2>
+        <span class="status">Row vs column</span>
+      </div>
+      <p class="muted" style="font-size:14px">Each number is the row unit's health left minus the column unit's health left, from −100 (wiped out with no damage dealt) to +100 (won without a scratch).</p>
+      <div class="scroll"><table class="matrix" id="matrix"></table></div>
+      <div class="legend">
+        <span><i class="sw" style="background:color-mix(in srgb, var(--win) 70%, var(--surface))"></i>Row wins</span>
+        <span><i class="sw" style="background:color-mix(in srgb, var(--loss) 70%, var(--surface))"></i>Row loses</span>
+        <span><i class="sw" style="border:1px dashed var(--muted);background:transparent"></i>Time limit reached</span>
+      </div>
+    </section>
+
+    <section class="panel" aria-labelledby="rep-h">
+      <div class="panel-head">
+        <h2 id="rep-h">Matchup</h2>
+        <span class="status" id="rep-status"></span>
+      </div>
+      <div class="vs" id="vs"></div>
+      <div class="canvas-box"><canvas id="cv" aria-label="Battle replay"></canvas><span class="clock num" id="clock">0.0 s</span></div>
+      <div class="row">
+        <button class="btn primary small" id="play">Play</button>
+        <button class="btn small" id="restart">Restart</button>
+        <label class="row" style="gap:6px;font-size:13px;color:var(--muted)" for="speed">Speed
+          <select id="speed" style="width:auto;padding:5px 8px;font-size:13px">
+            <option value="1">1×</option><option value="2" selected>2×</option><option value="4">4×</option>
+          </select>
+        </label>
+        <button class="btn small" id="swap">Swap sides</button>
+      </div>
+      <p id="verdict" class="verdict"></p>
+      <table class="stats" id="stats"></table>
+    </section>
+  </div>
+
+  <section class="panel" aria-labelledby="units-h">
+    <div class="panel-head">
+      <h2 id="units-h">Units</h2>
+      <div class="row">
+        <button class="btn small" id="add-ex">Add trait examples</button>
+        <button class="btn small" id="add">Add unit</button>
+      </div>
+    </div>
+    <div class="msg" id="ex-msg" aria-live="polite"></div>
+    <p class="muted" style="font-size:14px">Raw strength is total health × total damage per second for what the gold buys. Units with equal raw strength are equal on paper; range, splash, armor and ward are what turn them into counters.</p>
+    <div class="units" id="units"></div>
+  </section>
+
+  <section class="panel" aria-labelledby="data-h">
+    <div class="panel-head"><h2 id="data-h">Save and share</h2></div>
+    <p class="muted" style="font-size:14px">Your changes are kept in this browser. To move a roster elsewhere, copy it as text and paste it back in here later.</p>
+    <div class="row">
+      <button class="btn small" id="copy">Copy roster</button>
+      <button class="btn small" id="load">Load pasted roster</button>
+      <button class="btn small danger" id="reset">Reset to sample units</button>
+    </div>
+    <div class="row confirm" id="reset-confirm" hidden>
+      <span>Replace all units and settings with the sample roster?</span>
+      <button class="btn small danger" id="reset-yes">Replace</button>
+      <button class="btn small" id="reset-no">Keep mine</button>
+    </div>
+    <label class="field" for="io"><span class="hint">Roster text</span>
+      <textarea id="io" spellcheck="false"></textarea>
+    </label>
+    <div class="msg" id="io-msg" aria-live="polite"></div>
+  </section>
+
+  <section class="panel" aria-labelledby="rules-h">
+    <div class="panel-head"><h2 id="rules-h">How a fight works</h2></div>
+    <div class="rules">
+      <div class="rule"><h3>Targeting and movement</h3><p>Every body walks toward the nearest enemy and stops once it is in range. Melee units have a range of about 2 m.</p></div>
+      <div class="rule"><h3>Overkill</h3><p>Damage beyond a body's remaining health is wasted. Big hits on small bodies lose most of their damage.</p></div>
+      <div class="rule"><h3>Splash</h3><p>Every enemy within the splash radius of the target takes the full hit. Packed squads take many hits from one attack.</p></div>
+      <div class="rule"><h3>Armor</h3><p>Subtracts a flat amount from every hit, down to the armor floor. It shuts down small, fast hits and barely dents big ones.</p></div>
+      <div class="rule"><h3>Ward</h3><p>No single hit can deal more than the ward value. It shuts down big hits and ignores small ones.</p></div>
+      <div class="rule"><h3>Range vs speed</h3><p>A ranged unit gets free shots while the enemy closes the gap. Fast units shrink that window.</p></div>
+      <div class="rule"><h3>Burst and shotgun</h3><p>A burst fires its shots 0.15 s apart along the line toward its first target. Each shot hits the first body in its path: the target while it lives, then whoever stands behind it. If the line is empty, the shot misses. A shotgun fires all its pellets at once into a 60° cone, each at a different body, wrapping back to bodies already hit when it runs out.</p></div>
+      <div class="rule"><h3>Wind-up</h3><p>Once an enemy is in range, the unit locks onto it and charges for the wind-up time, then hits. If the target dies or gets out of range first, the charge is lost and the unit starts over. The reload starts after the hit.</p></div>
+      <div class="rule"><h3>Spin-up</h3><p>Raises attack speed every second the unit keeps firing, up to three times its base speed.</p></div>
+      <div class="rule"><h3>Pierce and projectiles</h3><p>A piercing shot also hits bodies lined up behind its target. A projectile with a speed travels in a straight line and hits the first enemy it touches, so units moving sideways can dodge it while units charging straight at it get hit.</p></div>
+      <div class="rule"><h3>Upgrades</h3><p>Each upgrade adds the unit’s starting health and hit again: one upgrade doubles them, two triple them. In the game, squads earn upgrades through experience and gold; here you set them directly to test upgraded matchups.</p></div>
+      <div class="rule"><h3>Fair price and tiers</h3><p>The price check finds how many squads of a unit tie against 6 squads of each 100-gold unit, and turns that into a fair price in gold. Under 140 gold is tier 1, 140–280 is tier 2, above 280 is tier 3. Raising one stat and measuring again shows what that stat is worth for that unit.</p></div>
+      <div class="rule"><h3>Minimum range, charge and knockback</h3><p>A unit can’t attack anything inside its minimum range. Charge multiplies the next hit after the unit has run 5 m. Knockback pushes a hit body away, fully for small bodies and barely for big ones.</p></div>
+    </div>
+  </section>
+</div>
+
+<script>
+// ===== Unit shapes (shared by Counter Lab and the demo) =====
+const Shapes = (() => {
+  const LIST = ['circle', 'ring', 'square', 'triangle', 'diamond', 'pentagon', 'hexagon', 'star', 'cross', 'bar'];
+  const LABELS = { circle: 'Circle', ring: 'Ring', square: 'Square', triangle: 'Triangle', diamond: 'Diamond', pentagon: 'Pentagon', hexagon: 'Hexagon', star: 'Star', cross: 'Cross', bar: 'Bar' };
+  const DEFAULTS = {
+    'Goblin Swarm': 'triangle', 'Skeleton Archers': 'diamond', 'Ember Imps': 'star', 'Fire Mage': 'hexagon',
+    'Sniper': 'cross', 'Brute': 'square', 'Wisps': 'ring', 'Crossbow Volley': 'pentagon', 'Ballista': 'bar',
+    'Boar Riders': 'circle', 'Spinning Golem': 'hexagon', 'Blunderbuss Crew': 'star', 'Ogre Smasher': 'square',
+  };
+  const valid = (s) => LIST.includes(s);
+  // Unit colours: picked to stay clear of the team colours (blue and red), which outline every body
+  const PALETTE = ['#9BD35A', '#E9E3CF', '#FFA94D', '#C77DFF', '#F7D154', '#8D99AE', '#E07A9B', '#B08155', '#3FD39A', '#B4A7F5', '#D9C49A', '#7FA650'];
+  const DEFAULT_COLORS = {
+    'Goblin Swarm': '#9BD35A', 'Skeleton Archers': '#E9E3CF', 'Ember Imps': '#FFA94D', 'Fire Mage': '#C77DFF',
+    'Sniper': '#F7D154', 'Brute': '#8D99AE', 'Wisps': '#B4A7F5', 'Crossbow Volley': '#B08155', 'Ballista': '#D9C49A',
+    'Boar Riders': '#E07A9B', 'Spinning Golem': '#7FA650', 'Blunderbuss Crew': '#3FD39A', 'Ogre Smasher': '#B08155',
+  };
+  const validColor = (c) => typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c);
+
+  // Give every unit a shape and a colour: keep valid ones, else a known default, else the first one not used yet
+  function assign(units) {
+    const used = new Set(units.filter(u => valid(u.shape)).map(u => u.shape));
+    const usedC = new Set(units.filter(u => validColor(u.color)).map(u => u.color.toUpperCase()));
+    return units.map((u) => {
+      let out = u;
+      if (!valid(u.shape)) {
+        let s = DEFAULTS[u.name];
+        if (!s || used.has(s)) s = LIST.find(x => !used.has(x)) || LIST[used.size % LIST.length];
+        used.add(s);
+        out = { ...out, shape: s };
+      }
+      if (!validColor(u.color)) {
+        let c = DEFAULT_COLORS[u.name];
+        if (!c || usedC.has(c)) c = PALETTE.find(x => !usedC.has(x)) || PALETTE[usedC.size % PALETTE.length];
+        usedC.add(c);
+        out = { ...out, color: c };
+      }
+      return out;
+    });
+  }
+
+  // Points of a regular polygon; up = 1 points toward the top of the screen, -1 toward the bottom
+  function poly(ctx, x, y, r, n, rot) {
+    ctx.beginPath();
+    for (let i = 0; i < n; i++) {
+      const a = rot + i * Math.PI * 2 / n;
+      const px = x + Math.cos(a) * r, py = y + Math.sin(a) * r;
+      i ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+    }
+    ctx.closePath();
+  }
+
+  // Builds the path for a shape. Returns true if the shape should be stroked instead of filled (ring).
+  function path(ctx, shape, x, y, r, up = 1) {
+    const top = up >= 0 ? -Math.PI / 2 : Math.PI / 2;
+    switch (shape) {
+      case 'square': ctx.beginPath(); ctx.rect(x - r * 0.88, y - r * 0.88, r * 1.76, r * 1.76); return false;
+      case 'triangle': poly(ctx, x, y + (up >= 0 ? r * 0.15 : -r * 0.15), r * 1.25, 3, top); return false;
+      case 'diamond': poly(ctx, x, y, r * 1.2, 4, top); return false;
+      case 'pentagon': poly(ctx, x, y, r * 1.08, 5, top); return false;
+      case 'hexagon': poly(ctx, x, y, r * 1.05, 6, 0); return false;
+      case 'star': {
+        ctx.beginPath();
+        for (let i = 0; i < 10; i++) {
+          const a = top + i * Math.PI / 5, rr = i % 2 ? r * 0.55 : r * 1.3;
+          const px = x + Math.cos(a) * rr, py = y + Math.sin(a) * rr;
+          i ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+        }
+        ctx.closePath(); return false;
+      }
+      case 'cross': {
+        const a = r * 1.15, b = r * 0.42;
+        ctx.beginPath();
+        ctx.moveTo(x - b, y - a); ctx.lineTo(x + b, y - a); ctx.lineTo(x + b, y - b); ctx.lineTo(x + a, y - b);
+        ctx.lineTo(x + a, y + b); ctx.lineTo(x + b, y + b); ctx.lineTo(x + b, y + a); ctx.lineTo(x - b, y + a);
+        ctx.lineTo(x - b, y + b); ctx.lineTo(x - a, y + b); ctx.lineTo(x - a, y - b); ctx.lineTo(x - b, y - b);
+        ctx.closePath(); return false;
+      }
+      case 'bar': ctx.beginPath(); ctx.rect(x - r * 1.3, y - r * 0.55, r * 2.6, r * 1.1); return false;
+      case 'ring': ctx.beginPath(); ctx.arc(x, y, r * 0.8, 0, Math.PI * 2); return true;
+      default: ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); return false;
+    }
+  }
+
+  // Draw a filled shape (a ring is drawn as a thick outline)
+  function draw(ctx, shape, x, y, r, up = 1) {
+    if (path(ctx, shape, x, y, r, up)) {
+      const lw = ctx.lineWidth; ctx.lineWidth = Math.max(1.5, r * 0.45);
+      ctx.strokeStyle = ctx.fillStyle; ctx.stroke(); ctx.lineWidth = lw;
+    } else ctx.fill();
+  }
+
+  // Outline only, for highlights (level outline, health ring use their own arcs)
+  function outline(ctx, shape, x, y, r, up = 1) { path(ctx, shape, x, y, r, up); ctx.stroke(); }
+
+  // Small inline SVG icon in the current text colour
+  function svg(shape, size = 14) {
+    const c = size / 2, r = size * 0.36;
+    const pts = (n, rr, rot, cy = c) => Array.from({ length: n }, (_, i) => {
+      const a = rot + i * Math.PI * 2 / n; return `${(c + Math.cos(a) * rr).toFixed(2)},${(cy + Math.sin(a) * rr).toFixed(2)}`;
+    }).join(' ');
+    let body;
+    switch (shape) {
+      case 'square': body = `<rect x="${c - r * 0.88}" y="${c - r * 0.88}" width="${r * 1.76}" height="${r * 1.76}"/>`; break;
+      case 'triangle': body = `<polygon points="${pts(3, r * 1.25, -Math.PI / 2, c + r * 0.15)}"/>`; break;
+      case 'diamond': body = `<polygon points="${pts(4, r * 1.2, -Math.PI / 2)}"/>`; break;
+      case 'pentagon': body = `<polygon points="${pts(5, r * 1.08, -Math.PI / 2)}"/>`; break;
+      case 'hexagon': body = `<polygon points="${pts(6, r * 1.05, 0)}"/>`; break;
+      case 'star': body = `<polygon points="${Array.from({ length: 10 }, (_, i) => { const a = -Math.PI / 2 + i * Math.PI / 5, rr = i % 2 ? r * 0.55 : r * 1.3; return `${(c + Math.cos(a) * rr).toFixed(2)},${(c + Math.sin(a) * rr).toFixed(2)}`; }).join(' ')}"/>`; break;
+      case 'cross': { const a = r * 1.15, b = r * 0.42; body = `<polygon points="${[[-b, -a], [b, -a], [b, -b], [a, -b], [a, b], [b, b], [b, a], [-b, a], [-b, b], [-a, b], [-a, -b], [-b, -b]].map(([px, py]) => `${(c + px).toFixed(2)},${(c + py).toFixed(2)}`).join(' ')}"/>`; break; }
+      case 'bar': body = `<rect x="${c - r * 1.3}" y="${c - r * 0.55}" width="${r * 2.6}" height="${r * 1.1}"/>`; break;
+      case 'ring': body = `<circle cx="${c}" cy="${c}" r="${r * 0.8}" fill="none" stroke="currentColor" stroke-width="${Math.max(1.5, r * 0.45)}"/>`; break;
+      default: body = `<circle cx="${c}" cy="${c}" r="${r}"/>`;
+    }
+    return `<svg class="shape-icon" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" fill="currentColor" aria-hidden="true">${body}</svg>`;
+  }
+
+  // A body: filled with the unit's colour, outlined in its team colour
+  function body(ctx, shape, x, y, r, up, fill, team, fillAlpha = 1) {
+    ctx.globalAlpha = fillAlpha; ctx.fillStyle = fill;
+    draw(ctx, shape, x, y, r, up);
+    ctx.globalAlpha = 1; ctx.strokeStyle = team; ctx.lineWidth = Math.max(1.5, Math.min(2.5, r * 0.32));
+    outline(ctx, shape, x, y, shape === 'ring' ? r * 1.05 : r + 0.6, up);
+  }
+
+  return { LIST, LABELS, PALETTE, valid, validColor, assign, draw, outline, path, svg, body };
+})();
+
+// ===== Battle engine (shared by headless tests and the page) =====
+const Engine = (() => {
+  const TRAIT_DEFAULTS = { burst: 1, pellets: 1, spinUp: 0, pierce: 0, projSpeed: 0, minRange: 0, charge: 1, knockback: 0, windUp: 0 };
+  const BURST_GAP = 0.15;      // seconds between shots in a burst
+  const SHOTGUN_COS = Math.sqrt(3) / 2; // pellets spread 30 degrees to each side of the target (cos 30)
+  // Only + - * / and sqrt from here on: those give identical results in every browser,
+  // so two players' phones run exactly the same battle.
+  const hyp = (x, y) => Math.sqrt(x * x + y * y);
+  const SPIN_CAP = 3;          // spin-up tops out at 3x attack speed
+  const CHARGE_RUN = 5;        // metres a unit must run before its next attack counts as a charge
+  const PIERCE_DEPTH = 10;     // metres a piercing shot travels past its target
+  const PIERCE_WIDTH = 1;      // half-width of the pierce corridor (m)
+  const PROJ_HIT_RADIUS = 1;   // a projectile hits a body within this distance of where it lands
+
+  const LEVEL_BONUS = 1;       // each upgrade adds +100% of starting health and hit (2x, then 3x)
+  const MAX_LEVEL = 2;         // two upgrades on top of the base unit
+
+  const withTraits = (u) => ({ ...TRAIT_DEFAULTS, defense: 'none', defVal: 0, level: 0, ...u });
+
+  // Unit stats at a given level (defaults to the unit's own level field)
+  function leveled(unit, level) {
+    const u = withTraits(unit);
+    const L = Math.max(0, Math.min(MAX_LEVEL, Math.round(level == null ? u.level : level)));
+    if (!L) return { ...u, level: 0 };
+    const k = 1 + LEVEL_BONUS * L;
+    return { ...u, level: L, hp: u.hp * k, hit: u.hit * k };
+  }
+
+  function squadsFor(unit, g) {
+    return Math.max(1, Math.floor(g.budget / Math.max(0.0001, unit.cost) + 1e-9));
+  }
+
+  // Raw strength of what the budget buys: total health x total damage per second
+  function rawStrength(unit, g) {
+    const u = leveled(unit);
+    const s = squadsFor(u, g);
+    const n = s * u.bodies;
+    const hp = n * u.hp;
+    const cycle = 1 / Math.max(0.01, u.aps) + Math.max(0, u.windUp); // wind-up adds to every attack cycle
+    const dps = n * u.hit / cycle * Math.max(1, u.burst) * Math.max(1, u.pellets);
+    return { squads: s, bodies: n, hp, dps, strength: hp * dps };
+  }
+
+  function damageAfterDefense(hit, target, g) {
+    if (target.u.defense === 'armor') return Math.max(hit - target.u.defVal, hit * g.minDmgPct / 100);
+    if (target.u.defense === 'ward') return Math.min(hit, target.u.defVal);
+    return hit;
+  }
+
+  function makeSide(unit, side, g) {
+    const u = leveled(unit);
+    const s = squadsFor(u, g);
+    const n = s * u.bodies;
+    const cols = Math.max(1, Math.min(n, Math.ceil(Math.sqrt(n * 2.5))));
+    const sp = g.spacing;
+    const bodies = [];
+    for (let i = 0; i < n; i++) {
+      const c = i % cols, r = Math.floor(i / cols);
+      const x = (c - (cols - 1) / 2) * sp;
+      const y = (g.distance / 2 + r * sp) * (side === 0 ? -1 : 1);
+      bodies.push(newBody(u, side, x, y, i, 0));
+    }
+    return bodies;
+  }
+
+  // `unit` must already be leveled (see leveled())
+  function newBody(unit, side, x, y, i, squad) {
+    const u = unit;
+    const interval = 1 / Math.max(0.01, u.aps);
+    return {
+      u, side, x, y, hp: u.hp, alive: true, squad, level: u.level || 0, xp: 0,
+      cd: ((i * 7) % 11) / 11 * interval, // deterministic stagger
+      moved: 0, firing: -1, burstLeft: 0, burstTimer: 0, burstDir: [0, 1], windTarget: null, windT: 0,
+    };
+  }
+
+  // Bodies of one squad placed around a point on the board (footprint about `size` metres)
+  function buildSquad(unit, side, cx, cy, squad, size, startIndex = 0, level = 0) {
+    const u = leveled(unit, level);
+    const n = Math.max(1, Math.round(u.bodies));
+    const cols = Math.ceil(Math.sqrt(n)), rows = Math.ceil(n / cols);
+    const sp = n === 1 ? 0 : Math.min(2.2, (size * 0.9) / Math.max(cols, rows));
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      const c = i % cols, r = Math.floor(i / cols);
+      out.push(newBody(u, side, cx + (c - (cols - 1) / 2) * sp, cy + (r - (rows - 1) / 2) * sp, startIndex + i, squad));
+    }
+    return out;
+  }
+
+  // Lab battle: one unit type per side in a standard formation
+  function battle(uA, uB, g, opts = {}) {
+    const bt = createBattle(makeSide(uA, 0, g), makeSide(uB, 1, g), g, opts);
+    const frames = [];
+    while (bt.step()) if (opts.record) frames.push(bt.frame());
+    const r = bt.result();
+    if (opts.record) frames.push(bt.frame(true));
+    r.frames = frames;
+    r.shapes = bt.bodies.map(b => b.u.shape || "circle");
+    r.colors = bt.bodies.map(b => b.u.color || null);
+    return r;
+  }
+
+  // A steppable battle between two lists of bodies (side 0 and side 1)
+  function createBattle(A, B, g, opts = {}) {
+    const all = A.concat(B);
+    const sides = [A, B];
+    const stats = [
+      { dealt: 0, wasted: 0, blocked: 0, missed: 0, windLost: 0, winds: 0, totalHp: A.reduce((s, b) => s + b.u.hp, 0) },
+      { dealt: 0, wasted: 0, blocked: 0, missed: 0, windLost: 0, winds: 0, totalHp: B.reduce((s, b) => s + b.u.hp, 0) },
+    ];
+    const dt = g.dt;
+    let projectiles = [];
+    let t = 0, shots = [], over = false;
+    const dist = (a, b) => hyp(a.x - b.x, a.y - b.y);
+    const aliveCount = (arr) => { let c = 0; for (const b of arr) if (b.alive) c++; return c; };
+
+    function hurt(owner, v, hit, fromX, fromY) {
+      const st = stats[owner.side];
+      const dmg = damageAfterDefense(hit, v, g);
+      st.blocked += hit - dmg;
+      const applied = Math.min(dmg, v.hp);
+      st.dealt += applied;
+      st.wasted += dmg - applied;
+      // experience: damage dealt, half of damage absorbed, and a bounty for killing leveled bodies
+      owner.xp += applied;
+      v.xp += applied * (g.absorbXp == null ? 0.5 : g.absorbXp);
+      v.hp -= dmg;
+      if (v.hp <= 0) { v.hp = 0; v.alive = false; owner.xp += v.u.hp * v.level; return; }
+      if (owner.u.knockback > 0) {
+        // big hits on small bodies push the full distance; on big bodies barely at all
+        const push = owner.u.knockback * Math.min(1, hit / v.u.hp);
+        const dx = v.x - fromX, dy = v.y - fromY, d = hyp(dx, dy) || 1;
+        v.x += dx / d * push; v.y += dy / d * push;
+      }
+    }
+
+    // Damage lands at point (px, py). direct = intended body for instant hits.
+    function impact(owner, px, py, direct, hit, dirX, dirY, fromX, fromY) {
+      const foes = sides[1 - owner.side];
+      const hitSet = new Set();
+      if (owner.u.splash > 0) {
+        for (const f of foes) if (f.alive && hyp(f.x - px, f.y - py) <= owner.u.splash) hitSet.add(f);
+      } else {
+        let v = null;
+        if (direct && direct.alive && !owner.u.projSpeed) v = direct;
+        else {
+          let bd = PROJ_HIT_RADIUS;
+          for (const f of foes) { if (!f.alive) continue; const d = hyp(f.x - px, f.y - py); if (d <= bd) { bd = d; v = f; } }
+        }
+        if (v) hitSet.add(v);
+      }
+      if (!hitSet.size && owner.u.projSpeed > 0) stats[owner.side].missed += hit;
+      // pierce: keep going along the shot line and hit the next bodies behind
+      if (owner.u.pierce > 0) {
+        const cand = [];
+        for (const f of foes) {
+          if (!f.alive || hitSet.has(f)) continue;
+          const rx = f.x - px, ry = f.y - py;
+          const along = rx * dirX + ry * dirY;
+          const across = Math.abs(rx * dirY - ry * dirX);
+          if (along > 0 && along <= PIERCE_DEPTH && across <= PIERCE_WIDTH) cand.push([along, f]);
+        }
+        cand.sort((a, b) => a[0] - b[0]);
+        for (let k = 0; k < Math.min(owner.u.pierce, cand.length); k++) hitSet.add(cand[k][1]);
+      }
+      for (const v of hitSet) hurt(owner, v, hit, fromX, fromY);
+    }
+
+    // enemies the unit may attack right now, nearest first
+    function validTargets(b) {
+      const valid = [];
+      for (const f of sides[1 - b.side]) {
+        if (!f.alive) continue;
+        const d = dist(f, b);
+        if (d <= b.u.range + 0.01 && d >= b.u.minRange) valid.push([d, f]);
+      }
+      valid.sort((p, q) => p[0] - q[0]);
+      return valid.map(v => v[1]);
+    }
+
+    // one shot, or a spread of shotgun pellets each at a different body in the cone
+    function aim(b, primary, valid) {
+      const n = Math.max(1, Math.round(b.u.pellets));
+      if (n === 1) return [primary];
+      const ax = primary.x - b.x, ay = primary.y - b.y, al = hyp(ax, ay);
+      const cone = valid.filter(f => {
+        const fx = f.x - b.x, fy = f.y - b.y, fl = hyp(fx, fy);
+        if (!al || !fl) return true;
+        return (ax * fx + ay * fy) / (al * fl) >= SHOTGUN_COS - 1e-12;
+      });
+      if (!cone.length) cone.push(primary);
+      const out = [];
+      for (let k = 0; k < n; k++) out.push(cone[k % cone.length]);
+      return out;
+    }
+
+    function fire(b, targets, canCharge) {
+      const charged = canCharge && b.u.charge > 1 && b.moved >= CHARGE_RUN;
+      b.moved = 0;
+      const hit = b.u.hit * (charged ? b.u.charge : 1);
+      for (const tgt of targets) {
+        const dx = tgt.x - b.x, dy = tgt.y - b.y, d = hyp(dx, dy) || 1;
+        const dirX = dx / d, dirY = dy / d;
+        if (b.u.projSpeed > 0) {
+          projectiles.push({ owner: b, x: b.x, y: b.y, fx: b.x, fy: b.y, tx: tgt.x, ty: tgt.y, dirX, dirY, left: d, hit });
+        } else {
+          impact(b, tgt.x, tgt.y, tgt, hit, dirX, dirY, b.x, b.y);
+        }
+        if (opts.record) shots.push([b.x, b.y, tgt.x, tgt.y, b.side, b.u.splash, charged ? 1 : 0]);
+      }
+    }
+
+    function step() {
+      if (over) return false;
+      if (t >= g.timeCap || !aliveCount(A) || !aliveCount(B)) { over = true; return false; }
+      shots = [];
+      // movement + targeting
+      for (const b of all) {
+        if (!b.alive) continue;
+        const foes = sides[1 - b.side];
+        let near = null, nd = Infinity;
+        for (const f of foes) {
+          if (!f.alive) continue;
+          const d = dist(f, b);
+          if (d < nd) { nd = d; near = f; }
+        }
+        b.near = near;
+        if (near && nd > b.u.range) {
+          const mv = Math.min(b.u.speed * dt, nd - b.u.range);
+          b.x += (near.x - b.x) / nd * mv;
+          b.y += (near.y - b.y) / nd * mv;
+          b.moved += mv;
+        }
+      }
+      // separation between allies
+      const minSep = g.spacing * 0.7;
+      for (let s = 0; s < 2; s++) {
+        const arr = sides[s];
+        for (let i = 0; i < arr.length; i++) {
+          const a = arr[i]; if (!a.alive) continue;
+          for (let j = i + 1; j < arr.length; j++) {
+            const c = arr[j]; if (!c.alive) continue;
+            const dx = c.x - a.x, dy = c.y - a.y;
+            const d = hyp(dx, dy);
+            if (d > 0 && d < minSep) {
+              const push = (minSep - d) / 2;
+              a.x -= dx / d * push; a.y -= dy / d * push;
+              c.x += dx / d * push; c.y += dy / d * push;
+            } else if (d === 0) {
+              a.x -= minSep / 2; c.x += minSep / 2;
+            }
+          }
+        }
+      }
+      // attacks
+      for (const b of all) {
+        if (!b.alive) continue;
+        b.cd -= dt;
+        if (b.firing >= 0) b.firing += dt;
+        // follow-up shots of a running burst fly along the direction locked at the start
+        // and hit the first enemy on that line; if the line is empty the shot misses
+        if (b.burstLeft > 0) {
+          b.burstTimer -= dt;
+          if (b.burstTimer <= 0) {
+            const [ux, uy] = b.burstDir;
+            let first = null, fa = Infinity;
+            for (const f of sides[1 - b.side]) {
+              if (!f.alive) continue;
+              const rx = f.x - b.x, ry = f.y - b.y;
+              const along = rx * ux + ry * uy;
+              const across = Math.abs(rx * uy - ry * ux);
+              if (along >= b.u.minRange && along <= b.u.range + 0.01 && across <= PIERCE_WIDTH && along < fa) { fa = along; first = f; }
+            }
+            if (first) {
+              fire(b, aim(b, first, validTargets(b)), false);
+            } else {
+              const end = { x: b.x + ux * b.u.range, y: b.y + uy * b.u.range };
+              if (b.u.projSpeed > 0) fire(b, [end], false); // the projectile flies on and can still clip someone
+              else {
+                stats[b.side].missed += b.u.hit * Math.max(1, Math.round(b.u.pellets));
+                if (opts.record) shots.push([b.x, b.y, end.x, end.y, b.side, 0, 0]);
+              }
+            }
+            b.burstLeft--; b.burstTimer += BURST_GAP;
+          }
+        }
+        let valid, primary;
+        if (b.u.windUp > 0) {
+          // wind-up: lock a target, charge, then hit. Lost if the target dies or escapes first.
+          if (b.windTarget) {
+            b.windT -= dt;
+            if (b.windT > 0) continue;
+            const tg = b.windTarget;
+            b.windTarget = null;
+            const d = tg.alive ? dist(tg, b) : Infinity;
+            if (!(d <= b.u.range + 0.01 && d >= b.u.minRange)) { stats[b.side].windLost++; continue; }
+            primary = tg;
+            valid = validTargets(b);
+            b.cd = 0; // reload starts after the hit
+          } else {
+            if (b.cd > 0) continue;
+            valid = validTargets(b);
+            if (!valid.length) continue;
+            b.windTarget = valid[0]; b.windT = b.u.windUp; stats[b.side].winds++;
+            continue;
+          }
+        } else {
+          if (b.cd > 0) continue;
+          valid = validTargets(b);
+          if (!valid.length) continue;
+          primary = valid[0];
+        }
+        if (b.firing < 0) b.firing = 0;
+        const spin = b.u.spinUp > 0 ? Math.min(SPIN_CAP, 1 + b.u.spinUp / 100 * b.firing) : 1;
+        b.cd += 1 / Math.max(0.01, b.u.aps * spin);
+        const n = Math.max(1, Math.round(b.u.burst));
+        if (n > 1) {
+          const dx = primary.x - b.x, dy = primary.y - b.y, d = hyp(dx, dy) || 1;
+          b.burstLeft = n - 1; b.burstTimer = BURST_GAP; b.burstDir = [dx / d, dy / d];
+          b.cd = Math.max(b.cd, (n - 1) * BURST_GAP + dt); // the next attack waits for the burst to finish
+        }
+        fire(b, aim(b, primary, valid), true);
+      }
+      // projectiles in flight
+      if (projectiles.length) {
+        // direct fire: a projectile hits the first enemy body it flies into;
+        // if it reaches its aim point without touching anyone, it lands there (and may miss)
+        const next = [];
+        for (const p of projectiles) {
+          const foes = sides[1 - p.owner.side];
+          let mv = p.owner.u.projSpeed * dt, done = false;
+          while (mv > 0 && !done) {
+            const sub = Math.min(0.5, mv, p.left);
+            p.x += p.dirX * sub; p.y += p.dirY * sub; p.left -= sub; mv -= sub;
+            for (const f of foes) {
+              if (f.alive && hyp(f.x - p.x, f.y - p.y) <= PROJ_HIT_RADIUS) {
+                impact(p.owner, p.x, p.y, null, p.hit, p.dirX, p.dirY, p.fx, p.fy);
+                done = true; break;
+              }
+            }
+            if (!done && p.left <= 1e-6) {
+              impact(p.owner, p.x, p.y, null, p.hit, p.dirX, p.dirY, p.fx, p.fy);
+              done = true;
+            }
+          }
+          if (!done) next.push(p);
+        }
+        projectiles = next;
+      }
+      t += dt;
+      return true;
+    }
+
+    function frame(final) {
+      return {
+        t, shots: final ? [] : shots,
+        p: final ? [] : projectiles.map(p => [p.x, p.y, p.owner.side]),
+        b: all.map(x => [x.x, x.y, x.alive ? x.hp / x.u.hp : 0, x.side, x.windTarget && x.u.windUp > 0 ? 1 - x.windT / x.u.windUp : 0]),
+      };
+    }
+
+    function result() {
+      const remHp = sides.map(arr => arr.reduce((s, b) => s + (b.alive ? b.hp : 0), 0));
+      const frac = [remHp[0] / stats[0].totalHp, remHp[1] / stats[1].totalHp];
+      const aliveA = aliveCount(A), aliveB = aliveCount(B);
+      let winner = -1, timeout = false;
+      if (aliveA && !aliveB) winner = 0;
+      else if (aliveB && !aliveA) winner = 1;
+      else if (aliveA && aliveB) { timeout = true; winner = frac[0] > frac[1] ? 0 : frac[1] > frac[0] ? 1 : -1; }
+      // survivors per squad: { squadId: { side, total, alive } }
+      const squads = {};
+      for (const b of all) {
+        const k = b.side + ':' + b.squad;
+        const s = squads[k] || (squads[k] = { side: b.side, squad: b.squad, total: 0, alive: 0, xp: 0 });
+        s.total++; if (b.alive) s.alive++;
+        s.xp += b.xp;
+      }
+      return {
+        winner, timeout, time: t, frac,
+        score: frac[0] - frac[1],
+        survivors: [aliveA, aliveB], counts: [A.length, B.length],
+        stats, squads,
+      };
+    }
+
+    return { step, frame, result, bodies: all, isOver: () => over, time: () => t, lastShots: () => shots, projectiles: () => projectiles };
+  }
+
+  function matrix(units, g) {
+    const n = units.length;
+    const m = [];
+    for (let i = 0; i < n; i++) {
+      m.push([]);
+      for (let j = 0; j < n; j++) {
+        if (i === j) { m[i].push(null); continue; }
+        if (j < i && m[j][i]) {
+          const r = m[j][i];
+          m[i].push({ ...r, score: -r.score, winner: r.winner === -1 ? -1 : 1 - r.winner, frac: [r.frac[1], r.frac[0]], mirrored: true });
+        } else {
+          m[i].push(battle(units[i], units[j], g));
+        }
+      }
+    }
+    return m;
+  }
+
+  return { battle, matrix, createBattle, buildSquad, rawStrength, squadsFor, withTraits, leveled, TRAIT_DEFAULTS, SPIN_CAP, CHARGE_RUN, LEVEL_BONUS, MAX_LEVEL };
+})();
+if (typeof module !== 'undefined') module.exports = Engine;
+
+
+(() => {
+  const SAMPLE = {"goldCosts":true,"settings":{"budget":200,"distance":40,"spacing":2.5,"minDmgPct":15,"timeCap":60,"dt":0.05},"units":[{"name":"Goblin Swarm","cost":100,"bodies":12,"hp":100,"hit":8,"aps":1,"range":2,"speed":12,"splash":0,"defense":"none","defVal":0},{"name":"Skeleton Archers","cost":100,"bodies":8,"hp":95,"hit":16,"aps":1,"range":32,"speed":4,"splash":0,"defense":"none","defVal":0},{"name":"Ember Imps","cost":100,"bodies":4,"hp":260,"hit":22,"aps":0.6,"range":10,"speed":5,"splash":3,"defense":"none","defVal":0},{"name":"Fire Mage","cost":100,"bodies":1,"hp":750,"hit":50,"aps":0.6,"range":28,"speed":4,"splash":4,"defense":"none","defVal":0},{"name":"Sniper","cost":100,"bodies":1,"hp":500,"hit":400,"aps":0.5,"range":45,"speed":4,"splash":0,"defense":"none","defVal":0},{"name":"Brute","cost":100,"bodies":1,"hp":800,"hit":35,"aps":1.2,"range":2,"speed":6,"splash":0,"defense":"armor","defVal":12},{"name":"Wisps","cost":100,"bodies":3,"hp":320,"hit":18,"aps":1.5,"range":15,"speed":7,"splash":0,"defense":"ward","defVal":40}]};
+  const EXAMPLES = [{"name":"Crossbow Volley","cost":100,"bodies":2,"hp":300,"hit":52,"aps":0.35,"range":30,"speed":4,"splash":0,"defense":"none","defVal":0,"burst":4},{"name":"Ballista","cost":100,"bodies":1,"hp":750,"hit":220,"aps":0.6,"range":40,"speed":3,"splash":0,"defense":"none","defVal":0,"pierce":3,"minRange":6,"projSpeed":45},{"name":"Spinning Golem","cost":100,"bodies":1,"hp":1300,"hit":22,"aps":1.2,"range":12,"speed":4,"splash":0,"defense":"none","defVal":0,"spinUp":25},{"name":"Boar Riders","cost":100,"bodies":3,"hp":310,"hit":30,"aps":0.8,"range":2,"speed":11,"splash":0,"defense":"none","defVal":0,"charge":2.5,"knockback":3},{"name":"Blunderbuss Crew","cost":100,"bodies":2,"hp":380,"hit":18,"aps":0.6,"range":12,"speed":5,"splash":0,"defense":"none","defVal":0,"pellets":6},{"name":"Ogre Smasher","cost":100,"bodies":1,"hp":1100,"hit":260,"aps":0.5,"range":3,"speed":7,"splash":2.5,"defense":"none","defVal":0,"windUp":1,"knockback":4}];
+  const KEY = 'counterlab.v1';
+  const TRAITS = [
+    ['burst', 'Burst shots', 1, 'Shots fired 0.15 s apart along one line; each hits the first body in its path. 1 = normal.'],
+    ['pellets', 'Shotgun pellets', 1, 'Pellets fired at once into a 60° cone, each at a different body. 1 = normal.'],
+    ['spinUp', 'Spin-up (%/s)', 5, 'Attack speed gained per second of firing, up to 3×.'],
+    ['pierce', 'Pierce', 1, 'Extra bodies a shot passes through behind its target.'],
+    ['projSpeed', 'Projectile speed (m/s)', 5, '0 = instant hit. Slower shots can be dodged.'],
+    ['minRange', 'Minimum range (m)', 1, 'Can’t hit anything closer than this.'],
+    ['charge', 'Charge (× damage)', 0.5, 'Next hit after running 5 m. 1 = off.'],
+    ['knockback', 'Knockback (m)', 0.5, 'How far a big hit pushes a small body.'],
+    ['windUp', 'Wind-up (s)', 0.1, 'Charges this long before each attack. Lost if the target dies or escapes first.'],
+  ];
+  const LEVERS = [
+    ['cost', 'Cost (gold)', 10, 'Price of one squad. A standard squad is 100.'],
+    ['bodies', 'Bodies', 1, 'Units in one squad.'],
+    ['hp', 'Health per body', 5, null],
+    ['hit', 'Hit size', 1, 'Damage per attack.'],
+    ['aps', 'Attacks per second', 0.1, null],
+    ['range', 'Range (m)', 1, null],
+    ['speed', 'Move speed (m/s)', 1, null],
+    ['splash', 'Splash radius (m)', 0.5, '0 = single target.'],
+    ['level', 'Upgrades (0–2)', 1, '1 = 2× health and hit, 2 = 3×.'],
+  ];
+  const PRICE_REF = 6; // yardstick squads per yardstick unit
+  const tierOf = (gold) => gold < 141 ? 1 : gold < 283 ? 2 : 3; // fair price in gold
+
+  const clone = (o) => JSON.parse(JSON.stringify(o));
+  let uid = 1;
+  const withIds = (units) => Shapes.assign(units).map(u => ({ ...Engine.withTraits(u), id: uid++ }));
+  let state;
+  // Older rosters counted cost in squads (1 = one standard squad). Convert them to gold (1 -> 100).
+  function toGold(p) {
+    if (p.goldCosts) return p;
+    const old = p.units.every(u => u.cost <= 10);
+    if (!old) return { ...p, goldCosts: true };
+    return {
+      ...p, goldCosts: true,
+      settings: { ...p.settings, budget: (p.settings && p.settings.budget ? p.settings.budget : 2) * 100 },
+      units: p.units.map(u => ({ ...u, cost: Math.round(u.cost * 100) })),
+    };
+  }
+  function load() {
+    try {
+      const raw = localStorage.getItem(KEY);
+      if (raw) { let p = JSON.parse(raw); if (valid(p)) { p = toGold(p); return { settings: { ...SAMPLE.settings, ...p.settings }, units: withIds(p.units) }; } }
+    } catch (e) {}
+    return { settings: clone(SAMPLE.settings), units: withIds(clone(SAMPLE.units)) };
+  }
+  function save() {
+    try { localStorage.setItem(KEY, JSON.stringify(exportData())); } catch (e) {}
+  }
+  function exportData() {
+    return { goldCosts: true, settings: state.settings, units: state.units.map(({ id, ...u }) => u) };
+  }
+  function valid(p) {
+    return p && typeof p === 'object' && p.settings && Array.isArray(p.units) && p.units.length >= 2 &&
+      p.units.every(u => u && typeof u.name === 'string' && ['cost','bodies','hp','hit','aps','range','speed','splash'].every(k => typeof u[k] === 'number'));
+  }
+  state = load();
+
+  const $ = (id) => document.getElementById(id);
+  const tagOf = (u) => (u.name.replace(/[^A-Za-z0-9]/g, '').slice(0, 3) || '???').toUpperCase();
+  const fmt = (n, d = 0) => Number(n).toLocaleString('en-US', { maximumFractionDigits: d, minimumFractionDigits: d });
+  const margin = (s) => (s > 0 ? '+' : s < 0 ? '−' : '±') + Math.abs(Math.round(s * 100));
+
+  // ---------- settings ----------
+  document.querySelectorAll('[data-s]').forEach(inp => {
+    inp.value = state.settings[inp.dataset.s];
+    inp.addEventListener('input', () => {
+      const v = parseFloat(inp.value);
+      if (!isFinite(v)) return;
+      state.settings[inp.dataset.s] = v;
+      save(); renderUnitSummaries(); scheduleRun();
+    });
+  });
+
+  // ---------- units ----------
+  const unitsEl = $('units');
+  function renderUnits() {
+    unitsEl.innerHTML = '';
+    state.units.forEach((u) => {
+      const d = document.createElement('details');
+      d.className = 'unit';
+      d.dataset.id = u.id;
+      d.innerHTML = `
+        <summary>
+          <div class="sum-top"><span class="sum-name"><span class="ico"></span><span class="tag"></span><span class="n"></span></span><span class="sum-cost"></span></div>
+          <div class="sum-line"></div>
+          <div class="bar" title="Raw strength compared with the strongest unit"><i></i></div>
+        </summary>
+        <div class="unit-body">
+          <div class="levers">
+            <div class="field"><label for="n-${u.id}">Name</label><input type="text" id="n-${u.id}" data-k="name"></div>
+            <div class="field"><label for="sh-${u.id}">Shape</label>
+              <select id="sh-${u.id}" data-k="shape">${Shapes.LIST.map(x => `<option value="${x}">${Shapes.LABELS[x]}</option>`).join('')}</select>
+              <span class="hint">How its bodies look on the battlefield.</span></div>
+            <div class="field"><label for="co-${u.id}">Colour</label>
+              <input type="color" id="co-${u.id}" data-k="color" style="height:38px;padding:3px">
+              <span class="hint">Teams are shown as an outline on top.</span></div>
+            ${LEVERS.map(([k, label, step, hint]) => `
+              <div class="field"><label for="${k}-${u.id}">${label}</label>
+                <input type="number" id="${k}-${u.id}" data-k="${k}" min="0" step="${step}">
+                ${hint ? `<span class="hint">${hint}</span>` : ''}</div>`).join('')}
+            <div class="field"><label for="def-${u.id}">Defense</label>
+              <select id="def-${u.id}" data-k="defense"><option value="none">None</option><option value="armor">Armor</option><option value="ward">Ward</option></select></div>
+            <div class="field"><label for="dv-${u.id}">Defense value</label><input type="number" id="dv-${u.id}" data-k="defVal" min="0" step="1">
+              <span class="hint def-hint"></span></div>
+          </div>
+          <h3 class="sub">Traits</h3>
+          <div class="levers">
+            ${TRAITS.map(([k, label, step, hint]) => `
+              <div class="field"><label for="${k}-${u.id}">${label}</label>
+                <input type="number" id="${k}-${u.id}" data-k="${k}" min="0" step="${step}">
+                <span class="hint">${hint}</span></div>`).join('')}
+          </div>
+          <div class="derived"></div>
+          <h3 class="sub">Price check</h3>
+          <div class="price">
+            <p class="hint" style="margin:0">Measures what this unit is worth in gold against your 100-gold units, in armies of ${PRICE_REF} squads each.</p>
+            <div class="row">
+              <button class="btn small" data-act="price">Check fair price</button>
+              <button class="btn small" data-act="values">Show stat values</button>
+            </div>
+            <div class="price-out" aria-live="polite"></div>
+          </div>
+          <div class="row">
+            <button class="btn small" data-act="dup">Duplicate</button>
+            <button class="btn small danger" data-act="del">Delete</button>
+          </div>
+        </div>`;
+      d.querySelectorAll('[data-k]').forEach(inp => {
+        inp.value = u[inp.dataset.k];
+        const ev = inp.tagName === 'SELECT' ? 'change' : 'input';
+        inp.addEventListener(ev, () => {
+          const k = inp.dataset.k;
+          if (k === 'name' || k === 'defense' || k === 'shape' || k === 'color') u[k] = inp.value;
+          else {
+            let v = parseFloat(inp.value);
+            if (!isFinite(v)) return;
+            if (k === 'bodies') v = Math.max(1, Math.round(v));
+            if (k === 'aps') v = Math.max(0.05, v);
+            if (k === 'cost') v = Math.max(10, v);
+            if (k === 'burst' || k === 'pellets') v = Math.max(1, Math.round(v));
+            if (k === 'level') v = Math.min(2, Math.round(v));
+            if (k === 'pierce') v = Math.round(v);
+            if (k === 'charge') v = Math.max(1, v);
+            u[k] = Math.max(0, v);
+          }
+          save(); renderUnitSummaries(); scheduleRun();
+        });
+      });
+      d.querySelector('[data-act="price"]').addEventListener('click', () => priceCheck(u, d, false));
+      d.querySelector('[data-act="values"]').addEventListener('click', () => priceCheck(u, d, true));
+      d.querySelector('[data-act="dup"]').addEventListener('click', () => {
+        const i = state.units.indexOf(u);
+        const c = { ...clone(u), id: uid++, name: u.name + ' copy' };
+        state.units.splice(i + 1, 0, c);
+        save(); renderUnits(); scheduleRun();
+      });
+      d.querySelector('[data-act="del"]').addEventListener('click', () => {
+        if (state.units.length <= 2) { flash('Keep at least two units so there is something to fight.'); return; }
+        state.units = state.units.filter(x => x !== u);
+        if (sel && (sel.a === u.id || sel.b === u.id)) sel = null;
+        save(); renderUnits(); scheduleRun();
+      });
+      unitsEl.appendChild(d);
+    });
+    renderUnitSummaries();
+  }
+  function renderUnitSummaries() {
+    const g = state.settings;
+    const rs = state.units.map(u => Engine.rawStrength(u, g));
+    const max = Math.max(...rs.map(r => r.strength), 1);
+    state.units.forEach((u, i) => {
+      const d = unitsEl.querySelector(`details[data-id="${u.id}"]`);
+      if (!d) return;
+      const r = rs[i];
+      d.querySelector('.tag').textContent = tagOf(u);
+      d.querySelector('.ico').innerHTML = Shapes.svg(u.shape, 14);
+      d.querySelector('.ico').style.color = u.color;
+      d.querySelector('.n').textContent = u.name;
+      d.querySelector('.sum-cost').textContent = `${fmt(u.cost)} gold`;
+      const def = u.defense === 'armor' ? ` · armor ${u.defVal}` : u.defense === 'ward' ? ` · ward ${u.defVal}` : '';
+      const tr = [];
+      if (u.burst > 1) tr.push(`burst ${u.burst}`);
+      if (u.pellets > 1) tr.push(`shotgun ${u.pellets}`);
+      if (u.spinUp > 0) tr.push(`spin-up ${fmt(u.spinUp)}%/s`);
+      if (u.pierce > 0) tr.push(`pierce ${u.pierce}`);
+      if (u.projSpeed > 0) tr.push(`shot ${fmt(u.projSpeed)} m/s`);
+      if (u.minRange > 0) tr.push(`min ${fmt(u.minRange)} m`);
+      if (u.charge > 1) tr.push(`charge ×${fmt(u.charge, 1)}`);
+      if (u.knockback > 0) tr.push(`knockback ${fmt(u.knockback, 1)} m`);
+      if (u.windUp > 0) tr.push(`wind-up ${fmt(u.windUp, 1)} s`);
+      if (u.level > 0) tr.push(`${u.level + 1}× stats`);
+      d.querySelector('.sum-line').textContent =
+        `${u.bodies} × ${fmt(u.hp)} hp · ${fmt(u.hit)} dmg × ${fmt(u.aps, 2)}/s · ${fmt(u.range)} m${u.splash ? ` · splash ${u.splash}` : ''}${def}${tr.length ? ' · ' + tr.join(' · ') : ''}`;
+      d.querySelector('.bar i').style.width = (r.strength / max * 100).toFixed(1) + '%';
+      const squadHp = u.bodies * u.hp, squadDps = u.bodies * u.hit * u.aps * Math.max(1, u.burst) * Math.max(1, u.pellets);
+      const uncounted = (u.spinUp > 0 || u.pierce > 0 || u.charge > 1) ? '<span>Spin-up, pierce and charge are not counted in raw strength.</span>' : '';
+      d.querySelector('.derived').innerHTML =
+        `<span>One squad: <b>${fmt(squadHp)}</b> health, <b>${fmt(squadDps, 1)}</b> damage/s</span>
+         <span>With ${fmt(g.budget)} gold: <b>${r.squads}</b> squad${r.squads === 1 ? '' : 's'}, <b>${r.bodies}</b> bodies</span>
+         <span>Raw strength: <b>${fmt(r.strength / 1000)}k</b> (${Math.round(r.strength / max * 100)}% of the strongest)</span>${uncounted}`;
+      const dh = d.querySelector('.def-hint');
+      dh.textContent = u.defense === 'armor' ? 'Blocked from every hit.' : u.defense === 'ward' ? 'Most damage one hit can deal.' : 'Not used without a defense.';
+    });
+  }
+  // ---------- price check ----------
+  // Fair price = how many squads of this unit tie against PRICE_REF squads of each 100-gold unit, on average.
+  function* marginGen(x, n, refs, g) {
+    let s = 0;
+    for (const r of refs) {
+      // only squad counts matter here: x fields n squads, each yardstick unit fields PRICE_REF squads
+      const res = Engine.battle({ ...x, cost: PRICE_REF / n }, { ...r, cost: 1 }, { ...g, budget: PRICE_REF });
+      s += res.score;
+      yield;
+    }
+    return s / refs.length;
+  }
+  function* fairPriceGen(x, refs, g) {
+    let lo = 1, hi = 24;
+    const mLo = yield* marginGen(x, lo, refs, g);
+    if (mLo >= 0) return { price: PRICE_REF, capped: 'high' };
+    let mHi = yield* marginGen(x, hi, refs, g);
+    if (mHi < 0) return { price: PRICE_REF / hi, capped: 'low' };
+    let mL = mLo;
+    while (hi - lo > 1) {
+      const mid = (lo + hi) >> 1;
+      const mm = yield* marginGen(x, mid, refs, g);
+      if (mm < 0) { lo = mid; mL = mm; } else { hi = mid; mHi = mm; }
+    }
+    const n = lo + (0 - mL) / (mHi - mL);
+    return { price: PRICE_REF / n };
+  }
+  const STAT_TESTS = [
+    ['hp', 'Health', 1.1, '+10%'], ['hit', 'Hit size', 1.1, '+10%'], ['aps', 'Attack speed', 1.1, '+10%'],
+    ['range', 'Range', 1.1, '+10%'], ['speed', 'Move speed', 1.1, '+10%'], ['bodies', 'Bodies', 1.25, '+25%'],
+  ];
+  function* priceJob(u, refs, g, withValues, report) {
+    const base = yield* fairPriceGen(u, refs, g);
+    report({ base });
+    if (!withValues) return;
+    const rows = [];
+    for (const [k, label, f, pct] of STAT_TESTS) {
+      const v = { ...u };
+      let skip = false;
+      if (k === 'bodies') { if (u.bodies < 2) skip = true; else v.bodies = Math.max(u.bodies + 1, Math.round(u.bodies * f)); }
+      else if (!(u[k] > 0)) skip = true;
+      else v[k] = u[k] * f;
+      if (skip) rows.push([label, pct, null]);
+      else {
+        const p = yield* fairPriceGen(v, refs, g);
+        rows.push([label, pct, p.price / base.price - 1]);
+      }
+      report({ base, rows: rows.slice() });
+    }
+  }
+  let priceRun = 0;
+  function priceCheck(u, d, withValues) {
+    const out = d.querySelector('.price-out');
+    const refs = state.units.filter(r => r !== u && r.cost === 100);
+    if (refs.length < 2) { out.innerHTML = '<p class="hint">Add at least two other units that cost 100 gold to use as the yardstick.</p>'; return; }
+    const id = ++priceRun;
+    const unitCopy = clone(u), g = { ...state.settings };
+    out.innerHTML = `<p class="hint">Measuring against ${refs.length} units…</p>`;
+    const render = ({ base, rows }) => {
+      const p = base.price * 100, tier = tierOf(p); // yardstick squads cost 100 gold
+      const capNote = base.capped === 'high' ? ' (at least)' : base.capped === 'low' ? ' (at most)' : '';
+      const listed = u.cost;
+      const verdict = Math.abs(p - listed) / listed < 0.12 ? 'priced right' : p > listed ? 'too strong for its cost' : 'too weak for its cost';
+      let h = `<p class="price-line"><b class="num">${Math.round(p)} gold</b>${capNote} fair price · <span class="chip ${tier === 1 ? 'ok' : 'strong'}">Tier ${tier}</span></p>
+               <p class="hint">Listed cost ${fmt(listed)} gold: ${verdict}.</p>`;
+      if (rows) {
+        const sorted = rows.slice().sort((a, b) => (b[2] ?? -9) - (a[2] ?? -9));
+        h += `<table class="stats vals"><thead><tr><th>Stat raised</th><th>Price change</th></tr></thead><tbody>${sorted.map(r =>
+          `<tr><td>${r[0]} ${r[1]}</td><td>${r[2] == null ? '—' : (r[2] >= 0 ? '+' : '−') + Math.abs(Math.round(r[2] * 100)) + '%'}</td></tr>`).join('')}</tbody></table>`;
+        if (rows.length < STAT_TESTS.length) h += `<p class="hint">Measuring ${STAT_TESTS[rows.length][1].toLowerCase()}…</p>`;
+      }
+      out.innerHTML = h;
+    };
+    const gen = priceJob(unitCopy, refs.map(clone), g, withValues, (r) => { if (id === priceRun) render(r); });
+    (function tick() {
+      if (id !== priceRun) return; // a newer check replaced this one
+      const t0 = performance.now();
+      while (performance.now() - t0 < 30) { if (gen.next().done) return; }
+      setTimeout(tick, 0);
+    })();
+  }
+
+  $('add').addEventListener('click', () => {
+    const u = { ...Shapes.assign([...state.units, Engine.withTraits({ name: 'New unit', cost: 100, bodies: 4, hp: 200, hit: 20, aps: 1, range: 10, speed: 6, splash: 0 })]).pop(), id: uid++ };
+    state.units.push(u);
+    save(); renderUnits(); scheduleRun();
+    const d = unitsEl.querySelector(`details[data-id="${u.id}"]`);
+    if (d) { d.open = true; d.querySelector('input[type="text"]').focus(); }
+  });
+  $('add-ex').addEventListener('click', () => {
+    const have = new Set(state.units.map(u => u.name));
+    const add = EXAMPLES.filter(e => !have.has(e.name));
+    if (!add.length) { $('ex-msg').textContent = 'All trait examples are already in your roster.'; return; }
+    const merged = Shapes.assign([...state.units, ...clone(add)]); // new examples get shapes not already in use
+    state.units.push(...merged.slice(state.units.length).map(u => ({ ...Engine.withTraits(u), id: uid++ })));
+    save(); renderUnits(); scheduleRun();
+    $('ex-msg').textContent = `Added ${add.map(e => e.name).join(', ')}.`;
+  });
+
+  // ---------- matrix ----------
+  let result = null, sel = null, runTimer = null;
+  function scheduleRun() {
+    $('status').textContent = 'Running…';
+    clearTimeout(runTimer);
+    runTimer = setTimeout(runAll, 250);
+  }
+  function runAll() {
+    const t0 = performance.now();
+    result = Engine.matrix(state.units, state.settings);
+    const ms = performance.now() - t0;
+    const n = state.units.length;
+    $('status').textContent = `${n * (n - 1) / 2} fights in ${Math.round(ms)} ms`;
+    renderMatrix();
+    if (!sel || !state.units.find(u => u.id === sel.a) || !state.units.find(u => u.id === sel.b)) {
+      sel = pickInteresting();
+    }
+    loadReplay(false);
+  }
+  function pickInteresting() {
+    // default to the most lopsided fight so the replay shows a clear counter
+    let best = null, bv = -1;
+    result.forEach((row, i) => row.forEach((c, j) => { if (c && j > i && Math.abs(c.score) > bv) { bv = Math.abs(c.score); best = { a: state.units[i].id, b: state.units[j].id }; } }));
+    return best;
+  }
+  function cellBg(s) {
+    const pct = Math.round(Math.min(1, Math.abs(s)) * 75) + 8;
+    return `color-mix(in srgb, ${s >= 0 ? 'var(--win)' : 'var(--loss)'} ${pct}%, var(--surface))`;
+  }
+  function renderMatrix() {
+    const t = $('matrix');
+    const us = state.units;
+    let h = '<thead><tr><th></th>' + us.map(u => `<th scope="col" title="${esc(u.name)}">${tagOf(u)}</th>`).join('') + '<th scope="col" class="overall">Overall</th></tr></thead><tbody>';
+    us.forEach((u, i) => {
+      h += `<tr><th scope="row"><span class="ico" style="color:${u.color}">${Shapes.svg(u.shape, 12)}</span> <span class="tag">${tagOf(u)}</span><span class="nm">${esc(u.name)}</span></th>`;
+      let sum = 0, cnt = 0;
+      us.forEach((v, j) => {
+        const c = result[i][j];
+        if (!c) { h += `<td><span class="cell self" aria-hidden="true">·</span></td>`; return; }
+        sum += c.score; cnt++;
+        const isSel = sel && sel.a === u.id && sel.b === v.id;
+        h += `<td><button class="cell${c.timeout ? ' timeout' : ''}${isSel ? ' sel' : ''}" data-a="${u.id}" data-b="${v.id}"
+              style="background:${cellBg(c.score)}" aria-label="${esc(u.name)} against ${esc(v.name)}: ${margin(c.score)}">${margin(c.score)}</button></td>`;
+      });
+      const avg = cnt ? sum / cnt : 0;
+      const chip = avg > 0.2 ? '<span class="chip strong">Strong</span>' : avg < -0.2 ? '<span class="chip weak">Weak</span>' : '<span class="chip ok">Even</span>';
+      h += `<td class="overall"><span class="num" style="font-size:13px;margin-right:6px">${margin(avg)}</span>${chip}</td></tr>`;
+    });
+    t.innerHTML = h + '</tbody>';
+    t.querySelectorAll('button.cell').forEach(b => b.addEventListener('click', () => {
+      sel = { a: +b.dataset.a, b: +b.dataset.b };
+      t.querySelectorAll('.cell.sel').forEach(x => x.classList.remove('sel'));
+      b.classList.add('sel');
+      loadReplay(true);
+      if (window.innerWidth < 960) $('rep-h').scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
+    }));
+  }
+  function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+
+  // ---------- replay ----------
+  const cv = $('cv'), ctx = cv.getContext('2d');
+  let rep = null, playing = false, ft = 0, lastTs = 0, raf = 0;
+  function loadReplay(autoplay) {
+    if (!sel) return;
+    const ua = state.units.find(u => u.id === sel.a), ub = state.units.find(u => u.id === sel.b);
+    if (!ua || !ub) return;
+    const r = Engine.battle(ua, ub, state.settings, { record: true });
+    // bounds
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (const f of r.frames) for (const b of f.b) { if (b[0] < minX) minX = b[0]; if (b[0] > maxX) maxX = b[0]; if (b[1] < minY) minY = b[1]; if (b[1] > maxY) maxY = b[1]; }
+    rep = { r, ua, ub, bounds: { minX, maxX, minY, maxY } };
+    ft = 0; playing = false;
+    $('vs').innerHTML = `<span class="a">${esc(ua.name)}</span><span class="x">vs</span><span class="b">${esc(ub.name)}</span>`;
+    const sa = Engine.squadsFor(ua, state.settings), sb = Engine.squadsFor(ub, state.settings);
+    $('rep-status').textContent = `${fmt(state.settings.budget)} gold each`;
+    const w = r.winner;
+    const name = w === 0 ? ua.name : w === 1 ? ub.name : null;
+    const v = $('verdict');
+    v.className = 'verdict ' + (w === 0 ? 'a' : w === 1 ? 'b' : '');
+    v.textContent = name
+      ? `${name} ${r.timeout ? 'leads at the time limit' : 'wins'} after ${fmt(r.time, 1)} s, margin ${margin(w === 0 ? r.score : -r.score)}.`
+      : `Draw after ${fmt(r.time, 1)} s.`;
+    const st = r.stats;
+    const pct = (a, b) => b > 0 ? Math.round(a / b * 100) + '%' : '0%';
+    $('stats').innerHTML = `
+      <thead><tr><th></th><th class="a">${esc(tagOf(ua))}</th><th class="b">${esc(tagOf(ub))}</th></tr></thead>
+      <tbody>
+        <tr><td>Squads × bodies</td><td>${sa} × ${ua.bodies}</td><td>${sb} × ${ub.bodies}</td></tr>
+        <tr><td>Bodies left</td><td>${r.survivors[0]} / ${r.counts[0]}</td><td>${r.survivors[1]} / ${r.counts[1]}</td></tr>
+        <tr><td>Health left</td><td>${Math.round(r.frac[0] * 100)}%</td><td>${Math.round(r.frac[1] * 100)}%</td></tr>
+        <tr><td>Damage dealt</td><td>${fmt(st[0].dealt)}</td><td>${fmt(st[1].dealt)}</td></tr>
+        <tr><td>Lost to overkill</td><td>${pct(st[0].wasted, st[0].dealt + st[0].wasted)}</td><td>${pct(st[1].wasted, st[1].dealt + st[1].wasted)}</td></tr>
+        <tr><td>Stopped by armor or ward</td><td>${pct(st[0].blocked, st[0].blocked + st[0].dealt + st[0].wasted)}</td><td>${pct(st[1].blocked, st[1].blocked + st[1].dealt + st[1].wasted)}</td></tr>
+        <tr><td>Wind-ups lost</td><td>${st[0].winds ? st[0].windLost + ' of ' + st[0].winds : '—'}</td><td>${st[1].winds ? st[1].windLost + ' of ' + st[1].winds : '—'}</td></tr>
+        <tr><td>Shots that missed</td><td>${pct(st[0].missed, st[0].missed + st[0].blocked + st[0].dealt + st[0].wasted)}</td><td>${pct(st[1].missed, st[1].missed + st[1].blocked + st[1].dealt + st[1].wasted)}</td></tr>
+      </tbody>`;
+    sizeCanvas(); draw();
+    if (autoplay && !matchMedia('(prefers-reduced-motion: reduce)').matches) play();
+    else $('play').textContent = 'Play';
+  }
+  function sizeCanvas() {
+    const r = cv.getBoundingClientRect();
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    cv.width = Math.max(1, Math.round(r.width * dpr));
+    cv.height = Math.max(1, Math.round(r.height * dpr));
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  function css(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+  function draw() {
+    if (!rep) return;
+    const W = cv.clientWidth, H = cv.clientHeight;
+    const f = rep.r.frames[Math.min(rep.r.frames.length - 1, Math.floor(ft))];
+    const { minX, maxX, minY, maxY } = rep.bounds;
+    const pad = 18;
+    const sx = (W - pad * 2) / Math.max(1, maxX - minX), sy = (H - pad * 2) / Math.max(1, maxY - minY);
+    const s = Math.min(sx, sy);
+    const ox = W / 2 - (minX + maxX) / 2 * s, oy = H / 2 + (minY + maxY) / 2 * s; // side 0 (row) at the bottom
+    const X = x => ox + x * s, Y = y => oy - y * s;
+    ctx.clearRect(0, 0, W, H);
+    const colA = css('--side-a'), colB = css('--side-b'), line = css('--line'), muted = css('--muted');
+    // midline
+    ctx.strokeStyle = line; ctx.setLineDash([4, 6]); ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(0, Y(0)); ctx.lineTo(W, Y(0)); ctx.stroke(); ctx.setLineDash([]);
+    // shots
+    for (const sh of f.shots) {
+      ctx.strokeStyle = sh[4] === 0 ? colA : colB; ctx.globalAlpha = 0.55; ctx.lineWidth = sh[6] ? 3 : 1;
+      ctx.beginPath(); ctx.moveTo(X(sh[0]), Y(sh[1])); ctx.lineTo(X(sh[2]), Y(sh[3])); ctx.stroke();
+      ctx.lineWidth = 1;
+      if (sh[5] > 0) { ctx.globalAlpha = 0.35; ctx.beginPath(); ctx.arc(X(sh[2]), Y(sh[3]), sh[5] * s, 0, Math.PI * 2); ctx.stroke(); }
+    }
+    ctx.globalAlpha = 1;
+    for (const p of (f.p || [])) {
+      ctx.fillStyle = p[2] === 0 ? colA : colB;
+      ctx.fillRect(X(p[0]) - 2.5, Y(p[1]) - 2.5, 5, 5);
+    }
+    const rad = Math.max(2.5, Math.min(9, state.settings.spacing * s * 0.38));
+    for (let bi = 0; bi < f.b.length; bi++) {
+      const b = f.b[bi];
+      const x = X(b[0]), y = Y(b[1]);
+      if (b[2] <= 0) { ctx.fillStyle = muted; ctx.globalAlpha = 0.25; ctx.beginPath(); ctx.arc(x, y, rad * 0.45, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1; continue; }
+      const c = b[3] === 0 ? colA : colB;
+      const shape = (rep.r.shapes && rep.r.shapes[bi]) || 'circle', up = b[3] === 0 ? 1 : -1;
+      const fill = (rep.r.colors && rep.r.colors[bi]) || c;
+      Shapes.body(ctx, shape, x, y, rad, up, fill, c, 0.3 + 0.7 * b[2]);
+      ctx.strokeStyle = c;
+      if (b[4] > 0) { // wind-up charging: ring fills clockwise
+        ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc(x, y, rad + 3.5, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * b[4]); ctx.stroke();
+      }
+    }
+    $('clock').textContent = fmt(f.t, 1) + ' s';
+  }
+  function tick(ts) {
+    if (!playing) return;
+    const dtMs = lastTs ? ts - lastTs : 16; lastTs = ts;
+    const speed = parseFloat($('speed').value);
+    ft += dtMs / 1000 / state.settings.dt * speed;
+    if (ft >= rep.r.frames.length - 1) { ft = rep.r.frames.length - 1; playing = false; $('play').textContent = 'Play'; draw(); return; }
+    draw();
+    raf = requestAnimationFrame(tick);
+  }
+  function play() {
+    if (!rep) return;
+    if (ft >= rep.r.frames.length - 1) ft = 0;
+    playing = true; lastTs = 0; $('play').textContent = 'Pause';
+    cancelAnimationFrame(raf); raf = requestAnimationFrame(tick);
+  }
+  $('play').addEventListener('click', () => { if (playing) { playing = false; $('play').textContent = 'Play'; } else play(); });
+  $('restart').addEventListener('click', () => { ft = 0; draw(); play(); });
+  $('swap').addEventListener('click', () => { if (!sel) return; sel = { a: sel.b, b: sel.a }; renderMatrix(); loadReplay(true); });
+  window.addEventListener('resize', () => { sizeCanvas(); draw(); });
+  matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', draw);
+  new MutationObserver(draw).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+
+  // ---------- save / share ----------
+  function flash(t) { $('io-msg').textContent = t; }
+  $('copy').addEventListener('click', () => {
+    const txt = JSON.stringify(exportData(), null, 1);
+    $('io').value = txt;
+    const done = () => flash('Roster copied. It is also in the box below.');
+    const fallback = () => { $('io').focus(); $('io').select(); flash('Roster is in the box below and selected. Copy it from there.'); };
+    try { navigator.clipboard.writeText(txt).then(done, fallback); } catch (e) { fallback(); }
+  });
+  $('load').addEventListener('click', () => {
+    let p;
+    try { p = JSON.parse($('io').value); } catch (e) { flash('That text is not a roster. Paste text copied with "Copy roster".'); return; }
+    if (!valid(p)) { flash('The roster needs settings and at least two units, each with a name and all eight levers.'); return; }
+    p = toGold(p);
+    state = { settings: { ...SAMPLE.settings, ...p.settings }, units: withIds(p.units.map(u => ({ defense: 'none', defVal: 0, ...u }))) };
+    sel = null; syncSettings(); save(); renderUnits(); runAll();
+    flash(`Loaded ${state.units.length} units.`);
+  });
+  $('reset').addEventListener('click', () => { $('reset-confirm').hidden = false; });
+  $('reset-no').addEventListener('click', () => { $('reset-confirm').hidden = true; });
+  $('reset-yes').addEventListener('click', () => {
+    state = { settings: clone(SAMPLE.settings), units: withIds(clone(SAMPLE.units)) };
+    $('reset-confirm').hidden = true; sel = null;
+    syncSettings(); save(); renderUnits(); runAll();
+    flash('Sample units restored.');
+  });
+  function syncSettings() { document.querySelectorAll('[data-s]').forEach(inp => { inp.value = state.settings[inp.dataset.s]; }); }
+
+  renderUnits();
+  runAll();
+})();
+</script>
+
+</body>
+</html>

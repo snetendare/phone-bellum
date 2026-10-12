@@ -1,0 +1,12 @@
+{
+  "settings": { "budget": 2, "distance": 40, "spacing": 2.5, "minDmgPct": 15, "timeCap": 60, "dt": 0.05 },
+  "units": [
+    { "name": "Goblin Swarm", "cost": 1, "bodies": 12, "hp": 100, "hit": 8, "aps": 1, "range": 2, "speed": 12, "splash": 0, "defense": "none", "defVal": 0 },
+    { "name": "Skeleton Archers", "cost": 1, "bodies": 8, "hp": 95, "hit": 16, "aps": 1.0, "range": 32, "speed": 4, "splash": 0, "defense": "none", "defVal": 0 },
+    { "name": "Ember Imps", "cost": 1, "bodies": 4, "hp": 260, "hit": 22, "aps": 0.6, "range": 10, "speed": 5, "splash": 3, "defense": "none", "defVal": 0 },
+    { "name": "Fire Mage", "cost": 1, "bodies": 1, "hp": 750, "hit": 50, "aps": 0.6, "range": 28, "speed": 4, "splash": 4, "defense": "none", "defVal": 0 },
+    { "name": "Sniper", "cost": 1, "bodies": 1, "hp": 500, "hit": 400, "aps": 0.5, "range": 45, "speed": 4, "splash": 0, "defense": "none", "defVal": 0 },
+    { "name": "Brute", "cost": 1, "bodies": 1, "hp": 800, "hit": 35, "aps": 1.2, "range": 2, "speed": 6, "splash": 0, "defense": "armor", "defVal": 12 },
+    { "name": "Wisps", "cost": 1, "bodies": 3, "hp": 320, "hit": 18, "aps": 1.5, "range": 15, "speed": 7, "splash": 0, "defense": "ward", "defVal": 40 }
+  ]
+}
