@@ -274,7 +274,7 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
       <div class="rule"><h3>Ward</h3><p>No single hit can deal more than the ward value. It shuts down big hits and ignores small ones.</p></div>
       <div class="rule"><h3>Range vs speed</h3><p>A ranged unit gets free shots while the enemy closes the gap. Fast units shrink that window.</p></div>
       <div class="rule"><h3>Burst and shotgun</h3><p>A burst fires its shots 0.15 s apart along the line toward its first target. Each shot hits the first body in its path: the target while it lives, then whoever stands behind it. If the line is empty, the shot misses. A shotgun fires all its pellets at once into a 60° cone, each at a different body, wrapping back to bodies already hit when it runs out.</p></div>
-      <div class="rule"><h3>Wind-up</h3><p>Each body winds up once, before its first hit. When an enemy first comes in range, the body locks onto it, charges for the wind-up time, then hits. If the target dies or gets out of range first, the charge is lost and the body starts over. After the first hit lands, it attacks at its normal rate.</p></div>
+      <div class="rule"><h3>Wind-up</h3><p>Before its first hit on a new target, the unit locks onto it and charges for the wind-up time. After that hit, it keeps firing at that target at its normal rate until the target dies or leaves range. The next target needs a new wind-up. If the target dies or gets out of range during the charge, the charge is lost.</p></div>
       <div class="rule"><h3>Spin-up</h3><p>Raises attack speed every second the unit keeps firing, up to three times its base speed.</p></div>
       <div class="rule"><h3>Pierce and projectiles</h3><p>A piercing shot also hits bodies lined up behind its target. A projectile with a speed travels in a straight line and hits the first enemy it touches, so units moving sideways can dodge it while units charging straight at it get hit.</p></div>
       <div class="rule"><h3>Upgrades</h3><p>Each upgrade adds the unit’s starting health and hit again: one upgrade doubles them, two triple them. In the game, squads earn upgrades through experience and gold; here you set them directly to test upgraded matchups.</p></div>
@@ -301,7 +301,7 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
     ['minRange', 'Minimum range (m)', 1, 'Can’t hit anything closer than this.'],
     ['charge', 'Charge (× damage)', 0.5, 'Next hit after running 5 m. 1 = off.'],
     ['knockback', 'Knockback (m)', 0.5, 'How far a big hit pushes a small body.'],
-    ['windUp', 'Wind-up (s)', 0.1, 'Charges this long before its first hit only. Lost if the target dies or escapes first.'],
+    ['windUp', 'Wind-up (s)', 0.1, 'Charges this long before the first hit on each new target, then fires normally at it. Lost if the target dies or escapes first.'],
   ];
   const LEVERS = [
     ['cost', 'Cost (gold)', 10, 'Price of one squad. A standard squad is 100.'],
