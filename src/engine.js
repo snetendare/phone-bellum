@@ -10,6 +10,7 @@ const Engine = (() => {
   const CHARGE_RUN = 5;        // metres a unit must run before its next attack counts as a charge
   const PIERCE_DEPTH = 10;     // metres a piercing shot travels past its target
   const PIERCE_WIDTH = 1;      // half-width of the pierce corridor (m)
+  const APPROACH = 0.5;         // metres a moving unit steps inside its max range
   const PROJ_HIT_RADIUS = 1;   // a projectile hits a body within this distance of where it lands
 
   const LEVEL_BONUS = 1;       // each upgrade adds +100% of starting health and hit (2x, then 3x)
@@ -227,7 +228,8 @@ const Engine = (() => {
         }
         b.near = near;
         if (near && nd > b.u.range) {
-          const mv = Math.min(b.u.speed * dt, nd - b.u.range);
+          // walk a little inside max range, so being nudged by allies doesn't leave the unit just out of reach
+          const mv = Math.min(b.u.speed * dt, nd - (b.u.range - Math.min(APPROACH, b.u.range * 0.25)));
           b.x += (near.x - b.x) / nd * mv;
           b.y += (near.y - b.y) / nd * mv;
           b.moved += mv;
