@@ -502,7 +502,7 @@ a { color: var(--you); }
       </div>
       <span class="hint" id="join-msg" aria-live="polite" hidden></span>
       <div class="bar">
-        <span class="hint">Playing with ${customSet ? `your ${units.length} units from Counter Lab` : `the ${units.length} built-in units`}.</span>
+        <span class="hint">Playing with ${customSet ? `your ${units.length} units from Counter Lab` : `the ${units.length} built-in units`}.${reportDb ? ' Your matches are saved here so you can ask Claude to review them.' : ''}</span>
         <span class="btnrow"><button class="btn small" id="load-units">Load units</button><a class="btn small" id="lab-link" href="lab.html" style="text-decoration:none;color:inherit;display:inline-block">Counter Lab</a></span>
       </div>
       <div class="bar">
@@ -594,6 +594,49 @@ a { color: var(--you); }
     if ($('next')) $('next').addEventListener('click', tapNext);
   }
 
+  // ---------- match reports ----------
+  // Inside Claude, every match on this screen is saved to the artifact's own storage (only the owner and editors
+  // can read it), so Claude can look back at how matches went when asked.
+  let reportDb = null, report = null, reportChain = Promise.resolve();
+  (async () => {
+    try { if (window.claude && typeof window.claude.use === 'function') reportDb = await window.claude.use('db'); } catch (e) { reportDb = null; }
+    if (reportDb && phase === 'start') showStart();
+  })();
+  function startReport() {
+    report = null;
+    if (!reportDb || mode === 'guest') return;
+    const t = new Date();
+    report = {
+      id: 'm' + t.getTime().toString(36), mode, started: t.toISOString(), updated: t.toISOString(),
+      units: units.map(u => u.name), customUnits: customSet, timer: mode === 'host' ? DEPLOY_SECONDS : (timerOn ? DEPLOY_SECONDS : 0),
+      over: false, winner: null, rounds: [],
+    };
+  }
+  function armyOf(match, side) {
+    return match.armies[side].map(q => ({ unit: units[q.unit].name, col: q.col, row: q.row, level: q.level + 1, placed: q.round }));
+  }
+  function skillsOf(match, side) {
+    const out = [];
+    units.forEach((u, i) => [0, 1].forEach(k => { if (Game.hasSkill(match, side, i, k)) out.push(`${(u.skillDefs[k] || {}).name} (${u.name})`); }));
+    return out;
+  }
+  function recordRound(pre, sum) {
+    if (!report || !reportDb) return;
+    const p = withUnits(pre), you = me, them = foe();
+    const entry = {
+      round: sum.round,
+      you: { hpBefore: p.hp[you], gold: p.gold[you], army: armyOf(p, you), skills: skillsOf(p, you) },
+      them: { hpBefore: p.hp[them], gold: p.gold[them], army: armyOf(p, them), skills: skillsOf(p, them) },
+      result: { winner: sum.winner === you ? 'you' : sum.winner === them ? 'them' : 'draw', timeout: !!sum.timeout, seconds: Math.round(sum.time), damageToYou: sum.dmg[you], damageToThem: sum.dmg[them] },
+    };
+    if (mode === 'claude') entry.claude = { said: claude.say || null, alsoDid: claude.did.slice(), leveledUp: lastAiLevels.map(x => `${units[x.unit].name} to level ${x.level + 1}`), botPlayed: !!claude.bot, note: claude.note || null };
+    report.rounds.push(entry);
+    report.updated = new Date().toISOString();
+    if (m && m.over) { report.over = true; report.winner = m.winner === you ? 'you' : m.winner === them ? 'them' : 'draw'; report.hpLeft = { you: m.hp[you], them: m.hp[them] }; }
+    const body = JSON.parse(JSON.stringify(report)), ref = reportDb.doc('matches/' + report.id);
+    reportChain = reportChain.then(() => ref.set(body)).catch((e) => console.warn('match report not saved', e && e.code));
+  }
+
   // ---------- flow: vs Claude ----------
   // Only inside Claude: the page asks Claude (on the player's own account) for its move each round.
   let sampleFn = null;
@@ -610,6 +653,7 @@ a { color: var(--you); }
     m = Game.createMatch(units, M, (now() ^ (Math.random() * 1e9)) >>> 0);
     nextReady = [false, false]; rematch = [false, false];
     claude.off = false; claude.history = [];
+    startReport();
     beginAiRound();
   }
 
@@ -759,6 +803,7 @@ Actions run in this order: sell, levelUp, skills, extraDeployments, place. Anyth
     mode = 'ai'; me = 0;
     m = Game.createMatch(units, M, (now() ^ (Math.random() * 1e9)) >>> 0);
     nextReady = [false, false]; rematch = [false, false];
+    startReport();
     beginAiRound();
   }
 
@@ -809,6 +854,7 @@ Actions run in this order: sell, levelUp, skills, extraDeployments, place. Anyth
     const sim = Game.startBattle(m);
     while (sim.step()) {}
     const summary = Game.resolve(m, sim.result());
+    recordRound(pre, summary);
     lastSummary = summary; nextReady = [false, false]; rematch = [false, false];
     if (mode === 'host') { send({ t: 'fight', pre, post: snapshot(m), summary }); saveHost(); }
     playBattle(pre);
@@ -1175,6 +1221,7 @@ Actions run in this order: sell, levelUp, skills, extraDeployments, place. Anyth
     if (!net.connected) return;
     m = Game.createMatch(units, M, (now() ^ (Math.random() * 1e9)) >>> 0);
     lastSummary = null; nextReady = [false, false]; rematch = [false, false];
+    startReport();
     hostBeginRound();
   }
 
