@@ -21,7 +21,9 @@
    "type": "poison",
    "name": "Poison shot",
    "cost": 100,
-   "params": {}
+   "params": {
+    "pct": 150
+   }
   },
   {
    "id": "stealth",
@@ -34,14 +36,14 @@
    "id": "armorHp",
    "type": "armorHp",
    "name": "Armor and health",
-   "cost": 100,
+   "cost": 200,
    "params": {}
   },
   {
    "id": "spawn",
    "type": "spawn",
    "name": "Spawn goblins",
-   "cost": 100,
+   "cost": 200,
    "params": {}
   },
   {
@@ -69,14 +71,14 @@
    "id": "healer",
    "type": "healer",
    "name": "Healing touch",
-   "cost": 100,
+   "cost": 200,
    "params": {}
   },
   {
    "id": "range",
    "type": "range",
    "name": "Long reach",
-   "cost": 100,
+   "cost": 200,
    "params": {}
   },
   {
@@ -87,14 +89,14 @@
    "params": {}
   },
   {
-   "id": "ward",
+   "id": "skmv5oxj501",
    "type": "ward",
    "name": "Ward",
    "cost": 100,
    "params": {}
   },
   {
-   "id": "slow",
+   "id": "skmv5oxpgk2",
    "type": "slow",
    "name": "Slow",
    "cost": 100,
@@ -334,7 +336,7 @@
    "charge": 1,
    "knockback": 0,
    "windUp": 0,
-   "defense": "ward",
+   "defense": "none",
    "defVal": 40,
    "level": 0,
    "name": "Wisps",
@@ -350,7 +352,7 @@
    "color": "#ff90ff",
    "skills": [
     "stealth",
-    "swift"
+    "skmv5oxj501"
    ],
    "skillsOn": [
     false,
@@ -358,7 +360,10 @@
    ],
    "skillMods": [
     null,
-    null
+    {
+     "params": {},
+     "cost": 200
+    }
    ]
   },
   {
