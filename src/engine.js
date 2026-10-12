@@ -36,8 +36,7 @@ const Engine = (() => {
     const s = squadsFor(u, g);
     const n = s * u.bodies;
     const hp = n * u.hp;
-    // wind-up comes before the first hit on each new target; counted on every attack (the case where every hit kills)
-    const cycle = 1 / Math.max(0.01, u.aps) + Math.max(0, u.windUp);
+    const cycle = 1 / Math.max(0.01, u.aps); // wind-up only happens when the unit sets up after moving, so it isn't counted per attack
     const dps = n * u.hit / cycle * Math.max(1, u.burst) * Math.max(1, u.pellets);
     return { squads: s, bodies: n, hp, dps, strength: hp * dps };
   }
@@ -71,7 +70,7 @@ const Engine = (() => {
     return {
       u, side, x, y, hp: u.hp, alive: true, squad, level: u.level || 0, xp: 0,
       cd: ((i * 7) % 11) / 11 * interval, // deterministic stagger
-      moved: 0, firing: -1, burstLeft: 0, burstTimer: 0, burstDir: [0, 1], windTarget: null, windT: 0, lockTarget: null,
+      moved: 0, firing: -1, burstLeft: 0, burstTimer: 0, burstDir: [0, 1], windTarget: null, windT: 0, setUp: false,
     };
   }
 
@@ -114,7 +113,6 @@ const Engine = (() => {
     let projectiles = [];
     let t = 0, shots = [], over = false;
     const dist = (a, b) => hyp(a.x - b.x, a.y - b.y);
-    const inRange = (b, tg) => { if (!tg || !tg.alive) return false; const d = dist(tg, b); return d <= b.u.range + 0.01 && d >= b.u.minRange; };
     const aliveCount = (arr) => { let c = 0; for (const b of arr) if (b.alive) c++; return c; };
 
     function hurt(owner, v, hit, fromX, fromY) {
@@ -233,6 +231,11 @@ const Engine = (() => {
           b.x += (near.x - b.x) / nd * mv;
           b.y += (near.y - b.y) / nd * mv;
           b.moved += mv;
+          // a unit with wind-up has to set up again after it moves; a charge in progress is lost
+          if (b.u.windUp > 0 && mv > 0) {
+            b.setUp = false;
+            if (b.windTarget) { b.windTarget = null; stats[b.side].windLost++; }
+          }
         }
       }
       // separation between allies
@@ -288,25 +291,17 @@ const Engine = (() => {
           }
         }
         let valid, primary;
-        // wind-up: before the first hit on a new target, lock it and charge for the wind-up time.
-        // After that hit, keep firing at that target at the normal rate until it dies or leaves range.
-        // The next target needs a new wind-up. If the charging target dies or escapes, the charge is lost.
-        if (b.u.windUp > 0 && b.lockTarget && !inRange(b, b.lockTarget)) b.lockTarget = null;
-        if (b.u.windUp > 0 && b.lockTarget) {
-          if (b.cd > 0) continue;
-          valid = validTargets(b);
-          primary = b.lockTarget;
-        } else if (b.u.windUp > 0) {
+        // wind-up: the unit sets up (like a sniper lying down) the first time an enemy is in range.
+        // Once set up it fires normally at anything in range. It only sets up again after it has moved.
+        if (b.u.windUp > 0 && !b.setUp) {
           if (b.windTarget) {
             b.windT -= dt;
             if (b.windT > 0) continue;
-            const tg = b.windTarget;
-            b.windTarget = null;
-            if (!inRange(b, tg)) { stats[b.side].windLost++; continue; }
-            primary = tg;
+            b.windTarget = null; b.setUp = true;
+            b.cd = 0; // reload starts with the first shot
             valid = validTargets(b);
-            b.lockTarget = tg;
-            b.cd = 0; // reload starts after the hit
+            if (!valid.length) continue;
+            primary = valid[0];
           } else {
             if (b.cd > 0) continue;
             valid = validTargets(b);
