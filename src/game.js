@@ -180,7 +180,13 @@ const Game = (() => {
         if (!was && isReady(m, sq)) newlyReady[side].push({ id: sq.id, unit: sq.unit, level: sq.level + 1 });
       }
     }
-    const summary = { round: m.round, winner: roundWinner, timeout: res.timeout, dmg, time: res.time, newlyReady };
+    // how each squad did: share of bodies left and damage dealt (for reports and Claude)
+    const squads = [[], []];
+    for (let side = 0; side < 2; side++) for (const sq of m.armies[side]) {
+      const r = res.squads[side + ':' + sq.id];
+      if (r) squads[side].push({ id: sq.id, unit: sq.unit, level: sq.level, left: r.alive / r.total, dealt: Math.round(r.dealt || 0) });
+    }
+    const summary = { round: m.round, winner: roundWinner, timeout: res.timeout, dmg, time: res.time, newlyReady, squads };
     m.history.push(summary);
     if (m.hp[0] <= 0 || m.hp[1] <= 0) {
       m.over = true;

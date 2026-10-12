@@ -534,6 +534,7 @@ const Engine = (() => {
       const applied = Math.min(amount, v.hp);
       if (applied <= 0) return;
       stats[owner.side].dealt += applied;
+      owner.dealt = (owner.dealt || 0) + applied;
       owner.xp += applied;
       v.xp += applied * (g.absorbXp == null ? 0.5 : g.absorbXp);
       v.hp -= applied;
@@ -547,6 +548,7 @@ const Engine = (() => {
       st.blocked += hit - dmg;
       const applied = Math.min(dmg, v.hp);
       st.dealt += applied;
+      owner.dealt = (owner.dealt || 0) + applied;
       st.wasted += dmg - applied;
       // experience: damage dealt, half of damage absorbed, and a bounty for killing leveled bodies
       owner.xp += applied;
@@ -890,9 +892,9 @@ const Engine = (() => {
       const squads = {};
       for (const b of all) {
         const k = b.side + ':' + b.squad;
-        const s = squads[k] || (squads[k] = { side: b.side, squad: b.squad, total: 0, alive: 0, xp: 0 });
+        const s = squads[k] || (squads[k] = { side: b.side, squad: b.squad, total: 0, alive: 0, xp: 0, dealt: 0 });
         s.total++; if (b.alive) s.alive++;
-        s.xp += b.xp;
+        s.xp += b.xp; s.dealt += b.dealt || 0;
       }
       return {
         winner, timeout, time: t, frac,
@@ -1111,7 +1113,13 @@ const Game = (() => {
         if (!was && isReady(m, sq)) newlyReady[side].push({ id: sq.id, unit: sq.unit, level: sq.level + 1 });
       }
     }
-    const summary = { round: m.round, winner: roundWinner, timeout: res.timeout, dmg, time: res.time, newlyReady };
+    // how each squad did: share of bodies left and damage dealt (for reports and Claude)
+    const squads = [[], []];
+    for (let side = 0; side < 2; side++) for (const sq of m.armies[side]) {
+      const r = res.squads[side + ':' + sq.id];
+      if (r) squads[side].push({ id: sq.id, unit: sq.unit, level: sq.level, left: r.alive / r.total, dealt: Math.round(r.dealt || 0) });
+    }
+    const summary = { round: m.round, winner: roundWinner, timeout: res.timeout, dmg, time: res.time, newlyReady, squads };
     m.history.push(summary);
     if (m.hp[0] <= 0 || m.hp[1] <= 0) {
       m.over = true;
@@ -1886,10 +1894,13 @@ if (typeof module !== 'undefined') module.exports = Game;
     claude.busy = true; claude.started = now();
     if (claude.ctl) claude.ctl.abort();
     const ctl = claude.ctl = new AbortController();
-    const opts = { modelTier: 'default', effort: 'low', cache: false, signal: ctl.signal };
-    const ask = typeof sampleFn.json === 'function'
+    const opts = { modelTier: 'complex', cache: false, signal: ctl.signal };
+    const once = () => typeof sampleFn.json === 'function'
       ? sampleFn.json(prompt, opts)
       : sampleFn(prompt, opts).then(r => { const t = r.text, a = t.indexOf('{'), b = t.lastIndexOf('}'); return JSON.parse(t.slice(a, b + 1)); });
+    const fatal = (e) => e && ['cancelled', 'not_granted', 'sampling_disabled', 'not_declared', 'capability_disabled', 'capability_removed', 'session_expired', 'rate_limited'].includes(e.code);
+    // one retry on a hiccup before the bot steps in
+    const ask = once().catch(e => (fatal(e) || ctl !== claude.ctl || m.round !== round) ? Promise.reject(e) : once());
     ask.then((mv) => {
       if (ctl !== claude.ctl || mode !== 'claude' || !m || m.round !== round || phase !== 'deploy') return;
       applyClaudeMove(mv && typeof mv === 'object' ? mv : {});
@@ -1943,6 +1954,34 @@ if (typeof module !== 'undefined') module.exports = Game;
     const theirSkills = [];
     units.forEach((u, i) => [0, 1].forEach(k => { if (Game.skillVisible(m, 0, i, k)) theirSkills.push(`${(u.skillDefs[k] || {}).name} on ${u.name}`); }));
     const hist = m.history.slice(-4).map(h => `- round ${h.round}: ${h.timeout ? 'time ran out' : h.winner === 1 ? 'you won' : h.winner === 0 ? 'you lost' : 'draw'}; you took ${h.dmg[1]} damage, they took ${h.dmg[0]}`);
+    // how each unit type did in the last fight
+    const last = m.history[m.history.length - 1];
+    const howDid = (side) => {
+      if (!last || !last.squads) return [];
+      const by = {};
+      for (const q of last.squads[side]) { const b = by[q.unit] || (by[q.unit] = { n: 0, left: 0, dealt: 0 }); b.n++; b.left += q.left; b.dealt += q.dealt; }
+      return Object.keys(by).sort((a, b) => by[b].dealt - by[a].dealt).map(ui => { const b = by[ui]; return `  ${units[ui].name} x${b.n}: dealt ${b.dealt} damage, ${Math.round(b.left / b.n * 100)}% of bodies survived`; });
+    };
+    const lastFight = last && last.squads ? `LAST FIGHT (round ${last.round}, ${last.winner === 1 ? 'you won' : last.winner === 0 ? 'you lost' : 'draw'} in ${Math.round(last.time)} s)
+Your units:
+${howDid(1).join('\n') || '  none'}
+Their units:
+${howDid(0).join('\n') || '  none'}
+` : '';
+    // their army by unit type, weighted by what it's worth (price x level), and which units beat it
+    const foeArmy = m.armies[0].filter(s => s.round < m.round);
+    const foeW = {}; let foeTotal = 0;
+    for (const s of foeArmy) { const w = Game.unitCostOf(units[s.unit]) * (s.level + 1); foeW[s.unit] = (foeW[s.unit] || 0) + w; foeTotal += w; }
+    const answers = foeTotal ? units.map((u, i) => [i, Object.keys(foeW).reduce((a, j) => a + (+j === i ? 0 : M[i][j] * foeW[j]), 0) / foeTotal]).sort((a, b) => b[1] - a[1]) : [];
+    const pct = (x) => `${x > 0 ? '+' : ''}${Math.round(x * 100)}`;
+    const foeMix = Object.keys(foeW).sort((a, b) => foeW[b] - foeW[a]).map(j => `${units[j].name} ${Math.round(foeW[j] / foeTotal * 100)}%`).join(', ');
+    const counterLines = answers.length ? `THEIR ARMY by value: ${foeMix}
+Your units ranked against their whole army (counter table weighted by their army value):
+${answers.slice(0, 5).map(([i, v]) => `  ${units[i].name} ${pct(v)}`).join('\n')}
+Worst choices against it: ${answers.slice(-3).reverse().map(([i, v]) => `${units[i].name} ${pct(v)}`).join(', ')}
+` : '';
+    const placeNow = Game.deploysAllowed(m, 1);
+    const cheapest = Math.min(...units.map(u => Game.unitCostOf(u)));
     return `You are playing Phone Bellum, a small auto-battler, against a human player. You are the RED side. Decide your moves for round ${m.round}. The human places their new squads at the same time and can't see yours until the fight. You only see their squads from earlier rounds. Play to win: build counters to what they have, protect your damage dealers, and think about what they are likely to add next.
 
 RULES
@@ -1962,8 +2001,14 @@ COUNTER TABLE (each unit vs each other with equal gold; +100 = wins easily, -100
 ${matrix}
 
 STATE
-- Your health ${m.hp[1]}, their health ${m.hp[0]}. Your gold: ${m.gold[1]}.
+- Your health ${m.hp[1]}, their health ${m.hp[0]}. Your gold: ${m.gold[1]}. Their gold to spend this round: ${m.gold[0]}.
 ${hist.length ? 'Recent rounds:\n' + hist.join('\n') : '- This is the first round.'}
+
+${lastFight}${counterLines}
+HOW TO PLAY WELL
+- Spend your gold. Gold you keep does nothing in this fight, and the human spends theirs every round. Aim to end the round with less than ${cheapest} gold left: place your ${placeNow} squad(s), level up squads that are ready (a level-up doubles a squad for half its price, the best deal in the game), buy skills for units you have several of, and buy extra deployments (${Game.CONFIG.extraDeployCost} gold each, up to 3) to place more squads when you still have gold.
+- Learn from the last fight: stop adding units that died without doing damage, and add more of what worked. Counter what they have most of, using the ranking above, but keep a mix so one counter pick from them can't wipe you.
+- Their squads stay where they are, so build where their army will walk into yours. Put tough, short-range units in front of your damage dealers.
 
 YOUR SQUADS
 ${mine.length ? mine.join('\n') : '- none yet'}
@@ -1974,6 +2019,7 @@ ${theirSkills.length ? 'Their skills: ' + theirSkills.join(', ') : ''}
 
 Reply with only a JSON object in this shape:
 {"sell":[squad ids],"levelUp":[squad ids, list one twice to level it twice],"skills":[{"unit":"unit name","slot":1}],"extraDeployments":0,"place":[{"unit":"unit name","col":5,"row":3}],"say":"one short playful line to your opponent, at most 15 words, shown after the fight"}
+For "say": make it about what is happening in this match, and never repeat a line.${claude.history.length ? ' Lines you already used:\n' + claude.history.slice(-6).map(x => '- ' + x).join('\n') : ''}
 Actions run in this order: sell, levelUp, skills, extraDeployments, place. Anything you can't afford or that breaks a rule is skipped, so keep the total cost within your gold (${m.gold[1]} plus any sales). Use exact unit names. Unspent gold isn't lost, but squads on the board win rounds.`;
   }
 
@@ -2011,6 +2057,7 @@ Actions run in this order: sell, levelUp, skills, extraDeployments, place. Anyth
     lastAiLevels = levels;
     claude.did = did;
     claude.say = String(mv.say || '').replace(/\s+/g, ' ').trim().slice(0, 140);
+    if (claude.say) claude.history.push(claude.say);
   }
 
   // ---------- flow: vs AI ----------

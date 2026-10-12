@@ -719,6 +719,7 @@ const Engine = (() => {
       const applied = Math.min(amount, v.hp);
       if (applied <= 0) return;
       stats[owner.side].dealt += applied;
+      owner.dealt = (owner.dealt || 0) + applied;
       owner.xp += applied;
       v.xp += applied * (g.absorbXp == null ? 0.5 : g.absorbXp);
       v.hp -= applied;
@@ -732,6 +733,7 @@ const Engine = (() => {
       st.blocked += hit - dmg;
       const applied = Math.min(dmg, v.hp);
       st.dealt += applied;
+      owner.dealt = (owner.dealt || 0) + applied;
       st.wasted += dmg - applied;
       // experience: damage dealt, half of damage absorbed, and a bounty for killing leveled bodies
       owner.xp += applied;
@@ -1075,9 +1077,9 @@ const Engine = (() => {
       const squads = {};
       for (const b of all) {
         const k = b.side + ':' + b.squad;
-        const s = squads[k] || (squads[k] = { side: b.side, squad: b.squad, total: 0, alive: 0, xp: 0 });
+        const s = squads[k] || (squads[k] = { side: b.side, squad: b.squad, total: 0, alive: 0, xp: 0, dealt: 0 });
         s.total++; if (b.alive) s.alive++;
-        s.xp += b.xp;
+        s.xp += b.xp; s.dealt += b.dealt || 0;
       }
       return {
         winner, timeout, time: t, frac,
