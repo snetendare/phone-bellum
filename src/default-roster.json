@@ -178,7 +178,7 @@
    "name": "Ember Imps",
    "cost": 100,
    "bodies": 4,
-   "hp": 160,
+   "hp": 110,
    "hit": 20,
    "aps": 0.8,
    "range": 10,
