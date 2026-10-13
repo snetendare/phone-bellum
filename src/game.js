@@ -34,10 +34,16 @@ const Game = (() => {
   // rows 0-4: enemy zone (row 4 is its front), rows 5-10: no man's land, rows 11-15: player zone (row 11 is its front)
   const zoneRows = (side) => Array.from({ length: ZONE }, (_, i) => side === 0 ? ROWS - ZONE + i : ZONE - 1 - i); // front row first
   const inZone = (side, row) => side === 0 ? row >= ROWS - ZONE && row < ROWS : row >= 0 && row < ZONE;
-  // Flank columns: from round 3 each player may also deploy inside the ENEMY's zone, in its two edge
-  // columns (the 3 rows nearest no man's land), so you have to guard your own edges.
-  const FLANK = { round: 3, cols: [0, COLS - 1], depth: 3, delay: 3 }; // delay: seconds a squad stands still in the first fight after it was placed on a flank
-  const flankRows = (side) => Array.from({ length: FLANK.depth }, (_, i) => side === 0 ? ZONE - 1 - i : ROWS - ZONE + i); // rows of the enemy zone, its front row first
+  // Flank columns: the two edge columns of the ENEMY's half of the board (their half of no man's land
+  // plus their whole zone). From round 3 you may deploy there; the matching columns on your half are the
+  // enemy's and never yours, so you have to guard your own edges.
+  const FLANK = { round: 3, cols: [0, COLS - 1], delay: 3 }; // delay: seconds a squad stands still in the first fight after it was placed on a flank
+  // the rows of the enemy's half: their zone from its front row to its back row, then their half of no man's land
+  const flankRows = (side) => {
+    const half = ROWS / 2, zone = Array.from({ length: ZONE }, (_, i) => side === 0 ? ZONE - 1 - i : ROWS - ZONE + i);
+    const nml = Array.from({ length: half - ZONE }, (_, i) => side === 0 ? ZONE + i : ROWS - ZONE - 1 - i);
+    return zone.concat(nml);
+  };
   const flankOpen = (m) => !!m && m.round >= FLANK.round;
   const isFlank = (side, col, row) => FLANK.cols.includes(col) && flankRows(side).includes(row);
   // a tile the other player already holds with a squad (or tower) you can see
