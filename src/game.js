@@ -34,10 +34,10 @@ const Game = (() => {
   // rows 0-4: enemy zone (row 4 is its front), rows 5-10: no man's land, rows 11-15: player zone (row 11 is its front)
   const zoneRows = (side) => Array.from({ length: ZONE }, (_, i) => side === 0 ? ROWS - ZONE + i : ZONE - 1 - i); // front row first
   const inZone = (side, row) => side === 0 ? row >= ROWS - ZONE && row < ROWS : row >= 0 && row < ZONE;
-  // Flank columns: from round 3 each player may also deploy in the outer columns of their half of
-  // no man's land (3 rows in front of their zone), so squads start further forward on the edges.
+  // Flank columns: from round 3 each player may also deploy in the outer columns of the ENEMY's half of
+  // no man's land (the 3 rows right in front of the enemy zone), so you have to guard your own edges.
   const FLANK = { round: 3, cols: [0, COLS - 1], depth: 3, delay: 3 }; // delay: seconds a flank squad stands still at the start of every fight
-  const flankRows = (side) => Array.from({ length: FLANK.depth }, (_, i) => side === 0 ? ROWS - ZONE - 1 - i : ZONE + i); // nearest the zone first
+  const flankRows = (side) => Array.from({ length: FLANK.depth }, (_, i) => side === 0 ? ZONE + i : ROWS - ZONE - 1 - i); // nearest the enemy zone first
   const flankOpen = (m) => !!m && m.round >= FLANK.round;
   const isFlank = (side, col, row) => FLANK.cols.includes(col) && flankRows(side).includes(row);
   const canPlaceAt = (m, side, col, row) => col >= 0 && col < COLS && (inZone(side, row) || (flankOpen(m) && isFlank(side, col, row)));
