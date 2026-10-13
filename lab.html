@@ -708,7 +708,6 @@ const Engine = (() => {
     ];
     const dt = g.dt;
     const sight = g.sight == null ? SIGHT : g.sight;
-    const engagedSq = new Set(); // squads that have spotted an enemy
     let projectiles = [];
     let t = 0, shots = [], over = false;
     const dist = (a, b) => hyp(a.x - b.x, a.y - b.y);
@@ -902,19 +901,18 @@ const Engine = (() => {
           const step = b.u.speed * (b.slowT > 0 ? 1 - b.slowMove / 100 : 1) * dt;
           let mv;
           // March straight ahead until an enemy comes within sight (range + SIGHT), or no enemy is left
-          // ahead, then lock on: from then on the body (and its whole squad) goes for the
-          // nearest enemy for the rest of the fight. So a squad meets what stands in its own lane, an empty
-          // lane lets it walk around the side, and nobody flips back and forth between marching and chasing.
+          // ahead, then lock on: from then on the body goes for its own nearest enemy for the rest of the
+          // fight. Each body decides for itself, so a squad can split up when its bodies spot different
+          // enemies. A squad meets what stands in its own lane, an empty lane lets it walk around the side,
+          // and nobody flips back and forth between marching and chasing.
           const fwd = b.side === 0 ? 1 : -1;
-          const sq = b.squad >= 0 ? b.side + ':' + b.squad : null;
-          if (!b.engaged && sq && engagedSq.has(sq)) b.engaged = true;
           if (!b.engaged) {
             let spotted = nd <= rg + sight;
             if (!spotted) { // nothing left ahead to march toward: go for the nearest
               spotted = true;
               for (const f of foes) if (f.alive && !f.hidden && (f.y - b.y) * fwd > 0) { spotted = false; break; }
             }
-            if (spotted) { b.engaged = true; if (sq) engagedSq.add(sq); }
+            if (spotted) b.engaged = true;
           }
           // where it wants to go: straight ahead, or at the nearest enemy
           let wx = 0, wy = fwd;
