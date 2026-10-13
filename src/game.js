@@ -43,7 +43,10 @@ const Game = (() => {
   // a tile the other player already holds with a squad (or tower) you can see
   const enemyHolds = (m, side, col, row) => !!m && (m.armies[1 - side].some(s => s.col === col && s.row === row && s.round < m.round) ||
     (m.round > 1 && m.towers && m.towers[1 - side] && m.towers[1 - side].col === col && m.towers[1 - side].row === row));
-  const canPlaceAt = (m, side, col, row) => col >= 0 && col < COLS && (inZone(side, row) || (flankOpen(m) && isFlank(side, col, row))) && !enemyHolds(m, side, col, row);
+  // the edge tiles of your zone that are the enemy's flank are reserved for them for the whole match
+  const reserved = (side, col, row) => isFlank(1 - side, col, row);
+  const canPlaceAt = (m, side, col, row) => col >= 0 && col < COLS && !reserved(side, col, row) &&
+    (inZone(side, row) || (flankOpen(m) && isFlank(side, col, row))) && !enemyHolds(m, side, col, row);
   const tileToWorld = (col, row) => ({ x: (col - (COLS - 1) / 2) * TILE, y: ((ROWS - 1) / 2 - row) * TILE });
 
   function rng(seed) { // mulberry32
@@ -131,7 +134,7 @@ const Game = (() => {
   // the tower can be placed (or moved) during round 1 only
   function placeTower(m, side, col, row) {
     if (!m.towers) m.towers = [null, null];
-    if (m.round !== 1 || !inZone(side, row) || !towerColOk(col)) return false;
+    if (m.round !== 1 || !inZone(side, row) || !towerColOk(col) || reserved(side, col, row)) return false;
     if (m.armies[side].some(s => s.col === col && s.row === row)) return false;
     m.towers[side] = { col, row };
     return true;
@@ -387,7 +390,7 @@ const Game = (() => {
     deploysAllowed, deploysLeft, deployedThisRound, buyDeploy, refundDeploy,
     skillDef, skillCost, isInnate, hasSkill, skillVisible, unitFor, canBuySkill, buySkill, undoSkill, sellValue, sell,
     TOWER, TOWER_MID, towerColOk, towerAt, needsTower, placeTower, ensureTower,
-    FLANK, flankRows, flankOpen, isFlank, canPlaceAt, enemyHolds,
+    FLANK, flankRows, flankOpen, isFlank, reserved, canPlaceAt, enemyHolds,
     zoneRows, inZone, tileToWorld, createMatch, place, unplace, bodiesFor, startBattle, resolve, aiDeploy, occupied,
   };
 })();
