@@ -151,7 +151,8 @@
    "skillMods": [
     null,
     null
-   ]
+   ],
+   "unlock": 0
   },
   {
    "burst": 1,
@@ -188,7 +189,8 @@
    "skillMods": [
     null,
     null
-   ]
+   ],
+   "unlock": 0
   },
   {
    "burst": 1,
@@ -225,7 +227,8 @@
    "skillMods": [
     null,
     null
-   ]
+   ],
+   "unlock": 50
   },
   {
    "burst": 1,
@@ -262,7 +265,8 @@
    "skillMods": [
     null,
     null
-   ]
+   ],
+   "unlock": 0
   },
   {
    "burst": 1,
@@ -299,7 +303,8 @@
    "skillMods": [
     null,
     null
-   ]
+   ],
+   "unlock": 0
   },
   {
    "burst": 1,
@@ -336,7 +341,8 @@
    "skillMods": [
     null,
     null
-   ]
+   ],
+   "unlock": 100
   },
   {
    "burst": 1,
@@ -376,7 +382,8 @@
      "params": {},
      "cost": 200
     }
-   ]
+   ],
+   "unlock": 50
   },
   {
    "burst": 6,
@@ -413,7 +420,8 @@
    "skillMods": [
     null,
     null
-   ]
+   ],
+   "unlock": 100
   },
   {
    "burst": 1,
@@ -450,7 +458,8 @@
    "skillMods": [
     null,
     null
-   ]
+   ],
+   "unlock": 100
   },
   {
    "burst": 1,
@@ -488,7 +497,8 @@
     null,
     null
    ],
-   "flame": 30
+   "flame": 30,
+   "unlock": 150
   },
   {
    "burst": 1,
@@ -530,7 +540,8 @@
       "hit": 20
      }
     }
-   ]
+   ],
+   "unlock": 150
   },
   {
    "burst": 1,
@@ -567,7 +578,8 @@
    "skillMods": [
     null,
     null
-   ]
+   ],
+   "unlock": 150
   },
   {
    "burst": 1,
@@ -609,7 +621,8 @@
    "skills": [
     "regen",
     "armorHp"
-   ]
+   ],
+   "unlock": 200
   },
   {
    "burst": 1,
@@ -651,7 +664,8 @@
    "skills": [
     "range",
     "shrink"
-   ]
+   ],
+   "unlock": 200
   },
   {
    "burst": 3,
@@ -693,7 +707,8 @@
    "skills": [
     "range",
     "skmv5oxpgk2"
-   ]
+   ],
+   "unlock": 200
   },
   {
    "burst": 1,
@@ -735,7 +750,8 @@
    "skills": [
     "swift",
     "armorHp"
-   ]
+   ],
+   "unlock": 200
   },
   {
    "burst": 1,
@@ -777,7 +793,8 @@
    "skills": [
     "raiseDead",
     "healer"
-   ]
+   ],
+   "unlock": 200
   }
  ]
 }

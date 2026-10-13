@@ -68,6 +68,7 @@ const Game = (() => {
       extraDeploys: [0, 0],
       tech: [{}, {}], // skills bought per unit type: tech[side][unitIdx] = [round bought or 0, round bought or 0]
       towers: [null, null], // { col, row } of each player's tower
+      unlocks: [{}, {}], // units unlocked per player: unlocks[side][unitIdx] = round it was unlocked
     };
   }
 
@@ -85,6 +86,29 @@ const Game = (() => {
     const defs = [0, 1].filter(k => hasSkill(m, side, ui, k)).map(k => skillDef(m, ui, k));
     return defs.length ? E.applySkills(base, defs, m.units) : base;
   }
+  // ---------- unlocks (like Mechabellum: some units start unlocked, the rest cost gold once per match) ----------
+  const unlockCost = (m, ui) => Math.max(0, Math.round(+m.units[ui].unlock || 0));
+  const isUnlocked = (m, side, ui) => unlockCost(m, ui) === 0 || !!(m.unlocks && m.unlocks[side] && m.unlocks[side][ui] > 0);
+  // an unlock bought this round is hidden from the opponent until the fight
+  const unlockVisible = (m, side, ui) => unlockCost(m, ui) === 0 || (isUnlocked(m, side, ui) && m.unlocks[side][ui] < m.round);
+  function unlock(m, side, ui) {
+    if (ui < 0 || ui >= m.units.length || isUnlocked(m, side, ui)) return false;
+    const cost = unlockCost(m, ui);
+    if (m.gold[side] < cost) return false;
+    if (!m.unlocks) m.unlocks = [{}, {}];
+    m.gold[side] -= cost;
+    m.unlocks[side][ui] = m.round;
+    return true;
+  }
+  // take back an unlock bought this round, as long as no squad of that unit was placed with it
+  function undoUnlock(m, side, ui) {
+    if (!m.unlocks || !(m.unlocks[side][ui] === m.round)) return false;
+    if (m.armies[side].some(s => s.unit === ui)) return false;
+    delete m.unlocks[side][ui];
+    m.gold[side] += unlockCost(m, ui);
+    return true;
+  }
+
   function canBuySkill(m, side, ui, k) {
     const d = skillDef(m, ui, k);
     if (!d || hasSkill(m, side, ui, k)) return false;
@@ -156,6 +180,7 @@ const Game = (() => {
   function place(m, side, unitIdx, col, row) {
     if (!canPlaceAt(m, side, col, row)) return null;
     if (needsTower(m, side)) return null; // the tower goes down first
+    if (!isUnlocked(m, side, unitIdx)) return null;
     if (occupied(m, side, col, row)) return null;
     const cost = unitCostOf(m.units[unitIdx]);
     if (m.gold[side] < cost) return null;
@@ -341,10 +366,12 @@ const Game = (() => {
       const budget = m.gold[side] - reserve;
       let best = -1, bs = -Infinity;
       m.units.forEach((u, i) => {
-        if (unitCostOf(u) > budget) return;
+        const extra = isUnlocked(m, side, i) ? 0 : unlockCost(m, i); // a locked unit costs its unlock on top
+        if (unitCostOf(u) + extra > budget) return;
         let s = 0, tot = 0;
         for (const t in oppCount) { s += oppCount[t] * (m.matrix[i][t] || 0); tot += oppCount[t]; }
         s = tot ? s / tot : 0;
+        s -= 0.2 * extra / SQUAD_COST; // unlocking is a one-off, so lean a little toward units already open
         s -= 0.12 * (own[i] || 0);
         s += (r() - 0.5) * 0.35;
         if (s > bs) { bs = s; best = i; }
@@ -352,6 +379,7 @@ const Game = (() => {
       if (best < 0) break;
       const spot = aiSpot(m, side, best, oppArmy, r);
       if (!spot) break;
+      if (!isUnlocked(m, side, best) && !unlock(m, side, best)) break;
       const sq = place(m, side, best, spot.col, spot.row);
       if (!sq) break;
       own[best] = (own[best] || 0) + 1;
@@ -394,6 +422,7 @@ const Game = (() => {
     COLS, ROWS, TILE, ZONE, START_HP, START_GOLD, INCOME, incomeFor, LOSER_BONUS, SQUAD_COST, SQUAD_POINTS, SETTINGS, XP_STEPS, xpNeeded, unitCostOf,
     levelCost, isReady, levelUp, undoLevel, aiLevel, AI, CONFIG,
     deploysAllowed, deploysLeft, deployedThisRound, buyDeploy, refundDeploy,
+    unlockCost, isUnlocked, unlockVisible, unlock, undoUnlock,
     skillDef, skillCost, isInnate, hasSkill, skillVisible, unitFor, canBuySkill, buySkill, undoSkill, sellValue, sell,
     TOWER, TOWER_MID, towerColOk, towerAt, needsTower, placeTower, ensureTower,
     FLANK, flankRows, flankOpen, isFlank, reserved, canPlaceAt, enemyHolds,

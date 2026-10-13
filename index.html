@@ -1074,6 +1074,7 @@ const Game = (() => {
       extraDeploys: [0, 0],
       tech: [{}, {}], // skills bought per unit type: tech[side][unitIdx] = [round bought or 0, round bought or 0]
       towers: [null, null], // { col, row } of each player's tower
+      unlocks: [{}, {}], // units unlocked per player: unlocks[side][unitIdx] = round it was unlocked
     };
   }
 
@@ -1091,6 +1092,29 @@ const Game = (() => {
     const defs = [0, 1].filter(k => hasSkill(m, side, ui, k)).map(k => skillDef(m, ui, k));
     return defs.length ? E.applySkills(base, defs, m.units) : base;
   }
+  // ---------- unlocks (like Mechabellum: some units start unlocked, the rest cost gold once per match) ----------
+  const unlockCost = (m, ui) => Math.max(0, Math.round(+m.units[ui].unlock || 0));
+  const isUnlocked = (m, side, ui) => unlockCost(m, ui) === 0 || !!(m.unlocks && m.unlocks[side] && m.unlocks[side][ui] > 0);
+  // an unlock bought this round is hidden from the opponent until the fight
+  const unlockVisible = (m, side, ui) => unlockCost(m, ui) === 0 || (isUnlocked(m, side, ui) && m.unlocks[side][ui] < m.round);
+  function unlock(m, side, ui) {
+    if (ui < 0 || ui >= m.units.length || isUnlocked(m, side, ui)) return false;
+    const cost = unlockCost(m, ui);
+    if (m.gold[side] < cost) return false;
+    if (!m.unlocks) m.unlocks = [{}, {}];
+    m.gold[side] -= cost;
+    m.unlocks[side][ui] = m.round;
+    return true;
+  }
+  // take back an unlock bought this round, as long as no squad of that unit was placed with it
+  function undoUnlock(m, side, ui) {
+    if (!m.unlocks || !(m.unlocks[side][ui] === m.round)) return false;
+    if (m.armies[side].some(s => s.unit === ui)) return false;
+    delete m.unlocks[side][ui];
+    m.gold[side] += unlockCost(m, ui);
+    return true;
+  }
+
   function canBuySkill(m, side, ui, k) {
     const d = skillDef(m, ui, k);
     if (!d || hasSkill(m, side, ui, k)) return false;
@@ -1162,6 +1186,7 @@ const Game = (() => {
   function place(m, side, unitIdx, col, row) {
     if (!canPlaceAt(m, side, col, row)) return null;
     if (needsTower(m, side)) return null; // the tower goes down first
+    if (!isUnlocked(m, side, unitIdx)) return null;
     if (occupied(m, side, col, row)) return null;
     const cost = unitCostOf(m.units[unitIdx]);
     if (m.gold[side] < cost) return null;
@@ -1347,10 +1372,12 @@ const Game = (() => {
       const budget = m.gold[side] - reserve;
       let best = -1, bs = -Infinity;
       m.units.forEach((u, i) => {
-        if (unitCostOf(u) > budget) return;
+        const extra = isUnlocked(m, side, i) ? 0 : unlockCost(m, i); // a locked unit costs its unlock on top
+        if (unitCostOf(u) + extra > budget) return;
         let s = 0, tot = 0;
         for (const t in oppCount) { s += oppCount[t] * (m.matrix[i][t] || 0); tot += oppCount[t]; }
         s = tot ? s / tot : 0;
+        s -= 0.2 * extra / SQUAD_COST; // unlocking is a one-off, so lean a little toward units already open
         s -= 0.12 * (own[i] || 0);
         s += (r() - 0.5) * 0.35;
         if (s > bs) { bs = s; best = i; }
@@ -1358,6 +1385,7 @@ const Game = (() => {
       if (best < 0) break;
       const spot = aiSpot(m, side, best, oppArmy, r);
       if (!spot) break;
+      if (!isUnlocked(m, side, best) && !unlock(m, side, best)) break;
       const sq = place(m, side, best, spot.col, spot.row);
       if (!sq) break;
       own[best] = (own[best] || 0) + 1;
@@ -1400,6 +1428,7 @@ const Game = (() => {
     COLS, ROWS, TILE, ZONE, START_HP, START_GOLD, INCOME, incomeFor, LOSER_BONUS, SQUAD_COST, SQUAD_POINTS, SETTINGS, XP_STEPS, xpNeeded, unitCostOf,
     levelCost, isReady, levelUp, undoLevel, aiLevel, AI, CONFIG,
     deploysAllowed, deploysLeft, deployedThisRound, buyDeploy, refundDeploy,
+    unlockCost, isUnlocked, unlockVisible, unlock, undoUnlock,
     skillDef, skillCost, isInnate, hasSkill, skillVisible, unitFor, canBuySkill, buySkill, undoSkill, sellValue, sell,
     TOWER, TOWER_MID, towerColOk, towerAt, needsTower, placeTower, ensureTower,
     FLANK, flankRows, flankOpen, isFlank, reserved, canPlaceAt, enemyHolds,
@@ -1411,7 +1440,7 @@ if (typeof module !== 'undefined') module.exports = Game;
 </script>
 <script>
 (() => {
-  const DATA = {"units":[{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"none","defVal":0,"level":0,"name":"Goblin Swarm","cost":1,"bodies":12,"hp":28,"hit":16,"aps":1.2,"range":2,"speed":12,"splash":0,"shape":"triangle","color":"#9BD35A","skills":["swift","shrink"],"skillMods":[null,null]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"none","defVal":0,"level":0,"name":"Skeleton Archers","cost":1,"bodies":8,"hp":32,"hit":12,"aps":0.8,"range":20,"speed":2.5,"splash":0,"shape":"triangle","color":"#E9E3CF","skills":["range","rapid"],"skillMods":[null,null]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"none","defVal":0,"level":0,"name":"Ember Imps","cost":1,"bodies":4,"hp":110,"hit":20,"aps":0.8,"range":10,"speed":4,"splash":3,"shape":"pentagon","color":"#FFA94D","skills":["swift","heavy"],"skillMods":[null,null]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"none","defVal":0,"level":0,"name":"Fire Mage","cost":1,"bodies":1,"hp":150,"hit":35,"aps":0.8,"range":26,"speed":3,"splash":4,"shape":"hexagon","color":"#fb0022","skills":["range","armorHp"],"skillMods":[null,null]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":1,"defense":"none","defVal":0,"level":0,"name":"Sniper","cost":1,"bodies":1,"hp":200,"hit":230,"aps":0.25,"range":35,"speed":2,"splash":0,"shape":"cross","color":"#F7D154","skills":["rapid","spawn"],"skillMods":[null,null]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"armor","defVal":6,"level":0,"name":"Brute","cost":2,"bodies":1,"hp":1100,"hit":98,"aps":0.5,"range":2,"speed":5,"splash":2.1,"shape":"square","color":"#8D99AE","skills":["armorHp","swift"],"skillMods":[null,null]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":20,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"none","defVal":40,"level":0,"name":"Wisps","cost":1,"bodies":3,"hp":80,"hit":70,"aps":0.8,"range":15,"speed":5,"splash":0,"shape":"ring","color":"#ff90ff","skills":["stealth","skmv5oxj501"],"skillMods":[null,{"params":{},"cost":200}]},{"burst":6,"pellets":2,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0.2,"defense":"none","defVal":0,"level":0,"name":"Leaf Wizard","cost":2,"bodies":1,"hp":300,"hit":21,"aps":0.45,"range":27,"speed":8,"splash":0,"shape":"hexagon","color":"#00d200","skills":["rapid","range"],"skillMods":[null,null]},{"burst":1,"pellets":1,"spinUp":0,"pierce":5,"projSpeed":35,"minRange":0,"charge":1,"knockback":0,"windUp":0.5,"defense":"none","defVal":0,"level":0,"name":"Earth Wizard","cost":2,"bodies":1,"hp":650,"hit":440,"aps":0.2,"range":20,"speed":3,"splash":2,"shape":"circle","color":"#24590d","skills":["regen","range"],"skillMods":[null,null]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"none","defVal":0,"level":0,"name":"Flame Wizard","cost":4,"bodies":1,"hp":2000,"hit":20,"aps":4,"range":15,"speed":2,"splash":0,"shape":"bar","color":"#b95018","skills":["armorHp","range"],"skillMods":[null,null],"flame":30},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"none","defVal":0,"level":0,"name":"Steel Wizard","cost":4,"bodies":1,"hp":1800,"hit":150,"aps":0.9,"range":15,"speed":2,"splash":2,"shape":"bar","color":"#57535a","skills":["range","heavy"],"skillMods":[null,{"params":{"slow":20,"hit":20}}]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"none","defVal":0,"level":0,"name":"Slime Wizard","cost":4,"bodies":1,"hp":700,"hit":450,"aps":0.15,"range":20,"speed":4,"splash":5,"shape":"ring","color":"#81f038","skills":["skmv5oxpgk2","range"],"skillMods":[null,null]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"armor","defVal":15,"level":0,"splash":3,"skillsInnate":[false,false],"skillMods":[null,null],"name":"Stone Golem","cost":6,"bodies":1,"hp":3450,"hit":69,"aps":0.6,"range":5,"speed":2.5,"shape":"square","color":"#9C8B7A","skills":["regen","armorHp"]},{"burst":1,"pellets":1,"spinUp":50,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"splash":0,"skillsInnate":[false,false],"skillMods":[null,null],"name":"Sun Priest","cost":6,"bodies":1,"hp":2800,"hit":38,"aps":2,"range":18,"speed":3,"shape":"star","color":"#FFD23F","skills":["range","shrink"]},{"burst":3,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":22,"minRange":12,"charge":1,"knockback":0,"windUp":1.5,"flame":0,"defense":"none","defVal":0,"level":0,"splash":6,"skillsInnate":[false,false],"skillMods":[null,null],"name":"Meteor Caller","cost":6,"bodies":1,"hp":400,"hit":114,"aps":0.3,"range":50,"speed":2,"shape":"diamond","color":"#FF6B35","skills":["range","skmv5oxpgk2"]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":3,"knockback":4,"windUp":0,"flame":0,"defense":"armor","defVal":6,"level":0,"splash":3,"skillsInnate":[false,false],"skillMods":[null,null],"name":"War Mammoth","cost":6,"bodies":1,"hp":2300,"hit":169,"aps":0.5,"range":3,"speed":9,"shape":"pentagon","color":"#A0785A","skills":["swift","armorHp"]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"splash":0,"skillsInnate":[true,false],"skillMods":[null,null],"name":"Necromancer","cost":6,"bodies":1,"hp":2300,"hit":56,"aps":1,"range":20,"speed":2.5,"shape":"hexagon","color":"#9D4EDD","skills":["raiseDead","healer"]}],"matrix":[[0,0.248,-0.678,-0.938,0.903,-0.194,0.042,0.22,0.674,-0.987,0.368,0.778,-0.874,0.757,0.042,0.028,0.873],[-0.248,0,0.184,-1,0.563,0.635,0.729,-1,0.563,-0.021,0.729,0.635,-0.649,0.354,0.115,0.75,0.53],[0.678,-0.184,0,-1,0.292,0.757,-0.201,-0.533,0.188,-0.95,-0.23,0.188,-0.691,0.486,0.021,0.042,0.681],[0.938,1,1,0,-1,0.391,1,0.36,0.083,-0.019,-0.209,-0.483,-0.246,-0.05,-0.912,-0.508,-0.099],[-0.903,-0.563,-0.292,1,0,0.837,-0.306,0.583,1,1,1,1,1,0.707,-0.212,0.077,-0.345],[0.194,-0.635,-0.757,-0.391,-0.837,0,-0.806,0.189,-0.648,-0.128,-0.456,-0.487,0.156,-0.405,0.124,-0.36,-0.082],[-0.042,-0.729,0.201,-1,0.306,0.806,0,-0.806,0.417,-0.545,0.583,0.556,0.806,0.738,-0.237,0.667,0.418],[-0.22,1,0.533,-0.36,-0.583,-0.189,0.806,0,-0.387,0.689,0.333,-0.307,-0.602,-0.01,0.167,-0.57,0.116],[-0.674,-0.563,-0.188,-0.083,-1,0.648,-0.417,0.387,0,0.538,-0.007,-0.333,0.575,0.383,0.041,0.35,-0.653],[0.987,0.021,0.95,0.019,-1,0.128,0.545,-0.689,-0.538,0,-0.356,0.142,-0.537,-0.543,-0.575,0.188,-0.118],[-0.368,-0.729,0.23,0.209,-1,0.456,-0.583,-0.333,0.007,0.356,0,0.083,0.732,-0.205,-0.625,0.593,-0.347],[-0.778,-0.635,-0.188,0.483,-1,0.487,-0.556,0.307,0.333,-0.142,-0.083,0,-0.059,-0.196,0.294,-0.035,-0.168],[0.874,0.649,0.691,0.246,-1,-0.156,-0.806,0.602,-0.575,0.537,-0.732,0.059,0,-0.68,0.397,-0.315,0.157],[-0.757,-0.354,-0.486,0.05,-0.707,0.405,-0.738,0.01,-0.383,0.543,0.205,0.196,0.68,0,0.389,0.517,0.146],[-0.042,-0.115,-0.021,0.912,0.212,-0.124,0.237,-0.167,-0.041,0.575,0.625,-0.294,-0.397,-0.389,0,-0.859,-0.056],[-0.028,-0.75,-0.042,0.508,-0.077,0.36,-0.667,0.57,-0.35,-0.188,-0.593,0.035,0.315,-0.517,0.859,0,0.324],[-0.873,-0.53,-0.681,0.099,0.345,0.082,-0.418,-0.116,0.653,0.118,0.347,0.168,-0.157,-0.146,0.056,-0.324,0]],"skills":[{"id":"regen","type":"regen","name":"Regeneration","cost":100,"params":{}},{"id":"poison","type":"poison","name":"Poison shot","cost":100,"params":{"pct":150}},{"id":"stealth","type":"stealth","name":"Stealth","cost":100,"params":{}},{"id":"armorHp","type":"armorHp","name":"Armor and health","cost":200,"params":{}},{"id":"spawn","type":"spawn","name":"Spawn goblins","cost":200,"params":{}},{"id":"rapid","type":"rapid","name":"Rapid fire","cost":100,"params":{}},{"id":"swift","type":"swift","name":"Swift strikes","cost":100,"params":{}},{"id":"heavy","type":"heavy","name":"Heavy shot","cost":100,"params":{}},{"id":"healer","type":"healer","name":"Healing touch","cost":200,"params":{}},{"id":"range","type":"range","name":"Long reach","cost":200,"params":{}},{"id":"shrink","type":"shrink","name":"Shortsight","cost":100,"params":{}},{"id":"skmv5oxj501","type":"ward","name":"Ward","cost":100,"params":{}},{"id":"skmv5oxpgk2","type":"slow","name":"Slow","cost":100,"params":{}},{"id":"raiseDead","type":"spawn","name":"Raise dead","cost":0,"params":{"unit":"Skeleton Archers","count":3,"every":2,"max":12}}]};
+  const DATA = {"units":[{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"none","defVal":0,"level":0,"name":"Goblin Swarm","cost":1,"bodies":12,"hp":28,"hit":16,"aps":1.2,"range":2,"speed":12,"splash":0,"shape":"triangle","color":"#9BD35A","skills":["swift","shrink"],"skillMods":[null,null],"unlock":0},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"none","defVal":0,"level":0,"name":"Skeleton Archers","cost":1,"bodies":8,"hp":32,"hit":12,"aps":0.8,"range":20,"speed":2.5,"splash":0,"shape":"triangle","color":"#E9E3CF","skills":["range","rapid"],"skillMods":[null,null],"unlock":0},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"none","defVal":0,"level":0,"name":"Ember Imps","cost":1,"bodies":4,"hp":110,"hit":20,"aps":0.8,"range":10,"speed":4,"splash":3,"shape":"pentagon","color":"#FFA94D","skills":["swift","heavy"],"skillMods":[null,null],"unlock":50},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"none","defVal":0,"level":0,"name":"Fire Mage","cost":1,"bodies":1,"hp":150,"hit":35,"aps":0.8,"range":26,"speed":3,"splash":4,"shape":"hexagon","color":"#fb0022","skills":["range","armorHp"],"skillMods":[null,null],"unlock":0},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":1,"defense":"none","defVal":0,"level":0,"name":"Sniper","cost":1,"bodies":1,"hp":200,"hit":230,"aps":0.25,"range":35,"speed":2,"splash":0,"shape":"cross","color":"#F7D154","skills":["rapid","spawn"],"skillMods":[null,null],"unlock":0},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"armor","defVal":6,"level":0,"name":"Brute","cost":2,"bodies":1,"hp":1100,"hit":98,"aps":0.5,"range":2,"speed":5,"splash":2.1,"shape":"square","color":"#8D99AE","skills":["armorHp","swift"],"skillMods":[null,null],"unlock":100},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":20,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"none","defVal":40,"level":0,"name":"Wisps","cost":1,"bodies":3,"hp":80,"hit":70,"aps":0.8,"range":15,"speed":5,"splash":0,"shape":"ring","color":"#ff90ff","skills":["stealth","skmv5oxj501"],"skillMods":[null,{"params":{},"cost":200}],"unlock":50},{"burst":6,"pellets":2,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0.2,"defense":"none","defVal":0,"level":0,"name":"Leaf Wizard","cost":2,"bodies":1,"hp":300,"hit":21,"aps":0.45,"range":27,"speed":8,"splash":0,"shape":"hexagon","color":"#00d200","skills":["rapid","range"],"skillMods":[null,null],"unlock":100},{"burst":1,"pellets":1,"spinUp":0,"pierce":5,"projSpeed":35,"minRange":0,"charge":1,"knockback":0,"windUp":0.5,"defense":"none","defVal":0,"level":0,"name":"Earth Wizard","cost":2,"bodies":1,"hp":650,"hit":440,"aps":0.2,"range":20,"speed":3,"splash":2,"shape":"circle","color":"#24590d","skills":["regen","range"],"skillMods":[null,null],"unlock":100},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"none","defVal":0,"level":0,"name":"Flame Wizard","cost":4,"bodies":1,"hp":2000,"hit":20,"aps":4,"range":15,"speed":2,"splash":0,"shape":"bar","color":"#b95018","skills":["armorHp","range"],"skillMods":[null,null],"flame":30,"unlock":150},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"none","defVal":0,"level":0,"name":"Steel Wizard","cost":4,"bodies":1,"hp":1800,"hit":150,"aps":0.9,"range":15,"speed":2,"splash":2,"shape":"bar","color":"#57535a","skills":["range","heavy"],"skillMods":[null,{"params":{"slow":20,"hit":20}}],"unlock":150},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"none","defVal":0,"level":0,"name":"Slime Wizard","cost":4,"bodies":1,"hp":700,"hit":450,"aps":0.15,"range":20,"speed":4,"splash":5,"shape":"ring","color":"#81f038","skills":["skmv5oxpgk2","range"],"skillMods":[null,null],"unlock":150},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"armor","defVal":15,"level":0,"splash":3,"skillsInnate":[false,false],"skillMods":[null,null],"name":"Stone Golem","cost":6,"bodies":1,"hp":3450,"hit":69,"aps":0.6,"range":5,"speed":2.5,"shape":"square","color":"#9C8B7A","skills":["regen","armorHp"],"unlock":200},{"burst":1,"pellets":1,"spinUp":50,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"splash":0,"skillsInnate":[false,false],"skillMods":[null,null],"name":"Sun Priest","cost":6,"bodies":1,"hp":2800,"hit":38,"aps":2,"range":18,"speed":3,"shape":"star","color":"#FFD23F","skills":["range","shrink"],"unlock":200},{"burst":3,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":22,"minRange":12,"charge":1,"knockback":0,"windUp":1.5,"flame":0,"defense":"none","defVal":0,"level":0,"splash":6,"skillsInnate":[false,false],"skillMods":[null,null],"name":"Meteor Caller","cost":6,"bodies":1,"hp":400,"hit":114,"aps":0.3,"range":50,"speed":2,"shape":"diamond","color":"#FF6B35","skills":["range","skmv5oxpgk2"],"unlock":200},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":3,"knockback":4,"windUp":0,"flame":0,"defense":"armor","defVal":6,"level":0,"splash":3,"skillsInnate":[false,false],"skillMods":[null,null],"name":"War Mammoth","cost":6,"bodies":1,"hp":2300,"hit":169,"aps":0.5,"range":3,"speed":9,"shape":"pentagon","color":"#A0785A","skills":["swift","armorHp"],"unlock":200},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"splash":0,"skillsInnate":[true,false],"skillMods":[null,null],"name":"Necromancer","cost":6,"bodies":1,"hp":2300,"hit":56,"aps":1,"range":20,"speed":2.5,"shape":"hexagon","color":"#9D4EDD","skills":["raiseDead","healer"],"unlock":200}],"matrix":[[0,0.248,-0.678,-0.938,0.903,-0.194,0.042,0.22,0.674,-0.987,0.368,0.778,-0.874,0.757,0.042,0.028,0.873],[-0.248,0,0.184,-1,0.563,0.635,0.729,-1,0.563,-0.021,0.729,0.635,-0.649,0.354,0.115,0.75,0.53],[0.678,-0.184,0,-1,0.292,0.757,-0.201,-0.533,0.188,-0.95,-0.23,0.188,-0.691,0.486,0.021,0.042,0.681],[0.938,1,1,0,-1,0.391,1,0.36,0.083,-0.019,-0.209,-0.483,-0.246,-0.05,-0.912,-0.508,-0.099],[-0.903,-0.563,-0.292,1,0,0.837,-0.306,0.583,1,1,1,1,1,0.707,-0.212,0.077,-0.345],[0.194,-0.635,-0.757,-0.391,-0.837,0,-0.806,0.189,-0.648,-0.128,-0.456,-0.487,0.156,-0.405,0.124,-0.36,-0.082],[-0.042,-0.729,0.201,-1,0.306,0.806,0,-0.806,0.417,-0.545,0.583,0.556,0.806,0.738,-0.237,0.667,0.418],[-0.22,1,0.533,-0.36,-0.583,-0.189,0.806,0,-0.387,0.689,0.333,-0.307,-0.602,-0.01,0.167,-0.57,0.116],[-0.674,-0.563,-0.188,-0.083,-1,0.648,-0.417,0.387,0,0.538,-0.007,-0.333,0.575,0.383,0.041,0.35,-0.653],[0.987,0.021,0.95,0.019,-1,0.128,0.545,-0.689,-0.538,0,-0.356,0.142,-0.537,-0.543,-0.575,0.188,-0.118],[-0.368,-0.729,0.23,0.209,-1,0.456,-0.583,-0.333,0.007,0.356,0,0.083,0.732,-0.205,-0.625,0.593,-0.347],[-0.778,-0.635,-0.188,0.483,-1,0.487,-0.556,0.307,0.333,-0.142,-0.083,0,-0.059,-0.196,0.294,-0.035,-0.168],[0.874,0.649,0.691,0.246,-1,-0.156,-0.806,0.602,-0.575,0.537,-0.732,0.059,0,-0.68,0.397,-0.315,0.157],[-0.757,-0.354,-0.486,0.05,-0.707,0.405,-0.738,0.01,-0.383,0.543,0.205,0.196,0.68,0,0.389,0.517,0.146],[-0.042,-0.115,-0.021,0.912,0.212,-0.124,0.237,-0.167,-0.041,0.575,0.625,-0.294,-0.397,-0.389,0,-0.859,-0.056],[-0.028,-0.75,-0.042,0.508,-0.077,0.36,-0.667,0.57,-0.35,-0.188,-0.593,0.035,0.315,-0.517,0.859,0,0.324],[-0.873,-0.53,-0.681,0.099,0.345,0.082,-0.418,-0.116,0.653,0.118,0.347,0.168,-0.157,-0.146,0.056,-0.324,0]],"skills":[{"id":"regen","type":"regen","name":"Regeneration","cost":100,"params":{}},{"id":"poison","type":"poison","name":"Poison shot","cost":100,"params":{"pct":150}},{"id":"stealth","type":"stealth","name":"Stealth","cost":100,"params":{}},{"id":"armorHp","type":"armorHp","name":"Armor and health","cost":200,"params":{}},{"id":"spawn","type":"spawn","name":"Spawn goblins","cost":200,"params":{}},{"id":"rapid","type":"rapid","name":"Rapid fire","cost":100,"params":{}},{"id":"swift","type":"swift","name":"Swift strikes","cost":100,"params":{}},{"id":"heavy","type":"heavy","name":"Heavy shot","cost":100,"params":{}},{"id":"healer","type":"healer","name":"Healing touch","cost":200,"params":{}},{"id":"range","type":"range","name":"Long reach","cost":200,"params":{}},{"id":"shrink","type":"shrink","name":"Shortsight","cost":100,"params":{}},{"id":"skmv5oxj501","type":"ward","name":"Ward","cost":100,"params":{}},{"id":"skmv5oxpgk2","type":"slow","name":"Slow","cost":100,"params":{}},{"id":"raiseDead","type":"spawn","name":"Raise dead","cost":0,"params":{"unit":"Skeleton Archers","count":3,"every":2,"max":12}}]};
   const ROLES = {
     'Goblin Swarm': 'Fast melee swarm. Soaks shots and overwhelms single-target units.',
     'Skeleton Archers': 'Cheap ranged squad that deals steady damage from behind.',
@@ -1785,7 +1814,8 @@ if (typeof module !== 'undefined') module.exports = Game;
     const left = Game.deploysLeft(m, me), allowed = Game.deploysAllowed(m, me);
     const price = (i) => Game.unitCostOf(units[i]);
     const can = editable();
-    const canBuy = (i) => can && !placingTower() && g >= price(i) && left > 0;
+    const locked = (i) => !Game.isUnlocked(m, me, i);
+    const canBuy = (i) => can && !placingTower() && !locked(i) && g >= price(i) && left > 0;
     let hint;
     if (!can) hint = mode === 'claude' && claude.fightWaiting ? 'Waiting for Claude to finish its move. The fight starts as soon as it does.' : timeUp ? 'Time’s up. The fight is about to start.' : 'You’re ready. Tap Not ready to make changes.';
     else {
@@ -1817,8 +1847,9 @@ if (typeof module !== 'undefined') module.exports = Game;
       <div class="bar"><span class="hint">${hint}</span>${extraBtns}</div>
       <div class="shop" id="shop">${units.map((u, i) => `
         <div class="uwrap">
-          <button class="ucard" data-i="${i}" aria-pressed="${selected === i}" aria-disabled="${!canBuy(i)}">
+          <button class="ucard" data-i="${i}" aria-pressed="${selected === i}" aria-disabled="${!canBuy(i)}" ${locked(i) ? 'data-locked="1" style="border-style:dashed"' : ''}>
             <span class="t"><span style="color:${u.color};display:inline-flex">${Shapes.svg(u.shape, 13)}</span> ${tag(u)}</span><span class="n">${esc(u.name)}</span>
+            ${locked(i) ? `<span class="c" style="color:var(--gold)">Locked · unlock ${Game.unlockCost(m, i)}</span>` : ''}
             <span class="c">${price(i)} · ${u.bodies} ${u.bodies === 1 ? 'body' : 'bodies'}${[0, 1].filter(k => Game.hasSkill(m, me, i, k)).length ? ` · ${[0, 1].filter(k => Game.hasSkill(m, me, i, k)).length}★` : ''}</span>
           </button>
           <button class="info" data-info="${i}" aria-label="About ${esc(u.name)}">i</button>
@@ -1828,6 +1859,7 @@ if (typeof module !== 'undefined') module.exports = Game;
     shop.scrollLeft = shopScroll;
     shop.addEventListener('scroll', () => { shopScroll = shop.scrollLeft; }, { passive: true });
     shop.querySelectorAll('.ucard').forEach(b => b.addEventListener('click', () => {
+      if (b.dataset.locked) { openSheet(+b.dataset.i); return; } // a locked unit opens its sheet, where it can be unlocked
       if (b.getAttribute('aria-disabled') === 'true') return;
       const i = +b.dataset.i;
       selected = selected === i ? null : i;
@@ -1906,6 +1938,7 @@ if (typeof module !== 'undefined') module.exports = Game;
         <li>You see the enemy’s earlier squads while you deploy, so build counters.</li>
         <li>3 deployments in round 1, then 2 per round. Extra ones cost ${Game.CONFIG.extraDeployCost} gold.</li>
         <li>Squads earn experience. A gold + means you can upgrade it: level 2 doubles health and attack, level 3 triples them.</li>
+        <li>Some units start unlocked. The rest cost gold once to unlock for the match; tap a locked card to unlock it.</li>
         <li>Each unit has two skills. Buy one and all your squads of that unit get it.</li>
         <li>Tap a squad from an earlier round to sell it for half its price.</li>
       </ul>
@@ -2047,9 +2080,10 @@ if (typeof module !== 'undefined') module.exports = Game;
   function armyOf(match, side) {
     return match.armies[side].map(q => ({ unit: units[q.unit].name, col: q.col, row: q.row, level: q.level + 1, placed: q.round }));
   }
+  const unlocksOf = (match, side) => units.map((u, i) => Game.unlockCost(match, i) > 0 && Game.isUnlocked(match, side, i) ? u.name : null).filter(Boolean);
   function skillsOf(match, side) {
     const out = [];
-    units.forEach((u, i) => [0, 1].forEach(k => { if (Game.hasSkill(match, side, i, k)) out.push(`${(u.skillDefs[k] || {}).name} (${u.name})`); }));
+    units.forEach((u, i) => [0, 1].forEach(k => { if (Game.hasSkill(match, side, i, k) && !Game.isInnate(match, i, k)) out.push(`${(u.skillDefs[k] || {}).name} (${u.name})`); }));
     return out;
   }
   function recordRound(pre, sum) {
@@ -2057,8 +2091,8 @@ if (typeof module !== 'undefined') module.exports = Game;
     const p = withUnits(pre), you = me, them = foe();
     const entry = {
       round: sum.round,
-      you: { hpBefore: p.hp[you], gold: p.gold[you], army: armyOf(p, you), skills: skillsOf(p, you), tower: (p.towers && p.towers[you]) || null },
-      them: { hpBefore: p.hp[them], gold: p.gold[them], army: armyOf(p, them), skills: skillsOf(p, them), tower: (p.towers && p.towers[them]) || null },
+      you: { hpBefore: p.hp[you], gold: p.gold[you], army: armyOf(p, you), skills: skillsOf(p, you), tower: (p.towers && p.towers[you]) || null, unlocked: unlocksOf(p, you) },
+      them: { hpBefore: p.hp[them], gold: p.gold[them], army: armyOf(p, them), skills: skillsOf(p, them), tower: (p.towers && p.towers[them]) || null, unlocked: unlocksOf(p, them) },
       result: { winner: sum.winner === you ? 'you' : sum.winner === them ? 'them' : 'draw', timeout: !!sum.timeout, seconds: Math.round(sum.time), damageToYou: sum.dmg[you], damageToThem: sum.dmg[them], yourTowerFell: !!(sum.towerFell && sum.towerFell[you]), theirTowerFell: !!(sum.towerFell && sum.towerFell[them]) },
     };
     if (mode === 'claude') entry.claude = { said: claude.say || null, alsoDid: claude.did.slice(), leveledUp: lastAiLevels.map(x => `${units[x.unit].name} to level ${x.level + 1}`), botPlayed: !!claude.bot, note: claude.note || null };
@@ -2151,7 +2185,8 @@ if (typeof module !== 'undefined') module.exports = Game;
       if (u.knockback > 0) t.push(`knockback ${u.knockback} m`);
       if (u.windUp > 0) t.push(`wind-up ${u.windUp} s`);
       const sk = (u.skillDefs || []).map((d, k) => d ? `skill ${k + 1} "${d.name}" (${Game.isInnate(m, i, k) ? 'BUILT IN: always on for both players, free' : `${Game.skillCost(m, i, k)} gold${Game.hasSkill(m, 1, i, k) ? ', YOU OWN IT' : ''}`}): ${Engine.describeSkill(d)}` : null).filter(Boolean);
-      return `- ${u.name}: price ${Game.unitCostOf(u)}, ${u.bodies} ${u.bodies === 1 ? 'body' : 'bodies'} x ${n1(u.hp, 0)} hp each, hit ${n1(u.hit)} x ${n1(u.aps, 2)}/s, range ${u.range} m, speed ${u.speed} m/s${t.length ? ', ' + t.join(', ') : ''}. Level-up cost ${Game.levelCost(u)}.${sk.length ? '\n    ' + sk.join('\n    ') : ''}`;
+      const lock = Game.isUnlocked(m, 1, i) ? (Game.unlockCost(m, i) ? ' [unlocked]' : '') : ` [LOCKED: unlock once for ${Game.unlockCost(m, i)} gold before you can place it]`;
+      return `- ${u.name}${lock}: price ${Game.unitCostOf(u)}, ${u.bodies} ${u.bodies === 1 ? 'body' : 'bodies'} x ${n1(u.hp, 0)} hp each, hit ${n1(u.hit)} x ${n1(u.aps, 2)}/s, range ${u.range} m, speed ${u.speed} m/s${t.length ? ', ' + t.join(', ') : ''}. Level-up cost ${Game.levelCost(u)}.${sk.length ? '\n    ' + sk.join('\n    ') : ''}`;
     };
     const tag = (u) => u.name;
     const matrix = units.map((u, i) => `${tag(u)}: ` + units.map((v, j) => i === j ? null : `${tag(v)} ${M[i][j] > 0 ? '+' : ''}${Math.round(M[i][j] * 100)}`).filter(Boolean).join(', ')).join('\n');
@@ -2200,6 +2235,7 @@ RULES
 - Gold: both players get ${Game.incomeFor(2)} going into round 2, and ${Game.CONFIG.incomeStep} more every round after that (next round: +${Game.incomeFor(m.round + 1)}). The round's loser gets +${Game.LOSER_BONUS} extra. Unspent gold carries over.
 - This round you may place ${Game.deploysAllowed(m, 1)} new squad(s). Each extra deployment costs ${Game.CONFIG.extraDeployCost} gold.
 - Squads earn XP by dealing and taking damage. A squad marked READY TO LEVEL UP can be upgraded for its unit's level-up cost: level 2 doubles health and hit, level 3 triples them. Leveling up chaff (many cheap bodies) gives the enemy lots of XP when they die.
+- Unlocks: units marked LOCKED must be unlocked once (their unlock price, on top of the squad price) before you can place them; it lasts the whole match. List them under "unlock", or just place them and they're unlocked automatically if you can afford it.${(() => { const t = units.map((u, i) => Game.unlockCost(m, i) > 0 && Game.unlockVisible(m, 0, i) ? u.name : null).filter(Boolean); return t.length ? ' The opponent has unlocked: ' + t.join(', ') + '.' : ''; })()}
 - Skills: each unit has 2. Buying one (its price) gives it to ALL your squads of that unit, now and later. You need at least one squad of that unit on the board (placing one this round counts).
 - You may sell squads from earlier rounds for half their price (their tile becomes free).
 
@@ -2232,9 +2268,9 @@ TOWERS
 - Their tower: ${m.round > 1 && m.towers && m.towers[0] ? `col ${m.towers[0].col}, row ${m.towers[0].row}` : 'hidden until the first fight'}
 
 Reply with only a JSON object in this shape:
-{"sell":[squad ids],"levelUp":[squad ids, list one twice to level it twice],"skills":[{"unit":"unit name","slot":1}],"extraDeployments":0,"place":[{"unit":"unit name","col":5,"row":3}],"say":"one short playful line to your opponent, at most 15 words, shown after the fight"}
+{"unlock":["unit name"],"sell":[squad ids],"levelUp":[squad ids, list one twice to level it twice],"skills":[{"unit":"unit name","slot":1}],"extraDeployments":0,"place":[{"unit":"unit name","col":5,"row":3}],"say":"one short playful line to your opponent, at most 15 words, shown after the fight"}
 For "say": make it about what is happening in this match, and never repeat a line.${claude.history.length ? ' Lines you already used:\n' + claude.history.slice(-6).map(x => '- ' + x).join('\n') : ''}
-Actions run in this order: tower (round 1 only), sell, levelUp, skills, extraDeployments, place. Anything you can't afford or that breaks a rule is skipped, so keep the total cost within your gold (${m.gold[1]} plus any sales). Use exact unit names. Unspent gold isn't lost, but squads on the board win rounds.`;
+Actions run in this order: tower (round 1 only), sell, levelUp, unlock, skills, extraDeployments, place. Anything you can't afford or that breaks a rule is skipped, so keep the total cost within your gold (${m.gold[1]} plus any sales). Use exact unit names. Unspent gold isn't lost, but squads on the board win rounds.`;
   }
 
   function applyClaudeMove(mv) {
@@ -2263,11 +2299,13 @@ Actions run in this order: tower (round 1 only), sell, levelUp, skills, extraDep
         if (ui >= 0 && (k === 0 || k === 1) && Game.buySkill(m, 1, ui, k)) { x.done = true; did.push(`bought ${units[ui].skillDefs[k].name} for ${units[ui].name}`); }
       }
     };
+    for (const name of list(mv.unlock)) { const ui = unitIdx(name); if (ui >= 0 && Game.unlock(m, 1, ui)) did.push(`unlocked ${units[ui].name}`); }
     trySkills();
     const extra = Math.max(0, Math.min(3, int(mv.extraDeployments) || 0));
     for (let k = 0; k < extra; k++) Game.buyDeploy(m, 1);
     for (const pl of list(mv.place)) {
       const ui = unitIdx(pl && pl.unit);
+      if (ui >= 0 && !Game.isUnlocked(m, 1, ui) && m.gold[1] >= Game.unlockCost(m, ui) + Game.unitCostOf(units[ui]) && Game.unlock(m, 1, ui)) did.push(`unlocked ${units[ui].name}`);
       if (ui >= 0) Game.place(m, 1, ui, int(pl.col), int(pl.row));
     }
     trySkills(); // skills for units placed just now
@@ -2431,6 +2469,19 @@ Actions run in this order: tower (round 1 only), sell, levelUp, skills, extraDep
   });
 
   // ---------- unit sheet ----------
+  function unlockBlock(i, side) {
+    if (!m || Game.unlockCost(m, i) === 0) return '';
+    const cost = Game.unlockCost(m, i);
+    if (side !== undefined && side !== me) return ''; // an enemy squad on the board is unlocked by definition
+    if (Game.isUnlocked(m, me, i)) {
+      const undo = phase === 'deploy' && editable() && m.unlocks[me][i] === m.round && !m.armies[me].some(q => q.unit === i);
+      return `<div class="bar" style="border-top:1px solid var(--line);padding-top:8px"><span class="hint">Unlocked${m.unlocks[me][i] === m.round ? ' this round' : ''}</span>${undo ? '<button class="btn small" id="unlock-undo">Undo unlock</button>' : ''}</div>`;
+    }
+    const why = phase !== 'deploy' ? '' : !editable() ? '' : m.gold[me] < cost ? `Need ${cost} gold` : '';
+    return `<div style="display:grid;gap:4px;border-top:1px solid var(--line);padding-top:8px">
+      <div class="bar"><b style="font-family:var(--font-display)">Locked</b>${phase === 'deploy' ? (why || !editable() ? `<button class="btn small" disabled>${why || `Unlock · ${cost} gold`}</button>` : `<button class="btn small primary" id="unlock">Unlock · ${cost} gold</button>`) : `<span class="hint">${cost} gold to unlock</span>`}</div>
+      <span class="hint">Pay once to be able to field this unit for the rest of the match. The opponent sees it after the next fight.</span></div>`;
+  }
   function skillBlock(i, side) {
     const defs = units[i].skillDefs || [];
     if (!defs.some(Boolean) || !m) return '';
@@ -2512,6 +2563,7 @@ Actions run in this order: tower (round 1 only), sell, levelUp, skills, extraDep
       <div class="bar"><h3 id="sheet-h"><span style="color:${u.color}">${Shapes.svg(u.shape, 18)}</span> ${esc(u.name)}</h3><button class="btn small" id="close">Close</button></div>
       <p class="role" style="margin:0">${ROLES[u.name] && !customSet ? ROLES[u.name] : customSet ? `From a Counter Lab roster · ${Game.unitCostOf(base)} gold` : ''}</p>
       ${lvl}
+      ${unlockBlock(i, side)}
       ${tr.length ? `<div class="traits">${tr.map(x => `<span>${x}</span>`).join('')}</div>` : ''}
       ${skillBlock(i, side)}
       <div class="stats num">
@@ -2529,6 +2581,8 @@ Actions run in this order: tower (round 1 only), sell, levelUp, skills, extraDep
     if ($('lvl-up')) $('lvl-up').addEventListener('click', () => { if (editable() && Game.levelUp(m, me, sq.id)) after(); });
     if ($('lvl-undo')) $('lvl-undo').addEventListener('click', () => { if (editable() && Game.undoLevel(m, me, sq.id)) after(); });
     $('sheet').querySelectorAll('[data-skill]').forEach(b => b.addEventListener('click', () => { if (editable() && Game.buySkill(m, me, i, +b.dataset.skill)) after(); }));
+    if ($('unlock')) $('unlock').addEventListener('click', () => { if (editable() && Game.unlock(m, me, i)) { selected = i; after(); } });
+    if ($('unlock-undo')) $('unlock-undo').addEventListener('click', () => { if (editable() && Game.undoUnlock(m, me, i)) { if (selected === i) selected = null; after(); } });
     $('sheet').querySelectorAll('[data-unskill]').forEach(b => b.addEventListener('click', () => { if (editable() && Game.undoSkill(m, me, i, +b.dataset.unskill)) after(); }));
     if ($('sell')) $('sell').addEventListener('click', () => {
       const btn = $('sell');
@@ -2756,6 +2810,7 @@ Actions run in this order: tower (round 1 only), sell, levelUp, skills, extraDep
       // skills bought this round stay hidden too
       for (const ui in (s.tech && s.tech[0]) || {}) s.tech[0][ui] = s.tech[0][ui].map(r => r === m.round ? 0 : r);
       if (m.round === 1 && s.towers) s.towers = [null, s.towers[1]]; // the host's tower stays hidden until the first fight
+      if (s.unlocks && s.unlocks[0]) for (const ui in s.unlocks[0]) if (s.unlocks[0][ui] === m.round) delete s.unlocks[0][ui]; // so do this round's unlocks
     }
     return s;
   }
@@ -2807,6 +2862,12 @@ Actions run in this order: tower (round 1 only), sell, levelUp, skills, extraDep
     }
     if (!m.tech) m.tech = [{}, {}];
     m.tech[1] = tech;
+    // the guest's unlocks: earlier ones stay as they were, this round's are taken as sent (gold was checked on their side)
+    if (!m.unlocks) m.unlocks = [{}, {}];
+    const unl = {};
+    for (const ui in m.unlocks[1]) if (m.unlocks[1][ui] < m.round) unl[ui] = m.unlocks[1][ui];
+    if (d.unlocks && typeof d.unlocks === 'object') for (const ui in d.unlocks) { const i = +ui; if (Number.isInteger(i) && i >= 0 && i < n && (d.unlocks[ui] | 0) === m.round) unl[i] = m.round; }
+    m.unlocks[1] = unl;
     // the guest's tower, which can only be set or moved in round 1
     if (m.round === 1 && m.towers) {
       const tw = d.tower;
@@ -2926,7 +2987,7 @@ Actions run in this order: tower (round 1 only), sell, levelUp, skills, extraDep
 
   function sendSide() {
     if (mode !== 'guest' || !m || phase !== 'deploy') return;
-    send({ t: 'side', round: m.round, army: m.armies[1], gold: m.gold[1], extra: m.extraDeploys[1], nextId: m.nextId[1], tech: (m.tech && m.tech[1]) || {}, tower: (m.towers && m.towers[1]) || null, ready: ready[1] || timeUp });
+    send({ t: 'side', round: m.round, army: m.armies[1], gold: m.gold[1], extra: m.extraDeploys[1], nextId: m.nextId[1], tech: (m.tech && m.tech[1]) || {}, tower: (m.towers && m.towers[1]) || null, unlocks: (m.unlocks && m.unlocks[1]) || {}, ready: ready[1] || timeUp });
   }
 
   function guestRecv(d) {
@@ -2944,7 +3005,8 @@ Actions run in this order: tower (round 1 only), sell, levelUp, skills, extraDep
           // same round after a reconnect: keep our own side as it is here, take everything else from the host
           if (!incoming.tech) incoming.tech = [{}, {}];
           if (!incoming.towers) incoming.towers = [null, null];
-          for (const k of ['armies', 'gold', 'extraDeploys', 'nextId', 'tech', 'towers']) incoming[k][1] = (m[k] || [null, null])[1];
+          if (!incoming.unlocks) incoming.unlocks = [{}, {}];
+          for (const k of ['armies', 'gold', 'extraDeploys', 'nextId', 'tech', 'towers', 'unlocks']) incoming[k][1] = (m[k] || [null, null])[1];
           m = incoming; ready[0] = theirReady;
           deadline = d.remaining > 0 ? now() + d.remaining - 300 : 0;
           timeUp = false;

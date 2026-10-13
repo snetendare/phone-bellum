@@ -444,7 +444,8 @@ a { color: var(--you); }
     const left = Game.deploysLeft(m, me), allowed = Game.deploysAllowed(m, me);
     const price = (i) => Game.unitCostOf(units[i]);
     const can = editable();
-    const canBuy = (i) => can && !placingTower() && g >= price(i) && left > 0;
+    const locked = (i) => !Game.isUnlocked(m, me, i);
+    const canBuy = (i) => can && !placingTower() && !locked(i) && g >= price(i) && left > 0;
     let hint;
     if (!can) hint = mode === 'claude' && claude.fightWaiting ? 'Waiting for Claude to finish its move. The fight starts as soon as it does.' : timeUp ? 'Time’s up. The fight is about to start.' : 'You’re ready. Tap Not ready to make changes.';
     else {
@@ -476,8 +477,9 @@ a { color: var(--you); }
       <div class="bar"><span class="hint">${hint}</span>${extraBtns}</div>
       <div class="shop" id="shop">${units.map((u, i) => `
         <div class="uwrap">
-          <button class="ucard" data-i="${i}" aria-pressed="${selected === i}" aria-disabled="${!canBuy(i)}">
+          <button class="ucard" data-i="${i}" aria-pressed="${selected === i}" aria-disabled="${!canBuy(i)}" ${locked(i) ? 'data-locked="1" style="border-style:dashed"' : ''}>
             <span class="t"><span style="color:${u.color};display:inline-flex">${Shapes.svg(u.shape, 13)}</span> ${tag(u)}</span><span class="n">${esc(u.name)}</span>
+            ${locked(i) ? `<span class="c" style="color:var(--gold)">Locked · unlock ${Game.unlockCost(m, i)}</span>` : ''}
             <span class="c">${price(i)} · ${u.bodies} ${u.bodies === 1 ? 'body' : 'bodies'}${[0, 1].filter(k => Game.hasSkill(m, me, i, k)).length ? ` · ${[0, 1].filter(k => Game.hasSkill(m, me, i, k)).length}★` : ''}</span>
           </button>
           <button class="info" data-info="${i}" aria-label="About ${esc(u.name)}">i</button>
@@ -487,6 +489,7 @@ a { color: var(--you); }
     shop.scrollLeft = shopScroll;
     shop.addEventListener('scroll', () => { shopScroll = shop.scrollLeft; }, { passive: true });
     shop.querySelectorAll('.ucard').forEach(b => b.addEventListener('click', () => {
+      if (b.dataset.locked) { openSheet(+b.dataset.i); return; } // a locked unit opens its sheet, where it can be unlocked
       if (b.getAttribute('aria-disabled') === 'true') return;
       const i = +b.dataset.i;
       selected = selected === i ? null : i;
@@ -565,6 +568,7 @@ a { color: var(--you); }
         <li>You see the enemy’s earlier squads while you deploy, so build counters.</li>
         <li>3 deployments in round 1, then 2 per round. Extra ones cost ${Game.CONFIG.extraDeployCost} gold.</li>
         <li>Squads earn experience. A gold + means you can upgrade it: level 2 doubles health and attack, level 3 triples them.</li>
+        <li>Some units start unlocked. The rest cost gold once to unlock for the match; tap a locked card to unlock it.</li>
         <li>Each unit has two skills. Buy one and all your squads of that unit get it.</li>
         <li>Tap a squad from an earlier round to sell it for half its price.</li>
       </ul>
@@ -706,9 +710,10 @@ a { color: var(--you); }
   function armyOf(match, side) {
     return match.armies[side].map(q => ({ unit: units[q.unit].name, col: q.col, row: q.row, level: q.level + 1, placed: q.round }));
   }
+  const unlocksOf = (match, side) => units.map((u, i) => Game.unlockCost(match, i) > 0 && Game.isUnlocked(match, side, i) ? u.name : null).filter(Boolean);
   function skillsOf(match, side) {
     const out = [];
-    units.forEach((u, i) => [0, 1].forEach(k => { if (Game.hasSkill(match, side, i, k)) out.push(`${(u.skillDefs[k] || {}).name} (${u.name})`); }));
+    units.forEach((u, i) => [0, 1].forEach(k => { if (Game.hasSkill(match, side, i, k) && !Game.isInnate(match, i, k)) out.push(`${(u.skillDefs[k] || {}).name} (${u.name})`); }));
     return out;
   }
   function recordRound(pre, sum) {
@@ -716,8 +721,8 @@ a { color: var(--you); }
     const p = withUnits(pre), you = me, them = foe();
     const entry = {
       round: sum.round,
-      you: { hpBefore: p.hp[you], gold: p.gold[you], army: armyOf(p, you), skills: skillsOf(p, you), tower: (p.towers && p.towers[you]) || null },
-      them: { hpBefore: p.hp[them], gold: p.gold[them], army: armyOf(p, them), skills: skillsOf(p, them), tower: (p.towers && p.towers[them]) || null },
+      you: { hpBefore: p.hp[you], gold: p.gold[you], army: armyOf(p, you), skills: skillsOf(p, you), tower: (p.towers && p.towers[you]) || null, unlocked: unlocksOf(p, you) },
+      them: { hpBefore: p.hp[them], gold: p.gold[them], army: armyOf(p, them), skills: skillsOf(p, them), tower: (p.towers && p.towers[them]) || null, unlocked: unlocksOf(p, them) },
       result: { winner: sum.winner === you ? 'you' : sum.winner === them ? 'them' : 'draw', timeout: !!sum.timeout, seconds: Math.round(sum.time), damageToYou: sum.dmg[you], damageToThem: sum.dmg[them], yourTowerFell: !!(sum.towerFell && sum.towerFell[you]), theirTowerFell: !!(sum.towerFell && sum.towerFell[them]) },
     };
     if (mode === 'claude') entry.claude = { said: claude.say || null, alsoDid: claude.did.slice(), leveledUp: lastAiLevels.map(x => `${units[x.unit].name} to level ${x.level + 1}`), botPlayed: !!claude.bot, note: claude.note || null };
@@ -810,7 +815,8 @@ a { color: var(--you); }
       if (u.knockback > 0) t.push(`knockback ${u.knockback} m`);
       if (u.windUp > 0) t.push(`wind-up ${u.windUp} s`);
       const sk = (u.skillDefs || []).map((d, k) => d ? `skill ${k + 1} "${d.name}" (${Game.isInnate(m, i, k) ? 'BUILT IN: always on for both players, free' : `${Game.skillCost(m, i, k)} gold${Game.hasSkill(m, 1, i, k) ? ', YOU OWN IT' : ''}`}): ${Engine.describeSkill(d)}` : null).filter(Boolean);
-      return `- ${u.name}: price ${Game.unitCostOf(u)}, ${u.bodies} ${u.bodies === 1 ? 'body' : 'bodies'} x ${n1(u.hp, 0)} hp each, hit ${n1(u.hit)} x ${n1(u.aps, 2)}/s, range ${u.range} m, speed ${u.speed} m/s${t.length ? ', ' + t.join(', ') : ''}. Level-up cost ${Game.levelCost(u)}.${sk.length ? '\n    ' + sk.join('\n    ') : ''}`;
+      const lock = Game.isUnlocked(m, 1, i) ? (Game.unlockCost(m, i) ? ' [unlocked]' : '') : ` [LOCKED: unlock once for ${Game.unlockCost(m, i)} gold before you can place it]`;
+      return `- ${u.name}${lock}: price ${Game.unitCostOf(u)}, ${u.bodies} ${u.bodies === 1 ? 'body' : 'bodies'} x ${n1(u.hp, 0)} hp each, hit ${n1(u.hit)} x ${n1(u.aps, 2)}/s, range ${u.range} m, speed ${u.speed} m/s${t.length ? ', ' + t.join(', ') : ''}. Level-up cost ${Game.levelCost(u)}.${sk.length ? '\n    ' + sk.join('\n    ') : ''}`;
     };
     const tag = (u) => u.name;
     const matrix = units.map((u, i) => `${tag(u)}: ` + units.map((v, j) => i === j ? null : `${tag(v)} ${M[i][j] > 0 ? '+' : ''}${Math.round(M[i][j] * 100)}`).filter(Boolean).join(', ')).join('\n');
@@ -859,6 +865,7 @@ RULES
 - Gold: both players get ${Game.incomeFor(2)} going into round 2, and ${Game.CONFIG.incomeStep} more every round after that (next round: +${Game.incomeFor(m.round + 1)}). The round's loser gets +${Game.LOSER_BONUS} extra. Unspent gold carries over.
 - This round you may place ${Game.deploysAllowed(m, 1)} new squad(s). Each extra deployment costs ${Game.CONFIG.extraDeployCost} gold.
 - Squads earn XP by dealing and taking damage. A squad marked READY TO LEVEL UP can be upgraded for its unit's level-up cost: level 2 doubles health and hit, level 3 triples them. Leveling up chaff (many cheap bodies) gives the enemy lots of XP when they die.
+- Unlocks: units marked LOCKED must be unlocked once (their unlock price, on top of the squad price) before you can place them; it lasts the whole match. List them under "unlock", or just place them and they're unlocked automatically if you can afford it.${(() => { const t = units.map((u, i) => Game.unlockCost(m, i) > 0 && Game.unlockVisible(m, 0, i) ? u.name : null).filter(Boolean); return t.length ? ' The opponent has unlocked: ' + t.join(', ') + '.' : ''; })()}
 - Skills: each unit has 2. Buying one (its price) gives it to ALL your squads of that unit, now and later. You need at least one squad of that unit on the board (placing one this round counts).
 - You may sell squads from earlier rounds for half their price (their tile becomes free).
 
@@ -891,9 +898,9 @@ TOWERS
 - Their tower: ${m.round > 1 && m.towers && m.towers[0] ? `col ${m.towers[0].col}, row ${m.towers[0].row}` : 'hidden until the first fight'}
 
 Reply with only a JSON object in this shape:
-{"sell":[squad ids],"levelUp":[squad ids, list one twice to level it twice],"skills":[{"unit":"unit name","slot":1}],"extraDeployments":0,"place":[{"unit":"unit name","col":5,"row":3}],"say":"one short playful line to your opponent, at most 15 words, shown after the fight"}
+{"unlock":["unit name"],"sell":[squad ids],"levelUp":[squad ids, list one twice to level it twice],"skills":[{"unit":"unit name","slot":1}],"extraDeployments":0,"place":[{"unit":"unit name","col":5,"row":3}],"say":"one short playful line to your opponent, at most 15 words, shown after the fight"}
 For "say": make it about what is happening in this match, and never repeat a line.${claude.history.length ? ' Lines you already used:\n' + claude.history.slice(-6).map(x => '- ' + x).join('\n') : ''}
-Actions run in this order: tower (round 1 only), sell, levelUp, skills, extraDeployments, place. Anything you can't afford or that breaks a rule is skipped, so keep the total cost within your gold (${m.gold[1]} plus any sales). Use exact unit names. Unspent gold isn't lost, but squads on the board win rounds.`;
+Actions run in this order: tower (round 1 only), sell, levelUp, unlock, skills, extraDeployments, place. Anything you can't afford or that breaks a rule is skipped, so keep the total cost within your gold (${m.gold[1]} plus any sales). Use exact unit names. Unspent gold isn't lost, but squads on the board win rounds.`;
   }
 
   function applyClaudeMove(mv) {
@@ -922,11 +929,13 @@ Actions run in this order: tower (round 1 only), sell, levelUp, skills, extraDep
         if (ui >= 0 && (k === 0 || k === 1) && Game.buySkill(m, 1, ui, k)) { x.done = true; did.push(`bought ${units[ui].skillDefs[k].name} for ${units[ui].name}`); }
       }
     };
+    for (const name of list(mv.unlock)) { const ui = unitIdx(name); if (ui >= 0 && Game.unlock(m, 1, ui)) did.push(`unlocked ${units[ui].name}`); }
     trySkills();
     const extra = Math.max(0, Math.min(3, int(mv.extraDeployments) || 0));
     for (let k = 0; k < extra; k++) Game.buyDeploy(m, 1);
     for (const pl of list(mv.place)) {
       const ui = unitIdx(pl && pl.unit);
+      if (ui >= 0 && !Game.isUnlocked(m, 1, ui) && m.gold[1] >= Game.unlockCost(m, ui) + Game.unitCostOf(units[ui]) && Game.unlock(m, 1, ui)) did.push(`unlocked ${units[ui].name}`);
       if (ui >= 0) Game.place(m, 1, ui, int(pl.col), int(pl.row));
     }
     trySkills(); // skills for units placed just now
@@ -1090,6 +1099,19 @@ Actions run in this order: tower (round 1 only), sell, levelUp, skills, extraDep
   });
 
   // ---------- unit sheet ----------
+  function unlockBlock(i, side) {
+    if (!m || Game.unlockCost(m, i) === 0) return '';
+    const cost = Game.unlockCost(m, i);
+    if (side !== undefined && side !== me) return ''; // an enemy squad on the board is unlocked by definition
+    if (Game.isUnlocked(m, me, i)) {
+      const undo = phase === 'deploy' && editable() && m.unlocks[me][i] === m.round && !m.armies[me].some(q => q.unit === i);
+      return `<div class="bar" style="border-top:1px solid var(--line);padding-top:8px"><span class="hint">Unlocked${m.unlocks[me][i] === m.round ? ' this round' : ''}</span>${undo ? '<button class="btn small" id="unlock-undo">Undo unlock</button>' : ''}</div>`;
+    }
+    const why = phase !== 'deploy' ? '' : !editable() ? '' : m.gold[me] < cost ? `Need ${cost} gold` : '';
+    return `<div style="display:grid;gap:4px;border-top:1px solid var(--line);padding-top:8px">
+      <div class="bar"><b style="font-family:var(--font-display)">Locked</b>${phase === 'deploy' ? (why || !editable() ? `<button class="btn small" disabled>${why || `Unlock · ${cost} gold`}</button>` : `<button class="btn small primary" id="unlock">Unlock · ${cost} gold</button>`) : `<span class="hint">${cost} gold to unlock</span>`}</div>
+      <span class="hint">Pay once to be able to field this unit for the rest of the match. The opponent sees it after the next fight.</span></div>`;
+  }
   function skillBlock(i, side) {
     const defs = units[i].skillDefs || [];
     if (!defs.some(Boolean) || !m) return '';
@@ -1171,6 +1193,7 @@ Actions run in this order: tower (round 1 only), sell, levelUp, skills, extraDep
       <div class="bar"><h3 id="sheet-h"><span style="color:${u.color}">${Shapes.svg(u.shape, 18)}</span> ${esc(u.name)}</h3><button class="btn small" id="close">Close</button></div>
       <p class="role" style="margin:0">${ROLES[u.name] && !customSet ? ROLES[u.name] : customSet ? `From a Counter Lab roster · ${Game.unitCostOf(base)} gold` : ''}</p>
       ${lvl}
+      ${unlockBlock(i, side)}
       ${tr.length ? `<div class="traits">${tr.map(x => `<span>${x}</span>`).join('')}</div>` : ''}
       ${skillBlock(i, side)}
       <div class="stats num">
@@ -1188,6 +1211,8 @@ Actions run in this order: tower (round 1 only), sell, levelUp, skills, extraDep
     if ($('lvl-up')) $('lvl-up').addEventListener('click', () => { if (editable() && Game.levelUp(m, me, sq.id)) after(); });
     if ($('lvl-undo')) $('lvl-undo').addEventListener('click', () => { if (editable() && Game.undoLevel(m, me, sq.id)) after(); });
     $('sheet').querySelectorAll('[data-skill]').forEach(b => b.addEventListener('click', () => { if (editable() && Game.buySkill(m, me, i, +b.dataset.skill)) after(); }));
+    if ($('unlock')) $('unlock').addEventListener('click', () => { if (editable() && Game.unlock(m, me, i)) { selected = i; after(); } });
+    if ($('unlock-undo')) $('unlock-undo').addEventListener('click', () => { if (editable() && Game.undoUnlock(m, me, i)) { if (selected === i) selected = null; after(); } });
     $('sheet').querySelectorAll('[data-unskill]').forEach(b => b.addEventListener('click', () => { if (editable() && Game.undoSkill(m, me, i, +b.dataset.unskill)) after(); }));
     if ($('sell')) $('sell').addEventListener('click', () => {
       const btn = $('sell');
@@ -1415,6 +1440,7 @@ Actions run in this order: tower (round 1 only), sell, levelUp, skills, extraDep
       // skills bought this round stay hidden too
       for (const ui in (s.tech && s.tech[0]) || {}) s.tech[0][ui] = s.tech[0][ui].map(r => r === m.round ? 0 : r);
       if (m.round === 1 && s.towers) s.towers = [null, s.towers[1]]; // the host's tower stays hidden until the first fight
+      if (s.unlocks && s.unlocks[0]) for (const ui in s.unlocks[0]) if (s.unlocks[0][ui] === m.round) delete s.unlocks[0][ui]; // so do this round's unlocks
     }
     return s;
   }
@@ -1466,6 +1492,12 @@ Actions run in this order: tower (round 1 only), sell, levelUp, skills, extraDep
     }
     if (!m.tech) m.tech = [{}, {}];
     m.tech[1] = tech;
+    // the guest's unlocks: earlier ones stay as they were, this round's are taken as sent (gold was checked on their side)
+    if (!m.unlocks) m.unlocks = [{}, {}];
+    const unl = {};
+    for (const ui in m.unlocks[1]) if (m.unlocks[1][ui] < m.round) unl[ui] = m.unlocks[1][ui];
+    if (d.unlocks && typeof d.unlocks === 'object') for (const ui in d.unlocks) { const i = +ui; if (Number.isInteger(i) && i >= 0 && i < n && (d.unlocks[ui] | 0) === m.round) unl[i] = m.round; }
+    m.unlocks[1] = unl;
     // the guest's tower, which can only be set or moved in round 1
     if (m.round === 1 && m.towers) {
       const tw = d.tower;
@@ -1585,7 +1617,7 @@ Actions run in this order: tower (round 1 only), sell, levelUp, skills, extraDep
 
   function sendSide() {
     if (mode !== 'guest' || !m || phase !== 'deploy') return;
-    send({ t: 'side', round: m.round, army: m.armies[1], gold: m.gold[1], extra: m.extraDeploys[1], nextId: m.nextId[1], tech: (m.tech && m.tech[1]) || {}, tower: (m.towers && m.towers[1]) || null, ready: ready[1] || timeUp });
+    send({ t: 'side', round: m.round, army: m.armies[1], gold: m.gold[1], extra: m.extraDeploys[1], nextId: m.nextId[1], tech: (m.tech && m.tech[1]) || {}, tower: (m.towers && m.towers[1]) || null, unlocks: (m.unlocks && m.unlocks[1]) || {}, ready: ready[1] || timeUp });
   }
 
   function guestRecv(d) {
@@ -1603,7 +1635,8 @@ Actions run in this order: tower (round 1 only), sell, levelUp, skills, extraDep
           // same round after a reconnect: keep our own side as it is here, take everything else from the host
           if (!incoming.tech) incoming.tech = [{}, {}];
           if (!incoming.towers) incoming.towers = [null, null];
-          for (const k of ['armies', 'gold', 'extraDeploys', 'nextId', 'tech', 'towers']) incoming[k][1] = (m[k] || [null, null])[1];
+          if (!incoming.unlocks) incoming.unlocks = [{}, {}];
+          for (const k of ['armies', 'gold', 'extraDeploys', 'nextId', 'tech', 'towers', 'unlocks']) incoming[k][1] = (m[k] || [null, null])[1];
           m = incoming; ready[0] = theirReady;
           deadline = d.remaining > 0 ? now() + d.remaining - 300 : 0;
           timeUp = false;

@@ -357,6 +357,7 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
   ];
   const LEVERS = [
     ['cost', 'Cost (gold)', 10, 'Price of one squad. A standard squad is 100.'],
+    ['unlock', 'Unlock cost (gold)', 10, 'Paid once per match before the unit can be fielded. 0 = unlocked from the start.'],
     ['bodies', 'Bodies', 1, 'Units in one squad.'],
     ['hp', 'Health per body', 5, null],
     ['hit', 'Hit size', 1, 'Damage per attack.'],
@@ -402,7 +403,7 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
     const skills = Array.isArray(p.skills) ? p.skills.filter(validSkill).map(sk => ({ ...sk, params: { ...(sk.params || {}) } })) : clone(SAMPLE.skills);
     const ids = new Set(skills.map(sk => sk.id));
     const units = withIds(p.units.map(u => ({
-      defense: 'none', defVal: 0, ...u,
+      defense: 'none', defVal: 0, unlock: 0, ...u,
       skills: [0, 1].map(k => (Array.isArray(u.skills) && ids.has(u.skills[k])) ? u.skills[k] : null),
       skillsOn: [0, 1].map(k => !!(Array.isArray(u.skillsOn) && u.skillsOn[k])),
       skillsInnate: [0, 1].map(k => !!(Array.isArray(u.skillsInnate) && u.skillsInnate[k])),
@@ -565,7 +566,7 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
       d.querySelector('.ico').innerHTML = Shapes.svg(u.shape, 14);
       d.querySelector('.ico').style.color = u.color;
       d.querySelector('.n').textContent = u.name;
-      d.querySelector('.sum-cost').textContent = `${fmt(u.cost)} gold`;
+      d.querySelector('.sum-cost').textContent = `${fmt(u.cost)} gold${u.unlock > 0 ? ` · unlock ${fmt(u.unlock)}` : ''}`;
       const def = u.defense === 'armor' ? ` · armor ${u.defVal}` : u.defense === 'ward' ? ` · ward ${u.defVal}` : '';
       const tr = [];
       if (u.burst > 1) tr.push(`burst ${u.burst}`);
@@ -849,7 +850,7 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
   }
 
   $('add').addEventListener('click', () => {
-    const u = { ...Shapes.assign([...state.units, Engine.withTraits({ name: 'New unit', cost: 100, bodies: 4, hp: 200, hit: 20, aps: 1, range: 10, speed: 6, splash: 0 })]).pop(), id: uid++, skills: [null, null], skillsOn: [false, false], skillsInnate: [false, false], skillMods: [null, null] };
+    const u = { ...Shapes.assign([...state.units, Engine.withTraits({ name: 'New unit', cost: 100, unlock: 0, bodies: 4, hp: 200, hit: 20, aps: 1, range: 10, speed: 6, splash: 0 })]).pop(), id: uid++, skills: [null, null], skillsOn: [false, false], skillsInnate: [false, false], skillMods: [null, null] };
     state.units.push(u);
     save(); renderUnits(); scheduleRun();
     const d = unitsEl.querySelector(`details[data-id="${u.id}"]`);
