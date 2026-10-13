@@ -23,6 +23,12 @@ const Game = (() => {
   const unitCostOf = (unit) => Math.max(10, Math.round((unit.cost || 1) * SQUAD_COST / 10) * 10);
   // Upgrades cost half the unit's price at the default setting (50 for a 100-gold squad)
   const levelCost = (unit) => Math.max(10, Math.round(CONFIG.levelCostPerTier * (unit.cost || 1) / 5) * 5);
+  // Each player has one tower, placed before anything else in round 1, on either side of their zone
+  // (not in the middle columns). It has a short, light attack. If it falls, that player's army is
+  // crippled for a few seconds (see Engine.TOWER_DOWN). It is rebuilt for every round.
+  const TOWER = { name: 'Tower', cost: 0, bodies: 1, hp: 650, hit: 30, aps: 1.2, range: 8, speed: 0, splash: 0, structure: true, shape: 'square', color: '#C9B79C' };
+  const TOWER_MID = [4, 7]; // columns the tower can't stand in
+  const towerColOk = (col) => col >= 0 && col < COLS && (col < TOWER_MID[0] || col > TOWER_MID[1]);
   const AI = { levelPolicy: 'smart', maxExtraDeploys: 3, skills: true }; // levelPolicy: smart | never | all (for experiments)
 
   // rows 0-4: enemy zone (row 4 is its front), rows 5-10: no man's land, rows 11-15: player zone (row 11 is its front)
@@ -42,6 +48,7 @@ const Game = (() => {
       armies: [[], []], nextId: [1, 1], history: [], over: false, winner: -1,
       extraDeploys: [0, 0],
       tech: [{}, {}], // skills bought per unit type: tech[side][unitIdx] = [round bought or 0, round bought or 0]
+      towers: [null, null], // { col, row } of each player's tower
     };
   }
 
@@ -108,10 +115,28 @@ const Game = (() => {
     return true;
   }
 
-  const occupied = (m, side, col, row) => m.armies[side].some(s => s.col === col && s.row === row);
+  const towerAt = (m, side, col, row) => !!(m.towers && m.towers[side] && m.towers[side].col === col && m.towers[side].row === row);
+  const occupied = (m, side, col, row) => towerAt(m, side, col, row) || m.armies[side].some(s => s.col === col && s.row === row);
+  const needsTower = (m, side) => !!(m.towers && !m.towers[side]);
+  // the tower can be placed (or moved) during round 1 only
+  function placeTower(m, side, col, row) {
+    if (!m.towers) m.towers = [null, null];
+    if (m.round !== 1 || !inZone(side, row) || !towerColOk(col)) return false;
+    if (m.armies[side].some(s => s.col === col && s.row === row)) return false;
+    m.towers[side] = { col, row };
+    return true;
+  }
+  // a player who never placed a tower gets one in the back corner on the left
+  function ensureTower(m, side) {
+    if (!m.towers) m.towers = [null, null];
+    if (m.towers[side]) return;
+    const rows = zoneRows(side), back = rows[rows.length - 1];
+    for (const col of [1, 10, 0, 11, 2, 9, 3, 8]) for (const row of [back, rows[rows.length - 2]]) if (placeTower(m, side, col, row)) return;
+  }
 
   function place(m, side, unitIdx, col, row) {
     if (!inZone(side, row) || col < 0 || col >= COLS) return null;
+    if (needsTower(m, side)) return null; // the tower goes down first
     if (occupied(m, side, col, row)) return null;
     const cost = unitCostOf(m.units[unitIdx]);
     if (m.gold[side] < cost) return null;
@@ -140,10 +165,13 @@ const Game = (() => {
       idx += b.length;
       out.push(...b);
     }
+    const t = m.towers && m.towers[side];
+    if (t) { const w = tileToWorld(t.col, t.row); out.push(...E.buildSquad(TOWER, side, w.x, w.y, -2, TILE, idx)); }
     return out;
   }
 
   function startBattle(m) {
+    ensureTower(m, 0); ensureTower(m, 1);
     return E.createBattle(bodiesFor(m, 0), bodiesFor(m, 1), SETTINGS, { record: true });
   }
 
@@ -188,7 +216,8 @@ const Game = (() => {
       const r = res.squads[side + ':' + sq.id];
       if (r) squads[side].push({ id: sq.id, unit: sq.unit, level: sq.level, left: r.alive / r.total, dealt: Math.round(r.dealt || 0) });
     }
-    const summary = { round: m.round, winner: roundWinner, timeout: res.timeout, dmg, time: res.time, newlyReady, squads };
+    const towerFell = [0, 1].map(sd => { const q = res.squads[sd + ':-2']; return !!(q && q.alive === 0); });
+    const summary = { round: m.round, winner: roundWinner, timeout: res.timeout, dmg, time: res.time, newlyReady, squads, towerFell };
     m.history.push(summary);
     if (m.hp[0] <= 0 || m.hp[1] <= 0) {
       m.over = true;
@@ -251,6 +280,11 @@ const Game = (() => {
   // using the counter table, with a nudge toward variety and a little randomness.
   function aiDeploy(m, side) {
     const r = rng(m.seed + m.round * 7919 + side * 104729);
+    if (needsTower(m, side)) { // tower first: a back corner, left or right
+      const rows = zoneRows(side);
+      const col = r() < 0.5 ? 1 + Math.floor(r() * 2) : 9 + Math.floor(r() * 2);
+      if (!placeTower(m, side, col, rows[3 + Math.floor(r() * 2)])) ensureTower(m, side);
+    }
     const opp = 1 - side;
     const oppArmy = m.armies[opp].filter(s => s.round < m.round);
     const oppCount = {};
@@ -335,6 +369,7 @@ const Game = (() => {
     levelCost, isReady, levelUp, undoLevel, aiLevel, AI, CONFIG,
     deploysAllowed, deploysLeft, deployedThisRound, buyDeploy, refundDeploy,
     skillDef, skillCost, isInnate, hasSkill, skillVisible, unitFor, canBuySkill, buySkill, undoSkill, sellValue, sell,
+    TOWER, TOWER_MID, towerColOk, towerAt, needsTower, placeTower, ensureTower,
     zoneRows, inZone, tileToWorld, createMatch, place, unplace, bodiesFor, startBattle, resolve, aiDeploy, occupied,
   };
 })();

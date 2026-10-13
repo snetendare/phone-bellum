@@ -19,6 +19,8 @@ const Engine = (() => {
   const PIERCE_WIDTH = 1;      // half-width of the pierce corridor (m)
   const APPROACH = 0.5;         // metres a moving unit steps inside its max range
   const PROJ_HIT_RADIUS = 1;
+  // A side whose tower falls is crippled for a while: it deals less damage, walks slower and takes more damage
+  const TOWER_DOWN = { secs: 9, attack: 90, move: 70, taken: 50 };
   const TURN = 6;              // how fast a walking body swings to a new heading (share of the turn per second)
   const SIGHT = 12;            // metres beyond its own range at which a unit notices an enemy and turns toward it   // a projectile hits a body within this distance of where it lands
 
@@ -249,11 +251,14 @@ const Engine = (() => {
     const all = A.concat(B);
     const sides = [A, B];
     const stats = [
-      { dealt: 0, wasted: 0, blocked: 0, missed: 0, windLost: 0, winds: 0, totalHp: A.reduce((s, b) => s + b.u.hp, 0) },
-      { dealt: 0, wasted: 0, blocked: 0, missed: 0, windLost: 0, winds: 0, totalHp: B.reduce((s, b) => s + b.u.hp, 0) },
+      { dealt: 0, wasted: 0, blocked: 0, missed: 0, windLost: 0, winds: 0, totalHp: A.reduce((s, b) => s + (b.u.structure ? 0 : b.u.hp), 0) },
+      { dealt: 0, wasted: 0, blocked: 0, missed: 0, windLost: 0, winds: 0, totalHp: B.reduce((s, b) => s + (b.u.structure ? 0 : b.u.hp), 0) },
     ];
     const dt = g.dt;
     const sight = g.sight == null ? SIGHT : g.sight;
+    const cripple = [0, 0];      // seconds left of the tower-down penalty for each side
+    const towerDown = g.towerDown || TOWER_DOWN;
+    const fell = (v) => { if (v.u.structure) cripple[v.side] = towerDown.secs; };
     let projectiles = [];
     let t = 0, shots = [], over = false;
     const dist = (a, b) => hyp(a.x - b.x, a.y - b.y);
@@ -273,13 +278,16 @@ const Engine = (() => {
       owner.xp += applied;
       v.xp += applied * (g.absorbXp == null ? 0.5 : g.absorbXp);
       v.hp -= applied;
-      if (v.hp <= 1e-9) { v.hp = 0; v.alive = false; owner.xp += v.u.hp * v.level; }
+      if (v.hp <= 1e-9) { v.hp = 0; v.alive = false; owner.xp += v.u.hp * v.level; fell(v); }
     }
-    const aliveCount = (arr) => { let c = 0; for (const b of arr) if (b.alive) c++; return c; };
+    // structures (towers) don't count: a side is beaten when its units are gone
+    const aliveCount = (arr) => { let c = 0; for (const b of arr) if (b.alive && !b.u.structure) c++; return c; };
 
     function hurt(owner, v, hit, fromX, fromY) {
       const st = stats[owner.side];
-      const dmg = damageAfterDefense(hit, v, g);
+      if (cripple[owner.side] > 0) hit = hit * (1 - towerDown.attack / 100);
+      let dmg = damageAfterDefense(hit, v, g);
+      if (cripple[v.side] > 0) dmg = dmg * (1 + towerDown.taken / 100);
       st.blocked += hit - dmg;
       const applied = Math.min(dmg, v.hp);
       st.dealt += applied;
@@ -289,7 +297,7 @@ const Engine = (() => {
       owner.xp += applied;
       v.xp += applied * (g.absorbXp == null ? 0.5 : g.absorbXp);
       v.hp -= dmg;
-      if (v.hp <= 0) { v.hp = 0; v.alive = false; owner.xp += v.u.hp * v.level; return; }
+      if (v.hp <= 0) { v.hp = 0; v.alive = false; owner.xp += v.u.hp * v.level; fell(v); return; }
       if (owner.u.poisonPct > 0) {
         // poison: a share of the hit, spread over its duration. Each attacker keeps one dose on the target;
         // its next hit refreshes that dose. Doses from different attackers add up.
@@ -309,7 +317,7 @@ const Engine = (() => {
         v.shrinkM = v.shrinkT > 0 ? Math.max(v.shrinkM, owner.u.shrinkM) : owner.u.shrinkM;
         v.shrinkT = Math.max(v.shrinkT, owner.u.shrinkDur);
       }
-      if (owner.u.knockback > 0) {
+      if (owner.u.knockback > 0 && !v.u.structure) {
         // big hits on small bodies push the full distance; on big bodies barely at all
         const push = owner.u.knockback * Math.min(1, hit / v.u.hp);
         const dx = v.x - fromX, dy = v.y - fromY, d = hyp(dx, dy) || 1;
@@ -431,6 +439,7 @@ const Engine = (() => {
       if (over) return false;
       if (t >= g.timeCap || !aliveCount(A) || !aliveCount(B)) { over = true; return false; }
       shots = [];
+      for (let k = 0; k < 2; k++) if (cripple[k] > 0) cripple[k] = Math.max(0, cripple[k] - dt);
       // movement + targeting
       for (const b of all) {
         if (!b.alive) continue;
@@ -444,7 +453,7 @@ const Engine = (() => {
         b.near = near;
         const rg = R(b);
         if (near && nd > rg) {
-          const step = b.u.speed * (b.slowT > 0 ? 1 - b.slowMove / 100 : 1) * dt;
+          const step = b.u.speed * (b.slowT > 0 ? 1 - b.slowMove / 100 : 1) * (cripple[b.side] > 0 ? 1 - towerDown.move / 100 : 1) * dt;
           let mv;
           // March straight ahead until an enemy comes within sight (range + SIGHT), or no enemy is left
           // ahead, then lock on: from then on the body goes for its own nearest enemy for the rest of the
@@ -491,12 +500,15 @@ const Engine = (() => {
             const c = arr[j]; if (!c.alive) continue;
             const dx = c.x - a.x, dy = c.y - a.y;
             const d = hyp(dx, dy);
+            if (a.u.structure && c.u.structure) continue;
+            // a structure doesn't budge: the other body moves the whole way
+            const ka = a.u.structure ? 0 : c.u.structure ? 2 : 1, kc = c.u.structure ? 0 : a.u.structure ? 2 : 1;
             if (d > 0 && d < minSep) {
               const push = (minSep - d) / 2;
-              a.x -= dx / d * push; a.y -= dy / d * push;
-              c.x += dx / d * push; c.y += dy / d * push;
+              a.x -= dx / d * push * ka; a.y -= dy / d * push * ka;
+              c.x += dx / d * push * kc; c.y += dy / d * push * kc;
             } else if (d === 0) {
-              a.x -= minSep / 2; c.x += minSep / 2;
+              a.x -= minSep / 2 * ka; c.x += minSep / 2 * kc;
             }
           }
         }
@@ -648,7 +660,7 @@ const Engine = (() => {
     }
 
     function result() {
-      const remHp = sides.map(arr => arr.reduce((s, b) => s + (b.alive ? b.hp : 0), 0));
+      const remHp = sides.map(arr => arr.reduce((s, b) => s + (b.alive && !b.u.structure ? b.hp : 0), 0));
       const frac = [remHp[0] / stats[0].totalHp, remHp[1] / stats[1].totalHp];
       const aliveA = aliveCount(A), aliveB = aliveCount(B);
       let winner = -1, timeout = false;
@@ -671,7 +683,7 @@ const Engine = (() => {
       };
     }
 
-    return { step, frame, result, bodies: all, isOver: () => over, time: () => t, lastShots: () => shots, projectiles: () => projectiles };
+    return { step, frame, result, bodies: all, isOver: () => over, time: () => t, lastShots: () => shots, projectiles: () => projectiles, crippled: (side) => cripple[side] };
   }
 
   function matrix(units, g) {
@@ -692,6 +704,6 @@ const Engine = (() => {
     return m;
   }
 
-  return { SKILL_TYPES, skillParam, describeSkill, applySkills, innateUnit, fairBudget, battle, makeArmy, matrix, createBattle, buildSquad, rawStrength, squadsFor, withTraits, leveled, TRAIT_DEFAULTS, SPIN_CAP, CHARGE_RUN, LEVEL_BONUS, MAX_LEVEL };
+  return { TOWER_DOWN, SKILL_TYPES, skillParam, describeSkill, applySkills, innateUnit, fairBudget, battle, makeArmy, matrix, createBattle, buildSquad, rawStrength, squadsFor, withTraits, leveled, TRAIT_DEFAULTS, SPIN_CAP, CHARGE_RUN, LEVEL_BONUS, MAX_LEVEL };
 })();
 if (typeof module !== 'undefined') module.exports = Engine;

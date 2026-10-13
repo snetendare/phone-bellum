@@ -310,6 +310,8 @@ const Engine = (() => {
   const PIERCE_WIDTH = 1;      // half-width of the pierce corridor (m)
   const APPROACH = 0.5;         // metres a moving unit steps inside its max range
   const PROJ_HIT_RADIUS = 1;
+  // A side whose tower falls is crippled for a while: it deals less damage, walks slower and takes more damage
+  const TOWER_DOWN = { secs: 9, attack: 90, move: 70, taken: 50 };
   const TURN = 6;              // how fast a walking body swings to a new heading (share of the turn per second)
   const SIGHT = 12;            // metres beyond its own range at which a unit notices an enemy and turns toward it   // a projectile hits a body within this distance of where it lands
 
@@ -540,11 +542,14 @@ const Engine = (() => {
     const all = A.concat(B);
     const sides = [A, B];
     const stats = [
-      { dealt: 0, wasted: 0, blocked: 0, missed: 0, windLost: 0, winds: 0, totalHp: A.reduce((s, b) => s + b.u.hp, 0) },
-      { dealt: 0, wasted: 0, blocked: 0, missed: 0, windLost: 0, winds: 0, totalHp: B.reduce((s, b) => s + b.u.hp, 0) },
+      { dealt: 0, wasted: 0, blocked: 0, missed: 0, windLost: 0, winds: 0, totalHp: A.reduce((s, b) => s + (b.u.structure ? 0 : b.u.hp), 0) },
+      { dealt: 0, wasted: 0, blocked: 0, missed: 0, windLost: 0, winds: 0, totalHp: B.reduce((s, b) => s + (b.u.structure ? 0 : b.u.hp), 0) },
     ];
     const dt = g.dt;
     const sight = g.sight == null ? SIGHT : g.sight;
+    const cripple = [0, 0];      // seconds left of the tower-down penalty for each side
+    const towerDown = g.towerDown || TOWER_DOWN;
+    const fell = (v) => { if (v.u.structure) cripple[v.side] = towerDown.secs; };
     let projectiles = [];
     let t = 0, shots = [], over = false;
     const dist = (a, b) => hyp(a.x - b.x, a.y - b.y);
@@ -564,13 +569,16 @@ const Engine = (() => {
       owner.xp += applied;
       v.xp += applied * (g.absorbXp == null ? 0.5 : g.absorbXp);
       v.hp -= applied;
-      if (v.hp <= 1e-9) { v.hp = 0; v.alive = false; owner.xp += v.u.hp * v.level; }
+      if (v.hp <= 1e-9) { v.hp = 0; v.alive = false; owner.xp += v.u.hp * v.level; fell(v); }
     }
-    const aliveCount = (arr) => { let c = 0; for (const b of arr) if (b.alive) c++; return c; };
+    // structures (towers) don't count: a side is beaten when its units are gone
+    const aliveCount = (arr) => { let c = 0; for (const b of arr) if (b.alive && !b.u.structure) c++; return c; };
 
     function hurt(owner, v, hit, fromX, fromY) {
       const st = stats[owner.side];
-      const dmg = damageAfterDefense(hit, v, g);
+      if (cripple[owner.side] > 0) hit = hit * (1 - towerDown.attack / 100);
+      let dmg = damageAfterDefense(hit, v, g);
+      if (cripple[v.side] > 0) dmg = dmg * (1 + towerDown.taken / 100);
       st.blocked += hit - dmg;
       const applied = Math.min(dmg, v.hp);
       st.dealt += applied;
@@ -580,7 +588,7 @@ const Engine = (() => {
       owner.xp += applied;
       v.xp += applied * (g.absorbXp == null ? 0.5 : g.absorbXp);
       v.hp -= dmg;
-      if (v.hp <= 0) { v.hp = 0; v.alive = false; owner.xp += v.u.hp * v.level; return; }
+      if (v.hp <= 0) { v.hp = 0; v.alive = false; owner.xp += v.u.hp * v.level; fell(v); return; }
       if (owner.u.poisonPct > 0) {
         // poison: a share of the hit, spread over its duration. Each attacker keeps one dose on the target;
         // its next hit refreshes that dose. Doses from different attackers add up.
@@ -600,7 +608,7 @@ const Engine = (() => {
         v.shrinkM = v.shrinkT > 0 ? Math.max(v.shrinkM, owner.u.shrinkM) : owner.u.shrinkM;
         v.shrinkT = Math.max(v.shrinkT, owner.u.shrinkDur);
       }
-      if (owner.u.knockback > 0) {
+      if (owner.u.knockback > 0 && !v.u.structure) {
         // big hits on small bodies push the full distance; on big bodies barely at all
         const push = owner.u.knockback * Math.min(1, hit / v.u.hp);
         const dx = v.x - fromX, dy = v.y - fromY, d = hyp(dx, dy) || 1;
@@ -722,6 +730,7 @@ const Engine = (() => {
       if (over) return false;
       if (t >= g.timeCap || !aliveCount(A) || !aliveCount(B)) { over = true; return false; }
       shots = [];
+      for (let k = 0; k < 2; k++) if (cripple[k] > 0) cripple[k] = Math.max(0, cripple[k] - dt);
       // movement + targeting
       for (const b of all) {
         if (!b.alive) continue;
@@ -735,7 +744,7 @@ const Engine = (() => {
         b.near = near;
         const rg = R(b);
         if (near && nd > rg) {
-          const step = b.u.speed * (b.slowT > 0 ? 1 - b.slowMove / 100 : 1) * dt;
+          const step = b.u.speed * (b.slowT > 0 ? 1 - b.slowMove / 100 : 1) * (cripple[b.side] > 0 ? 1 - towerDown.move / 100 : 1) * dt;
           let mv;
           // March straight ahead until an enemy comes within sight (range + SIGHT), or no enemy is left
           // ahead, then lock on: from then on the body goes for its own nearest enemy for the rest of the
@@ -782,12 +791,15 @@ const Engine = (() => {
             const c = arr[j]; if (!c.alive) continue;
             const dx = c.x - a.x, dy = c.y - a.y;
             const d = hyp(dx, dy);
+            if (a.u.structure && c.u.structure) continue;
+            // a structure doesn't budge: the other body moves the whole way
+            const ka = a.u.structure ? 0 : c.u.structure ? 2 : 1, kc = c.u.structure ? 0 : a.u.structure ? 2 : 1;
             if (d > 0 && d < minSep) {
               const push = (minSep - d) / 2;
-              a.x -= dx / d * push; a.y -= dy / d * push;
-              c.x += dx / d * push; c.y += dy / d * push;
+              a.x -= dx / d * push * ka; a.y -= dy / d * push * ka;
+              c.x += dx / d * push * kc; c.y += dy / d * push * kc;
             } else if (d === 0) {
-              a.x -= minSep / 2; c.x += minSep / 2;
+              a.x -= minSep / 2 * ka; c.x += minSep / 2 * kc;
             }
           }
         }
@@ -939,7 +951,7 @@ const Engine = (() => {
     }
 
     function result() {
-      const remHp = sides.map(arr => arr.reduce((s, b) => s + (b.alive ? b.hp : 0), 0));
+      const remHp = sides.map(arr => arr.reduce((s, b) => s + (b.alive && !b.u.structure ? b.hp : 0), 0));
       const frac = [remHp[0] / stats[0].totalHp, remHp[1] / stats[1].totalHp];
       const aliveA = aliveCount(A), aliveB = aliveCount(B);
       let winner = -1, timeout = false;
@@ -962,7 +974,7 @@ const Engine = (() => {
       };
     }
 
-    return { step, frame, result, bodies: all, isOver: () => over, time: () => t, lastShots: () => shots, projectiles: () => projectiles };
+    return { step, frame, result, bodies: all, isOver: () => over, time: () => t, lastShots: () => shots, projectiles: () => projectiles, crippled: (side) => cripple[side] };
   }
 
   function matrix(units, g) {
@@ -983,7 +995,7 @@ const Engine = (() => {
     return m;
   }
 
-  return { SKILL_TYPES, skillParam, describeSkill, applySkills, innateUnit, fairBudget, battle, makeArmy, matrix, createBattle, buildSquad, rawStrength, squadsFor, withTraits, leveled, TRAIT_DEFAULTS, SPIN_CAP, CHARGE_RUN, LEVEL_BONUS, MAX_LEVEL };
+  return { TOWER_DOWN, SKILL_TYPES, skillParam, describeSkill, applySkills, innateUnit, fairBudget, battle, makeArmy, matrix, createBattle, buildSquad, rawStrength, squadsFor, withTraits, leveled, TRAIT_DEFAULTS, SPIN_CAP, CHARGE_RUN, LEVEL_BONUS, MAX_LEVEL };
 })();
 if (typeof module !== 'undefined') module.exports = Engine;
 
@@ -1014,6 +1026,12 @@ const Game = (() => {
   const unitCostOf = (unit) => Math.max(10, Math.round((unit.cost || 1) * SQUAD_COST / 10) * 10);
   // Upgrades cost half the unit's price at the default setting (50 for a 100-gold squad)
   const levelCost = (unit) => Math.max(10, Math.round(CONFIG.levelCostPerTier * (unit.cost || 1) / 5) * 5);
+  // Each player has one tower, placed before anything else in round 1, on either side of their zone
+  // (not in the middle columns). It has a short, light attack. If it falls, that player's army is
+  // crippled for a few seconds (see Engine.TOWER_DOWN). It is rebuilt for every round.
+  const TOWER = { name: 'Tower', cost: 0, bodies: 1, hp: 650, hit: 30, aps: 1.2, range: 8, speed: 0, splash: 0, structure: true, shape: 'square', color: '#C9B79C' };
+  const TOWER_MID = [4, 7]; // columns the tower can't stand in
+  const towerColOk = (col) => col >= 0 && col < COLS && (col < TOWER_MID[0] || col > TOWER_MID[1]);
   const AI = { levelPolicy: 'smart', maxExtraDeploys: 3, skills: true }; // levelPolicy: smart | never | all (for experiments)
 
   // rows 0-4: enemy zone (row 4 is its front), rows 5-10: no man's land, rows 11-15: player zone (row 11 is its front)
@@ -1033,6 +1051,7 @@ const Game = (() => {
       armies: [[], []], nextId: [1, 1], history: [], over: false, winner: -1,
       extraDeploys: [0, 0],
       tech: [{}, {}], // skills bought per unit type: tech[side][unitIdx] = [round bought or 0, round bought or 0]
+      towers: [null, null], // { col, row } of each player's tower
     };
   }
 
@@ -1099,10 +1118,28 @@ const Game = (() => {
     return true;
   }
 
-  const occupied = (m, side, col, row) => m.armies[side].some(s => s.col === col && s.row === row);
+  const towerAt = (m, side, col, row) => !!(m.towers && m.towers[side] && m.towers[side].col === col && m.towers[side].row === row);
+  const occupied = (m, side, col, row) => towerAt(m, side, col, row) || m.armies[side].some(s => s.col === col && s.row === row);
+  const needsTower = (m, side) => !!(m.towers && !m.towers[side]);
+  // the tower can be placed (or moved) during round 1 only
+  function placeTower(m, side, col, row) {
+    if (!m.towers) m.towers = [null, null];
+    if (m.round !== 1 || !inZone(side, row) || !towerColOk(col)) return false;
+    if (m.armies[side].some(s => s.col === col && s.row === row)) return false;
+    m.towers[side] = { col, row };
+    return true;
+  }
+  // a player who never placed a tower gets one in the back corner on the left
+  function ensureTower(m, side) {
+    if (!m.towers) m.towers = [null, null];
+    if (m.towers[side]) return;
+    const rows = zoneRows(side), back = rows[rows.length - 1];
+    for (const col of [1, 10, 0, 11, 2, 9, 3, 8]) for (const row of [back, rows[rows.length - 2]]) if (placeTower(m, side, col, row)) return;
+  }
 
   function place(m, side, unitIdx, col, row) {
     if (!inZone(side, row) || col < 0 || col >= COLS) return null;
+    if (needsTower(m, side)) return null; // the tower goes down first
     if (occupied(m, side, col, row)) return null;
     const cost = unitCostOf(m.units[unitIdx]);
     if (m.gold[side] < cost) return null;
@@ -1131,10 +1168,13 @@ const Game = (() => {
       idx += b.length;
       out.push(...b);
     }
+    const t = m.towers && m.towers[side];
+    if (t) { const w = tileToWorld(t.col, t.row); out.push(...E.buildSquad(TOWER, side, w.x, w.y, -2, TILE, idx)); }
     return out;
   }
 
   function startBattle(m) {
+    ensureTower(m, 0); ensureTower(m, 1);
     return E.createBattle(bodiesFor(m, 0), bodiesFor(m, 1), SETTINGS, { record: true });
   }
 
@@ -1179,7 +1219,8 @@ const Game = (() => {
       const r = res.squads[side + ':' + sq.id];
       if (r) squads[side].push({ id: sq.id, unit: sq.unit, level: sq.level, left: r.alive / r.total, dealt: Math.round(r.dealt || 0) });
     }
-    const summary = { round: m.round, winner: roundWinner, timeout: res.timeout, dmg, time: res.time, newlyReady, squads };
+    const towerFell = [0, 1].map(sd => { const q = res.squads[sd + ':-2']; return !!(q && q.alive === 0); });
+    const summary = { round: m.round, winner: roundWinner, timeout: res.timeout, dmg, time: res.time, newlyReady, squads, towerFell };
     m.history.push(summary);
     if (m.hp[0] <= 0 || m.hp[1] <= 0) {
       m.over = true;
@@ -1242,6 +1283,11 @@ const Game = (() => {
   // using the counter table, with a nudge toward variety and a little randomness.
   function aiDeploy(m, side) {
     const r = rng(m.seed + m.round * 7919 + side * 104729);
+    if (needsTower(m, side)) { // tower first: a back corner, left or right
+      const rows = zoneRows(side);
+      const col = r() < 0.5 ? 1 + Math.floor(r() * 2) : 9 + Math.floor(r() * 2);
+      if (!placeTower(m, side, col, rows[3 + Math.floor(r() * 2)])) ensureTower(m, side);
+    }
     const opp = 1 - side;
     const oppArmy = m.armies[opp].filter(s => s.round < m.round);
     const oppCount = {};
@@ -1326,6 +1372,7 @@ const Game = (() => {
     levelCost, isReady, levelUp, undoLevel, aiLevel, AI, CONFIG,
     deploysAllowed, deploysLeft, deployedThisRound, buyDeploy, refundDeploy,
     skillDef, skillCost, isInnate, hasSkill, skillVisible, unitFor, canBuySkill, buySkill, undoSkill, sellValue, sell,
+    TOWER, TOWER_MID, towerColOk, towerAt, needsTower, placeTower, ensureTower,
     zoneRows, inZone, tileToWorld, createMatch, place, unplace, bodiesFor, startBattle, resolve, aiDeploy, occupied,
   };
 })();
@@ -1500,9 +1547,36 @@ if (typeof module !== 'undefined') module.exports = Game;
     }
   }
 
+  // a little keep with battlements, in the team colour
+  function drawKeep(x, y, s, side, hpr) {
+    const c = teamCol(side);
+    ctx.globalAlpha = 0.35 + 0.65 * (hpr == null ? 1 : hpr);
+    ctx.fillStyle = Game.TOWER.color; ctx.strokeStyle = c; ctx.lineWidth = Math.max(1.5, s * 0.08);
+    const w = s * 0.62, h = s * 0.62, x0 = x - w / 2, y0 = y - h / 2 + s * 0.06, m = w / 5;
+    ctx.beginPath();
+    ctx.moveTo(x0, y0 + h); ctx.lineTo(x0, y0);
+    for (let k = 0; k < 5; k++) { const xa = x0 + k * m; if (k % 2 === 0) { ctx.lineTo(xa, y0 - m * 0.9); ctx.lineTo(xa + m, y0 - m * 0.9); ctx.lineTo(xa + m, y0); } else ctx.lineTo(xa + m, y0); }
+    ctx.lineTo(x0 + w, y0 + h); ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = c; ctx.fillRect(x - m * 0.5, y0 + h - m * 1.6, m, m * 1.6);
+    ctx.globalAlpha = 1;
+  }
+  const towerVisible = (side) => m && m.towers && m.towers[side] && (side === me || !(phase === 'deploy' && m.round === 1));
+  function drawTowerTile(side) {
+    const tw = m.towers[side], t = tilePx();
+    drawKeep((scol(tw.col) + 0.5) * t, (srow(tw.row) + 0.5) * t, t, side);
+  }
+  const placingTower = () => phase === 'deploy' && m && Game.needsTower(m, me);
+
   function drawDeploy() {
     drawBoard();
     const t = tilePx();
+    if (placingTower() && editable()) { // where the tower may go: the sides of your zone, not the middle columns
+      ctx.strokeStyle = css('--gold'); ctx.globalAlpha = 0.5; ctx.lineWidth = 1.5;
+      for (const row of Game.zoneRows(me)) for (let c = 0; c < Game.COLS; c++) {
+        if (Game.towerColOk(c) && !Game.occupied(m, me, c, row)) ctx.strokeRect(scol(c) * t + 3, srow(row) * t + 3, t - 6, t - 6);
+      }
+      ctx.globalAlpha = 1;
+    }
     if (selected !== null && phase === 'deploy') {
       ctx.strokeStyle = css('--you'); ctx.globalAlpha = 0.25; ctx.lineWidth = 1;
       for (const row of Game.zoneRows(me)) for (let c = 0; c < Game.COLS; c++) {
@@ -1517,6 +1591,7 @@ if (typeof module !== 'undefined') module.exports = Game;
     // the opponent's squads from this round stay hidden until the fight
     for (const sq of m.armies[foe()]) if (sq.round < m.round || phase !== 'deploy') drawSquad(sq, foe(), false);
     for (const sq of m.armies[me]) drawSquad(sq, me, sq.round === m.round && phase === 'deploy');
+    for (const side of [me, foe()]) if (towerVisible(side)) drawTowerTile(side);
   }
 
   function drawBattle() {
@@ -1544,7 +1619,14 @@ if (typeof module !== 'undefined') module.exports = Game;
       ctx.beginPath(); ctx.arc(PX(b.x), PY(b.y), Math.max(1.5, radius(b.u) * 0.45), 0, Math.PI * 2); ctx.fill();
     }
     for (const b of bt.bodies) {
-      if (!b.alive) continue;
+      if (!b.alive || !b.u.structure) continue;
+      const hpr = b.hp / b.u.hp, t = tilePx();
+      drawKeep(PX(b.x), PY(b.y), t, b.side, hpr);
+      ctx.strokeStyle = teamCol(b.side); ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(PX(b.x), PY(b.y), t * 0.5, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * hpr); ctx.stroke();
+    }
+    for (const b of bt.bodies) {
+      if (!b.alive || b.u.structure) continue;
       const c = teamCol(b.side), r = radius(b.u), hpr = b.hp / b.u.hp;
       if (b.hidden) { // stealthed: a dashed ghost until it attacks (fainter for the enemy's)
         ctx.globalAlpha = b.side === me ? 0.6 : 0.3; ctx.strokeStyle = c; ctx.lineWidth = 1.5; ctx.setLineDash([2, 2]);
@@ -1585,6 +1667,15 @@ if (typeof module !== 'undefined') module.exports = Game;
       ctx.fillStyle = teamCol(p.owner.side);
       ctx.fillRect(PX(p.x) - 2.5, PY(p.y) - 2.5, 5, 5);
     }
+    // a fallen tower cripples its army for a few seconds
+    const crip = [me, foe()].filter(sd => bt.crippled(sd) > 0);
+    crip.forEach((sd, k) => {
+      const txt = sd === me ? `Your tower fell · crippled ${Math.ceil(bt.crippled(sd))} s` : `${mode === 'claude' ? 'Claude’s' : 'Enemy'} tower fell · crippled ${Math.ceil(bt.crippled(sd))} s`;
+      ctx.font = `600 ${Math.max(11, Math.round(W * 0.035))}px "IBM Plex Mono", monospace`;
+      const tw = ctx.measureText(txt).width + 16, th = Math.max(20, W * 0.06), x = (W - tw) / 2, y = H * (sd === me ? 0.62 : 0.32) + k * 2;
+      ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(x, y, tw, th);
+      ctx.fillStyle = teamCol(sd); ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(txt, W / 2, y + th / 2);
+    });
   }
 
   function render() {
@@ -1656,7 +1747,7 @@ if (typeof module !== 'undefined') module.exports = Game;
     const left = Game.deploysLeft(m, me), allowed = Game.deploysAllowed(m, me);
     const price = (i) => Game.unitCostOf(units[i]);
     const can = editable();
-    const canBuy = (i) => can && g >= price(i) && left > 0;
+    const canBuy = (i) => can && !placingTower() && g >= price(i) && left > 0;
     let hint;
     if (!can) hint = mode === 'claude' && claude.fightWaiting ? 'Waiting for Claude to finish its move. The fight starts as soon as it does.' : timeUp ? 'Time’s up. The fight is about to start.' : 'You’re ready. Tap Not ready to make changes.';
     else {
@@ -1665,6 +1756,8 @@ if (typeof module !== 'undefined') module.exports = Game;
         : (fresh ? 'Tap a squad you placed this round to take it back.' : 'Pick a unit, then tap a tile in the bottom five rows.');
       if (left <= 0 && selected === null) hint = `No deployments left. Buy one more for ${Game.CONFIG.extraDeployCost} gold, or spend gold on upgrades.`;
       if (readyN && selected === null) hint = `${readyN} squad${readyN === 1 ? ' is' : 's are'} ready to level up. Tap ${readyN === 1 ? 'it' : 'one'} to upgrade.`;
+      if (m.round === 1 && selected === null && m.towers && m.towers[me]) hint += ' Tap your tower to move it (round 1 only).';
+      if (placingTower()) hint = 'First, place your tower: tap a gold tile on the left or right side of your zone. If it falls in a fight, your army is crippled for a few seconds.';
     }
     const extraBtns = `<span style="display:flex;gap:6px;flex-wrap:wrap">
         <button class="btn small" id="buy-deploy" ${can && g >= Game.CONFIG.extraDeployCost ? '' : 'disabled'}>+1 deployment · ${Game.CONFIG.extraDeployCost}</button>
@@ -1766,7 +1859,8 @@ if (typeof module !== 'undefined') module.exports = Game;
       <h2>Phone Bellum</h2>
       <ul>
         <li>Buy squads with gold each round. A standard squad costs ${Game.SQUAD_COST}. Income grows by ${Game.CONFIG.incomeStep} every round.</li>
-        <li>Place them in the bottom five rows. They stay for the whole match.</li>
+        <li>First place your tower on the left or right side of your zone. If it falls in a fight, your army is crippled for a few seconds.</li>
+        <li>Place squads in the bottom five rows. They stay for the whole match.</li>
         <li>Columns are lanes: squads march straight ahead and fight what they meet, so an empty lane lets a squad walk around the side.</li>
         <li>You have ${DEPLOY_SECONDS} seconds to deploy, then the armies fight on their own.</li>
         <li>The loser takes damage from every enemy squad still standing.</li>
@@ -1837,6 +1931,8 @@ if (typeof module !== 'undefined') module.exports = Game;
     if (sum.dmg[foe()]) lines.push(`${them} takes <b class="num">${sum.dmg[foe()]}</b> damage.`);
     if (sum.dmg[me]) lines.push(`You take <b class="num">${sum.dmg[me]}</b> damage.`);
     if (!sum.dmg[0] && !sum.dmg[1]) lines.push('Nobody takes damage.');
+    if (sum.towerFell && sum.towerFell[foe()]) lines.push(`You broke ${mode === 'claude' ? 'Claude’s' : 'the enemy’s'} tower.`);
+    if (sum.towerFell && sum.towerFell[me]) lines.push('Your tower fell.');
     const lv = (list) => list.map(x => `${esc(units[x.unit].name)} (to level ${x.level + 1})`).join(', ');
     const lvLines = [];
     if (solo() && lastAiLevels.length) lvLines.push(`<p><span style="color:var(--gold)">${them} leveled up before the fight:</span> ${lv(lastAiLevels)}.</p>`);
@@ -1867,7 +1963,7 @@ if (typeof module !== 'undefined') module.exports = Game;
       return;
     }
     phase = 'result'; hud(); netStatus();
-    const bonus = sum.bonusTo === me ? ` You get ${Game.LOSER_BONUS} extra for losing the round.` : sum.bonusTo === foe() ? ` The ${them.toLowerCase()} gets ${Game.LOSER_BONUS} extra for losing the round.` : '';
+    const bonus = sum.bonusTo === me ? ` You get ${Game.LOSER_BONUS} extra for losing the round.` : sum.bonusTo === foe() ? ` ${mode === 'claude' ? 'Claude gets' : `The ${them.toLowerCase()} gets`} ${Game.LOSER_BONUS} extra for losing the round.` : '';
     const waiting = !solo() && nextReady[me];
     overlay(`<div class="card">
       <span class="eyebrow">${Math.round(sum.time)} s of fighting</span>
@@ -1922,9 +2018,9 @@ if (typeof module !== 'undefined') module.exports = Game;
     const p = withUnits(pre), you = me, them = foe();
     const entry = {
       round: sum.round,
-      you: { hpBefore: p.hp[you], gold: p.gold[you], army: armyOf(p, you), skills: skillsOf(p, you) },
-      them: { hpBefore: p.hp[them], gold: p.gold[them], army: armyOf(p, them), skills: skillsOf(p, them) },
-      result: { winner: sum.winner === you ? 'you' : sum.winner === them ? 'them' : 'draw', timeout: !!sum.timeout, seconds: Math.round(sum.time), damageToYou: sum.dmg[you], damageToThem: sum.dmg[them] },
+      you: { hpBefore: p.hp[you], gold: p.gold[you], army: armyOf(p, you), skills: skillsOf(p, you), tower: (p.towers && p.towers[you]) || null },
+      them: { hpBefore: p.hp[them], gold: p.gold[them], army: armyOf(p, them), skills: skillsOf(p, them), tower: (p.towers && p.towers[them]) || null },
+      result: { winner: sum.winner === you ? 'you' : sum.winner === them ? 'them' : 'draw', timeout: !!sum.timeout, seconds: Math.round(sum.time), damageToYou: sum.dmg[you], damageToThem: sum.dmg[them], yourTowerFell: !!(sum.towerFell && sum.towerFell[you]), theirTowerFell: !!(sum.towerFell && sum.towerFell[them]) },
     };
     if (mode === 'claude') entry.claude = { said: claude.say || null, alsoDid: claude.did.slice(), leveledUp: lastAiLevels.map(x => `${units[x.unit].name} to level ${x.level + 1}`), botPlayed: !!claude.bot, note: claude.note || null };
     report.rounds.push(entry);
@@ -2036,7 +2132,7 @@ if (typeof module !== 'undefined') module.exports = Game;
       for (const q of last.squads[side]) { const b = by[q.unit] || (by[q.unit] = { n: 0, left: 0, dealt: 0 }); b.n++; b.left += q.left; b.dealt += q.dealt; }
       return Object.keys(by).sort((a, b) => by[b].dealt - by[a].dealt).map(ui => { const b = by[ui]; return `  ${units[ui].name} x${b.n}: dealt ${b.dealt} damage, ${Math.round(b.left / b.n * 100)}% of bodies survived`; });
     };
-    const lastFight = last && last.squads ? `LAST FIGHT (round ${last.round}, ${last.winner === 1 ? 'you won' : last.winner === 0 ? 'you lost' : 'draw'} in ${Math.round(last.time)} s)
+    const lastFight = last && last.squads ? `LAST FIGHT (round ${last.round}, ${last.winner === 1 ? 'you won' : last.winner === 0 ? 'you lost' : 'draw'} in ${Math.round(last.time)} s)${last.towerFell ? (last.towerFell[1] ? '. YOUR TOWER FELL' : '') + (last.towerFell[0] ? '. THEIR TOWER FELL' : '') : ''}
 Your units:
 ${howDid(1).join('\n') || '  none'}
 Their units:
@@ -2091,10 +2187,15 @@ THEIR SQUADS (from earlier rounds)
 ${theirs.length ? theirs.join('\n') : '- none yet'}
 ${theirSkills.length ? 'Their skills: ' + theirSkills.join(', ') : ''}
 
+TOWERS
+- Each player has one tower (${Game.TOWER.hp} hp, hit ${Game.TOWER.hit} x ${Game.TOWER.aps}/s, range ${Game.TOWER.range} m). It never moves, is rebuilt every round and doesn't count for winning a round. If a tower falls during a fight, its owner's whole army deals ${Engine.TOWER_DOWN.attack}% less damage, moves ${Engine.TOWER_DOWN.move}% slower and takes ${Engine.TOWER_DOWN.taken}% more damage for ${Engine.TOWER_DOWN.secs} s. Sending a squad down an empty lane to break their tower can turn a fight; guard the lane to yours.
+- Your tower: ${m.towers && m.towers[1] ? `col ${m.towers[1].col}, row ${m.towers[1].row}` : `NOT PLACED YET. Add "tower":{"col":C,"row":R} to your reply: R in your zone (rows 0-${Game.ZONE - 1}), C in columns 0-${Game.TOWER_MID[0] - 1} or ${Game.TOWER_MID[1] + 1}-${Game.COLS - 1} (not the middle). Squads can't share its tile.`}
+- Their tower: ${m.round > 1 && m.towers && m.towers[0] ? `col ${m.towers[0].col}, row ${m.towers[0].row}` : 'hidden until the first fight'}
+
 Reply with only a JSON object in this shape:
 {"sell":[squad ids],"levelUp":[squad ids, list one twice to level it twice],"skills":[{"unit":"unit name","slot":1}],"extraDeployments":0,"place":[{"unit":"unit name","col":5,"row":3}],"say":"one short playful line to your opponent, at most 15 words, shown after the fight"}
 For "say": make it about what is happening in this match, and never repeat a line.${claude.history.length ? ' Lines you already used:\n' + claude.history.slice(-6).map(x => '- ' + x).join('\n') : ''}
-Actions run in this order: sell, levelUp, skills, extraDeployments, place. Anything you can't afford or that breaks a rule is skipped, so keep the total cost within your gold (${m.gold[1]} plus any sales). Use exact unit names. Unspent gold isn't lost, but squads on the board win rounds.`;
+Actions run in this order: tower (round 1 only), sell, levelUp, skills, extraDeployments, place. Anything you can't afford or that breaks a rule is skipped, so keep the total cost within your gold (${m.gold[1]} plus any sales). Use exact unit names. Unspent gold isn't lost, but squads on the board win rounds.`;
   }
 
   function applyClaudeMove(mv) {
@@ -2102,6 +2203,10 @@ Actions run in this order: sell, levelUp, skills, extraDeployments, place. Anyth
     const int = (x) => Math.round(Number(x));
     const unitIdx = (name) => units.findIndex(u => u.name.toLowerCase() === String(name || '').toLowerCase().trim());
     const did = [];
+    if (Game.needsTower(m, 1)) { // the tower goes down first; a bad spot falls back to the default corner
+      const tw = mv.tower && typeof mv.tower === 'object' ? mv.tower : null;
+      if (!(tw && Game.placeTower(m, 1, int(tw.col), int(tw.row)))) Game.ensureTower(m, 1);
+    }
     for (const id of list(mv.sell)) {
       const sq = m.armies[1].find(s => s.id === int(id));
       if (sq && Game.sell(m, 1, sq.id)) did.push(`sold ${units[sq.unit].name}`);
@@ -2186,6 +2291,7 @@ Actions run in this order: sell, levelUp, skills, extraDeployments, place. Anyth
     closeSheet(); selected = null;
     if (mode === 'ai' || (mode === 'claude' && claude.bot)) lastAiLevels = Game.aiLevel(m, 1); // the AI spends its level-ups now
     else if (mode !== 'claude') lastAiLevels = [];
+    Game.ensureTower(m, 0); Game.ensureTower(m, 1);
     const pre = snapshot(m);
     // work out the result first; both screens then play the same battle back
     const sim = Game.startBattle(m);
@@ -2262,6 +2368,13 @@ Actions run in this order: sell, levelUp, skills, extraDeployments, place. Anyth
   cv.addEventListener('click', (ev) => {
     if (phase !== 'deploy') return;
     const t = tileAt(ev); if (!t) return;
+    if (placingTower()) { if (editable() && Game.placeTower(m, me, t.col, t.row)) changed(); return; }
+    if (Game.towerAt(m, me, t.col, t.row)) {
+      if (m.round === 1 && editable()) { m.towers[me] = null; selected = null; changed(); } // pick it up to move it
+      else openTowerSheet(me);
+      return;
+    }
+    if (towerVisible(foe()) && Game.towerAt(m, foe(), t.col, t.row)) { openTowerSheet(foe()); return; }
     const own = m.armies[me].find(s => s.col === t.col && s.row === t.row);
     if (own) {
       if (own.round === m.round) { if (editable() && Game.unplace(m, me, t.col, t.row)) changed(); }
@@ -2307,6 +2420,16 @@ Actions run in this order: sell, levelUp, skills, extraDeployments, place. Anyth
     return `<div style="display:grid;gap:8px"><h4 style="margin:0;font-size:12px;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted)">Skills${mine ? ' · for all your squads of this unit' : ''}</h4>${rows.join('')}</div>`;
   }
 
+  function openTowerSheet(side) {
+    const T = Game.TOWER, D = Engine.TOWER_DOWN;
+    $('sheet').innerHTML = `
+      <div class="bar"><h3 id="sheet-h">${side === me ? 'Your tower' : `${esc(foeName())}'s tower`}</h3><button class="btn small" id="close">Close</button></div>
+      <p class="role" style="margin:0">Stands where it was placed and shoots anything that comes close. It is rebuilt for every round.</p>
+      <p style="margin:0"><span style="color:var(--foe)">If it falls:</span> that army deals ${D.attack}% less damage, moves ${D.move}% slower and takes ${D.taken}% more damage for ${D.secs} s.</p>
+      <div class="stats"><div><span>Health</span><b class="num">${T.hp}</b></div><div><span>Hit</span><b class="num">${T.hit}</b></div><div><span>Attacks/s</span><b class="num">${T.aps}</b></div><div><span>Range</span><b class="num">${T.range} m</b></div></div>`;
+    $('sheet-back').hidden = false;
+    $('close').addEventListener('click', closeSheet);
+  }
   function openSheet(i, sq, side) {
     const base = units[i];
     const owner = side === undefined ? me : side;
@@ -2593,6 +2716,7 @@ Actions run in this order: sell, levelUp, skills, extraDeployments, place. Anyth
       s.armies[0] = s.armies[0].filter(q => q.round < m.round);
       // skills bought this round stay hidden too
       for (const ui in (s.tech && s.tech[0]) || {}) s.tech[0][ui] = s.tech[0][ui].map(r => r === m.round ? 0 : r);
+      if (m.round === 1 && s.towers) s.towers = [null, s.towers[1]]; // the host's tower stays hidden until the first fight
     }
     return s;
   }
@@ -2644,6 +2768,12 @@ Actions run in this order: sell, levelUp, skills, extraDeployments, place. Anyth
     }
     if (!m.tech) m.tech = [{}, {}];
     m.tech[1] = tech;
+    // the guest's tower, which can only be set or moved in round 1
+    if (m.round === 1 && m.towers) {
+      const tw = d.tower;
+      m.towers[1] = null;
+      if (tw && Number.isInteger(tw.col) && Number.isInteger(tw.row)) Game.placeTower(m, 1, tw.col, tw.row);
+    }
   }
 
   function checkNext() {
@@ -2757,7 +2887,7 @@ Actions run in this order: sell, levelUp, skills, extraDeployments, place. Anyth
 
   function sendSide() {
     if (mode !== 'guest' || !m || phase !== 'deploy') return;
-    send({ t: 'side', round: m.round, army: m.armies[1], gold: m.gold[1], extra: m.extraDeploys[1], nextId: m.nextId[1], tech: (m.tech && m.tech[1]) || {}, ready: ready[1] || timeUp });
+    send({ t: 'side', round: m.round, army: m.armies[1], gold: m.gold[1], extra: m.extraDeploys[1], nextId: m.nextId[1], tech: (m.tech && m.tech[1]) || {}, tower: (m.towers && m.towers[1]) || null, ready: ready[1] || timeUp });
   }
 
   function guestRecv(d) {
@@ -2774,7 +2904,8 @@ Actions run in this order: sell, levelUp, skills, extraDeployments, place. Anyth
         if (phase === 'deploy' && m && m.round === incoming.round) {
           // same round after a reconnect: keep our own side as it is here, take everything else from the host
           if (!incoming.tech) incoming.tech = [{}, {}];
-          for (const k of ['armies', 'gold', 'extraDeploys', 'nextId', 'tech']) incoming[k][1] = (m[k] || [{}, {}])[1];
+          if (!incoming.towers) incoming.towers = [null, null];
+          for (const k of ['armies', 'gold', 'extraDeploys', 'nextId', 'tech', 'towers']) incoming[k][1] = (m[k] || [null, null])[1];
           m = incoming; ready[0] = theirReady;
           deadline = d.remaining > 0 ? now() + d.remaining - 300 : 0;
           timeUp = false;
