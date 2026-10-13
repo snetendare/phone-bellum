@@ -10,3 +10,13 @@ art = art.replace('<script src="peerjs.min.js"></script>', '<script src="https:/
 if (art.includes('id="lab-link"') || !art.includes('jsdelivr')) throw new Error('artifact build failed');
 fs.writeFileSync('phone-bellum.html', art);
 console.log('wrote phone-bellum.html', art.length);
+
+// Counter Lab artifact (counter-lab.html) from lab.html: no link back to the game, no note about Load units
+// (artifacts don't share browser storage with the game).
+const lab = fs.readFileSync('lab.html', 'utf8');
+let la = lab.slice(lab.indexOf('<title>'), lab.indexOf('</head>')) + '\n' + lab.slice(lab.indexOf('<body>') + 6, lab.lastIndexOf('</body>'));
+la = la.replace('<a href="./" style="color:inherit">Phone Bellum</a>', 'Phone Bellum')
+  .replace(' Units you make here show up in the game under Load units on this device.', '');
+if (la.includes('href="./"') || la.includes('Load units')) throw new Error('lab artifact build failed');
+fs.writeFileSync('counter-lab.html', la);
+console.log('wrote counter-lab.html', la.length);
