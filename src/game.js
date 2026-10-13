@@ -3,7 +3,7 @@ const Game = (() => {
   const E = (typeof Engine !== 'undefined') ? Engine : require('./engine.js');
 
   const COLS = 12, ROWS = 16, TILE = 6, ZONE = 5; // each side builds in ZONE rows; the rows between are no man's land
-  const START_HP = 40, START_GOLD = 300, INCOME = 250, LOSER_BONUS = 50;
+  const START_HP = 40, START_GOLD = 200, INCOME = 250, LOSER_BONUS = 50;
   const SQUAD_COST = 100, SQUAD_POINTS = 2;
   const SETTINGS = { dt: 0.05, timeCap: 60, spacing: 3.5, minDmgPct: 15, absorbXp: 1, sight: 12 };
   // XP a squad needs in total to reach level 1, 2, 3, as multiples of its own starting health.
@@ -17,7 +17,7 @@ const Game = (() => {
   const deploysAllowed = (m, side) => CONFIG.deployCap
     ? (m.round === 1 ? CONFIG.firstRoundDeploys : CONFIG.deploysPerRound) + m.extraDeploys[side]
     : Infinity;
-  const deployedThisRound = (m, side) => m.armies[side].filter(s => s.round === m.round).length;
+  const deployedThisRound = (m, side) => m.armies[side].filter(s => s.round === m.round && !s.free).length; // package squads don't count
   const deploysLeft = (m, side) => deploysAllowed(m, side) - deployedThisRound(m, side);
   // A unit's `cost` is in lab units: 1 = one standard squad (SQUAD_COST gold)
   const unitCostOf = (unit) => Math.max(10, Math.round((unit.cost || 1) * SQUAD_COST / 10) * 10);
@@ -60,7 +60,64 @@ const Game = (() => {
     return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
   }
 
+  // ---------- starting packages ----------
+  // Before round 1 each player picks one of 3 packages (their own, not mirrored): two tier 1-2 unit types,
+  // both unlocked for free, plus free squads of them worth exactly PACKAGE.value gold.
+  const PACKAGE = { value: 300, maxPrice: 200, options: 3 };
+  function allPackages(units) {
+    const out = [], ok = units.map((u, i) => unitCostOf(u) <= PACKAGE.maxPrice ? i : -1).filter(i => i >= 0);
+    for (const a of ok) for (const b of ok) {
+      if (a === b) continue;
+      const ca = unitCostOf(units[a]), cb = unitCostOf(units[b]);
+      for (let na = 1; na * ca < PACKAGE.value; na++) {
+        const rest = PACKAGE.value - na * ca;
+        if (rest % cb !== 0 || rest / cb < 1) continue;
+        const nb = rest / cb;
+        if (na < nb || (na === nb && a > b)) continue; // list each package once: the unit with more squads first
+        out.push({ units: [a, b], squads: Array(na).fill(a).concat(Array(nb).fill(b)) });
+      }
+    }
+    return out;
+  }
+  function dealPackages(units, r) {
+    const all = allPackages(units), pick = [];
+    for (let guard = 0; pick.length < Math.min(PACKAGE.options, all.length) && guard < 200; guard++) {
+      const p = all[Math.floor(r() * all.length)];
+      // three different packages, and no unit type in more than one of them where possible
+      if (pick.includes(p) || (guard < 120 && pick.some(q => q.units.some(u => p.units.includes(u))))) continue;
+      pick.push(p);
+    }
+    return pick;
+  }
+  const packOf = (m, side) => m.packages && m.pack && m.pack[side] != null ? m.packages[side][m.pack[side]] : null;
+  const needsPack = (m, side) => !!(m.packages && m.packages[side] && m.packages[side].length && m.pack[side] == null);
+  // package squads still waiting to be placed
+  function freeLeft(m, side) {
+    const p = packOf(m, side);
+    if (!p || m.round !== 1) return []; // package squads go down in round 1
+    const left = p.squads.slice();
+    for (const s of m.armies[side]) if (s.free) { const k = left.indexOf(s.unit); if (k >= 0) left.splice(k, 1); }
+    return left;
+  }
+  function choosePack(m, side, k) {
+    if (m.round !== 1 || !needsPack(m, side) || !(k >= 0 && k < m.packages[side].length)) return false;
+    m.pack[side] = k;
+    if (!m.unlocks) m.unlocks = [{}, {}];
+    for (const ui of m.packages[side][k].units) m.unlocks[side][ui] = m.round;
+    return true;
+  }
+  // before a fight: pick the first package for a player who didn't choose, and put unplaced package squads down
+  function ensurePack(m, side) {
+    if (needsPack(m, side)) choosePack(m, side, 0);
+    const r = rng(m.seed + 4242 + side);
+    for (const ui of freeLeft(m, side)) {
+      const spot = aiSpot(m, side, ui, [], r);
+      if (!spot || !place(m, side, ui, spot.col, spot.row)) break;
+    }
+  }
+
   function createMatch(units, matrix, seed) {
+    const r = rng((seed >>> 0) + 777);
     return {
       units, matrix, seed: seed >>> 0,
       round: 1, hp: [START_HP, START_HP], gold: [START_GOLD, START_GOLD],
@@ -69,6 +126,8 @@ const Game = (() => {
       tech: [{}, {}], // skills bought per unit type: tech[side][unitIdx] = [round bought or 0, round bought or 0]
       towers: [null, null], // { col, row } of each player's tower
       unlocks: [{}, {}], // units unlocked per player: unlocks[side][unitIdx] = round it was unlocked
+      packages: [dealPackages(units, r), dealPackages(units, r)], // each player's 3 starting package options
+      pack: [null, null], // which one each player picked
     };
   }
 
@@ -103,6 +162,7 @@ const Game = (() => {
   // take back an unlock bought this round, as long as no squad of that unit was placed with it
   function undoUnlock(m, side, ui) {
     if (!m.unlocks || !(m.unlocks[side][ui] === m.round)) return false;
+    const p = packOf(m, side); if (p && p.units.includes(ui)) return false; // package units stay unlocked
     if (m.armies[side].some(s => s.unit === ui)) return false;
     delete m.unlocks[side][ui];
     m.gold[side] += unlockCost(m, ui);
@@ -182,6 +242,11 @@ const Game = (() => {
     if (needsTower(m, side)) return null; // the tower goes down first
     if (!isUnlocked(m, side, unitIdx)) return null;
     if (occupied(m, side, col, row)) return null;
+    if (freeLeft(m, side).includes(unitIdx)) { // a package squad: no gold, no deployment
+      const sq = { id: m.nextId[side]++, unit: unitIdx, col, row, round: m.round, xp: 0, level: 0, cost: 0, free: true };
+      m.armies[side].push(sq);
+      return sq;
+    }
     const cost = unitCostOf(m.units[unitIdx]);
     if (m.gold[side] < cost) return null;
     if (deploysLeft(m, side) <= 0) return null;
@@ -217,6 +282,7 @@ const Game = (() => {
 
   function startBattle(m) {
     ensureTower(m, 0); ensureTower(m, 1);
+    ensurePack(m, 0); ensurePack(m, 1);
     return E.createBattle(bodiesFor(m, 0), bodiesFor(m, 1), SETTINGS, { record: true });
   }
 
@@ -325,6 +391,16 @@ const Game = (() => {
   // using the counter table, with a nudge toward variety and a little randomness.
   function aiDeploy(m, side) {
     const r = rng(m.seed + m.round * 7919 + side * 104729);
+    if (needsPack(m, side)) { // the package whose units do best against the whole roster
+      let bk = 0, bs = -Infinity;
+      m.packages[side].forEach((p, k) => {
+        let s = 0;
+        for (const ui of p.squads) s += m.matrix[ui].reduce((a, b) => a + b, 0) * unitCostOf(m.units[ui]);
+        s += (r() - 0.5) * 50;
+        if (s > bs) { bs = s; bk = k; }
+      });
+      choosePack(m, side, bk);
+    }
     if (needsTower(m, side)) { // tower first: a back corner, left or right
       const rows = zoneRows(side);
       const col = r() < 0.5 ? 1 + Math.floor(r() * 2) : 9 + Math.floor(r() * 2);
@@ -332,6 +408,7 @@ const Game = (() => {
     }
     const opp = 1 - side;
     const oppArmy = m.armies[opp].filter(s => s.round < m.round);
+    for (const ui of freeLeft(m, side)) { const spot = aiSpot(m, side, ui, oppArmy, r); if (spot) place(m, side, ui, spot.col, spot.row); }
     const oppCount = {};
     for (const s of oppArmy) oppCount[s.unit] = (oppCount[s.unit] || 0) + 1;
     const own = {};
@@ -422,6 +499,7 @@ const Game = (() => {
     COLS, ROWS, TILE, ZONE, START_HP, START_GOLD, INCOME, incomeFor, LOSER_BONUS, SQUAD_COST, SQUAD_POINTS, SETTINGS, XP_STEPS, xpNeeded, unitCostOf,
     levelCost, isReady, levelUp, undoLevel, aiLevel, AI, CONFIG,
     deploysAllowed, deploysLeft, deployedThisRound, buyDeploy, refundDeploy,
+    PACKAGE, allPackages, packOf, needsPack, freeLeft, choosePack, ensurePack,
     unlockCost, isUnlocked, unlockVisible, unlock, undoUnlock,
     skillDef, skillCost, isInnate, hasSkill, skillVisible, unitFor, canBuySkill, buySkill, undoSkill, sellValue, sell,
     TOWER, TOWER_MID, towerColOk, towerAt, needsTower, placeTower, ensureTower,
