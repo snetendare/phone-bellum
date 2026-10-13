@@ -49,9 +49,11 @@ const Game = (() => {
   // m.units[i].skillDefs = [def or null, def or null], resolved from the unit's two skill slots
   const skillDef = (m, ui, k) => (m.units[ui].skillDefs || [])[k] || null;
   const skillCost = (m, ui, k) => { const d = skillDef(m, ui, k); return d ? Math.max(0, Math.round(+d.cost || 0)) : 0; };
-  const hasSkill = (m, side, ui, k) => !!(m.tech && m.tech[side] && m.tech[side][ui] && m.tech[side][ui][k] > 0);
+  // a built-in skill (skillsInnate on the unit) is always on, free and visible
+  const isInnate = (m, ui, k) => !!(skillDef(m, ui, k) && Array.isArray(m.units[ui].skillsInnate) && m.units[ui].skillsInnate[k]);
+  const hasSkill = (m, side, ui, k) => isInnate(m, ui, k) || !!(m.tech && m.tech[side] && m.tech[side][ui] && m.tech[side][ui][k] > 0);
   // a skill bought this round is hidden from the opponent until the fight
-  const skillVisible = (m, side, ui, k) => hasSkill(m, side, ui, k) && m.tech[side][ui][k] < m.round;
+  const skillVisible = (m, side, ui, k) => isInnate(m, ui, k) || (hasSkill(m, side, ui, k) && m.tech[side][ui][k] < m.round);
   function unitFor(m, side, ui) {
     const base = m.units[ui];
     const defs = [0, 1].filter(k => hasSkill(m, side, ui, k)).map(k => skillDef(m, ui, k));
@@ -332,7 +334,7 @@ const Game = (() => {
     COLS, ROWS, TILE, ZONE, START_HP, START_GOLD, INCOME, incomeFor, LOSER_BONUS, SQUAD_COST, SQUAD_POINTS, SETTINGS, XP_STEPS, xpNeeded, unitCostOf,
     levelCost, isReady, levelUp, undoLevel, aiLevel, AI, CONFIG,
     deploysAllowed, deploysLeft, deployedThisRound, buyDeploy, refundDeploy,
-    skillDef, skillCost, hasSkill, skillVisible, unitFor, canBuySkill, buySkill, undoSkill, sellValue, sell,
+    skillDef, skillCost, isInnate, hasSkill, skillVisible, unitFor, canBuySkill, buySkill, undoSkill, sellValue, sell,
     zoneRows, inZone, tileToWorld, createMatch, place, unplace, bodiesFor, startBattle, resolve, aiDeploy, occupied,
   };
 })();

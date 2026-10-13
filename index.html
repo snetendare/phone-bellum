@@ -418,6 +418,29 @@ const Engine = (() => {
     return u;
   }
 
+  // The unit with its built-in skills (slots marked in skillsInnate), resolved from a skill library
+  function innateUnit(unit, lib, roster) {
+    if (!unit || !Array.isArray(unit.skillsInnate) || !Array.isArray(unit.skills)) return unit;
+    const defs = [0, 1].filter(k => unit.skillsInnate[k] && unit.skills[k]).map(k => {
+      const base = (lib || []).find(s => s && s.id === unit.skills[k]);
+      if (!base) return null;
+      const mod = Array.isArray(unit.skillMods) && unit.skillMods[k] && typeof unit.skillMods[k] === 'object' ? unit.skillMods[k] : null;
+      return mod ? { ...base, params: { ...base.params, ...(mod.params || {}) } } : base;
+    }).filter(Boolean);
+    return defs.length ? applySkills(unit, defs, roster) : unit;
+  }
+
+  // Gold per side for counter tables: the smallest amount that every unit's price divides evenly
+  // (costs in lab units, 1 = 100 gold), so no unit is stuck with leftover gold. Falls back to the priciest unit.
+  function fairBudget(costs, min = 2) {
+    const top = Math.max(min, ...costs);
+    const step = Math.min(...costs.filter(c => c > 0));
+    for (let b = top; b <= top * 6 + 1e-9; b += step) {
+      if (costs.every(c => c <= 0 || Math.abs(b / c - Math.round(b / c)) < 1e-6)) return b;
+    }
+    return top;
+  }
+
   function squadsFor(unit, g) {
     return Math.max(1, Math.floor(g.budget / Math.max(0.0001, unit.cost) + 1e-9));
   }
@@ -953,7 +976,7 @@ const Engine = (() => {
     return m;
   }
 
-  return { SKILL_TYPES, skillParam, describeSkill, applySkills, battle, makeArmy, matrix, createBattle, buildSquad, rawStrength, squadsFor, withTraits, leveled, TRAIT_DEFAULTS, SPIN_CAP, CHARGE_RUN, LEVEL_BONUS, MAX_LEVEL };
+  return { SKILL_TYPES, skillParam, describeSkill, applySkills, innateUnit, fairBudget, battle, makeArmy, matrix, createBattle, buildSquad, rawStrength, squadsFor, withTraits, leveled, TRAIT_DEFAULTS, SPIN_CAP, CHARGE_RUN, LEVEL_BONUS, MAX_LEVEL };
 })();
 if (typeof module !== 'undefined') module.exports = Engine;
 
@@ -1010,9 +1033,11 @@ const Game = (() => {
   // m.units[i].skillDefs = [def or null, def or null], resolved from the unit's two skill slots
   const skillDef = (m, ui, k) => (m.units[ui].skillDefs || [])[k] || null;
   const skillCost = (m, ui, k) => { const d = skillDef(m, ui, k); return d ? Math.max(0, Math.round(+d.cost || 0)) : 0; };
-  const hasSkill = (m, side, ui, k) => !!(m.tech && m.tech[side] && m.tech[side][ui] && m.tech[side][ui][k] > 0);
+  // a built-in skill (skillsInnate on the unit) is always on, free and visible
+  const isInnate = (m, ui, k) => !!(skillDef(m, ui, k) && Array.isArray(m.units[ui].skillsInnate) && m.units[ui].skillsInnate[k]);
+  const hasSkill = (m, side, ui, k) => isInnate(m, ui, k) || !!(m.tech && m.tech[side] && m.tech[side][ui] && m.tech[side][ui][k] > 0);
   // a skill bought this round is hidden from the opponent until the fight
-  const skillVisible = (m, side, ui, k) => hasSkill(m, side, ui, k) && m.tech[side][ui][k] < m.round;
+  const skillVisible = (m, side, ui, k) => isInnate(m, ui, k) || (hasSkill(m, side, ui, k) && m.tech[side][ui][k] < m.round);
   function unitFor(m, side, ui) {
     const base = m.units[ui];
     const defs = [0, 1].filter(k => hasSkill(m, side, ui, k)).map(k => skillDef(m, ui, k));
@@ -1293,7 +1318,7 @@ const Game = (() => {
     COLS, ROWS, TILE, ZONE, START_HP, START_GOLD, INCOME, incomeFor, LOSER_BONUS, SQUAD_COST, SQUAD_POINTS, SETTINGS, XP_STEPS, xpNeeded, unitCostOf,
     levelCost, isReady, levelUp, undoLevel, aiLevel, AI, CONFIG,
     deploysAllowed, deploysLeft, deployedThisRound, buyDeploy, refundDeploy,
-    skillDef, skillCost, hasSkill, skillVisible, unitFor, canBuySkill, buySkill, undoSkill, sellValue, sell,
+    skillDef, skillCost, isInnate, hasSkill, skillVisible, unitFor, canBuySkill, buySkill, undoSkill, sellValue, sell,
     zoneRows, inZone, tileToWorld, createMatch, place, unplace, bodiesFor, startBattle, resolve, aiDeploy, occupied,
   };
 })();
@@ -1302,7 +1327,7 @@ if (typeof module !== 'undefined') module.exports = Game;
 </script>
 <script>
 (() => {
-  const DATA = {"units":[{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"none","defVal":0,"level":0,"name":"Goblin Swarm","cost":1,"bodies":12,"hp":28,"hit":16,"aps":1.2,"range":2,"speed":12,"splash":0,"shape":"triangle","color":"#9BD35A","skills":["swift","shrink"],"skillMods":[null,null]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"none","defVal":0,"level":0,"name":"Skeleton Archers","cost":1,"bodies":8,"hp":32,"hit":12,"aps":0.8,"range":20,"speed":2.5,"splash":0,"shape":"triangle","color":"#E9E3CF","skills":["range","rapid"],"skillMods":[null,null]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"none","defVal":0,"level":0,"name":"Ember Imps","cost":1,"bodies":4,"hp":110,"hit":20,"aps":0.8,"range":10,"speed":4,"splash":3,"shape":"pentagon","color":"#FFA94D","skills":["swift","heavy"],"skillMods":[null,null]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"none","defVal":0,"level":0,"name":"Fire Mage","cost":1,"bodies":1,"hp":150,"hit":35,"aps":0.8,"range":26,"speed":3,"splash":4,"shape":"hexagon","color":"#fb0022","skills":["range","armorHp"],"skillMods":[null,null]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":1,"defense":"none","defVal":0,"level":0,"name":"Sniper","cost":1,"bodies":1,"hp":200,"hit":230,"aps":0.25,"range":35,"speed":2,"splash":0,"shape":"cross","color":"#F7D154","skills":["rapid","spawn"],"skillMods":[null,null]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"armor","defVal":6,"level":0,"name":"Brute","cost":2,"bodies":1,"hp":1100,"hit":98,"aps":0.5,"range":2,"speed":5,"splash":2.1,"shape":"square","color":"#8D99AE","skills":["armorHp","swift"],"skillMods":[null,null]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":20,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"none","defVal":40,"level":0,"name":"Wisps","cost":1,"bodies":3,"hp":80,"hit":70,"aps":0.8,"range":15,"speed":5,"splash":0,"shape":"ring","color":"#ff90ff","skills":["stealth","skmv5oxj501"],"skillMods":[null,{"params":{},"cost":200}]},{"burst":6,"pellets":2,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0.2,"defense":"none","defVal":0,"level":0,"name":"Leaf Wizard","cost":2,"bodies":1,"hp":300,"hit":21,"aps":0.45,"range":27,"speed":8,"splash":0,"shape":"hexagon","color":"#00d200","skills":["rapid","range"],"skillMods":[null,null]},{"burst":1,"pellets":1,"spinUp":0,"pierce":5,"projSpeed":35,"minRange":0,"charge":1,"knockback":0,"windUp":0.5,"defense":"none","defVal":0,"level":0,"name":"Earth Wizard","cost":2,"bodies":1,"hp":650,"hit":440,"aps":0.2,"range":20,"speed":3,"splash":2,"shape":"circle","color":"#24590d","skills":["regen","range"],"skillMods":[null,null]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"none","defVal":0,"level":0,"name":"Flame Wizard","cost":4,"bodies":1,"hp":2000,"hit":20,"aps":4,"range":15,"speed":2,"splash":0,"shape":"bar","color":"#b95018","skills":["armorHp","range"],"skillMods":[null,null],"flame":30},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"none","defVal":0,"level":0,"name":"Steel Wizard","cost":4,"bodies":1,"hp":1800,"hit":150,"aps":0.9,"range":15,"speed":2,"splash":2,"shape":"bar","color":"#57535a","skills":["range","heavy"],"skillMods":[null,{"params":{"slow":20,"hit":20}}]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"none","defVal":0,"level":0,"name":"Slime Wizard","cost":4,"bodies":1,"hp":700,"hit":450,"aps":0.15,"range":20,"speed":4,"splash":5,"shape":"ring","color":"#81f038","skills":["skmv5oxpgk2","range"],"skillMods":[null,null]}],"matrix":[[0,0.333,-0.576,-0.653,0.938,0.042,0.313,0.427,0.688,-0.768,0.396,0.875],[-0.333,0,-0.116,-1,0.656,0.594,0.594,-0.84,0.594,0.449,0.813,0.813],[0.576,0.116,0,-0.833,0.188,0.576,-0.542,-0.333,0.375,-0.8,-0.078,0.188],[0.653,1,0.833,0,-0.912,-0.288,0.767,0.02,0.5,-0.405,-0.514,-0.35],[-0.938,-0.656,-0.188,0.912,0,0.51,-0.417,-0.117,1,1,1,1],[-0.042,-0.594,-0.576,0.288,-0.51,0,-0.833,0.182,-0.397,0.315,-0.292,0.193],[-0.313,-0.594,0.542,-0.767,0.417,0.833,0,-0.533,0.667,-0.405,0.667,0.5],[-0.427,0.84,0.333,-0.02,0.117,-0.182,0.533,0,-0.225,0.733,-0.02,-0.28],[-0.688,-0.594,-0.375,-0.5,-1,0.397,-0.667,0.225,0,-0.12,0.154,0.308],[0.768,-0.449,0.8,0.405,-1,-0.315,0.405,-0.733,0.12,0,-0.356,0.55],[-0.396,-0.813,0.078,0.514,-1,0.292,-0.667,0.02,-0.154,0.356,0,0.5],[-0.875,-0.813,-0.188,0.35,-1,-0.193,-0.5,0.28,-0.308,-0.55,-0.5,0]],"skills":[{"id":"regen","type":"regen","name":"Regeneration","cost":100,"params":{}},{"id":"poison","type":"poison","name":"Poison shot","cost":100,"params":{"pct":150}},{"id":"stealth","type":"stealth","name":"Stealth","cost":100,"params":{}},{"id":"armorHp","type":"armorHp","name":"Armor and health","cost":200,"params":{}},{"id":"spawn","type":"spawn","name":"Spawn goblins","cost":200,"params":{}},{"id":"rapid","type":"rapid","name":"Rapid fire","cost":100,"params":{}},{"id":"swift","type":"swift","name":"Swift strikes","cost":100,"params":{}},{"id":"heavy","type":"heavy","name":"Heavy shot","cost":100,"params":{}},{"id":"healer","type":"healer","name":"Healing touch","cost":200,"params":{}},{"id":"range","type":"range","name":"Long reach","cost":200,"params":{}},{"id":"shrink","type":"shrink","name":"Shortsight","cost":100,"params":{}},{"id":"skmv5oxj501","type":"ward","name":"Ward","cost":100,"params":{}},{"id":"skmv5oxpgk2","type":"slow","name":"Slow","cost":100,"params":{}}]};
+  const DATA = {"units":[{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"none","defVal":0,"level":0,"name":"Goblin Swarm","cost":1,"bodies":12,"hp":28,"hit":16,"aps":1.2,"range":2,"speed":12,"splash":0,"shape":"triangle","color":"#9BD35A","skills":["swift","shrink"],"skillMods":[null,null]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"none","defVal":0,"level":0,"name":"Skeleton Archers","cost":1,"bodies":8,"hp":32,"hit":12,"aps":0.8,"range":20,"speed":2.5,"splash":0,"shape":"triangle","color":"#E9E3CF","skills":["range","rapid"],"skillMods":[null,null]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"none","defVal":0,"level":0,"name":"Ember Imps","cost":1,"bodies":4,"hp":110,"hit":20,"aps":0.8,"range":10,"speed":4,"splash":3,"shape":"pentagon","color":"#FFA94D","skills":["swift","heavy"],"skillMods":[null,null]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"none","defVal":0,"level":0,"name":"Fire Mage","cost":1,"bodies":1,"hp":150,"hit":35,"aps":0.8,"range":26,"speed":3,"splash":4,"shape":"hexagon","color":"#fb0022","skills":["range","armorHp"],"skillMods":[null,null]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":1,"defense":"none","defVal":0,"level":0,"name":"Sniper","cost":1,"bodies":1,"hp":200,"hit":230,"aps":0.25,"range":35,"speed":2,"splash":0,"shape":"cross","color":"#F7D154","skills":["rapid","spawn"],"skillMods":[null,null]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"armor","defVal":6,"level":0,"name":"Brute","cost":2,"bodies":1,"hp":1100,"hit":98,"aps":0.5,"range":2,"speed":5,"splash":2.1,"shape":"square","color":"#8D99AE","skills":["armorHp","swift"],"skillMods":[null,null]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":20,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"none","defVal":40,"level":0,"name":"Wisps","cost":1,"bodies":3,"hp":80,"hit":70,"aps":0.8,"range":15,"speed":5,"splash":0,"shape":"ring","color":"#ff90ff","skills":["stealth","skmv5oxj501"],"skillMods":[null,{"params":{},"cost":200}]},{"burst":6,"pellets":2,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0.2,"defense":"none","defVal":0,"level":0,"name":"Leaf Wizard","cost":2,"bodies":1,"hp":300,"hit":21,"aps":0.45,"range":27,"speed":8,"splash":0,"shape":"hexagon","color":"#00d200","skills":["rapid","range"],"skillMods":[null,null]},{"burst":1,"pellets":1,"spinUp":0,"pierce":5,"projSpeed":35,"minRange":0,"charge":1,"knockback":0,"windUp":0.5,"defense":"none","defVal":0,"level":0,"name":"Earth Wizard","cost":2,"bodies":1,"hp":650,"hit":440,"aps":0.2,"range":20,"speed":3,"splash":2,"shape":"circle","color":"#24590d","skills":["regen","range"],"skillMods":[null,null]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"none","defVal":0,"level":0,"name":"Flame Wizard","cost":4,"bodies":1,"hp":2000,"hit":20,"aps":4,"range":15,"speed":2,"splash":0,"shape":"bar","color":"#b95018","skills":["armorHp","range"],"skillMods":[null,null],"flame":30},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"none","defVal":0,"level":0,"name":"Steel Wizard","cost":4,"bodies":1,"hp":1800,"hit":150,"aps":0.9,"range":15,"speed":2,"splash":2,"shape":"bar","color":"#57535a","skills":["range","heavy"],"skillMods":[null,{"params":{"slow":20,"hit":20}}]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"defense":"none","defVal":0,"level":0,"name":"Slime Wizard","cost":4,"bodies":1,"hp":700,"hit":450,"aps":0.15,"range":20,"speed":4,"splash":5,"shape":"ring","color":"#81f038","skills":["skmv5oxpgk2","range"],"skillMods":[null,null]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"armor","defVal":15,"level":0,"splash":3,"skillsInnate":[false,false],"skillMods":[null,null],"name":"Stone Golem","cost":6,"bodies":1,"hp":3450,"hit":69,"aps":0.6,"range":5,"speed":2.5,"shape":"square","color":"#9C8B7A","skills":["regen","armorHp"]},{"burst":1,"pellets":1,"spinUp":50,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"splash":0,"skillsInnate":[false,false],"skillMods":[null,null],"name":"Sun Priest","cost":6,"bodies":1,"hp":2200,"hit":30,"aps":2,"range":22,"speed":3,"shape":"star","color":"#FFD23F","skills":["range","shrink"]},{"burst":3,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":22,"minRange":12,"charge":1,"knockback":0,"windUp":1.5,"flame":0,"defense":"none","defVal":0,"level":0,"splash":6,"skillsInnate":[false,false],"skillMods":[null,null],"name":"Meteor Caller","cost":6,"bodies":1,"hp":400,"hit":114,"aps":0.3,"range":50,"speed":2,"shape":"diamond","color":"#FF6B35","skills":["range","skmv5oxpgk2"]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":3,"knockback":4,"windUp":0,"flame":0,"defense":"armor","defVal":6,"level":0,"splash":3,"skillsInnate":[false,false],"skillMods":[null,null],"name":"War Mammoth","cost":6,"bodies":1,"hp":2300,"hit":169,"aps":0.5,"range":3,"speed":9,"shape":"pentagon","color":"#A0785A","skills":["swift","armorHp"]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"splash":0,"skillsInnate":[true,false],"skillMods":[null,null],"name":"Necromancer","cost":6,"bodies":1,"hp":2300,"hit":56,"aps":1,"range":20,"speed":2.5,"shape":"hexagon","color":"#9D4EDD","skills":["raiseDead","healer"]}],"matrix":[[0,0.248,-0.678,-0.938,0.903,-0.194,0.042,0.22,0.674,-0.987,0.368,0.778,-0.874,0.34,0.042,0.028,0.873],[-0.248,0,0.184,-1,0.563,0.635,0.729,-1,0.563,-0.021,0.729,0.635,-0.649,-0.253,0.115,0.75,0.53],[0.678,-0.184,0,-1,0.292,0.757,-0.201,-0.533,0.188,-0.95,-0.23,0.188,-0.691,-0.195,0.021,0.042,0.681],[0.938,1,1,0,-1,0.391,1,0.36,0.083,-0.019,-0.209,-0.483,-0.246,-0.109,-0.912,-0.508,-0.099],[-0.903,-0.563,-0.292,1,0,0.837,-0.306,0.583,1,1,1,1,1,0.887,-0.212,0.077,-0.345],[0.194,-0.635,-0.757,-0.391,-0.837,0,-0.806,0.189,-0.648,-0.128,-0.456,-0.487,0.156,-0.055,0.124,-0.36,-0.082],[-0.042,-0.729,0.201,-1,0.306,0.806,0,-0.806,0.417,-0.545,0.583,0.556,0.806,0.458,-0.237,0.667,0.418],[-0.22,1,0.533,-0.36,-0.583,-0.189,0.806,0,-0.387,0.689,0.333,-0.307,-0.602,-0.103,0.167,-0.57,0.116],[-0.674,-0.563,-0.188,-0.083,-1,0.648,-0.417,0.387,0,0.538,-0.007,-0.333,0.575,0.187,0.041,0.35,-0.653],[0.987,0.021,0.95,0.019,-1,0.128,0.545,-0.689,-0.538,0,-0.356,0.142,-0.537,-0.364,-0.575,0.188,-0.118],[-0.368,-0.729,0.23,0.209,-1,0.456,-0.583,-0.333,0.007,0.356,0,0.083,0.732,0.222,-0.625,0.593,-0.347],[-0.778,-0.635,-0.188,0.483,-1,0.487,-0.556,0.307,0.333,-0.142,-0.083,0,-0.059,-0.182,0.294,-0.035,-0.168],[0.874,0.649,0.691,0.246,-1,-0.156,-0.806,0.602,-0.575,0.537,-0.732,0.059,0,-0.373,0.397,-0.315,0.157],[-0.34,0.253,0.195,0.109,-0.887,0.055,-0.458,0.103,-0.187,0.364,-0.222,0.182,0.373,0,0.223,0.232,-0.163],[-0.042,-0.115,-0.021,0.912,0.212,-0.124,0.237,-0.167,-0.041,0.575,0.625,-0.294,-0.397,-0.223,0,-0.859,-0.056],[-0.028,-0.75,-0.042,0.508,-0.077,0.36,-0.667,0.57,-0.35,-0.188,-0.593,0.035,0.315,-0.232,0.859,0,0.324],[-0.873,-0.53,-0.681,0.099,0.345,0.082,-0.418,-0.116,0.653,0.118,0.347,0.168,-0.157,0.163,0.056,-0.324,0]],"skills":[{"id":"regen","type":"regen","name":"Regeneration","cost":100,"params":{}},{"id":"poison","type":"poison","name":"Poison shot","cost":100,"params":{"pct":150}},{"id":"stealth","type":"stealth","name":"Stealth","cost":100,"params":{}},{"id":"armorHp","type":"armorHp","name":"Armor and health","cost":200,"params":{}},{"id":"spawn","type":"spawn","name":"Spawn goblins","cost":200,"params":{}},{"id":"rapid","type":"rapid","name":"Rapid fire","cost":100,"params":{}},{"id":"swift","type":"swift","name":"Swift strikes","cost":100,"params":{}},{"id":"heavy","type":"heavy","name":"Heavy shot","cost":100,"params":{}},{"id":"healer","type":"healer","name":"Healing touch","cost":200,"params":{}},{"id":"range","type":"range","name":"Long reach","cost":200,"params":{}},{"id":"shrink","type":"shrink","name":"Shortsight","cost":100,"params":{}},{"id":"skmv5oxj501","type":"ward","name":"Ward","cost":100,"params":{}},{"id":"skmv5oxpgk2","type":"slow","name":"Slow","cost":100,"params":{}},{"id":"raiseDead","type":"spawn","name":"Raise dead","cost":0,"params":{"unit":"Skeleton Archers","count":3,"every":2,"max":12}}]};
   const ROLES = {
     'Goblin Swarm': 'Fast melee swarm. Soaks shots and overwhelms single-target units.',
     'Skeleton Archers': 'Cheap ranged squad that deals steady damage from behind.',
@@ -1315,6 +1340,11 @@ if (typeof module !== 'undefined') module.exports = Game;
     'Flame Wizard': 'A slow fortress that sprays fire across everything in front of it.',
     'Steel Wizard': 'Heavy caster that hammers everything in reach.',
     'Slime Wizard': 'Lobs huge, slow globs of slime that splash over a wide area.',
+    'Stone Golem': 'A walking wall. Heavy armor shrugs off small hits while it holds its lane.',
+    'Sun Priest': 'Channels a beam that burns hotter the longer it holds one target. Melts giants.',
+    'Meteor Caller': 'Drops slow meteors from far behind the lines. Helpless once something reaches it.',
+    'War Mammoth': 'Charges down an open lane and tramples whatever stands behind it.',
+    'Necromancer': 'Keeps raising skeletons to screen its army from big hits.',
     'Wisps': 'Warded spirits firing slow bolts. No single hit can deal more than 40 to them.',
     'Crossbow Volley': 'Fires 4-bolt bursts down one line. Lined-up targets take every bolt.',
     'Ballista': 'Slow piercing bolts from long range. Can’t hit anything close.',
@@ -1969,7 +1999,7 @@ if (typeof module !== 'undefined') module.exports = Game;
       if (u.charge > 1) t.push(`charge x${u.charge}`);
       if (u.knockback > 0) t.push(`knockback ${u.knockback} m`);
       if (u.windUp > 0) t.push(`wind-up ${u.windUp} s`);
-      const sk = (u.skillDefs || []).map((d, k) => d ? `skill ${k + 1} "${d.name}" (${Game.skillCost(m, i, k)} gold${Game.hasSkill(m, 1, i, k) ? ', YOU OWN IT' : ''}): ${Engine.describeSkill(d)}` : null).filter(Boolean);
+      const sk = (u.skillDefs || []).map((d, k) => d ? `skill ${k + 1} "${d.name}" (${Game.isInnate(m, i, k) ? 'BUILT IN: always on for both players, free' : `${Game.skillCost(m, i, k)} gold${Game.hasSkill(m, 1, i, k) ? ', YOU OWN IT' : ''}`}): ${Engine.describeSkill(d)}` : null).filter(Boolean);
       return `- ${u.name}: price ${Game.unitCostOf(u)}, ${u.bodies} ${u.bodies === 1 ? 'body' : 'bodies'} x ${n1(u.hp, 0)} hp each, hit ${n1(u.hit)} x ${n1(u.aps, 2)}/s, range ${u.range} m, speed ${u.speed} m/s${t.length ? ', ' + t.join(', ') : ''}. Level-up cost ${Game.levelCost(u)}.${sk.length ? '\n    ' + sk.join('\n    ') : ''}`;
     };
     const tag = (u) => u.name;
@@ -2240,7 +2270,9 @@ Actions run in this order: sell, levelUp, skills, extraDeployments, place. Anyth
     const rows = [0, 1].filter(k => defs[k]).map(k => {
       const d = defs[k], cost = Game.skillCost(m, i, k);
       let act = '';
-      if (mine) {
+      if (Game.isInnate(m, i, k)) {
+        act = `<span class="chip" style="color:var(--ink);border:1px solid currentColor;border-radius:99px;padding:1px 8px;font-size:12px">Built in</span>`;
+      } else if (mine) {
         if (Game.hasSkill(m, me, i, k)) {
           act = `<span class="chip" style="color:var(--gold);border:1px solid currentColor;border-radius:99px;padding:1px 8px;font-size:12px">Owned</span>`;
           if (phase === 'deploy' && editable() && m.tech[me][i][k] === m.round) act += ` <button class="btn small" data-unskill="${k}">Undo</button>`;
@@ -2336,7 +2368,7 @@ Actions run in this order: sell, levelUp, skills, extraDeployments, place. Anyth
     const total = n * (n - 1) / 2;
     let done = 0;
     // enough gold per side that even the priciest unit fields a full squad
-    const g = { ...MATRIX_SETTINGS, budget: Math.max(MATRIX_SETTINGS.budget, ...us.map(u => u.cost)) };
+    const g = { ...MATRIX_SETTINGS, budget: Engine.fairBudget(us.map(u => u.cost), MATRIX_SETTINGS.budget) };
     for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) {
       const r = Engine.battle(us[i], us[j], g);
       out[i][j] = +r.score.toFixed(3); out[j][i] = -out[i][j];
@@ -2378,7 +2410,7 @@ Actions run in this order: sell, levelUp, skills, extraDeployments, place. Anyth
       const prepared = clean.map(u => ({ ...Engine.withTraits(u), level: 0, bodies: Math.max(1, Math.round(u.bodies)) }));
       const id = ++loaderRun;
       $('use-roster').disabled = true; if ($('use-lab')) $('use-lab').disabled = true;
-      const gen = matrixGen(prepared);
+      const gen = matrixGen(prepared.map(u => Engine.innateUnit(u, (p && p.skills) || [], prepared))); // built-in skills count in the table
       (function step() {
         if (id !== loaderRun) return;
         const t0 = performance.now();

@@ -405,6 +405,7 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
       defense: 'none', defVal: 0, ...u,
       skills: [0, 1].map(k => (Array.isArray(u.skills) && ids.has(u.skills[k])) ? u.skills[k] : null),
       skillsOn: [0, 1].map(k => !!(Array.isArray(u.skillsOn) && u.skillsOn[k])),
+      skillsInnate: [0, 1].map(k => !!(Array.isArray(u.skillsInnate) && u.skillsInnate[k])),
       skillMods: [0, 1].map(k => cleanMod(Array.isArray(u.skillMods) ? u.skillMods[k] : null)),
     })));
     return { settings: { sight: 12, ...SAMPLE.settings, ...p.settings }, skills, units };
@@ -429,7 +430,7 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
   const isCustom = (u, k) => !!(u.skillMods && u.skillMods[k]);
   // The unit as tests see it: with the skills ticked On in tests
   function prep(u) {
-    const defs = [0, 1].filter(k => u.skills && u.skills[k] && u.skillsOn && u.skillsOn[k]).map(k => slotDef(u, k)).filter(Boolean);
+    const defs = [0, 1].filter(k => u.skills && u.skills[k] && ((u.skillsOn && u.skillsOn[k]) || (u.skillsInnate && u.skillsInnate[k]))).map(k => slotDef(u, k)).filter(Boolean);
     return defs.length ? Engine.applySkills(u, defs, state.units) : u;
   }
   function valid(p) {
@@ -578,7 +579,7 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
       if (u.knockback > 0) tr.push(`knockback ${fmt(u.knockback, 1)} m`);
       if (u.windUp > 0) tr.push(`wind-up ${fmt(u.windUp, 1)} s`);
       if (u.level > 0) tr.push(`${u.level + 1}× stats`);
-      [0, 1].forEach(k => { const sk = slotDef(u, k); if (sk) tr.push(`${sk.name}${isCustom(u, k) ? '*' : ''}${u.skillsOn[k] ? ' (on)' : ''}`); });
+      [0, 1].forEach(k => { const sk = slotDef(u, k); if (sk) tr.push(`${sk.name}${isCustom(u, k) ? '*' : ''}${u.skillsInnate[k] ? ' (built in)' : u.skillsOn[k] ? ' (on)' : ''}`); });
       d.querySelector('.sum-line').textContent =
         `${u.bodies} × ${fmt(u.hp)} hp · ${fmt(u.hit)} dmg × ${fmt(u.aps, 2)}/s · ${fmt(u.range)} m${u.splash ? ` · splash ${u.splash}` : ''}${def}${tr.length ? ' · ' + tr.join(' · ') : ''}`;
       d.querySelector('.bar i').style.width = (r.strength / max * 100).toFixed(1) + '%';
@@ -607,7 +608,8 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
           <option value="">No skill</option>
           ${state.skills.map(sk => `<option value="${esc(sk.id)}" ${u.skills[k] === sk.id ? 'selected' : ''}>${esc(sk.name)}</option>`).join('')}
         </select>
-        <label class="on"><input type="checkbox" data-on="${k}" ${u.skillsOn[k] ? 'checked' : ''} ${u.skills[k] ? '' : 'disabled'}> On in tests</label>
+        <label class="on"><input type="checkbox" data-on="${k}" ${u.skillsOn[k] || u.skillsInnate[k] ? 'checked' : ''} ${u.skills[k] && !u.skillsInnate[k] ? '' : 'disabled'}> On in tests</label>
+        <label class="on" title="Free and always on in the game, for both players"><input type="checkbox" data-innate="${k}" ${u.skillsInnate[k] ? 'checked' : ''} ${u.skills[k] ? '' : 'disabled'}> Built in</label>
         <span class="skill-desc" data-desc="${k}">${def ? slotText(u, k) : ''}</span>
         ${def ? `<details class="slot-custom" data-k="${k}" ${open.has(String(k)) ? 'open' : ''}>
           <summary>Adjust for ${esc(u.name)} only</summary>
@@ -628,12 +630,16 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
       const k = +sl.dataset.slot;
       u.skills[k] = sl.value || null;
       u.skillMods[k] = null; // a different skill starts from its own settings
-      if (!u.skills[k]) u.skillsOn[k] = false;
+      if (!u.skills[k]) { u.skillsOn[k] = false; u.skillsInnate[k] = false; }
       save(); renderSlots(u, d); renderUnitSummaries(); renderSkillUse(); scheduleRun();
     }));
     box.querySelectorAll('[data-on]').forEach(cb => cb.addEventListener('change', () => {
       u.skillsOn[+cb.dataset.on] = cb.checked;
       save(); renderUnitSummaries(); scheduleRun();
+    }));
+    box.querySelectorAll('[data-innate]').forEach(cb => cb.addEventListener('change', () => {
+      u.skillsInnate[+cb.dataset.innate] = cb.checked;
+      save(); renderSlots(u, d); renderUnitSummaries(); scheduleRun();
     }));
     box.querySelectorAll('details.slot-custom').forEach(det => {
       const k = +det.dataset.k;
@@ -843,7 +849,7 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
   }
 
   $('add').addEventListener('click', () => {
-    const u = { ...Shapes.assign([...state.units, Engine.withTraits({ name: 'New unit', cost: 100, bodies: 4, hp: 200, hit: 20, aps: 1, range: 10, speed: 6, splash: 0 })]).pop(), id: uid++, skills: [null, null], skillsOn: [false, false], skillMods: [null, null] };
+    const u = { ...Shapes.assign([...state.units, Engine.withTraits({ name: 'New unit', cost: 100, bodies: 4, hp: 200, hit: 20, aps: 1, range: 10, speed: 6, splash: 0 })]).pop(), id: uid++, skills: [null, null], skillsOn: [false, false], skillsInnate: [false, false], skillMods: [null, null] };
     state.units.push(u);
     save(); renderUnits(); scheduleRun();
     const d = unitsEl.querySelector(`details[data-id="${u.id}"]`);
@@ -856,7 +862,7 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
     const merged = Shapes.assign([...state.units, ...clone(add)]); // new examples get shapes not already in use
     const ids = new Set(state.skills.map(sk => sk.id));
     state.units.push(...merged.slice(state.units.length).map(u => ({ ...Engine.withTraits(u), id: uid++,
-      skills: [0, 1].map(k => (u.skills && ids.has(u.skills[k])) ? u.skills[k] : null), skillsOn: [false, false], skillMods: [null, null] })));
+      skills: [0, 1].map(k => (u.skills && ids.has(u.skills[k])) ? u.skills[k] : null), skillsOn: [false, false], skillsInnate: [false, false], skillMods: [null, null] })));
     save(); renderUnits(); scheduleRun();
     $('ex-msg').textContent = `Added ${add.map(e => e.name).join(', ')}.`;
   });

@@ -101,6 +101,18 @@
    "name": "Slow",
    "cost": 100,
    "params": {}
+  },
+  {
+   "id": "raiseDead",
+   "type": "spawn",
+   "name": "Raise dead",
+   "cost": 0,
+   "params": {
+    "unit": "Skeleton Archers",
+    "count": 3,
+    "every": 2,
+    "max": 12
+   }
   }
  ],
  "units": [
@@ -555,6 +567,216 @@
    "skillMods": [
     null,
     null
+   ]
+  },
+  {
+   "burst": 1,
+   "pellets": 1,
+   "spinUp": 0,
+   "pierce": 0,
+   "projSpeed": 0,
+   "minRange": 0,
+   "charge": 1,
+   "knockback": 0,
+   "windUp": 0,
+   "flame": 0,
+   "defense": "armor",
+   "defVal": 15,
+   "level": 0,
+   "splash": 3,
+   "skillsOn": [
+    false,
+    false
+   ],
+   "skillsInnate": [
+    false,
+    false
+   ],
+   "skillMods": [
+    null,
+    null
+   ],
+   "name": "Stone Golem",
+   "cost": 600,
+   "bodies": 1,
+   "hp": 3450,
+   "hit": 69,
+   "aps": 0.6,
+   "range": 5,
+   "speed": 2.5,
+   "shape": "square",
+   "color": "#9C8B7A",
+   "skills": [
+    "regen",
+    "armorHp"
+   ]
+  },
+  {
+   "burst": 1,
+   "pellets": 1,
+   "spinUp": 50,
+   "pierce": 0,
+   "projSpeed": 0,
+   "minRange": 0,
+   "charge": 1,
+   "knockback": 0,
+   "windUp": 0,
+   "flame": 0,
+   "defense": "none",
+   "defVal": 0,
+   "level": 0,
+   "splash": 0,
+   "skillsOn": [
+    false,
+    false
+   ],
+   "skillsInnate": [
+    false,
+    false
+   ],
+   "skillMods": [
+    null,
+    null
+   ],
+   "name": "Sun Priest",
+   "cost": 600,
+   "bodies": 1,
+   "hp": 2200,
+   "hit": 30,
+   "aps": 2,
+   "range": 22,
+   "speed": 3,
+   "shape": "star",
+   "color": "#FFD23F",
+   "skills": [
+    "range",
+    "shrink"
+   ]
+  },
+  {
+   "burst": 3,
+   "pellets": 1,
+   "spinUp": 0,
+   "pierce": 0,
+   "projSpeed": 22,
+   "minRange": 12,
+   "charge": 1,
+   "knockback": 0,
+   "windUp": 1.5,
+   "flame": 0,
+   "defense": "none",
+   "defVal": 0,
+   "level": 0,
+   "splash": 6,
+   "skillsOn": [
+    false,
+    false
+   ],
+   "skillsInnate": [
+    false,
+    false
+   ],
+   "skillMods": [
+    null,
+    null
+   ],
+   "name": "Meteor Caller",
+   "cost": 600,
+   "bodies": 1,
+   "hp": 400,
+   "hit": 114,
+   "aps": 0.3,
+   "range": 50,
+   "speed": 2,
+   "shape": "diamond",
+   "color": "#FF6B35",
+   "skills": [
+    "range",
+    "skmv5oxpgk2"
+   ]
+  },
+  {
+   "burst": 1,
+   "pellets": 1,
+   "spinUp": 0,
+   "pierce": 0,
+   "projSpeed": 0,
+   "minRange": 0,
+   "charge": 3,
+   "knockback": 4,
+   "windUp": 0,
+   "flame": 0,
+   "defense": "armor",
+   "defVal": 6,
+   "level": 0,
+   "splash": 3,
+   "skillsOn": [
+    false,
+    false
+   ],
+   "skillsInnate": [
+    false,
+    false
+   ],
+   "skillMods": [
+    null,
+    null
+   ],
+   "name": "War Mammoth",
+   "cost": 600,
+   "bodies": 1,
+   "hp": 2300,
+   "hit": 169,
+   "aps": 0.5,
+   "range": 3,
+   "speed": 9,
+   "shape": "pentagon",
+   "color": "#A0785A",
+   "skills": [
+    "swift",
+    "armorHp"
+   ]
+  },
+  {
+   "burst": 1,
+   "pellets": 1,
+   "spinUp": 0,
+   "pierce": 0,
+   "projSpeed": 0,
+   "minRange": 0,
+   "charge": 1,
+   "knockback": 0,
+   "windUp": 0,
+   "flame": 0,
+   "defense": "none",
+   "defVal": 0,
+   "level": 0,
+   "splash": 0,
+   "skillsOn": [
+    false,
+    false
+   ],
+   "skillsInnate": [
+    true,
+    false
+   ],
+   "skillMods": [
+    null,
+    null
+   ],
+   "name": "Necromancer",
+   "cost": 600,
+   "bodies": 1,
+   "hp": 2300,
+   "hit": 56,
+   "aps": 1,
+   "range": 20,
+   "speed": 2.5,
+   "shape": "hexagon",
+   "color": "#9D4EDD",
+   "skills": [
+    "raiseDead",
+    "healer"
    ]
   }
  ]

@@ -127,6 +127,29 @@ const Engine = (() => {
     return u;
   }
 
+  // The unit with its built-in skills (slots marked in skillsInnate), resolved from a skill library
+  function innateUnit(unit, lib, roster) {
+    if (!unit || !Array.isArray(unit.skillsInnate) || !Array.isArray(unit.skills)) return unit;
+    const defs = [0, 1].filter(k => unit.skillsInnate[k] && unit.skills[k]).map(k => {
+      const base = (lib || []).find(s => s && s.id === unit.skills[k]);
+      if (!base) return null;
+      const mod = Array.isArray(unit.skillMods) && unit.skillMods[k] && typeof unit.skillMods[k] === 'object' ? unit.skillMods[k] : null;
+      return mod ? { ...base, params: { ...base.params, ...(mod.params || {}) } } : base;
+    }).filter(Boolean);
+    return defs.length ? applySkills(unit, defs, roster) : unit;
+  }
+
+  // Gold per side for counter tables: the smallest amount that every unit's price divides evenly
+  // (costs in lab units, 1 = 100 gold), so no unit is stuck with leftover gold. Falls back to the priciest unit.
+  function fairBudget(costs, min = 2) {
+    const top = Math.max(min, ...costs);
+    const step = Math.min(...costs.filter(c => c > 0));
+    for (let b = top; b <= top * 6 + 1e-9; b += step) {
+      if (costs.every(c => c <= 0 || Math.abs(b / c - Math.round(b / c)) < 1e-6)) return b;
+    }
+    return top;
+  }
+
   function squadsFor(unit, g) {
     return Math.max(1, Math.floor(g.budget / Math.max(0.0001, unit.cost) + 1e-9));
   }
@@ -662,6 +685,6 @@ const Engine = (() => {
     return m;
   }
 
-  return { SKILL_TYPES, skillParam, describeSkill, applySkills, battle, makeArmy, matrix, createBattle, buildSquad, rawStrength, squadsFor, withTraits, leveled, TRAIT_DEFAULTS, SPIN_CAP, CHARGE_RUN, LEVEL_BONUS, MAX_LEVEL };
+  return { SKILL_TYPES, skillParam, describeSkill, applySkills, innateUnit, fairBudget, battle, makeArmy, matrix, createBattle, buildSquad, rawStrength, squadsFor, withTraits, leveled, TRAIT_DEFAULTS, SPIN_CAP, CHARGE_RUN, LEVEL_BONUS, MAX_LEVEL };
 })();
 if (typeof module !== 'undefined') module.exports = Engine;
