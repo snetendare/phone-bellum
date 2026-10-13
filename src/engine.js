@@ -418,7 +418,7 @@ const Engine = (() => {
         } else {
           impact(b, tgt.x, tgt.y, tgt, hit, dirX, dirY, b.x, b.y);
         }
-        if (opts.record && !targets.flame) shots.push([b.x, b.y, tgt.x, tgt.y, b.side, b.u.splash, charged ? 1 : 0]);
+        if (opts.record && !targets.flame) shots.push([b.x, b.y, tgt.x, tgt.y, b.side, b.u.splash, charged ? 1 : 0, 0, 0, b.u.spinUp > 0 ? b.spin : 1]);
       }
       // a flame is drawn once, as a wedge from the unit out to its range
       if (opts.record && targets.flame) {
@@ -590,8 +590,15 @@ const Engine = (() => {
           if (!valid.length) continue;
           primary = valid[0];
         }
+        // spin-up builds while the unit keeps hitting one target: it stays on that target while it can,
+        // and the ramp starts over when it has to switch
+        if (b.u.spinUp > 0) {
+          if (b.spinTarget && b.spinTarget.alive && valid.includes(b.spinTarget)) primary = b.spinTarget;
+          else { b.spinTarget = primary; b.firing = 0; }
+        }
         if (b.firing < 0) b.firing = 0;
         const spin = b.u.spinUp > 0 ? Math.min(SPIN_CAP, 1 + b.u.spinUp / 100 * b.firing) : 1;
+        b.spin = spin;
         // reload doesn't stack up while the unit has nothing to shoot: keep at most one step of carry-over
         b.cd = Math.max(b.cd, -dt) + 1 / Math.max(0.01, b.u.aps * spin);
         const n = Math.max(1, Math.round(b.u.burst));

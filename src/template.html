@@ -324,7 +324,7 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
       <div class="rule"><h3>Burst and shotgun</h3><p>A burst fires its shots 0.15 s apart along the line toward its first target. Each shot hits the first body in its path: the target while it lives, then whoever stands behind it. If the line is empty, the shot misses. A shotgun fires all its pellets at once into a 60° cone, each at a different body, wrapping back to bodies already hit when it runs out.</p></div>
       <div class="rule"><h3>Flame cone</h3><p>Like the Vulcan: every attack hits all enemies in range inside a cone toward the target, stealthed ones too, instantly. Damage grows with how many enemies stand in the fire, so it melts swarms, while armor eats a big share of each small tick and longer-ranged units can shoot it before it gets close.</p></div>
       <div class="rule"><h3>Wind-up</h3><p>The first time an enemy is in range, the unit sets up for the wind-up time, like a sniper lying down. Once set up, it fires at its normal rate at anything in range. If it has to move, it gets up, and it sets up again when an enemy is next in range. Moving during the setup cancels it.</p></div>
-      <div class="rule"><h3>Spin-up</h3><p>Raises attack speed every second the unit keeps firing, up to three times its base speed.</p></div>
+      <div class="rule"><h3>Spin-up</h3><p>Raises attack speed every second the unit keeps hitting the same target, up to three times its base speed. It stays on that target while it can, and the ramp starts over when it has to switch, so swarms keep it slow and big targets let it melt them.</p></div>
       <div class="rule"><h3>Pierce and projectiles</h3><p>A piercing shot also hits bodies lined up behind its target. A projectile with a speed travels in a straight line and hits the first enemy it touches, so units moving sideways can dodge it while units charging straight at it get hit.</p></div>
       <div class="rule"><h3>Upgrades</h3><p>Each upgrade adds the unit’s starting health and hit again: one upgrade doubles them, two triple them. In the game, squads earn upgrades through experience and gold; here you set them directly to test upgraded matchups.</p></div>
       <div class="rule"><h3>Skills</h3><p>Upgrades a player buys during a match. Each unit has two. A skill changes the unit’s stats, gives it a new ability, or both. Poison ignores armor and ward. Spawned bodies fight like normal bodies but don’t count for damage after the round.</p></div>
@@ -346,7 +346,7 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
   const TRAITS = [
     ['burst', 'Burst shots', 1, 'Shots fired 0.15 s apart along one line; each hits the first body in its path. 1 = normal.'],
     ['pellets', 'Shotgun pellets', 1, 'Pellets fired at once into a 60° cone, each at a different body. 1 = normal.'],
-    ['spinUp', 'Spin-up (%/s)', 5, 'Attack speed gained per second of firing, up to 3×.'],
+    ['spinUp', 'Spin-up (%/s)', 5, 'Attack speed gained per second of hitting the same target, up to 3×. Starts over when the unit switches target.'],
     ['pierce', 'Pierce', 1, 'Extra bodies a shot passes through behind its target.'],
     ['projSpeed', 'Projectile speed (m/s)', 5, '0 = instant hit. Slower shots can be dodged.'],
     ['minRange', 'Minimum range (m)', 1, 'Can’t hit anything closer than this.'],
@@ -1024,7 +1024,7 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
         ctx.beginPath(); ctx.moveTo(cx, cy); ctx.arc(cx, cy, rr, ang - half, ang + half); ctx.closePath(); ctx.fill();
         continue;
       }
-      ctx.strokeStyle = sh[4] === 0 ? colA : colB; ctx.globalAlpha = 0.55; ctx.lineWidth = sh[6] ? 3 : 1;
+      ctx.strokeStyle = sh[4] === 0 ? colA : colB; ctx.globalAlpha = 0.55; ctx.lineWidth = Math.max(sh[6] ? 3 : 1, 1 + ((sh[9] || 1) - 1) * 1.5); // spun-up beams get thicker
       ctx.beginPath(); ctx.moveTo(X(sh[0]), Y(sh[1])); ctx.lineTo(X(sh[2]), Y(sh[3])); ctx.stroke();
       ctx.lineWidth = 1;
       if (sh[5] > 0) { ctx.globalAlpha = 0.35; ctx.beginPath(); ctx.arc(X(sh[2]), Y(sh[3]), sh[5] * s, 0, Math.PI * 2); ctx.stroke(); }

@@ -311,7 +311,7 @@ a { color: var(--you); }
         ctx.beginPath(); ctx.moveTo(PX(e.x1), PY(e.y1)); ctx.lineTo(PX(e.x2), PY(e.y2)); ctx.stroke(); ctx.setLineDash([]);
       }
       if (e.kind === 'shot') {
-        ctx.strokeStyle = teamCol(e.side); ctx.globalAlpha = 0.7 * a; ctx.lineWidth = e.charged ? 3 : 1;
+        ctx.strokeStyle = teamCol(e.side); ctx.globalAlpha = 0.7 * a; ctx.lineWidth = Math.max(e.charged ? 3 : 1, 1 + (e.spin - 1) * 1.5); // spun-up beams get thicker
         ctx.beginPath(); ctx.moveTo(PX(e.x1), PY(e.y1)); ctx.lineTo(PX(e.x2), PY(e.y2)); ctx.stroke();
         if (e.splash > 0) { ctx.globalAlpha = 0.4 * a; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(PX(e.x2), PY(e.y2), e.splash * S, 0, Math.PI * 2); ctx.stroke(); }
       }
@@ -744,7 +744,7 @@ a { color: var(--you); }
       if (u.burst > 1) t.push(`burst ${u.burst}`);
       if (u.flame > 0) t.push(`flamethrower: every attack hits all enemies in range within ${u.flame}° to each side of its target`);
       else if (u.pellets > 1) t.push(`shotgun ${u.pellets}`);
-      if (u.spinUp > 0) t.push(`spin-up ${u.spinUp}%/s`);
+      if (u.spinUp > 0) t.push(`spin-up ${u.spinUp}%/s on one target, up to 3x attack speed, starts over when it switches target`);
       if (u.pierce > 0) t.push(`pierce ${u.pierce}`);
       if (u.projSpeed > 0) t.push(`projectile ${u.projSpeed} m/s`);
       if (u.minRange > 0) t.push(`min range ${u.minRange} m`);
@@ -946,7 +946,7 @@ Actions run in this order: sell, levelUp, skills, extraDeployments, place. Anyth
 
   function absorb() {
     for (const s of bt.lastShots()) if (s[8] > 0) fx.push({ kind: 'flame', x1: s[0], y1: s[1], x2: s[2], y2: s[3], side: s[4], half: s[8], age: 0, life: 0.3 });
-    else fx.push({ kind: s[7] === 1 ? 'heal' : 'shot', x1: s[0], y1: s[1], x2: s[2], y2: s[3], side: s[4], splash: s[5], charged: s[6], age: 0, life: s[7] === 1 ? 0.35 : 0.18 });
+    else fx.push({ kind: s[7] === 1 ? 'heal' : 'shot', x1: s[0], y1: s[1], x2: s[2], y2: s[3], side: s[4], splash: s[5], charged: s[6], spin: s[9] || 1, age: 0, life: s[7] === 1 ? 0.35 : 0.18 });
     for (const b of bt.bodies) if (!b.alive && !b._gone) { b._gone = true; fx.push({ kind: 'death', x: b.x, y: b.y, r: radius(b.u), side: b.side, age: 0, life: 0.5 }); }
   }
 
