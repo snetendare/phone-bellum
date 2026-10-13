@@ -731,9 +731,11 @@ const Engine = (() => {
       if (t >= g.timeCap || !aliveCount(A) || !aliveCount(B)) { over = true; return false; }
       shots = [];
       for (let k = 0; k < 2; k++) if (cripple[k] > 0) cripple[k] = Math.max(0, cripple[k] - dt);
+      // a body with a start delay (deployed on a flank) can't move or attack until it runs out
+      for (const b of all) if (b.delay > 0) b.delay = Math.max(0, b.delay - dt);
       // movement + targeting
       for (const b of all) {
-        if (!b.alive) continue;
+        if (!b.alive || b.delay > 0) continue;
         const foes = sides[1 - b.side];
         let near = null, nd = Infinity;
         for (const f of foes) {
@@ -791,9 +793,10 @@ const Engine = (() => {
             const c = arr[j]; if (!c.alive) continue;
             const dx = c.x - a.x, dy = c.y - a.y;
             const d = hyp(dx, dy);
-            if (a.u.structure && c.u.structure) continue;
-            // a structure doesn't budge: the other body moves the whole way
-            const ka = a.u.structure ? 0 : c.u.structure ? 2 : 1, kc = c.u.structure ? 0 : a.u.structure ? 2 : 1;
+            // structures and bodies still waiting to start (flank squads) don't budge: the other body moves the whole way
+            const fa = a.u.structure || a.delay > 0, fc = c.u.structure || c.delay > 0;
+            if (fa && fc) continue;
+            const ka = fa ? 0 : fc ? 2 : 1, kc = fc ? 0 : fa ? 2 : 1;
             if (d > 0 && d < minSep) {
               const push = (minSep - d) / 2;
               a.x -= dx / d * push * ka; a.y -= dy / d * push * ka;
@@ -838,7 +841,7 @@ const Engine = (() => {
       }
       // attacks
       for (const b of all) {
-        if (!b.alive) continue;
+        if (!b.alive || b.delay > 0) continue;
         b.cd -= dt * (b.slowT > 0 ? 1 - b.slowAtk / 100 : 1); // slowed units reload slower
         if (b.firing >= 0) b.firing += dt;
         // follow-up shots of a running burst fly along the direction locked at the start
@@ -1039,7 +1042,7 @@ const Game = (() => {
   const inZone = (side, row) => side === 0 ? row >= ROWS - ZONE && row < ROWS : row >= 0 && row < ZONE;
   // Flank columns: from round 3 each player may also deploy in the outer columns of their half of
   // no man's land (3 rows in front of their zone), so squads start further forward on the edges.
-  const FLANK = { round: 3, cols: [0, COLS - 1], depth: 3 };
+  const FLANK = { round: 3, cols: [0, COLS - 1], depth: 3, delay: 3 }; // delay: seconds a flank squad stands still at the start of every fight
   const flankRows = (side) => Array.from({ length: FLANK.depth }, (_, i) => side === 0 ? ROWS - ZONE - 1 - i : ZONE + i); // nearest the zone first
   const flankOpen = (m) => !!m && m.round >= FLANK.round;
   const isFlank = (side, col, row) => FLANK.cols.includes(col) && flankRows(side).includes(row);
@@ -1172,6 +1175,7 @@ const Game = (() => {
     for (const sq of m.armies[side]) {
       const w = tileToWorld(sq.col, sq.row);
       const b = E.buildSquad(unitFor(m, side, sq.unit), side, w.x, w.y, sq.id, TILE, idx, sq.level);
+      if (isFlank(side, sq.col, sq.row)) for (const x of b) x.delay = FLANK.delay;
       idx += b.length;
       out.push(...b);
     }
@@ -1652,7 +1656,11 @@ if (typeof module !== 'undefined') module.exports = Game;
         ctx.setLineDash([]); ctx.globalAlpha = 1;
         continue;
       }
-      Shapes.body(ctx, b.u.shape, PX(b.x), PY(b.y), r, upOf(b.side), b.u.color, c, 0.35 + 0.65 * hpr);
+      Shapes.body(ctx, b.u.shape, PX(b.x), PY(b.y), r, upOf(b.side), b.u.color, c, (0.35 + 0.65 * hpr) * (b.delay > 0 ? 0.45 : 1));
+      if (b.delay > 0) { // flank squads arrive a few seconds late: a shrinking ring shows the wait
+        ctx.strokeStyle = css('--gold'); ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(PX(b.x), PY(b.y), r + 3, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * b.delay / Game.FLANK.delay); ctx.stroke();
+      }
       if (b.poison && b.poison.length) { ctx.fillStyle = '#6FD08C'; ctx.beginPath(); ctx.arc(PX(b.x) + r * 0.9, PY(b.y) - r * 0.9, Math.max(2, r * 0.3), 0, Math.PI * 2); ctx.fill(); }
       if (b.slowT > 0) { ctx.fillStyle = '#9BD0FF'; ctx.beginPath(); ctx.arc(PX(b.x) - r * 0.9, PY(b.y) - r * 0.9, Math.max(2, r * 0.3), 0, Math.PI * 2); ctx.fill(); } // slowed
       if (b.u.hp >= 500 && hpr < 1) {
@@ -1775,7 +1783,7 @@ if (typeof module !== 'undefined') module.exports = Game;
       if (left <= 0 && selected === null) hint = `No deployments left. Buy one more for ${Game.CONFIG.extraDeployCost} gold, or spend gold on upgrades.`;
       if (readyN && selected === null) hint = `${readyN} squad${readyN === 1 ? ' is' : 's are'} ready to level up. Tap ${readyN === 1 ? 'it' : 'one'} to upgrade.`;
       if (m.round === 1 && selected === null && m.towers && m.towers[me]) hint += ' Tap your tower to move it (round 1 only).';
-      if (m.round === Game.FLANK.round && selected === null && !fresh) hint = 'Flank columns are open: you can now also deploy on the outer edges in front of your zone.';
+      if (m.round === Game.FLANK.round && selected === null && !fresh) hint = `Flank columns are open: you can now also deploy on the outer edges in front of your zone. Squads there can't move or attack for the first ${Game.FLANK.delay} s of each fight.`;
       if (placingTower()) hint = 'First, place your tower: tap a gold tile on the left or right side of your zone. If it falls in a fight, your army is crippled for a few seconds.';
     }
     const extraBtns = `<span style="display:flex;gap:6px;flex-wrap:wrap">
@@ -1879,7 +1887,7 @@ if (typeof module !== 'undefined') module.exports = Game;
       <ul>
         <li>Buy squads with gold each round. A standard squad costs ${Game.SQUAD_COST}. Income grows by ${Game.CONFIG.incomeStep} every round.</li>
         <li>First place your tower on the left or right side of your zone. If it falls in a fight, your army is crippled for a few seconds.</li>
-        <li>Place squads in the bottom five rows. They stay for the whole match. From round ${Game.FLANK.round}, the outer columns in front of your zone open up for flanking.</li>
+        <li>Place squads in the bottom five rows. They stay for the whole match. From round ${Game.FLANK.round}, the outer columns in front of your zone open up for flanking; squads there wait ${Game.FLANK.delay} s before they move or attack.</li>
         <li>Columns are lanes: squads march straight ahead and fight what they meet, so an empty lane lets a squad walk around the side.</li>
         <li>You have ${DEPLOY_SECONDS} seconds to deploy, then the armies fight on their own.</li>
         <li>The loser takes damage from every enemy squad still standing.</li>
@@ -2174,7 +2182,7 @@ Worst choices against it: ${answers.slice(-3).reverse().map(([i, v]) => `${units
     return `You are playing Phone Bellum, a small auto-battler, against a human player. You are the RED side. Decide your moves for round ${m.round}. The human places their new squads at the same time and can't see yours until the fight. You only see their squads from earlier rounds. Play to win: build counters to what they have, protect your damage dealers, and think about what they are likely to add next.
 
 RULES
-- Board: columns 0-${Game.COLS - 1}, rows 0-${Game.ROWS - 1}, tiles ${Game.TILE} m wide. Your zone is rows 0-${Game.ZONE - 1}; row ${Game.ZONE - 1} is your front line, nearest the enemy, and row 0 is the back. Rows ${Game.ZONE}-${Game.ROWS - Game.ZONE - 1} are no man's land. From round ${Game.FLANK.round} each player may also deploy on flank tiles: columns ${Game.FLANK.cols.join(' and ')}, in the ${Game.FLANK.depth} rows of no man's land nearest their zone (yours: rows ${Game.flankRows(1).join(', ')}; theirs: rows ${Game.flankRows(0).join(', ')})${Game.flankOpen(m) ? ', OPEN NOW' : ''}. Squads there start far forward on the edge, good for running down an empty lane to the enemy tower or backline. The enemy zone is rows ${Game.ROWS - Game.ZONE}-${Game.ROWS - 1}; row ${Game.ROWS - Game.ZONE} is their front. One squad per tile. Squads keep their tile for the whole match.
+- Board: columns 0-${Game.COLS - 1}, rows 0-${Game.ROWS - 1}, tiles ${Game.TILE} m wide. Your zone is rows 0-${Game.ZONE - 1}; row ${Game.ZONE - 1} is your front line, nearest the enemy, and row 0 is the back. Rows ${Game.ZONE}-${Game.ROWS - Game.ZONE - 1} are no man's land. From round ${Game.FLANK.round} each player may also deploy on flank tiles: columns ${Game.FLANK.cols.join(' and ')}, in the ${Game.FLANK.depth} rows of no man's land nearest their zone (yours: rows ${Game.flankRows(1).join(', ')}; theirs: rows ${Game.flankRows(0).join(', ')})${Game.flankOpen(m) ? ', OPEN NOW' : ''}. Squads there start far forward on the edge, good for running down an empty lane to the enemy tower or backline, but they can't move or attack for the first ${Game.FLANK.delay} s of every fight. The enemy zone is rows ${Game.ROWS - Game.ZONE}-${Game.ROWS - 1}; row ${Game.ROWS - Game.ZONE} is their front. One squad per tile. Squads keep their tile for the whole match.
 - The fight is automatic. Every body marches straight ahead in its own column until an enemy comes within its range + ${Game.SETTINGS.sight} m, then turns toward the nearest enemy and attacks once in range. Once no enemy is ahead of it, it turns toward the nearest one. So columns are lanes: a squad fights what stands in its lane, a squad in an empty lane walks past and hits the enemy from the side or behind, and long-range units in the back only get attacked once the front is gone. Short-range units in front shield long-range units behind. Spreading out limits splash damage.
 - The round's loser loses health: for each surviving enemy squad, 2 x (its price / 100), scaled by the share of its bodies alive. If time runs out, both sides take damage. Health starts at 40 and the match ends at 0.
 - Gold: both players get ${Game.incomeFor(2)} going into round 2, and ${Game.CONFIG.incomeStep} more every round after that (next round: +${Game.incomeFor(m.round + 1)}). The round's loser gets +${Game.LOSER_BONUS} extra. Unspent gold carries over.

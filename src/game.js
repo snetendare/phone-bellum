@@ -36,7 +36,7 @@ const Game = (() => {
   const inZone = (side, row) => side === 0 ? row >= ROWS - ZONE && row < ROWS : row >= 0 && row < ZONE;
   // Flank columns: from round 3 each player may also deploy in the outer columns of their half of
   // no man's land (3 rows in front of their zone), so squads start further forward on the edges.
-  const FLANK = { round: 3, cols: [0, COLS - 1], depth: 3 };
+  const FLANK = { round: 3, cols: [0, COLS - 1], depth: 3, delay: 3 }; // delay: seconds a flank squad stands still at the start of every fight
   const flankRows = (side) => Array.from({ length: FLANK.depth }, (_, i) => side === 0 ? ROWS - ZONE - 1 - i : ZONE + i); // nearest the zone first
   const flankOpen = (m) => !!m && m.round >= FLANK.round;
   const isFlank = (side, col, row) => FLANK.cols.includes(col) && flankRows(side).includes(row);
@@ -169,6 +169,7 @@ const Game = (() => {
     for (const sq of m.armies[side]) {
       const w = tileToWorld(sq.col, sq.row);
       const b = E.buildSquad(unitFor(m, side, sq.unit), side, w.x, w.y, sq.id, TILE, idx, sq.level);
+      if (isFlank(side, sq.col, sq.row)) for (const x of b) x.delay = FLANK.delay;
       idx += b.length;
       out.push(...b);
     }

@@ -917,9 +917,11 @@ const Engine = (() => {
       if (t >= g.timeCap || !aliveCount(A) || !aliveCount(B)) { over = true; return false; }
       shots = [];
       for (let k = 0; k < 2; k++) if (cripple[k] > 0) cripple[k] = Math.max(0, cripple[k] - dt);
+      // a body with a start delay (deployed on a flank) can't move or attack until it runs out
+      for (const b of all) if (b.delay > 0) b.delay = Math.max(0, b.delay - dt);
       // movement + targeting
       for (const b of all) {
-        if (!b.alive) continue;
+        if (!b.alive || b.delay > 0) continue;
         const foes = sides[1 - b.side];
         let near = null, nd = Infinity;
         for (const f of foes) {
@@ -977,9 +979,10 @@ const Engine = (() => {
             const c = arr[j]; if (!c.alive) continue;
             const dx = c.x - a.x, dy = c.y - a.y;
             const d = hyp(dx, dy);
-            if (a.u.structure && c.u.structure) continue;
-            // a structure doesn't budge: the other body moves the whole way
-            const ka = a.u.structure ? 0 : c.u.structure ? 2 : 1, kc = c.u.structure ? 0 : a.u.structure ? 2 : 1;
+            // structures and bodies still waiting to start (flank squads) don't budge: the other body moves the whole way
+            const fa = a.u.structure || a.delay > 0, fc = c.u.structure || c.delay > 0;
+            if (fa && fc) continue;
+            const ka = fa ? 0 : fc ? 2 : 1, kc = fc ? 0 : fa ? 2 : 1;
             if (d > 0 && d < minSep) {
               const push = (minSep - d) / 2;
               a.x -= dx / d * push * ka; a.y -= dy / d * push * ka;
@@ -1024,7 +1027,7 @@ const Engine = (() => {
       }
       // attacks
       for (const b of all) {
-        if (!b.alive) continue;
+        if (!b.alive || b.delay > 0) continue;
         b.cd -= dt * (b.slowT > 0 ? 1 - b.slowAtk / 100 : 1); // slowed units reload slower
         if (b.firing >= 0) b.firing += dt;
         // follow-up shots of a running burst fly along the direction locked at the start
