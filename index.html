@@ -1555,6 +1555,8 @@ if (typeof module !== 'undefined') module.exports = Game;
     'Boar Riders': 'Fast chargers whose first hit doubles and knocks small bodies back.',
   };
   const DEPLOY_SECONDS = 30;   // deploy countdown each round
+  const FIRST_DEPLOY_SECONDS = 60;   // round 1: package, tower and squads
+  const deployMs = () => (m && m.round === 1 ? FIRST_DEPLOY_SECONDS : DEPLOY_SECONDS) * 1000;
   const NEXT_SECONDS = 20;     // results screen moves on by itself after this long
   const PEER_PREFIX = 'phonebellum-v1-';
   const CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
@@ -2058,7 +2060,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
         <li>Then place your tower on the left or right side of your zone. If it falls in a fight, your army is crippled for a few seconds.</li>
         <li>Place squads in the bottom five rows. They stay for the whole match. From round ${Game.FLANK.round}, the edge columns on the enemy's half of the board open up for flanking. The red edge columns on your half are theirs, never yours; a squad placed there waits ${Game.FLANK.delay} s before it moves or attacks, in its first fight only.</li>
         <li>Columns are lanes: squads march straight ahead and fight what they meet, so an empty lane lets a squad walk around the side.</li>
-        <li>You have ${DEPLOY_SECONDS} seconds to deploy, then the armies fight on their own.</li>
+        <li>You have ${FIRST_DEPLOY_SECONDS} seconds to deploy in round 1 and ${DEPLOY_SECONDS} after that, then the armies fight on their own.</li>
         <li>The loser takes damage from every enemy squad still standing.</li>
         <li>You see the enemy’s earlier squads while you deploy, so build counters.</li>
         <li>3 deployments in round 1, then 2 per round. Extra ones cost ${Game.CONFIG.extraDeployCost} gold.</li>
@@ -2087,7 +2089,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
       <div class="bar">
         <span class="hint">Deploy timer vs AI</span>
         <div class="seg" role="group" aria-label="Deploy timer vs AI">
-          <button data-tm="1" aria-pressed="${timerOn}">${DEPLOY_SECONDS} s</button><button data-tm="0" aria-pressed="${!timerOn}">Off</button>
+          <button data-tm="1" aria-pressed="${timerOn}">On</button><button data-tm="0" aria-pressed="${!timerOn}">Off</button>
         </div>
       </div>
       <div class="bar">
@@ -2456,9 +2458,9 @@ Actions run in this order: package and tower (round 1 only), sell, levelUp, unlo
   }
 
   function beginAiRound() {
-    if (mode === 'claude') { startClaudeTurn(); enterDeploy(timerOn ? DEPLOY_SECONDS * 1000 : 0); return; }
+    if (mode === 'claude') { startClaudeTurn(); enterDeploy(timerOn ? deployMs() : 0); return; }
     Game.aiDeploy(m, 1);       // the AI commits first; its new squads stay hidden until the fight
-    enterDeploy(timerOn ? DEPLOY_SECONDS * 1000 : 0);
+    enterDeploy(timerOn ? deployMs() : 0);
   }
 
   function enterDeploy(ms) {
@@ -2922,12 +2924,12 @@ Actions run in this order: package and tower (round 1 only), sell, levelUp, unlo
   }
 
   function hostBeginRound() {
-    enterDeploy(DEPLOY_SECONDS * 1000);
+    enterDeploy(deployMs());
     sendSync(); saveHost();
   }
 
   function onFriendConnected() {
-    if (phase === 'deploy' && !deadline) { deadline = now() + Math.max(10000, pausedLeft || DEPLOY_SECONDS * 1000); pausedLeft = 0; }
+    if (phase === 'deploy' && !deadline) { deadline = now() + Math.max(10000, pausedLeft || deployMs()); pausedLeft = 0; }
     sendSync();
     netStatus();
     if (phase === 'lobby') drawLobby();
@@ -3054,7 +3056,7 @@ Actions run in this order: package and tower (round 1 only), sell, levelUp, unlo
     m = withUnits(s.m); lastSummary = s.summary || null;
     nextReady = s.nextReady || [false, false]; rematch = s.rematch || [false, false];
     if (s.phase === 'deploy') {
-      enterDeploy(0); pausedLeft = Math.max(10000, s.left || DEPLOY_SECONDS * 1000);
+      enterDeploy(0); pausedLeft = Math.max(10000, s.left || deployMs());
       // squads placed this round are kept; ready flags reset
     } else if (lastSummary) { bt = null; showResult(lastSummary); }
     else { phase = 'lobby'; drawLobby(); }
