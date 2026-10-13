@@ -1,0 +1,52 @@
+const { chromium } = require('playwright-core');
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+(async () => {
+  const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--disable-features=WebRtcHideLocalIpsWithMdns'] });
+  const mk = async (n) => { const p = await (await b.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 })).newPage(); p.on('pageerror', e => console.log(`[${n}] PAGE ERROR`, e.message)); return p; };
+  const tap = async (p, c, r) => { const b2 = await p.locator('#board').boundingBox(); await p.mouse.click(b2.x + (c + .5) * b2.width / 12, b2.y + (r + .5) * b2.height / 16); };
+  const hint = (p) => p.locator('#panel .hint').first().textContent();
+  // vs bot
+  const p = await mk('ai');
+  await p.goto('http://127.0.0.1:8766/'); await sleep(500);
+  await p.click('[data-tm="0"]'); await p.click('#go'); await sleep(300);
+  console.log('1:', await hint(p));
+  console.log('packs:', (await p.$$eval('[data-pack]', bs => bs.map(x => x.textContent.replace(/\s+/g, ' ').trim().slice(0, 60)))).join(' || '));
+  await p.screenshot({ path: 'pack-choose.png' });
+  await tap(p, 5, 13); console.log('board tap while choosing ignored:', (await hint(p)).startsWith('Pick'));
+  await p.click('[data-pack="1"]'); await sleep(200);
+  console.log('2:', await hint(p));
+  await tap(p, 2, 15); await sleep(200);
+  console.log('3:', await hint(p), '| gold', await p.locator('.gold').first().textContent());
+  const cards = await p.$$eval('.ucard', cs => cs.map(c => c.textContent.replace(/\s+/g, ' ').trim()));
+  const fi = cards.map((t, i) => /Free/.test(t) ? i : -1).filter(i => i >= 0);
+  console.log('free cards:', fi.map(i => cards[i]).join(' | '));
+  let col = 3;
+  for (const i of fi) { await p.click(`.ucard >> nth=${i}`); for (let k = 0; k < 2; k++) { await tap(p, col++, 13); await sleep(100); } }
+  console.log('4:', await hint(p), '| gold', await p.locator('.gold').first().textContent(), '|', await p.locator('.deploys').textContent());
+  await p.screenshot({ path: 'pack-placed.png' });
+  await p.click('#fight'); await sleep(500); await p.click('#skip'); await sleep(300);
+  console.log('result:', (await p.locator('#overlay').innerText()).replace(/\s+/g, ' ').slice(0, 80));
+  // multiplayer: both pick packages, guest leaves its squads for auto placement
+  const host = await mk('host'), guest = await mk('guest');
+  const BASE = 'http://127.0.0.1:8766/?peerhost=127.0.0.1&peerport=9000';
+  await host.goto(BASE); await host.click('#friend');
+  await host.waitForFunction(() => /Waiting/.test(document.getElementById('lobby-status').textContent));
+  await guest.goto(await host.locator('#link').textContent());
+  await host.waitForFunction(() => !document.getElementById('start').disabled, null, { timeout: 20000 });
+  await host.click('#start');
+  await guest.waitForFunction(() => document.getElementById('phase').textContent === 'Deploy');
+  await sleep(300);
+  console.log('guest packs:', (await guest.$$eval('[data-pack]', bs => bs.map(x => x.textContent.replace(/\s+/g, ' ').trim().slice(0, 50)))).join(' || '));
+  await host.click('[data-pack="0"]'); await guest.click('[data-pack="2"]'); await sleep(300);
+  await tap(host, 1, 15); await tap(guest, 1, 15); await sleep(300);
+  const hc = await host.$$eval('.ucard', cs => cs.map(c => /Free/.test(c.textContent)));
+  await host.click(`.ucard >> nth=${hc.indexOf(true)}`); await tap(host, 5, 12);
+  await sleep(500);
+  await guest.click('#ready'); await host.click('#ready');
+  await guest.waitForFunction(() => document.getElementById('phase').textContent === 'Battle', null, { timeout: 5000 });
+  await sleep(1200); await guest.screenshot({ path: 'pack-mp-guest.png' });
+  await host.click('#skip'); await guest.click('#skip'); await sleep(400);
+  const hp = (pg) => pg.evaluate(() => document.getElementById('hp-you').textContent + '/' + document.getElementById('hp-foe').textContent);
+  console.log('mp hp host', await hp(host), 'guest', await hp(guest));
+  await b.close();
+})();

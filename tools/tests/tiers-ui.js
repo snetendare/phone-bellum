@@ -1,0 +1,25 @@
+const { chromium } = require('playwright-core');
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+(async () => {
+  const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome' });
+  const p = await (await b.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 })).newPage();
+  p.on('pageerror', e => console.log('PAGE ERROR', e.message));
+  const tap = async (c, r) => { const b2 = await p.locator('#board').boundingBox(); await p.mouse.click(b2.x + (c + .5) * b2.width / 12, b2.y + (r + .5) * b2.height / 16); };
+  await p.goto('http://127.0.0.1:8766/'); await sleep(500);
+  await p.click('[data-tm="0"]'); await p.click('#go'); await sleep(300);
+  await p.click('[data-pack="0"]'); await sleep(200); await tap(1, 15); await sleep(200);
+  console.log('tabs:', (await p.$$eval('[data-tier]', bs => bs.map(x => x.textContent.replace(/\s+/g, ' ').trim()))).join(' | '));
+  await p.locator('#panel').scrollIntoViewIfNeeded(); await p.screenshot({ path: 'tiers-1.png', fullPage: false });
+  await p.click('[data-tier="2"]'); await sleep(200);
+  console.log('tier 2 cards:', (await p.$$eval('.ucard', cs => cs.map(c => c.textContent.replace(/\s+/g, ' ').trim()))).join(' | '));
+  await p.screenshot({ path: 'tiers-2.png' });
+  await p.click('.ucard >> nth=0'); await sleep(200);
+  await p.click('#unlock'); await sleep(200);
+  console.log('confirm:', (await p.locator('.confirm').innerText()).replace(/\s+/g, ' '), '| gold', await p.locator('.gold').first().textContent());
+  await p.screenshot({ path: 'tiers-confirm.png' });
+  await p.click('#unlock-no'); await sleep(150);
+  console.log('after No: still locked:', await p.locator('#unlock').count(), '| gold', await p.locator('.gold').first().textContent());
+  await p.click('#unlock'); await p.click('#unlock-yes'); await sleep(150);
+  console.log('after Yes:', (await p.locator('#sheet').innerText()).replace(/\s+/g, ' ').slice(0, 60), '| gold', await p.locator('.gold').first().textContent());
+  await b.close();
+})();
