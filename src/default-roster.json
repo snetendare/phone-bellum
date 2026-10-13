@@ -1,6 +1,7 @@
 {
   "goldCosts": true,
   "settings": {
+    "sight": 12,
     "budget": 100,
     "distance": 40,
     "spacing": 3.2,
@@ -126,9 +127,11 @@
       "charge": 1,
       "knockback": 0,
       "windUp": 0,
+      "flame": 0,
       "defense": "none",
       "defVal": 0,
       "level": 0,
+      "unlock": 50,
       "name": "Goblin Swarm",
       "cost": 100,
       "bodies": 12,
@@ -136,7 +139,7 @@
       "hit": 16,
       "aps": 1.2,
       "range": 2,
-      "speed": 12,
+      "speed": 8,
       "splash": 0,
       "shape": "triangle",
       "color": "#9BD35A",
@@ -152,7 +155,10 @@
         null,
         null
       ],
-      "unlock": 50
+      "skillsInnate": [
+        false,
+        false
+      ]
     },
     {
       "burst": 1,
@@ -164,9 +170,11 @@
       "charge": 1,
       "knockback": 0,
       "windUp": 0,
+      "flame": 0,
       "defense": "none",
       "defVal": 0,
       "level": 0,
+      "unlock": 45,
       "name": "Skeleton Archers",
       "cost": 100,
       "bodies": 8,
@@ -190,7 +198,10 @@
         null,
         null
       ],
-      "unlock": 50
+      "skillsInnate": [
+        false,
+        false
+      ]
     },
     {
       "burst": 1,
@@ -202,9 +213,11 @@
       "charge": 1,
       "knockback": 0,
       "windUp": 0,
+      "flame": 0,
       "defense": "none",
       "defVal": 0,
       "level": 0,
+      "unlock": 50,
       "name": "Ember Imps",
       "cost": 100,
       "bodies": 4,
@@ -228,7 +241,10 @@
         null,
         null
       ],
-      "unlock": 50
+      "skillsInnate": [
+        false,
+        false
+      ]
     },
     {
       "burst": 1,
@@ -240,9 +256,11 @@
       "charge": 1,
       "knockback": 0,
       "windUp": 0,
+      "flame": 0,
       "defense": "none",
       "defVal": 0,
       "level": 0,
+      "unlock": 50,
       "name": "Fire Mage",
       "cost": 100,
       "bodies": 1,
@@ -266,7 +284,10 @@
         null,
         null
       ],
-      "unlock": 50
+      "skillsInnate": [
+        false,
+        false
+      ]
     },
     {
       "burst": 1,
@@ -278,13 +299,15 @@
       "charge": 1,
       "knockback": 0,
       "windUp": 1,
+      "flame": 0,
       "defense": "none",
       "defVal": 0,
       "level": 0,
+      "unlock": 50,
       "name": "Sniper",
       "cost": 100,
       "bodies": 1,
-      "hp": 200,
+      "hp": 140,
       "hit": 230,
       "aps": 0.25,
       "range": 35,
@@ -304,7 +327,10 @@
         null,
         null
       ],
-      "unlock": 50
+      "skillsInnate": [
+        false,
+        false
+      ]
     },
     {
       "burst": 1,
@@ -316,9 +342,11 @@
       "charge": 1,
       "knockback": 0,
       "windUp": 0,
+      "flame": 0,
       "defense": "armor",
       "defVal": 6,
       "level": 0,
+      "unlock": 50,
       "name": "Brute",
       "cost": 200,
       "bodies": 1,
@@ -342,7 +370,10 @@
         null,
         null
       ],
-      "unlock": 50
+      "skillsInnate": [
+        false,
+        false
+      ]
     },
     {
       "burst": 1,
@@ -354,17 +385,19 @@
       "charge": 1,
       "knockback": 0,
       "windUp": 0,
+      "flame": 0,
       "defense": "none",
       "defVal": 40,
       "level": 0,
+      "unlock": 50,
       "name": "Wisps",
       "cost": 100,
       "bodies": 3,
       "hp": 80,
       "hit": 70,
       "aps": 0.8,
-      "range": 15,
-      "speed": 5,
+      "range": 19,
+      "speed": 4,
       "splash": 0,
       "shape": "ring",
       "color": "#ff90ff",
@@ -383,7 +416,10 @@
           "cost": 200
         }
       ],
-      "unlock": 50
+      "skillsInnate": [
+        false,
+        false
+      ]
     },
     {
       "burst": 6,
@@ -395,17 +431,19 @@
       "charge": 1,
       "knockback": 0,
       "windUp": 0.2,
+      "flame": 0,
       "defense": "none",
       "defVal": 0,
       "level": 0,
+      "unlock": 50,
       "name": "Leaf Wizard",
       "cost": 200,
       "bodies": 1,
-      "hp": 300,
+      "hp": 240,
       "hit": 21,
       "aps": 0.45,
       "range": 27,
-      "speed": 8,
+      "speed": 6,
       "splash": 0,
       "shape": "hexagon",
       "color": "#00d200",
@@ -421,7 +459,10 @@
         null,
         null
       ],
-      "unlock": 50
+      "skillsInnate": [
+        false,
+        false
+      ]
     },
     {
       "burst": 1,
@@ -433,16 +474,18 @@
       "charge": 1,
       "knockback": 0,
       "windUp": 0.5,
+      "flame": 0,
       "defense": "none",
       "defVal": 0,
       "level": 0,
+      "unlock": 50,
       "name": "Earth Wizard",
       "cost": 200,
       "bodies": 1,
       "hp": 650,
       "hit": 440,
       "aps": 0.2,
-      "range": 20,
+      "range": 23,
       "speed": 3,
       "splash": 2,
       "shape": "circle",
@@ -459,7 +502,10 @@
         null,
         null
       ],
-      "unlock": 50
+      "skillsInnate": [
+        false,
+        false
+      ]
     },
     {
       "burst": 1,
@@ -471,9 +517,11 @@
       "charge": 1,
       "knockback": 0,
       "windUp": 0,
+      "flame": 30,
       "defense": "none",
       "defVal": 0,
       "level": 0,
+      "unlock": 100,
       "name": "Flame Wizard",
       "cost": 400,
       "bodies": 1,
@@ -497,8 +545,10 @@
         null,
         null
       ],
-      "flame": 30,
-      "unlock": 100
+      "skillsInnate": [
+        false,
+        false
+      ]
     },
     {
       "burst": 1,
@@ -510,9 +560,11 @@
       "charge": 1,
       "knockback": 0,
       "windUp": 0,
+      "flame": 0,
       "defense": "none",
       "defVal": 0,
       "level": 0,
+      "unlock": 100,
       "name": "Steel Wizard",
       "cost": 400,
       "bodies": 1,
@@ -541,7 +593,10 @@
           }
         }
       ],
-      "unlock": 100
+      "skillsInnate": [
+        false,
+        false
+      ]
     },
     {
       "burst": 1,
@@ -553,16 +608,18 @@
       "charge": 1,
       "knockback": 0,
       "windUp": 0,
+      "flame": 0,
       "defense": "none",
       "defVal": 0,
       "level": 0,
+      "unlock": 100,
       "name": "Slime Wizard",
       "cost": 400,
       "bodies": 1,
       "hp": 700,
-      "hit": 450,
+      "hit": 550,
       "aps": 0.15,
-      "range": 20,
+      "range": 22,
       "speed": 4,
       "splash": 5,
       "shape": "ring",
@@ -579,7 +636,10 @@
         null,
         null
       ],
-      "unlock": 100
+      "skillsInnate": [
+        false,
+        false
+      ]
     },
     {
       "burst": 1,
@@ -595,6 +655,7 @@
       "defense": "armor",
       "defVal": 15,
       "level": 0,
+      "unlock": 150,
       "splash": 3,
       "skillsOn": [
         false,
@@ -608,7 +669,7 @@
         null,
         null
       ],
-      "name": "Stone Golem",
+      "name": "Ether Golem",
       "cost": 600,
       "bodies": 1,
       "hp": 3450,
@@ -617,12 +678,11 @@
       "range": 5,
       "speed": 2.5,
       "shape": "square",
-      "color": "#9C8B7A",
+      "color": "#51005c",
       "skills": [
         "regen",
         "armorHp"
-      ],
-      "unlock": 150
+      ]
     },
     {
       "burst": 1,
@@ -638,6 +698,7 @@
       "defense": "none",
       "defVal": 0,
       "level": 0,
+      "unlock": 150,
       "splash": 0,
       "skillsOn": [
         false,
@@ -664,8 +725,7 @@
       "skills": [
         "range",
         "shrink"
-      ],
-      "unlock": 150
+      ]
     },
     {
       "burst": 3,
@@ -681,6 +741,7 @@
       "defense": "none",
       "defVal": 0,
       "level": 0,
+      "unlock": 150,
       "splash": 6,
       "skillsOn": [
         false,
@@ -707,8 +768,7 @@
       "skills": [
         "range",
         "skmv5oxpgk2"
-      ],
-      "unlock": 150
+      ]
     },
     {
       "burst": 1,
@@ -724,6 +784,7 @@
       "defense": "armor",
       "defVal": 6,
       "level": 0,
+      "unlock": 150,
       "splash": 3,
       "skillsOn": [
         false,
@@ -750,8 +811,7 @@
       "skills": [
         "swift",
         "armorHp"
-      ],
-      "unlock": 150
+      ]
     },
     {
       "burst": 1,
@@ -767,6 +827,7 @@
       "defense": "none",
       "defVal": 0,
       "level": 0,
+      "unlock": 150,
       "splash": 0,
       "skillsOn": [
         false,
@@ -793,8 +854,50 @@
       "skills": [
         "raiseDead",
         "healer"
+      ]
+    },
+    {
+      "burst": 1,
+      "pellets": 3,
+      "spinUp": 0,
+      "pierce": 0,
+      "projSpeed": 0,
+      "minRange": 0,
+      "charge": 1,
+      "knockback": 0,
+      "windUp": 0,
+      "flame": 0,
+      "defense": "none",
+      "defVal": 0,
+      "level": 0,
+      "name": "Ent",
+      "cost": 100,
+      "unlock": 50,
+      "bodies": 2,
+      "hp": 400,
+      "hit": 30,
+      "aps": 1.2,
+      "range": 4,
+      "speed": 1.9,
+      "splash": 0,
+      "shape": "square",
+      "color": "#0d3000",
+      "skills": [
+        "armorHp",
+        "regen"
       ],
-      "unlock": 150
+      "skillsOn": [
+        false,
+        false
+      ],
+      "skillsInnate": [
+        false,
+        false
+      ],
+      "skillMods": [
+        null,
+        null
+      ]
     }
   ]
 }
