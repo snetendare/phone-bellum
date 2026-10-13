@@ -477,7 +477,7 @@ a { color: var(--you); }
       <div class="bar"><span class="hint">${hint}</span>${extraBtns}</div>
       <div class="shop" id="shop">${units.map((u, i) => `
         <div class="uwrap">
-          <button class="ucard" data-i="${i}" aria-pressed="${selected === i}" aria-disabled="${!canBuy(i)}" ${locked(i) ? 'data-locked="1" style="border-style:dashed"' : ''}>
+          <button class="ucard" data-i="${i}" aria-pressed="${selected === i}" aria-disabled="${!canBuy(i) && !(locked(i) && can)}" ${locked(i) ? `data-locked="1" style="border-style:dashed" aria-label="${esc(u.name)}, locked, unlock for ${Game.unlockCost(m, i)} gold"` : ''}>
             <span class="t"><span style="color:${u.color};display:inline-flex">${Shapes.svg(u.shape, 13)}</span> ${tag(u)}</span><span class="n">${esc(u.name)}</span>
             ${locked(i) ? `<span class="c" style="color:var(--gold)">Locked · unlock ${Game.unlockCost(m, i)}</span>` : ''}
             <span class="c">${price(i)} · ${u.bodies} ${u.bodies === 1 ? 'body' : 'bodies'}${[0, 1].filter(k => Game.hasSkill(m, me, i, k)).length ? ` · ${[0, 1].filter(k => Game.hasSkill(m, me, i, k)).length}★` : ''}</span>
