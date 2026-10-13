@@ -181,8 +181,8 @@
       "hp": 32,
       "hit": 12,
       "aps": 0.8,
-      "range": 20,
-      "speed": 2.5,
+      "range": 29,
+      "speed": 2.1,
       "splash": 0,
       "shape": "triangle",
       "color": "#E9E3CF",
@@ -324,7 +324,12 @@
         false
       ],
       "skillMods": [
-        null,
+        {
+          "params": {
+            "range": 0,
+            "aps": 20
+          }
+        },
         null
       ],
       "skillsInnate": [
@@ -485,7 +490,7 @@
       "hp": 650,
       "hit": 440,
       "aps": 0.2,
-      "range": 23,
+      "range": 24,
       "speed": 3,
       "splash": 2,
       "shape": "circle",
@@ -618,10 +623,10 @@
       "bodies": 1,
       "hp": 700,
       "hit": 550,
-      "aps": 0.15,
+      "aps": 0.2,
       "range": 22,
       "speed": 4,
-      "splash": 5,
+      "splash": 6,
       "shape": "ring",
       "color": "#81f038",
       "skills": [
@@ -858,21 +863,21 @@
     },
     {
       "burst": 1,
-      "pellets": 3,
+      "pellets": 1,
       "spinUp": 0,
       "pierce": 0,
       "projSpeed": 0,
       "minRange": 0,
       "charge": 1,
-      "knockback": 0,
+      "knockback": 1,
       "windUp": 0,
-      "flame": 0,
+      "flame": 90,
       "defense": "none",
       "defVal": 0,
       "level": 0,
+      "unlock": 50,
       "name": "Ent",
       "cost": 100,
-      "unlock": 50,
       "bodies": 2,
       "hp": 400,
       "hit": 30,
@@ -895,8 +900,17 @@
         false
       ],
       "skillMods": [
-        null,
-        null
+        {
+          "params": {
+            "armor": 4,
+            "hp": 20
+          }
+        },
+        {
+          "params": {
+            "pct": 5
+          }
+        }
       ]
     }
   ]
