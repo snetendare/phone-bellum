@@ -1868,11 +1868,20 @@ if (typeof module !== 'undefined') module.exports = Game;
       <p class="big">${lines.join(' ')}</p>
       ${lvLines.join('')}
       <p>Next round: +${sum.income || Game.incomeFor(sum.round + 1)} gold each.${bonus}</p>
-      ${waiting ? '<p class="status wait">Waiting for your opponent</p>' : `<button class="btn primary" id="next">Next round</button>`}
+      <div class="btnrow">
+        ${waiting ? '<p class="status wait">Waiting for your opponent</p>' : `<button class="btn primary" id="next">Next round</button>`}
+        <button class="btn" id="menu">Main menu</button>
+      </div>
     </div>`);
     if (waiting) panelInfo('The next round starts when your opponent is ready too.', '', null);
     else panelInfo('Your squads keep their tiles. Add more to counter what you just saw.', 'Next round', tapNext);
     if ($('next')) $('next').addEventListener('click', tapNext);
+    // leaving mid-match takes a second tap, so it can't happen by accident
+    $('menu').addEventListener('click', () => {
+      const b = $('menu');
+      if (!b.dataset.sure) { b.dataset.sure = '1'; b.textContent = solo() ? 'Tap again to quit this match' : 'Tap again to leave your opponent'; return; }
+      showStart();
+    });
   }
 
   // ---------- match reports ----------
