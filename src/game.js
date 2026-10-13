@@ -34,13 +34,16 @@ const Game = (() => {
   // rows 0-4: enemy zone (row 4 is its front), rows 5-10: no man's land, rows 11-15: player zone (row 11 is its front)
   const zoneRows = (side) => Array.from({ length: ZONE }, (_, i) => side === 0 ? ROWS - ZONE + i : ZONE - 1 - i); // front row first
   const inZone = (side, row) => side === 0 ? row >= ROWS - ZONE && row < ROWS : row >= 0 && row < ZONE;
-  // Flank columns: from round 3 each player may also deploy in the outer columns of the ENEMY's half of
-  // no man's land (the 3 rows right in front of the enemy zone), so you have to guard your own edges.
+  // Flank columns: from round 3 each player may also deploy inside the ENEMY's zone, in its two edge
+  // columns (the 3 rows nearest no man's land), so you have to guard your own edges.
   const FLANK = { round: 3, cols: [0, COLS - 1], depth: 3, delay: 3 }; // delay: seconds a squad stands still in the first fight after it was placed on a flank
-  const flankRows = (side) => Array.from({ length: FLANK.depth }, (_, i) => side === 0 ? ZONE + i : ROWS - ZONE - 1 - i); // nearest the enemy zone first
+  const flankRows = (side) => Array.from({ length: FLANK.depth }, (_, i) => side === 0 ? ZONE - 1 - i : ROWS - ZONE + i); // rows of the enemy zone, its front row first
   const flankOpen = (m) => !!m && m.round >= FLANK.round;
   const isFlank = (side, col, row) => FLANK.cols.includes(col) && flankRows(side).includes(row);
-  const canPlaceAt = (m, side, col, row) => col >= 0 && col < COLS && (inZone(side, row) || (flankOpen(m) && isFlank(side, col, row)));
+  // a tile the other player already holds with a squad (or tower) you can see
+  const enemyHolds = (m, side, col, row) => !!m && (m.armies[1 - side].some(s => s.col === col && s.row === row && s.round < m.round) ||
+    (m.round > 1 && m.towers && m.towers[1 - side] && m.towers[1 - side].col === col && m.towers[1 - side].row === row));
+  const canPlaceAt = (m, side, col, row) => col >= 0 && col < COLS && (inZone(side, row) || (flankOpen(m) && isFlank(side, col, row))) && !enemyHolds(m, side, col, row);
   const tileToWorld = (col, row) => ({ x: (col - (COLS - 1) / 2) * TILE, y: ((ROWS - 1) / 2 - row) * TILE });
 
   function rng(seed) { // mulberry32
@@ -363,13 +366,13 @@ const Game = (() => {
     if (flankOpen(m) && u.range <= 5 && u.speed >= 6 && r() < 0.5) {
       const et = m.towers && m.towers[1 - side];
       const cols = et ? FLANK.cols.slice().sort((a, b) => Math.abs(a - et.col) - Math.abs(b - et.col)) : (r() < 0.5 ? FLANK.cols.slice() : FLANK.cols.slice().reverse());
-      for (const col of cols) for (const row of flankRows(side)) if (!occupied(m, side, col, row)) return { col, row };
+      for (const col of cols) for (const row of flankRows(side)) if (!occupied(m, side, col, row) && canPlaceAt(m, side, col, row)) return { col, row };
     }
     let best = null, bc = Infinity;
     for (let zi = 0; zi < rows.length; zi++) {
       for (let col = 0; col < COLS; col++) {
         const row = rows[zi];
-        if (occupied(m, side, col, row)) continue;
+        if (occupied(m, side, col, row) || !canPlaceAt(m, side, col, row)) continue;
         const rowCost = band.includes(zi) ? 0 : 3 * Math.min(Math.abs(zi - band[0]), Math.abs(zi - band[1]));
         const c = Math.abs(col - target) + rowCost + r() * 0.8;
         if (c < bc) { bc = c; best = { col, row }; }
@@ -384,7 +387,7 @@ const Game = (() => {
     deploysAllowed, deploysLeft, deployedThisRound, buyDeploy, refundDeploy,
     skillDef, skillCost, isInnate, hasSkill, skillVisible, unitFor, canBuySkill, buySkill, undoSkill, sellValue, sell,
     TOWER, TOWER_MID, towerColOk, towerAt, needsTower, placeTower, ensureTower,
-    FLANK, flankRows, flankOpen, isFlank, canPlaceAt,
+    FLANK, flankRows, flankOpen, isFlank, canPlaceAt, enemyHolds,
     zoneRows, inZone, tileToWorld, createMatch, place, unplace, bodiesFor, startBattle, resolve, aiDeploy, occupied,
   };
 })();
