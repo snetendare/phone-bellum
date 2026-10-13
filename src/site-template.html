@@ -37,6 +37,19 @@ body { padding-top: calc(12px + env(safe-area-inset-top, 0px)); padding-bottom: 
 .status.wait::after { content: ""; display: inline-block; width: 1.2em; text-align: left; animation: dots 1.4s steps(4) infinite; }
 @keyframes dots { 0% { content: ""; } 25% { content: "."; } 50% { content: ".."; } 75% { content: "..."; } }
 a { color: var(--you); }
+/* unit shop: one tab per tier, rarity colours, locked units greyed out */
+.tiers { display: grid; grid-template-columns: repeat(var(--n, 4), minmax(0, 1fr)); gap: 6px; }
+.tiers button { min-width: 0; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--muted); padding: 6px 6px; font: 600 14px var(--font-display); display: grid; gap: 1px; text-align: left; border-top: 3px solid var(--tier); }
+.tiers button em { font: 600 11px var(--font-display); font-style: normal; color: var(--tier); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tiers button small { font: 500 10px var(--font-data); letter-spacing: -0.03em; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tiers button[aria-selected="true"] { color: var(--ink); background: var(--panel); box-shadow: inset 0 0 0 1px var(--tier); }
+.ucard { border-top: 3px solid var(--tier, var(--line)) !important; }
+.ucard .tier { font: 600 10px var(--font-data); letter-spacing: 0.08em; color: var(--tier); text-transform: uppercase; }
+.ucard[data-locked] { opacity: 0.55; background: repeating-linear-gradient(135deg, transparent 0 8px, rgba(255,255,255,0.03) 8px 16px), var(--bg); }
+.ucard[data-locked] .t > span:first-child { filter: grayscale(1); }
+.ucard[data-locked] .n { color: var(--muted); }
+.ucard .lock { white-space: nowrap; display: inline-flex; align-items: center; gap: 4px; font: 600 12px var(--font-data); color: var(--gold); }
+.confirm { display: grid; gap: 8px; border: 1px solid var(--gold); border-radius: 6px; padding: 10px; }
 @media (prefers-reduced-motion: reduce) { .status.wait::after { animation: none; content: "…"; } }
 </style>
 </head>
@@ -258,6 +271,14 @@ a { color: var(--you); }
     const tw = m.towers[side], t = tilePx();
     drawKeep((scol(tw.col) + 0.5) * t, (srow(tw.row) + 0.5) * t, t, side);
   }
+  // tiers by squad price: 100 = tier 1, 200 = tier 2, 400 = tier 3, 600 = tier 4 (any other prices rank in between)
+  const TIER_COLORS = ['#9AA5A8', '#6FD08C', '#5BA8F5', '#C58BF2', '#F2B84B'];
+  const tierOf = (i) => { const prices = [...new Set(units.map(u => Game.unitCostOf(u)))].sort((a, b) => a - b); return prices.indexOf(Game.unitCostOf(units[i])) + 1; };
+  const TIER_NAMES = ['Basic', 'Strong', 'Elite', 'Legendary', 'Mythic'];
+const tierName = (t) => TIER_NAMES[Math.min(TIER_NAMES.length-1, t-1)];
+const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
+  const LOCK_SVG = '<svg width="11" height="12" viewBox="0 0 11 12" aria-hidden="true"><rect x="1" y="5" width="9" height="7" rx="1.5" fill="currentColor"/><path d="M3 5V3.5a2.5 2.5 0 0 1 5 0V5" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>';
+  let shopTier = 1, unlockAsk = null;
   const choosingPack = () => phase === 'deploy' && m && Game.needsPack(m, me);
   const placingTower = () => phase === 'deploy' && m && !Game.needsPack(m, me) && Game.needsTower(m, me);
   const packText = (p) => { const n = {}; p.squads.forEach(ui => { n[ui] = (n[ui] || 0) + 1; }); return p.units.map(ui => `${n[ui]}× ${esc(units[ui].name)}`).join(' + '); };
@@ -481,22 +502,35 @@ a { color: var(--you); }
     $('panel').innerHTML = `
       <div class="bar"><span class="gold num">${g} gold</span><span class="deploys num">${Math.max(0, left)} of ${allowed} deployments left</span><span class="timer" id="timer">${deadline ? fmtClock(deadline - now()) : ''}</span></div>
       <div class="bar"><span class="hint">${hint}</span>${extraBtns}</div>
+      ${choosingPack() && can ? '' : (() => {
+        const tiers = [...new Set(units.map((u, i) => tierOf(i)))].sort((a, b) => a - b);
+        if (!tiers.includes(shopTier)) shopTier = tiers[0];
+        return `<div class="tiers" role="tablist" aria-label="Unit tiers, higher is stronger" style="--n:${tiers.length}">${tiers.map(t => {
+          const idx = units.map((u, i) => i).filter(i => tierOf(i) === t), open = idx.filter(i => !locked(i)).length, free = idx.some(i => freeN(i) > 0);
+          return `<button role="tab" data-tier="${t}" aria-selected="${t === shopTier}" aria-label="Tier ${t}, ${tierName(t)}, ${Game.unitCostOf(units[idx[0]])} gold, ${open} of ${idx.length} unlocked${free ? ', has free squads' : ''}" style="--tier:${tierColor(t)}">Tier ${t}<em>${tierName(t)}</em><small>${Game.unitCostOf(units[idx[0]])}g · ${open}/${idx.length}</small></button>`;
+        }).join('')}</div>`;
+      })()}
       ${choosingPack() && can ? `<div class="packs" style="display:grid;gap:8px">${m.packages[me].map((p, k) => `
         <button class="btn pack" data-pack="${k}" style="display:grid;gap:4px;text-align:left;padding:10px 12px">
           <span style="display:flex;gap:8px;align-items:center">${p.units.map(ui => `<span style="color:${units[ui].color};display:inline-flex">${Shapes.svg(units[ui].shape, 16)}</span>`).join('')}<b>${packText(p)}</b></span>
           <span class="hint" style="white-space:normal">${p.units.map(ui => ROLES[units[ui].name] && !customSet ? esc(ROLES[units[ui].name]) : '').filter(Boolean).join(' ')}</span>
-        </button>`).join('')}</div>` : `<div class="shop" id="shop">${units.map((u, i) => `
-        <div class="uwrap">
+        </button>`).join('')}</div>` : `<div class="shop" id="shop">${units.map((u, i) => tierOf(i) !== shopTier ? '' : `
+        <div class="uwrap" style="--tier:${tierColor(tierOf(i))}">
           <button class="ucard" data-i="${i}" aria-pressed="${selected === i}" aria-disabled="${!canBuy(i) && !(locked(i) && can)}" ${locked(i) ? `data-locked="1" style="border-style:dashed" aria-label="${esc(u.name)}, locked, unlock for ${Game.unlockCost(m, i)} gold"` : ''}>
-            <span class="t"><span style="color:${u.color};display:inline-flex">${Shapes.svg(u.shape, 13)}</span> ${tag(u)}</span><span class="n">${esc(u.name)}</span>
-            ${locked(i) ? `<span class="c" style="color:var(--gold)">Locked · unlock ${Game.unlockCost(m, i)}</span>` : ''}
+            <span class="t"><span style="color:${u.color};display:inline-flex">${Shapes.svg(u.shape, 13)}</span> ${tag(u)} <span class="tier">T${tierOf(i)}</span></span><span class="n">${esc(u.name)}</span>
+            ${locked(i) ? `<span class="lock">${LOCK_SVG} Locked · ${Game.unlockCost(m, i)}g</span>` : ''}
             ${freeN(i) ? `<span class="c" style="color:var(--win, #6FD08C)">Free ×${freeN(i)}</span>` : ''}
             <span class="c">${price(i)} · ${u.bodies} ${u.bodies === 1 ? 'body' : 'bodies'}${[0, 1].filter(k => Game.hasSkill(m, me, i, k)).length ? ` · ${[0, 1].filter(k => Game.hasSkill(m, me, i, k)).length}★` : ''}</span>
           </button>
           <button class="info" data-info="${i}" aria-label="About ${esc(u.name)}">i</button>
         </div>`).join('')}</div>`}
       <div class="bar"><span class="hint">${status}</span>${action}</div>`;
-    $('panel').querySelectorAll('[data-pack]').forEach(b => b.addEventListener('click', () => { if (editable() && Game.choosePack(m, me, +b.dataset.pack)) changed(); }));
+    $('panel').querySelectorAll('[data-pack]').forEach(b => b.addEventListener('click', () => {
+      if (!editable() || !Game.choosePack(m, me, +b.dataset.pack)) return;
+      const f = Game.freeLeft(m, me); if (f.length) shopTier = tierOf(f[0]); // show the tier of the first free squad
+      changed();
+    }));
+    $('panel').querySelectorAll('[data-tier]').forEach(b => b.addEventListener('click', () => { shopTier = +b.dataset.tier; shopScroll = 0; panelDeploy(); }));
     const shop = $('shop') || document.createElement('div');
     shop.scrollLeft = shopScroll;
     shop.addEventListener('scroll', () => { shopScroll = shop.scrollLeft; }, { passive: true });
@@ -1127,8 +1161,12 @@ Actions run in this order: package and tower (round 1 only), sell, levelUp, unlo
       return `<div class="bar" style="border-top:1px solid var(--line);padding-top:8px"><span class="hint">Unlocked${m.unlocks[me][i] === m.round ? ' this round' : ''}</span>${undo ? '<button class="btn small" id="unlock-undo">Undo unlock</button>' : ''}</div>`;
     }
     const why = phase !== 'deploy' ? '' : !editable() ? '' : m.gold[me] < cost ? `Need ${cost} gold` : '';
+    if (unlockAsk === i && phase === 'deploy' && editable() && !why) return `<div class="confirm" role="alertdialog" aria-label="Confirm unlock">
+      <b style="font-family:var(--font-display)">Unlock ${esc(units[i].name)} for ${cost} gold?</b>
+      <span class="hint">You'll have ${m.gold[me] - cost} gold left. This lasts the whole match.</span>
+      <div class="btnrow" style="justify-content:flex-start"><button class="btn small primary" id="unlock-yes">Yes, unlock</button><button class="btn small" id="unlock-no">No</button></div></div>`;
     return `<div style="display:grid;gap:4px;border-top:1px solid var(--line);padding-top:8px">
-      <div class="bar"><b style="font-family:var(--font-display)">Locked</b>${phase === 'deploy' ? (why || !editable() ? `<button class="btn small" disabled>${why || `Unlock · ${cost} gold`}</button>` : `<button class="btn small primary" id="unlock">Unlock · ${cost} gold</button>`) : `<span class="hint">${cost} gold to unlock</span>`}</div>
+      <div class="bar"><b style="font-family:var(--font-display);display:inline-flex;gap:6px;align-items:center">${LOCK_SVG} Locked</b>${phase === 'deploy' ? (why || !editable() ? `<button class="btn small" disabled>${why || `Unlock · ${cost} gold`}</button>` : `<button class="btn small" id="unlock">Unlock · ${cost} gold</button>`) : `<span class="hint">${cost} gold to unlock</span>`}</div>
       <span class="hint">Pay once to be able to field this unit for the rest of the match. The opponent sees it after the next fight.</span></div>`;
   }
   function skillBlock(i, side) {
@@ -1230,7 +1268,9 @@ Actions run in this order: package and tower (round 1 only), sell, levelUp, unlo
     if ($('lvl-up')) $('lvl-up').addEventListener('click', () => { if (editable() && Game.levelUp(m, me, sq.id)) after(); });
     if ($('lvl-undo')) $('lvl-undo').addEventListener('click', () => { if (editable() && Game.undoLevel(m, me, sq.id)) after(); });
     $('sheet').querySelectorAll('[data-skill]').forEach(b => b.addEventListener('click', () => { if (editable() && Game.buySkill(m, me, i, +b.dataset.skill)) after(); }));
-    if ($('unlock')) $('unlock').addEventListener('click', () => { if (editable() && Game.unlock(m, me, i)) { selected = i; after(); } });
+    if ($('unlock')) $('unlock').addEventListener('click', () => { unlockAsk = i; openSheet(i, sq, side); }); // ask first
+    if ($('unlock-no')) $('unlock-no').addEventListener('click', () => { unlockAsk = null; openSheet(i, sq, side); });
+    if ($('unlock-yes')) $('unlock-yes').addEventListener('click', () => { unlockAsk = null; if (editable() && Game.unlock(m, me, i)) { selected = i; shopTier = tierOf(i); after(); } });
     if ($('unlock-undo')) $('unlock-undo').addEventListener('click', () => { if (editable() && Game.undoUnlock(m, me, i)) { if (selected === i) selected = null; after(); } });
     $('sheet').querySelectorAll('[data-unskill]').forEach(b => b.addEventListener('click', () => { if (editable() && Game.undoSkill(m, me, i, +b.dataset.unskill)) after(); }));
     if ($('sell')) $('sell').addEventListener('click', () => {
@@ -1240,7 +1280,7 @@ Actions run in this order: package and tower (round 1 only), sell, levelUp, unlo
     });
     ($('lvl-up') || $('close')).focus();
   }
-  function closeSheet() { $('sheet-back').hidden = true; loaderRun++; }
+  function closeSheet() { $('sheet-back').hidden = true; loaderRun++; unlockAsk = null; }
 
   // ---------- load units from Counter Lab ----------
   let loaderRun = 0;
