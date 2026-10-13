@@ -49,6 +49,16 @@ a { color: var(--you); }
 .ucard[data-locked] .t > span:first-child { filter: grayscale(1); }
 .ucard[data-locked] .n { color: var(--muted); }
 .ucard .lock { white-space: nowrap; display: inline-flex; align-items: center; gap: 4px; font: 600 12px var(--font-data); color: var(--gold); }
+/* role symbols on unit cards and in the info sheet */
+.roles { display: flex; align-items: center; gap: 5px; }
+.roles svg { width: 16px; height: 16px; flex: none; fill: currentColor; }
+.roles .is, .roles .ex { color: var(--ink); }
+.roles .beats { color: var(--you); }
+.roles .rng { color: var(--muted); margin-left: auto; }
+.ucard .roles { margin: 2px -26px 1px 0; }
+.ucard[data-locked] .roles { filter: grayscale(1); }
+.roleline { margin: 0; display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--muted); }
+.roleline .roles .rng { margin-left: 0; }
 .confirm { display: grid; gap: 8px; border: 1px solid var(--gold); border-radius: 6px; padding: 10px; }
 @media (prefers-reduced-motion: reduce) { .status.wait::after { animation: none; content: "…"; } }
 </style>
@@ -106,6 +116,66 @@ a { color: var(--you); }
     'Ballista': 'Slow piercing bolts from long range. Can’t hit anything close.',
     'Boar Riders': 'Fast chargers whose first hit doubles and knocks small bodies back.',
   };
+  // ---------- role symbols: what a unit is, what it beats, one extra trait, and its range ----------
+  // [is, beats, extra] for the built-in units. Units from Counter Lab get theirs from their stats (autoRole).
+  const ROLE_SET = {
+    'Goblin Swarm': ['swarm', 'giants'], 'Skeleton Archers': ['swarm', 'giants'],
+    'Ember Imps': ['group', 'crowds'],
+    'Fire Mage': ['single', 'crowds'], 'Leaf Wizard': ['single', 'crowds'], 'Slime Wizard': ['single', 'crowds'], 'Meteor Caller': ['single', 'crowds', 'artillery'],
+    'Sniper': ['single', 'giants'], 'Wisps': ['single', 'giants', 'ward'],
+    'Brute': ['giant', 'crowds'], 'Flame Wizard': ['giant', 'crowds'], 'Stone Golem': ['giant', 'crowds', 'tank'],
+    'Sun Priest': ['giant', 'giants'],
+    'Steel Wizard': ['giant', 'both'], 'Earth Wizard': ['giant', 'both'],
+    'War Mammoth': ['giant', null, 'charger'], 'Necromancer': ['giant', null, 'summoner'],
+  };
+  const IS_TXT = { swarm: 'Swarm', group: 'Small group', single: 'Single', giant: 'Giant' };
+  const BEATS_TXT = { crowds: 'beats crowds', giants: 'beats giants', both: 'beats crowds and giants' };
+  const EXTRA_TXT = { tank: 'tank', artillery: 'artillery', summoner: 'summoner', charger: 'charger', ward: 'ward' };
+  const RANGE_TXT = ['melee', 'mid range', 'long range'];
+  const ico = (body, cls) => `<svg class="${cls}" viewBox="0 0 16 16" aria-hidden="true">${body}</svg>`;
+  const dots = (pts, r) => pts.map(([x, y]) => `<circle cx="${x}" cy="${y}" r="${r}"/>`).join('');
+  const IS_SVG = { // more, smaller dots = more bodies
+    swarm: dots([[3, 4], [8.5, 3], [13.5, 5], [4, 9.5], [10, 9], [6.5, 14], [12.5, 13.5]], 1.6),
+    group: dots([[8, 4], [3.8, 11.5], [12.2, 11.5]], 2.6),
+    single: dots([[8, 8]], 3.6),
+    giant: dots([[8, 8]], 7),
+  };
+  const SIGHT = '<path d="M1 5V1h4M11 1h4v4M15 11v4h-4M5 15H1v-4" fill="none" stroke="currentColor" stroke-width="1.6"/>';
+  const BEATS_SVG = { // the same dots as above, inside a target sight
+    crowds: SIGHT + dots([[5.5, 5.5], [10.5, 5.5], [5.5, 10.5], [10.5, 10.5]], 1.5),
+    giants: SIGHT + dots([[8, 8]], 4),
+    both: SIGHT + dots([[5, 5], [5, 9], [9, 4.6]], 1.2) + dots([[10, 10]], 2.9),
+  };
+  const EXTRA_SVG = {
+    tank: '<path d="M8 1.5 14 4v4c0 3.5-3 6-6 7.2C5 14 2 11.5 2 8V4z"/>',
+    ward: '<circle cx="8" cy="8" r="6.2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="2.4 1.6"/><circle cx="8" cy="8" r="2.4"/>',
+    artillery: '<path d="M2 14Q6 -2 13 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="2.2 1.6"/><circle cx="13" cy="12.6" r="2.2"/>',
+    charger: '<path d="M2 3l5.5 5L2 13M8.5 3 14 8l-5.5 5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/>',
+    summoner: '<circle cx="8" cy="8" r="6.3" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M8 4.5v7M4.5 8h7" stroke="currentColor" stroke-width="2"/>',
+  };
+  const rangeSvg = (n) => ico(`<circle cx="1.8" cy="8" r="1.6"/>${[4, 7.5, 11].map((r, k) => {
+    const a = 0.7, x = (1.8 + r * Math.cos(a)).toFixed(2), y1 = (8 - r * Math.sin(a)).toFixed(2), y2 = (8 + r * Math.sin(a)).toFixed(2);
+    return `<path d="M${x} ${y1}A${r} ${r} 0 0 1 ${x} ${y2}" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" opacity="${k < n ? 1 : 0.22}"/>`;
+  }).join('')}`, 'rng');
+  function autoRole(u) {
+    const is = u.bodies >= 6 ? 'swarm' : u.bodies >= 2 ? 'group' : u.hp >= 1000 ? 'giant' : 'single';
+    const aoe = u.splash >= 2 || u.pellets > 1 || u.flame > 0 || u.pierce > 0;
+    const big = u.hit >= 100 || u.spinUp > 0 || u.bodies >= 6;
+    const beats = aoe && big ? 'both' : aoe ? 'crowds' : big ? 'giants' : null;
+    const extra = u.charge > 1 ? 'charger' : u.spawn ? 'summoner' : u.defense === 'ward' ? 'ward'
+      : u.defense === 'armor' && u.defVal >= 10 ? 'tank' : u.minRange > 0 || u.range >= 40 ? 'artillery' : null;
+    return [is, beats, extra];
+  }
+  // role of unit i for a side (your bought skills count for range, e.g. Long reach)
+  function roleOf(i, side) {
+    const u = m && side !== null ? Game.unitFor(m, side === undefined ? me : side, i) : units[i]; // null = base unit (enemy skills stay hidden)
+    const [is, beats, extra] = (!customSet && ROLE_SET[units[i].name]) || autoRole(u);
+    const range = u.range <= 5 ? 1 : u.range < 20 ? 2 : 3;
+    const text = [IS_TXT[is], beats && BEATS_TXT[beats], extra && EXTRA_TXT[extra], RANGE_TXT[range - 1]].filter(Boolean).join(', ');
+    return { is, beats, extra, range, text };
+  }
+  const roleIcons = (r) => ico(IS_SVG[r.is], 'is') + (r.beats ? ico(BEATS_SVG[r.beats], 'beats') : '') + (r.extra ? ico(EXTRA_SVG[r.extra], 'ex') : '');
+  const roleRow = (i) => { const r = roleOf(i); return `<span class="roles" title="${r.text}">${roleIcons(r)}${rangeSvg(r.range)}</span>`; };
   const DEPLOY_SECONDS = 30;   // deploy countdown each round
   const FIRST_DEPLOY_SECONDS = 60;   // round 1: package, tower and squads
   const deployMs = () => (m && m.round === 1 ? FIRST_DEPLOY_SECONDS : DEPLOY_SECONDS) * 1000;
@@ -520,6 +590,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
         <div class="uwrap" style="--tier:${tierColor(tierOf(i))}">
           <button class="ucard" data-i="${i}" aria-pressed="${selected === i}" aria-disabled="${!canBuy(i) && !(locked(i) && can)}" ${locked(i) ? `data-locked="1" style="border-style:dashed" aria-label="${esc(u.name)}, locked, unlock for ${Game.unlockCost(m, i)} gold"` : ''}>
             <span class="t"><span style="color:${u.color};display:inline-flex">${Shapes.svg(u.shape, 13)}</span> ${tag(u)} <span class="tier">T${tierOf(i)}</span></span><span class="n">${esc(u.name)}</span>
+            ${roleRow(i)}
             ${locked(i) ? `<span class="lock">${LOCK_SVG} Locked · ${Game.unlockCost(m, i)}g</span>` : ''}
             ${freeN(i) ? `<span class="c" style="color:var(--win, #6FD08C)">Free ×${freeN(i)}</span>` : ''}
             <span class="c">${price(i)} · ${u.bodies} ${u.bodies === 1 ? 'body' : 'bodies'}${[0, 1].filter(k => Game.hasSkill(m, me, i, k)).length ? ` · ${[0, 1].filter(k => Game.hasSkill(m, me, i, k)).length}★` : ''}</span>
@@ -1250,6 +1321,7 @@ Actions run in this order: package and tower (round 1 only), sell, levelUp, unlo
     if (u.splash > 0) tr.push(`Splash ${u.splash} m`);
     $('sheet').innerHTML = `
       <div class="bar"><h3 id="sheet-h"><span style="color:${u.color}">${Shapes.svg(u.shape, 18)}</span> ${esc(u.name)}</h3><button class="btn small" id="close">Close</button></div>
+      ${(() => { const r = roleOf(i, owner === me ? me : null); return `<p class="roleline"><span class="roles">${roleIcons(r)}${rangeSvg(r.range)}</span><span>${r.text}</span></p>`; })()}
       <p class="role" style="margin:0">${ROLES[u.name] && !customSet ? ROLES[u.name] : customSet ? `From a Counter Lab roster · ${Game.unitCostOf(base)} gold` : ''}</p>
       ${lvl}
       ${unlockBlock(i, side)}
