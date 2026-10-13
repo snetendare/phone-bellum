@@ -19,6 +19,7 @@ const Engine = (() => {
   const PIERCE_WIDTH = 1;      // half-width of the pierce corridor (m)
   const APPROACH = 0.5;         // metres a moving unit steps inside its max range
   const PROJ_HIT_RADIUS = 1;
+  const TURN = 6;              // how fast a walking body swings to a new heading (share of the turn per second)
   const SIGHT = 12;            // metres beyond its own range at which a unit notices an enemy and turns toward it   // a projectile hits a body within this distance of where it lands
 
   const LEVEL_BONUS = 1;       // each upgrade adds +100% of starting health and hit (2x, then 3x)
@@ -230,6 +231,7 @@ const Engine = (() => {
     ];
     const dt = g.dt;
     const sight = g.sight == null ? SIGHT : g.sight;
+    const engagedSq = new Set(); // squads that have spotted an enemy
     let projectiles = [];
     let t = 0, shots = [], over = false;
     const dist = (a, b) => hyp(a.x - b.x, a.y - b.y);
@@ -422,21 +424,34 @@ const Engine = (() => {
         if (near && nd > rg) {
           const step = b.u.speed * (b.slowT > 0 ? 1 - b.slowMove / 100 : 1) * dt;
           let mv;
-          // March straight ahead until an enemy comes within sight (range + SIGHT), then turn toward it.
-          // So a squad meets what stands in its own lane, and an empty lane lets it walk around the side.
-          // Once every enemy is level or behind, it turns toward the nearest one.
+          // March straight ahead until an enemy comes within sight (range + SIGHT), or no enemy is left
+          // ahead, then lock on: from then on the body (and its whole squad) goes for the
+          // nearest enemy for the rest of the fight. So a squad meets what stands in its own lane, an empty
+          // lane lets it walk around the side, and nobody flips back and forth between marching and chasing.
           const fwd = b.side === 0 ? 1 : -1;
-          let ahead = false;
-          if (nd > rg + sight) for (const f of foes) if (f.alive && !f.hidden && (f.y - b.y) * fwd > 0) { ahead = true; break; }
-          if (ahead) {
-            mv = step;
-            b.y += fwd * mv;
-          } else {
-            // walk a little inside max range, so being nudged by allies doesn't leave the unit just out of reach
-            mv = Math.min(step, nd - (rg - Math.min(APPROACH, rg * 0.25)));
-            b.x += (near.x - b.x) / nd * mv;
-            b.y += (near.y - b.y) / nd * mv;
+          const sq = b.squad >= 0 ? b.side + ':' + b.squad : null;
+          if (!b.engaged && sq && engagedSq.has(sq)) b.engaged = true;
+          if (!b.engaged) {
+            let spotted = nd <= rg + sight;
+            if (!spotted) { // nothing left ahead to march toward: go for the nearest
+              spotted = true;
+              for (const f of foes) if (f.alive && !f.hidden && (f.y - b.y) * fwd > 0) { spotted = false; break; }
+            }
+            if (spotted) { b.engaged = true; if (sq) engagedSq.add(sq); }
           }
+          // where it wants to go: straight ahead, or at the nearest enemy
+          let wx = 0, wy = fwd;
+          if (b.engaged) { wx = (near.x - b.x) / nd; wy = (near.y - b.y) / nd; }
+          // turn smoothly instead of snapping: the heading swings toward the wanted direction
+          if (b.hx === undefined) { b.hx = 0; b.hy = fwd; }
+          const k = Math.min(1, TURN * dt);
+          let hx = b.hx + (wx - b.hx) * k, hy = b.hy + (wy - b.hy) * k, hl = hyp(hx, hy);
+          if (hl < 1e-6) { hx = wx; hy = wy; hl = 1; }
+          b.hx = hx / hl; b.hy = hy / hl;
+          // walk a little inside max range, so being nudged by allies doesn't leave the unit just out of reach
+          mv = b.engaged ? Math.min(step, nd - (rg - Math.min(APPROACH, rg * 0.25))) : step;
+          b.x += b.hx * mv;
+          b.y += b.hy * mv;
           b.moved += mv;
           // a unit with wind-up has to set up again after it moves; a charge in progress is lost
           if (b.u.windUp > 0 && mv > 0) {
