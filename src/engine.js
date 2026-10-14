@@ -260,7 +260,7 @@ const Engine = (() => {
     const towerDown = g.towerDown || TOWER_DOWN;
     const fell = (v) => { if (v.u.structure) cripple[v.side] = towerDown.secs; };
     let projectiles = [];
-    let t = 0, shots = [], over = false;
+    let t = 0, shots = [], over = false, tick = 0;
     const dist = (a, b) => hyp(a.x - b.x, a.y - b.y);
     // current range: shortsight can shrink it for a while, but never below 1 m (or the unit's own range if shorter)
     const R = (b) => b.shrinkT > 0 ? Math.max(Math.min(b.u.range, 1), b.u.range - b.shrinkM) : b.u.range;
@@ -273,7 +273,7 @@ const Engine = (() => {
     let seed = (A.length * 7919 + B.length * 104729 + 1) >>> 0;
     const rnd = () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let x = Math.imul(seed ^ seed >>> 15, 1 | seed); x = x + Math.imul(x ^ x >>> 7, 61 | x) ^ x; return ((x ^ x >>> 14) >>> 0) / 4294967296; };
     let spawnIdx = A.length + B.length;
-    const SPAWN_SPOTS = [[1, 0], [-1, 0], [0, 1], [0, -1], [0.7, 0.7], [-0.7, 0.7], [0.7, -0.7], [-0.7, -0.7]];
+    const SPAWN_SPOTS = [[0.7, 0.7], [-0.7, 0.7], [0, 1], [1, 0], [-1, 0], [0.7, -0.7], [-0.7, -0.7], [0, -1]]; // (side, forward): front first
     // damage that skips armor and ward (poison)
     function direct(owner, v, amount) {
       const applied = Math.min(amount, v.hp);
@@ -283,7 +283,7 @@ const Engine = (() => {
       owner.xp += applied;
       v.xp += applied * (g.absorbXp == null ? 0.5 : g.absorbXp);
       v.hp -= applied;
-      if (v.hp <= 1e-9) { v.hp = 0; v.alive = false; owner.xp += v.u.hp * v.level; fell(v); }
+      if (v.hp <= 1e-9) { v.hp = 0; v.alive = false; v.diedTick = tick; owner.xp += v.u.hp * v.level; fell(v); }
     }
     // structures (towers) don't count: a side is beaten when its units are gone
     const aliveCount = (arr) => { let c = 0; for (const b of arr) if (b.alive && !b.u.structure) c++; return c; };
@@ -305,7 +305,7 @@ const Engine = (() => {
       owner.xp += applied;
       v.xp += applied * (g.absorbXp == null ? 0.5 : g.absorbXp);
       v.hp -= dmg;
-      if (v.hp <= 0) { v.hp = 0; v.alive = false; owner.xp += v.u.hp * v.level; fell(v); return; }
+      if (v.hp <= 0) { v.hp = 0; v.alive = false; v.diedTick = tick; owner.xp += v.u.hp * v.level; fell(v); return; }
       if (owner.u.poisonPct > 0) {
         // poison: a share of the hit, spread over its duration. Each attacker keeps one dose on the target;
         // its next hit refreshes that dose. Doses from different attackers add up.
@@ -447,6 +447,7 @@ const Engine = (() => {
       if (over) return false;
       if (t >= g.timeCap || !aliveCount(A) || !aliveCount(B)) { over = true; return false; }
       shots = [];
+      tick++;
       for (let k = 0; k < 2; k++) if (cripple[k] > 0) cripple[k] = Math.max(0, cripple[k] - dt);
       // a body with a start delay (deployed on a flank) can't move or attack until it runs out
       for (const b of all) if (b.delay > 0) b.delay = Math.max(0, b.delay - dt);
@@ -548,17 +549,19 @@ const Engine = (() => {
             b.kids = (b.kids || []).filter(k => k.alive);
             const n = Math.min(b.u.spawn.count, b.u.spawn.max - b.kids.length);
             for (let k = 0; k < n; k++) {
-              const [ox, oy] = SPAWN_SPOTS[(b.kids.length + k) % SPAWN_SPOTS.length];
-              const kid = newBody(b.u.spawn.unit, b.side, b.x + ox * g.spacing * 0.7, b.y + oy * g.spacing * 0.7, spawnIdx++, -1);
+              // spots are relative to the side's forward direction, so both sides spawn in front of the summoner
+              const [ox, oy] = SPAWN_SPOTS[(b.kids.length + k) % SPAWN_SPOTS.length], fwd = b.side === 0 ? 1 : -1;
+              const kid = newBody(b.u.spawn.unit, b.side, b.x + ox * g.spacing * 0.7, b.y + oy * fwd * g.spacing * 0.7, spawnIdx++, -1);
               b.kids.push(kid); all.push(kid); sides[b.side].push(kid);
               stats[b.side].totalHp += kid.u.hp;
             }
           }
         }
       }
-      // attacks
+      // attacks. A body killed earlier in this same tick still gets its attack, so neither side
+      // wins a trade just by being processed first (side 0 used to win one-shot duels like Sniper vs Sniper)
       for (const b of all) {
-        if (!b.alive || b.delay > 0) continue;
+        if ((!b.alive && b.diedTick !== tick) || b.delay > 0) continue;
         b.cd -= dt * (b.slowT > 0 ? 1 - b.slowAtk / 100 : 1); // slowed units reload slower
         if (b.firing >= 0) b.firing += dt;
         // follow-up shots of a running burst fly along the direction locked at the start

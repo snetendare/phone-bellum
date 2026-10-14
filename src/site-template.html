@@ -490,55 +490,6 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
       ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(x, y, tw, th);
       ctx.fillStyle = teamCol(sd); ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(txt, W / 2, y + th / 2);
     });
-    drawBanter();
-  }
-
-  // Round 1 of a two-player match: the towers have a little chat during the fight (guest first, then host)
-  const BANTER = [
-    { side: 1, from: 0.8, to: 6.5, text: 'Hej bror sorry att jag är sen och en toffel' },
-    { side: 0, from: 7, to: 12.5, text: 'Ingen fara min broder, du är min bästa vän' },
-  ];
-  function drawBanter() {
-    if (mode !== 'host' && mode !== 'guest') return;
-    const pre = battlePre || m;
-    if (!pre || pre.round !== 1 || !pre.towers) return;
-    const now = bt.time(), t = tilePx();
-    for (const b of BANTER) {
-      const tw = pre.towers[b.side];
-      if (!tw || now < b.from || now > b.to) continue;
-      const a = Math.min(1, (now - b.from) / 0.25, (b.to - now) / 0.25); // quick fade in and out
-      const fs = Math.max(12, Math.round(W * 0.036));
-      ctx.font = `700 ${fs}px "Chakra Petch", sans-serif`;
-      // wrap to at most ~60% of the board width
-      const maxW = W * 0.6, words = b.text.split(' '), lines = [];
-      let line = '';
-      for (const w of words) { const tryL = line ? line + ' ' + w : w; if (ctx.measureText(tryL).width > maxW && line) { lines.push(line); line = w; } else line = tryL; }
-      lines.push(line);
-      const pad = fs * 0.6, lh = fs * 1.25;
-      const bw = Math.max(...lines.map(l => ctx.measureText(l).width)) + pad * 2, bh = lines.length * lh + pad * 1.4;
-      const cx = (scol(tw.col) + 0.5) * t, cy = (srow(tw.row) + 0.5) * t;
-      const above = cy > H / 2; // bubble points at the tower from the middle of the board
-      const bx = Math.max(6, Math.min(W - bw - 6, cx - bw / 2));
-      const by = above ? cy - t * 0.7 - bh - fs * 0.8 : cy + t * 0.7 + fs * 0.8;
-      const tipY = above ? cy - t * 0.45 : cy + t * 0.45, baseY = above ? by + bh : by;
-      const tx = Math.max(bx + fs, Math.min(bx + bw - fs, cx));
-      ctx.save(); ctx.globalAlpha = a;
-      ctx.fillStyle = '#FFFDF4'; ctx.strokeStyle = '#111'; ctx.lineWidth = Math.max(2, fs * 0.16); ctx.lineJoin = 'round';
-      const r = fs * 0.7;
-      ctx.beginPath();
-      ctx.moveTo(bx + r, by); ctx.lineTo(bx + bw - r, by); ctx.quadraticCurveTo(bx + bw, by, bx + bw, by + r);
-      ctx.lineTo(bx + bw, by + bh - r); ctx.quadraticCurveTo(bx + bw, by + bh, bx + bw - r, by + bh);
-      ctx.lineTo(bx + r, by + bh); ctx.quadraticCurveTo(bx, by + bh, bx, by + bh - r);
-      ctx.lineTo(bx, by + r); ctx.quadraticCurveTo(bx, by, bx + r, by); ctx.closePath();
-      ctx.fill(); ctx.stroke();
-      // the tail toward the tower
-      ctx.beginPath(); ctx.moveTo(tx - fs * 0.5, baseY); ctx.lineTo(cx, tipY); ctx.lineTo(tx + fs * 0.5, baseY); ctx.closePath();
-      ctx.fill(); ctx.stroke();
-      ctx.fillRect(tx - fs * 0.5 + 1, baseY - (above ? ctx.lineWidth : -ctx.lineWidth) * (above ? 1 : 0) - ctx.lineWidth / 2, fs - 2, ctx.lineWidth); // hide the seam
-      ctx.fillStyle = '#111'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      lines.forEach((l, k) => ctx.fillText(l, bx + bw / 2, by + pad * 0.7 + lh * (k + 0.5)));
-      ctx.restore();
-    }
   }
 
   function render() {

@@ -46,7 +46,9 @@
       "type": "spawn",
       "name": "Spawn goblins",
       "cost": 200,
-      "params": {}
+      "params": {
+        "every": 7
+      }
     },
     {
       "id": "rapid",
@@ -311,7 +313,7 @@
       "hp": 140,
       "hit": 230,
       "aps": 0.25,
-      "range": 35,
+      "range": 33,
       "speed": 2,
       "splash": 0,
       "shape": "cross",
