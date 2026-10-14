@@ -5,7 +5,7 @@ const Game = (() => {
   const COLS = 12, ROWS = 16, TILE = 6, ZONE = 5; // each side builds in ZONE rows; the rows between are no man's land
   const START_HP = 40, START_GOLD = 250, INCOME = 250, LOSER_BONUS = 50;
   const SQUAD_COST = 100, SQUAD_POINTS = 2;
-  const SETTINGS = { dt: 0.05, timeCap: 60, spacing: 3.5, minDmgPct: 15, absorbXp: 1, sight: 12, flameReach: 1.2 }; // flameReach: flame cones reach 1.2x the unit's range
+  const SETTINGS = { dt: 0.05, timeCap: 60, spacing: 3.5, minDmgPct: 15, absorbXp: 1, armorXp: 0.5, sight: 12, flameReach: 1.2 }; // flameReach: flame cones reach 1.2x the unit's range
   // XP a squad needs in total to reach level 1, 2, 3, as multiples of its own starting health.
   // XP = damage dealt + damage absorbed + bounty for killing leveled bodies.
   const XP_STEPS = [5, 12, 24];

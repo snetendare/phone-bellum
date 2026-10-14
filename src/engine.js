@@ -292,6 +292,9 @@ const Engine = (() => {
       const st = stats[owner.side];
       if (cripple[owner.side] > 0) hit = hit * (1 - towerDown.attack / 100);
       let dmg = damageAfterDefense(hit, v, g);
+      // damage the target's armor turned away earns it a little experience (g.armorXp per point, default 0.5)
+      const armor = (v.u.defense === 'armor' ? v.u.defVal : 0) + (v.u.bonusArmor || 0);
+      if (armor > 0) v.xp += (hit - Math.max(hit - armor, hit * g.minDmgPct / 100)) * (g.armorXp == null ? 0.5 : g.armorXp);
       if (cripple[v.side] > 0) dmg = dmg * (1 + towerDown.taken / 100);
       st.blocked += hit - dmg;
       const applied = Math.min(dmg, v.hp);
