@@ -307,8 +307,9 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
 
   <section class="panel" aria-labelledby="data-h">
     <div class="panel-head"><h2 id="data-h">Save and share</h2></div>
-    <p class="muted" style="font-size:14px">Your changes are kept in this browser. To move a roster elsewhere, copy it as text and paste it back in here later.</p>
+    <p class="muted" style="font-size:14px">Your changes are kept in this browser. To move a roster elsewhere, copy it as text and paste it back in here later. Send changes lists only what differs from the game’s current default roster, so Claude can put it into the game.</p>
     <div class="row">
+      <button class="btn small" id="send">Send changes</button>
       <button class="btn small" id="copy">Copy roster</button>
       <button class="btn small" id="load">Load pasted roster</button>
       <button class="btn small danger" id="reset">Reset to sample units</button>
@@ -2039,6 +2040,54 @@ if (typeof module !== 'undefined') module.exports = Engine;
     $('io').value = txt;
     const done = () => flash('Roster copied. It is also in the box below.');
     const fallback = () => { $('io').focus(); $('io').select(); flash('Roster is in the box below and selected. Copy it from there.'); };
+    try { navigator.clipboard.writeText(txt).then(done, fallback); } catch (e) { fallback(); }
+  });
+  // ---------- send changes ----------
+  // Lists what differs from the built-in default roster in a short text. Inside Claude it is also saved to the
+  // artifact's own storage (collection "changes"), so Claude can read it directly; elsewhere it is copied.
+  let changeDb = null;
+  (async () => {
+    try { if (window.claude && typeof window.claude.use === 'function') changeDb = await window.claude.use('db'); } catch (e) { changeDb = null; }
+  })();
+  const val = (v) => typeof v === 'object' ? JSON.stringify(v) : String(v);
+  function fieldDiff(a, b, skip) {
+    const out = [];
+    new Set([...Object.keys(a), ...Object.keys(b)]).forEach(k => {
+      if (skip.includes(k)) return;
+      if (k === 'params' && a.params && b.params) { out.push(...fieldDiff(a.params, b.params, []).map(t => 'params.' + t)); return; }
+      if (val(a[k]) !== val(b[k])) out.push(`${k} ${a[k] === undefined ? '(none)' : val(a[k])} -> ${b[k] === undefined ? '(none)' : val(b[k])}`);
+    });
+    return out;
+  }
+  function changesText() {
+    const base = (() => { const b = fromRoster(clone(SAMPLE)); return { settings: b.settings, skills: b.skills, units: b.units.map(({ id, ...u }) => u) }; })();
+    const now = exportData(), lines = [];
+    const bu = new Map(base.units.map(u => [u.name, u])), nu = new Map(now.units.map(u => [u.name, u]));
+    now.units.forEach(u => { const o = bu.get(u.name); if (!o) lines.push('New unit: ' + JSON.stringify(u)); else { const d = fieldDiff(o, u, []); if (d.length) lines.push(`${u.name}: ${d.join(', ')}`); } });
+    base.units.forEach(u => { if (!nu.has(u.name)) lines.push('Removed unit: ' + u.name); });
+    const kept = now.units.filter(u => bu.has(u.name)).map(u => u.name), was = base.units.filter(u => nu.has(u.name)).map(u => u.name);
+    if (kept.join() !== was.join()) lines.push('Unit order: ' + now.units.map(u => u.name).join(', '));
+    const bs = new Map(base.skills.map(k => [k.id, k])), ns = new Map(now.skills.map(k => [k.id, k]));
+    now.skills.forEach(k => { const o = bs.get(k.id); if (!o) lines.push('New skill: ' + JSON.stringify(k)); else { const d = fieldDiff(o, k, ['id']); if (d.length) lines.push(`Skill ${o.name} [${k.id}]: ${d.join(', ')}`); } });
+    base.skills.forEach(k => { if (!ns.has(k.id)) lines.push(`Removed skill: ${k.name} [${k.id}]`); });
+    const sd = fieldDiff(base.settings, now.settings, []);
+    if (sd.length) lines.push('Settings: ' + sd.join(', '));
+    return lines;
+  }
+  $('send').addEventListener('click', async () => {
+    const lines = changesText();
+    if (!lines.length) { flash('No changes from the game’s default roster.'); return; }
+    const txt = 'Counter Lab changes:\n' + lines.join('\n');
+    $('io').value = txt;
+    let sent = false;
+    if (changeDb) {
+      const t = new Date();
+      try { await changeDb.doc('changes/c' + t.getTime().toString(36)).set({ at: t.toISOString(), text: txt, roster: exportData() }); sent = true; } catch (e) { sent = false; }
+    }
+    const n = `${lines.length} change${lines.length === 1 ? '' : 's'}`;
+    if (sent) { flash(`Sent ${n}. Tell Claude “check the lab”. The list is also in the box below.`); return; }
+    const done = () => flash(`${n} copied. Paste them to Claude. They are also in the box below.`);
+    const fallback = () => { $('io').focus(); $('io').select(); flash(`${n} are in the box below and selected. Copy them and paste them to Claude.`); };
     try { navigator.clipboard.writeText(txt).then(done, fallback); } catch (e) { fallback(); }
   });
   $('load').addEventListener('click', () => {
