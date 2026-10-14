@@ -66,9 +66,9 @@ a { color: var(--you); }
 <body>
 <div class="app">
   <div class="hud" aria-label="Match status">
-    <div class="side you"><div class="lbl"><span>You</span><span class="num" id="hp-you">40</span></div><div class="hp"><i id="hpbar-you" style="width:100%"></i></div></div>
+    <div class="side you"><div class="lbl"><span>You</span><span class="num" id="hp-you">50</span></div><div class="hp"><i id="hpbar-you" style="width:100%"></i></div></div>
     <div class="round"><b class="num" id="round">1</b><span id="phase">Deploy</span></div>
-    <div class="side foe"><div class="lbl"><span id="foe-name">Enemy</span><span class="num" id="hp-foe">40</span></div><div class="hp"><i id="hpbar-foe" style="width:100%"></i></div></div>
+    <div class="side foe"><div class="lbl"><span id="foe-name">Enemy</span><span class="num" id="hp-foe">50</span></div><div class="hp"><i id="hpbar-foe" style="width:100%"></i></div></div>
   </div>
   <div class="net" id="net" hidden aria-live="polite"><i></i><span id="net-text"></span></div>
 
@@ -113,7 +113,7 @@ a { color: var(--you); }
     'Meteor Caller': 'Drops slow meteors from far behind the lines. Helpless once something reaches it.',
     'War Mammoth': 'Charges down an open lane and tramples whatever stands behind it.',
     'Necromancer': 'Keeps raising skeletons to screen its army from big hits.',
-    'Wisps': 'Warded spirits firing slow bolts. No single hit can deal more than 40 to them.',
+    'Wisps': 'Spirits firing slow, hard-hitting bolts from range. Fragile up close.',
     'Crossbow Volley': 'Fires 4-bolt bursts down one line. Lined-up targets take every bolt.',
     'Ballista': 'Slow piercing bolts from long range. Can’t hit anything close.',
     'Boar Riders': 'Fast chargers whose first hit doubles and knocks small bodies back.',
@@ -231,6 +231,7 @@ a { color: var(--you); }
   const foe = () => 1 - me;
   let m = null;             // match state (on the guest: a copy kept in step by the host)
   let phase = 'start';      // start | lobby | deploy | battle | result | end
+  try { if (/[?&]test\b/.test(location.search)) window.__pb = () => ({ m, me }); } catch (e) {} // read-only peek for UI tests
   let selected = null;      // unit index chosen in the shop
   let bt = null;            // battle being played back
   let battlePre = null;     // match as it stood when the running battle began (for the HUD)
@@ -239,6 +240,9 @@ a { color: var(--you); }
   let lastSummary = null;
   let lastAiLevels = [];
   let hoverTile = null;
+  let moveMode = false;     // the Move ability is active: tap an older squad, then a tile
+  let moving = null;        // id of the older squad picked to move
+  let drag = null, dragEndAt = 0; // dragging one of your squads to another tile
   let timerOn = true;       // vs AI: deploy countdown on or off
   let deadline = 0;         // local time the deploy phase ends (0 = no countdown running)
   let pausedLeft = 0;       // host: countdown time left while the opponent is away
@@ -368,20 +372,35 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
       }
       ctx.globalAlpha = 1;
     }
-    if (selected !== null && phase === 'deploy') {
+    if ((selected !== null || (drag && drag.moved) || moving != null) && phase === 'deploy') {
       ctx.strokeStyle = css('--you'); ctx.globalAlpha = 0.25; ctx.lineWidth = 1;
       for (let row = 0; row < Game.ROWS; row++) for (let c = 0; c < Game.COLS; c++) {
         if (Game.canPlaceAt(m, me, c, row) && !Game.occupied(m, me, c, row)) ctx.strokeRect(scol(c) * t + 3, srow(row) * t + 3, t - 6, t - 6);
       }
       ctx.globalAlpha = 1;
     }
-    if (hoverTile && selected !== null && Game.canPlaceAt(m, me, hoverTile.col, hoverTile.row) && !Game.occupied(m, me, hoverTile.col, hoverTile.row)) {
+    if (hoverTile && (selected !== null || moving != null) && Game.canPlaceAt(m, me, hoverTile.col, hoverTile.row) && !Game.occupied(m, me, hoverTile.col, hoverTile.row)) {
       ctx.fillStyle = css('--you'); ctx.globalAlpha = 0.18;
       ctx.fillRect(scol(hoverTile.col) * t, srow(hoverTile.row) * t, t, t); ctx.globalAlpha = 1;
     }
     // the opponent's squads from this round stay hidden until the fight
-    for (const sq of m.armies[foe()]) if (sq.round < m.round || phase !== 'deploy') drawSquad(sq, foe(), false);
-    for (const sq of m.armies[me]) drawSquad(sq, me, sq.round === m.round && phase === 'deploy');
+    // a squad they moved this round still shows on its old tile
+    for (const sq of m.armies[foe()]) if (sq.round < m.round || phase !== 'deploy') {
+      const p = phase === 'deploy' ? Game.seenAt(m, sq) : sq;
+      drawSquad(p === sq ? sq : { ...sq, col: p.col, row: p.row }, foe(), false);
+    }
+    for (const sq of m.armies[me]) {
+      if (phase === 'deploy' && sq.from && sq.movedRound === m.round) { // where your moved squad came from
+        ctx.strokeStyle = css('--muted'); ctx.setLineDash([2, 4]); ctx.lineWidth = 1;
+        ctx.strokeRect(scol(sq.from.col) * t + 4, srow(sq.from.row) * t + 4, t - 8, t - 8); ctx.setLineDash([]);
+      }
+      const at = drag && drag.moved && drag.id === sq.id ? { ...sq, col: drag.over.col, row: drag.over.row } : sq;
+      drawSquad(at, me, (sq.round === m.round || sq.movedRound === m.round) && phase === 'deploy');
+      if (moving === sq.id && phase === 'deploy') {
+        ctx.strokeStyle = css('--gold'); ctx.lineWidth = 2;
+        ctx.strokeRect(scol(sq.col) * t + 1, srow(sq.row) * t + 1, t - 2, t - 2);
+      }
+    }
     for (const side of [me, foe()]) if (towerVisible(side)) drawTowerTile(side);
   }
 
@@ -474,6 +493,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
   }
 
   function render() {
+    cv.style.touchAction = phase === 'deploy' ? 'none' : ''; // so a finger can drag squads without scrolling the page
     if (!m) { drawBoard(); return; }
     if (bt && (phase === 'battle' || phase === 'result' || phase === 'end')) drawBattle();
     else drawDeploy();
@@ -550,11 +570,13 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
     else {
       hint = selected !== null
         ? (canBuy(selected) ? `Tap a tile in your zone${Game.flankOpen(m) ? ' or a flank tile in theirs' : ''} to place ${esc(units[selected].name)}.` : left <= 0 ? 'No deployments left this round.' : `Not enough gold for ${esc(units[selected].name)}.`)
-        : (fresh ? 'Tap a squad you placed this round to take it back.' : 'Pick a unit, then tap a tile in the bottom five rows.');
+        : (fresh ? 'Drag a squad you placed this round to move it, or tap it to take it back.' : 'Pick a unit, then tap a tile in the bottom five rows.');
       if (left <= 0 && selected === null) hint = `No deployments left. Buy one more for ${Game.CONFIG.extraDeployCost} gold, or spend gold on upgrades.`;
       if (readyN && selected === null) hint = `${readyN} squad${readyN === 1 ? ' is' : 's are'} ready to level up. Tap ${readyN === 1 ? 'it' : 'one'} to upgrade.`;
       if (m.round === 1 && selected === null && m.towers && m.towers[me]) hint += ' Tap your tower to move it (round 1 only).';
       if (m.round === Game.FLANK.round && selected === null && !fresh) hint = `Flank columns are open: you can now also deploy on the blue edge columns on the enemy's half, and they can on the red ones on yours. A squad placed there can't move or attack for the first ${Game.FLANK.delay} s of its first fight; after that it starts like any other.`;
+      if (m.round === 1 && selected === null && m.armies[me].some(s => s.free)) hint = 'Your package squads are already on the board. Drag them where you want them, or tap one to take it back.';
+      if (moveMode) hint = moving == null ? `Tap one of your squads from an earlier round to move it (${Game.CONFIG.moveCost} gold, once per round).` : `Tap a free tile to move ${esc(units[m.armies[me].find(s => s.id === moving).unit].name)} there, or drag it.`;
       const freeL = Game.freeLeft(m, me);
       if (freeL.length && !placingTower() && selected === null) hint = `Place your free package squads: ${[...new Set(freeL)].map(ui => `${freeL.filter(x => x === ui).length}× ${esc(units[ui].name)}`).join(', ')}. They cost no gold and no deployments.`;
       if (choosingPack()) hint = `Pick your starting package. Both units are unlocked for you and you get their squads for free, plus ${m.gold[me]} gold to spend. Your opponent picks from their own packages.`;
@@ -563,6 +585,9 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
     const extraBtns = `<span style="display:flex;gap:6px;flex-wrap:wrap">
         <button class="btn small" id="buy-deploy" ${can && g >= Game.CONFIG.extraDeployCost ? '' : 'disabled'}>+1 deployment · ${Game.CONFIG.extraDeployCost}</button>
         ${can && m.extraDeploys[me] > 0 && left > 0 ? `<button class="btn small" id="refund-deploy">Refund unused</button>` : ''}
+        ${Game.movedId(m, me) != null
+          ? `<button class="btn small" id="undo-move" ${can ? '' : 'disabled'}>Undo move · +${Game.CONFIG.moveCost}</button>`
+          : `<button class="btn small" id="move-btn" aria-pressed="${moveMode}" ${(can && m.armies[me].some(s => s.round < m.round) && (moveMode || g >= Game.CONFIG.moveCost)) ? '' : 'disabled'}>${moveMode ? 'Cancel move' : `Move a squad · ${Game.CONFIG.moveCost}`}</button>`}
       </span>`;
     let action, status;
     if (solo()) {
@@ -622,6 +647,8 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
     if ($('ready')) $('ready').addEventListener('click', toggleReady);
     $('buy-deploy').addEventListener('click', () => { if (editable() && Game.buyDeploy(m, me)) changed(); });
     if ($('refund-deploy')) $('refund-deploy').addEventListener('click', () => { if (editable() && Game.refundDeploy(m, me)) changed(); });
+    if ($('move-btn')) $('move-btn').addEventListener('click', () => { if (!editable()) return; moveMode = !moveMode; moving = null; if (moveMode) selected = null; changed(); });
+    if ($('undo-move')) $('undo-move').addEventListener('click', () => { if (editable() && Game.undoMove(m, me)) changed(); });
     tick();
   }
 
@@ -947,7 +974,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
       const u = units[s.unit], need = s.level < Engine.MAX_LEVEL ? Math.round(Game.xpNeeded(u, s.level)) : null;
       return `- id ${s.id}: ${u.name} at col ${s.col}, row ${s.row}, level ${s.level + 1}${need ? `, XP ${Math.round(s.xp)}/${need}` : ', max level'}${Game.isReady(m, s) ? ', READY TO LEVEL UP' : ''}${s.round < m.round ? `, sells for ${Game.sellValue(m, s)}` : ''}`;
     });
-    const theirs = m.armies[0].filter(s => s.round < m.round).map(s => `- ${units[s.unit].name} at col ${s.col}, row ${s.row}, level ${s.level + 1}`);
+    const theirs = m.armies[0].filter(s => s.round < m.round).map(s => { const p = Game.seenAt(m, s); return `- ${units[s.unit].name} at col ${p.col}, row ${p.row}, level ${s.level + 1}`; });
     const theirSkills = [];
     units.forEach((u, i) => [0, 1].forEach(k => { if (Game.skillVisible(m, 0, i, k)) theirSkills.push(`${(u.skillDefs[k] || {}).name} on ${u.name}`); }));
     const hist = m.history.slice(-4).map(h => `- round ${h.round}: ${h.timeout ? 'time ran out' : h.winner === 1 ? 'you won' : h.winner === 0 ? 'you lost' : 'draw'}; you took ${h.dmg[1]} damage, they took ${h.dmg[0]}`);
@@ -982,9 +1009,9 @@ Worst choices against it: ${answers.slice(-3).reverse().map(([i, v]) => `${units
     return `You are playing Phone Bellum, a small auto-battler, against a human player. You are the RED side. Decide your moves for round ${m.round}. The human places their new squads at the same time and can't see yours until the fight. You only see their squads from earlier rounds. Play to win: build counters to what they have, protect your damage dealers, and think about what they are likely to add next.
 
 RULES
-- Board: columns 0-${Game.COLS - 1}, rows 0-${Game.ROWS - 1}, tiles ${Game.TILE} m wide. Your zone is rows 0-${Game.ZONE - 1}; row ${Game.ZONE - 1} is your front line, nearest the enemy, and row 0 is the back. Rows ${Game.ZONE}-${Game.ROWS - Game.ZONE - 1} are no man's land. From round ${Game.FLANK.round} each player may also deploy on flank tiles: columns ${Game.FLANK.cols.join(' and ')}, on the OPPONENT's half of the board: their whole zone plus their half of no man's land (yours: rows ${Math.min(...Game.flankRows(1))}-${Math.max(...Game.flankRows(1))}; theirs: rows ${Math.min(...Game.flankRows(0))}-${Math.max(...Game.flankRows(0))})${Game.flankOpen(m) ? ', OPEN NOW' : ''}. You can't use a tile the opponent already holds with a squad or their tower. Their flank columns on YOUR half (columns ${Game.FLANK.cols.join(' and ')}, rows ${Math.min(...Game.flankRows(0))}-${Math.max(...Game.flankRows(0))}) are reserved for them for the whole match: you can never place a squad or your tower there. Squads there start inside the enemy's lines, good for hitting their tower or backline from the side, so guard your own edges against theirs. A squad placed on a flank can't move or attack for the first ${Game.FLANK.delay} s of the first fight after it was placed; from the next round on it starts normally. The enemy zone is rows ${Game.ROWS - Game.ZONE}-${Game.ROWS - 1}; row ${Game.ROWS - Game.ZONE} is their front. One squad per tile. Squads keep their tile for the whole match.
+- Board: columns 0-${Game.COLS - 1}, rows 0-${Game.ROWS - 1}, tiles ${Game.TILE} m wide. Your zone is rows 0-${Game.ZONE - 1}; row ${Game.ZONE - 1} is your front line, nearest the enemy, and row 0 is the back. Rows ${Game.ZONE}-${Game.ROWS - Game.ZONE - 1} are no man's land. From round ${Game.FLANK.round} each player may also deploy on flank tiles: columns ${Game.FLANK.cols.join(' and ')}, on the OPPONENT's half of the board: their whole zone plus their half of no man's land (yours: rows ${Math.min(...Game.flankRows(1))}-${Math.max(...Game.flankRows(1))}; theirs: rows ${Math.min(...Game.flankRows(0))}-${Math.max(...Game.flankRows(0))})${Game.flankOpen(m) ? ', OPEN NOW' : ''}. You can't use a tile the opponent already holds with a squad or their tower. Their flank columns on YOUR half (columns ${Game.FLANK.cols.join(' and ')}, rows ${Math.min(...Game.flankRows(0))}-${Math.max(...Game.flankRows(0))}) are reserved for them for the whole match: you can never place a squad or your tower there. Squads there start inside the enemy's lines, good for hitting their tower or backline from the side, so guard your own edges against theirs. A squad placed on a flank can't move or attack for the first ${Game.FLANK.delay} s of the first fight after it was placed; from the next round on it starts normally. The enemy zone is rows ${Game.ROWS - Game.ZONE}-${Game.ROWS - 1}; row ${Game.ROWS - Game.ZONE} is their front. One squad per tile. Squads keep their tile, except: once per round you may move ONE of your squads from an earlier round to another free tile you could place on, for ${Game.CONFIG.moveCost} gold ("move"). The opponent sees it on its old tile until the fight.
 - The fight is automatic. Every body marches straight ahead in its own column until an enemy comes within its range + ${Game.SETTINGS.sight} m, then turns toward the nearest enemy and attacks once in range. Once no enemy is ahead of it, it turns toward the nearest one. So columns are lanes: a squad fights what stands in its lane, a squad in an empty lane walks past and hits the enemy from the side or behind, and long-range units in the back only get attacked once the front is gone. Short-range units in front shield long-range units behind. Spreading out limits splash damage.
-- The round's loser loses health: for each surviving enemy squad, 2 x (its price / 100), scaled by the share of its bodies alive. If time runs out, both sides take damage. Health starts at 40 and the match ends at 0.
+- The round's loser loses health: for each surviving enemy squad, 2 x (its price / 100), scaled by the share of its bodies alive. If time runs out, both sides take damage. A round costs the loser at most ${Game.MAX_ROUND_DMG} health. Health starts at ${Game.START_HP} and the match ends at 0.
 - Gold: both players get ${Game.incomeFor(2)} going into round 2, and ${Game.CONFIG.incomeStep} more every round after that (next round: +${Game.incomeFor(m.round + 1)}). The round's loser gets +${Game.LOSER_BONUS} extra. Unspent gold carries over.
 - This round you may place ${Game.deploysAllowed(m, 1)} new squad(s). Each extra deployment costs ${Game.CONFIG.extraDeployCost} gold.
 - Squads earn XP by dealing and taking damage. A squad marked READY TO LEVEL UP can be upgraded for its unit's level-up cost: level 2 doubles health and hit, level 3 triples them. Leveling up chaff (many cheap bodies) gives the enemy lots of XP when they die.
@@ -1024,9 +1051,9 @@ TOWERS
 - Their tower: ${m.round > 1 && m.towers && m.towers[0] ? `col ${m.towers[0].col}, row ${m.towers[0].row}` : 'hidden until the first fight'}
 
 Reply with only a JSON object in this shape:
-{${Game.needsPack(m, 1) ? '"package":0,' : ''}"unlock":["unit name"],"sell":[squad ids],"levelUp":[squad ids, list one twice to level it twice],"skills":[{"unit":"unit name","slot":1}],"extraDeployments":0,"place":[{"unit":"unit name","col":5,"row":3}],"say":"one short playful line to your opponent, at most 15 words, shown after the fight"}
+{${Game.needsPack(m, 1) ? '"package":0,' : ''}"unlock":["unit name"],"sell":[squad ids],"levelUp":[squad ids, list one twice to level it twice],"skills":[{"unit":"unit name","slot":1}],"extraDeployments":0,"move":{"id":squad id,"col":5,"row":3} or null,"place":[{"unit":"unit name","col":5,"row":3}],"say":"one short playful line to your opponent, at most 15 words, shown after the fight"}
 For "say": make it about what is happening in this match, and never repeat a line.${claude.history.length ? ' Lines you already used:\n' + claude.history.slice(-6).map(x => '- ' + x).join('\n') : ''}
-Actions run in this order: package and tower (round 1 only), sell, levelUp, unlock, skills, extraDeployments, place. Anything you can't afford or that breaks a rule is skipped, so keep the total cost within your gold (${m.gold[1]} plus any sales). Use exact unit names. Unspent gold isn't lost, but squads on the board win rounds.`;
+Actions run in this order: package and tower (round 1 only), sell, levelUp, unlock, skills, extraDeployments, move, place. Anything you can't afford or that breaks a rule is skipped, so keep the total cost within your gold (${m.gold[1]} plus any sales). Use exact unit names. Unspent gold isn't lost, but squads on the board win rounds.`;
   }
 
   function applyClaudeMove(mv) {
@@ -1034,7 +1061,10 @@ Actions run in this order: package and tower (round 1 only), sell, levelUp, unlo
     const int = (x) => Math.round(Number(x));
     const unitIdx = (name) => units.findIndex(u => u.name.toLowerCase() === String(name || '').toLowerCase().trim());
     const did = [];
-    if (Game.needsPack(m, 1) && !Game.choosePack(m, 1, int(mv.package))) Game.choosePack(m, 1, 0);
+    if (Game.needsPack(m, 1)) {
+      if (!Game.choosePack(m, 1, int(mv.package))) Game.choosePack(m, 1, 0);
+      m.armies[1] = m.armies[1].filter(s => !s.free); // Claude places its package squads itself; any it leaves out are placed at the fight
+    }
     if (Game.needsTower(m, 1)) { // the tower goes down first; a bad spot falls back to the default corner
       const tw = mv.tower && typeof mv.tower === 'object' ? mv.tower : null;
       if (!(tw && Game.placeTower(m, 1, int(tw.col), int(tw.row)))) Game.ensureTower(m, 1);
@@ -1060,6 +1090,10 @@ Actions run in this order: package and tower (round 1 only), sell, levelUp, unlo
     trySkills();
     const extra = Math.max(0, Math.min(3, int(mv.extraDeployments) || 0));
     for (let k = 0; k < extra; k++) Game.buyDeploy(m, 1);
+    if (mv.move && typeof mv.move === 'object') {
+      const sq = m.armies[1].find(s => s.id === int(mv.move.id) && s.round < m.round);
+      if (sq && Game.moveSquad(m, 1, sq.id, int(mv.move.col), int(mv.move.row))) did.push(`moved ${units[sq.unit].name}`);
+    }
     for (const pl of list(mv.place)) {
       const ui = unitIdx(pl && pl.unit);
       if (ui >= 0 && !Game.isUnlocked(m, 1, ui) && m.gold[1] >= Game.unlockCost(m, ui) + Game.unitCostOf(units[ui]) && Game.unlock(m, 1, ui)) did.push(`unlocked ${units[ui].name}`);
@@ -1195,7 +1229,32 @@ Actions run in this order: package and tower (round 1 only), sell, levelUp, unlo
     if (c < 0 || rw < 0 || c >= Game.COLS || rw >= Game.ROWS) return null;
     return { col: scol(c), row: srow(rw) }; // screen -> model (the flip is its own inverse)
   }
+  // drag one of your squads: this round's squads move for free; an older one only with the Move ability
+  cv.addEventListener('pointerdown', (ev) => {
+    if (phase !== 'deploy' || !m || !editable() || choosingPack() || placingTower()) return;
+    const t = tileAt(ev); if (!t) return;
+    const sq = m.armies[me].find(s => s.col === t.col && s.row === t.row);
+    if (!sq) return;
+    if (sq.round < m.round && !(moveMode || Game.movedId(m, me) === sq.id)) return;
+    if (!Game.canMove(m, me, sq)) return;
+    drag = { id: sq.id, from: t, over: t, moved: false };
+    try { cv.setPointerCapture(ev.pointerId); } catch (e) {}
+  });
+  cv.addEventListener('pointerup', () => {
+    if (!drag) return;
+    const d = drag; drag = null;
+    if (!d.moved || (d.over.col === d.from.col && d.over.row === d.from.row)) { render(); return; }
+    dragEndAt = performance.now(); // the click that follows a drag is not a tap
+    if (Game.moveSquad(m, me, d.id, d.over.col, d.over.row) && m.armies[me].find(s => s.id === d.id).round < m.round) { moveMode = false; moving = null; }
+    changed();
+  });
+  cv.addEventListener('pointercancel', () => { if (drag) { drag = null; render(); } });
   cv.addEventListener('pointermove', (ev) => {
+    if (drag) {
+      const t = tileAt(ev);
+      if (t && (t.col !== drag.over.col || t.row !== drag.over.row)) { drag.over = t; drag.moved = true; render(); }
+      return;
+    }
     if (phase !== 'deploy' || ev.pointerType !== 'mouse') return;
     hoverTile = tileAt(ev); render();
   });
@@ -1204,7 +1263,14 @@ Actions run in this order: package and tower (round 1 only), sell, levelUp, unlo
     if (phase !== 'deploy') return;
     const t = tileAt(ev); if (!t) return;
     if (choosingPack()) return; // the package comes first
+    if (performance.now() - dragEndAt < 400) return;
     if (placingTower()) { if (editable() && Game.placeTower(m, me, t.col, t.row)) changed(); return; }
+    if (moveMode && editable()) { // Move ability: pick an older squad, then a free tile
+      const own = m.armies[me].find(s => s.col === t.col && s.row === t.row);
+      if (own && own.round < m.round) { moving = moving === own.id ? null : own.id; changed(); return; }
+      if (!own && moving != null && Game.moveSquad(m, me, moving, t.col, t.row)) { moveMode = false; moving = null; changed(); }
+      return;
+    }
     if (Game.towerAt(m, me, t.col, t.row)) {
       if (m.round === 1 && editable()) { m.towers[me] = null; selected = null; changed(); } // pick it up to move it
       else openTowerSheet(me);
@@ -1217,7 +1283,7 @@ Actions run in this order: package and tower (round 1 only), sell, levelUp, unlo
       else openSheet(own.unit, own, me);
       return;
     }
-    const enemy = m.armies[foe()].find(s => s.col === t.col && s.row === t.row && s.round < m.round);
+    const enemy = m.armies[foe()].find(s => { const p = Game.seenAt(m, s); return p.col === t.col && p.row === t.row && s.round < m.round; });
     if (enemy) { openSheet(enemy.unit, enemy, foe()); return; }
     if (selected !== null && editable() && Game.canPlaceAt(m, me, t.col, t.row)) {
       if (Game.place(m, me, selected, t.col, t.row)) {
@@ -1300,6 +1366,8 @@ Actions run in this order: package and tower (round 1 only), sell, levelUp, unlo
           ? `<button class="btn primary" id="lvl-up">Level up · ${cost} gold</button>`
           : `<button class="btn primary" disabled>${editable() ? `Need ${cost} gold` : `Level up · ${cost} gold`}</button>`);
         if (boughtNow && editable()) btns.push(`<button class="btn" id="lvl-undo">Undo level-up</button>`);
+        if (sq.round < m.round && editable() && Game.movedId(m, me) === sq.id) btns.push(`<button class="btn" id="move-undo">Undo move · +${Game.CONFIG.moveCost}</button>`);
+        else if (sq.round < m.round && editable() && Game.movedId(m, me) == null) btns.push(`<button class="btn" id="move-sq" ${m.gold[me] >= Game.CONFIG.moveCost ? '' : 'disabled'}>Move · ${Game.CONFIG.moveCost} gold</button>`);
         if (sq.round < m.round && editable()) btns.push(`<button class="btn" id="sell">Sell · ${Game.sellValue(m, sq)} gold</button>`);
         if (btns.length) lvl += `<div style="display:flex;gap:8px;flex-wrap:wrap">${btns.join('')}</div>`;
         else if (next) lvl += `<p class="hint" style="margin:0">Earns XP from damage it deals and takes. Killing leveled enemies pays extra.</p>`;
@@ -1350,6 +1418,8 @@ Actions run in this order: package and tower (round 1 only), sell, levelUp, unlo
     if ($('unlock-yes')) $('unlock-yes').addEventListener('click', () => { unlockAsk = null; if (editable() && Game.unlock(m, me, i)) { selected = i; shopTier = tierOf(i); after(); } });
     if ($('unlock-undo')) $('unlock-undo').addEventListener('click', () => { if (editable() && Game.undoUnlock(m, me, i)) { if (selected === i) selected = null; after(); } });
     $('sheet').querySelectorAll('[data-unskill]').forEach(b => b.addEventListener('click', () => { if (editable() && Game.undoSkill(m, me, i, +b.dataset.unskill)) after(); }));
+    if ($('move-sq')) $('move-sq').addEventListener('click', () => { if (!editable()) return; closeSheet(); moveMode = true; moving = sq.id; selected = null; changed(); });
+    if ($('move-undo')) $('move-undo').addEventListener('click', () => { if (editable() && Game.undoMove(m, me)) after(); });
     if ($('sell')) $('sell').addEventListener('click', () => {
       const btn = $('sell');
       if (!btn.dataset.sure) { btn.dataset.sure = '1'; btn.textContent = `Tap again to sell for ${Game.sellValue(m, sq)}`; btn.classList.add('primary'); return; }
@@ -1572,7 +1642,11 @@ Actions run in this order: package and tower (round 1 only), sell, levelUp, unlo
   function syncState() {
     const s = snapshot(m);
     if (phase === 'deploy') {
-      s.armies[0] = s.armies[0].filter(q => q.round < m.round);
+      s.armies[0] = s.armies[0].filter(q => q.round < m.round).map(q => { // a squad moved this round shows on its old tile
+        if (q.from && q.movedRound === m.round) { q.col = q.from.col; q.row = q.from.row; }
+        delete q.from; delete q.movedRound; return q;
+      });
+      if (s.moved) s.moved[0] = null;
       // skills bought this round stay hidden too
       for (const ui in (s.tech && s.tech[0]) || {}) s.tech[0][ui] = s.tech[0][ui].map(r => r === m.round ? 0 : r);
       if (m.round === 1 && s.towers) s.towers = [null, s.towers[1]]; // the host's tower stays hidden until the first fight
@@ -1617,7 +1691,12 @@ Actions run in this order: package and tower (round 1 only), sell, levelUp, unlo
       id: s.id | 0, unit: s.unit, col: s.col, row: s.row, round: s.round | 0, xp: Math.max(0, +s.xp || 0),
       level: Math.max(0, Math.min(Engine.MAX_LEVEL, s.level | 0)), cost: Math.max(0, +s.cost || 0), ...(s.free ? { free: true } : {}),
       ...(s.boughtLevels && typeof s.boughtLevels === 'object' ? { boughtLevels: s.boughtLevels } : {}),
+      ...(s.from && (s.movedRound | 0) === m.round && (s.round | 0) < m.round && Number.isInteger(s.from.col) && Number.isInteger(s.from.row) ? { from: { col: s.from.col, row: s.from.row }, movedRound: m.round } : {}),
     }));
+    // the guest's move this round: one squad at most
+    if (!m.moved) m.moved = [null, null];
+    m.moved[1] = null;
+    for (const q of m.armies[1]) if (q.movedRound === m.round) { if (m.moved[1] == null) m.moved[1] = q.id; else { delete q.from; delete q.movedRound; } }
     m.gold[1] = Math.max(0, +d.gold || 0);
     m.extraDeploys[1] = Math.max(0, d.extra | 0);
     m.nextId[1] = Math.max(m.nextId[1], d.nextId | 0);

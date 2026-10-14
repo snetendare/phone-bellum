@@ -3,7 +3,7 @@ const Game = (() => {
   const E = (typeof Engine !== 'undefined') ? Engine : require('./engine.js');
 
   const COLS = 12, ROWS = 16, TILE = 6, ZONE = 5; // each side builds in ZONE rows; the rows between are no man's land
-  const START_HP = 40, START_GOLD = 250, INCOME = 250, LOSER_BONUS = 50;
+  const START_HP = 50, MAX_ROUND_DMG = 20, START_GOLD = 250, INCOME = 250, LOSER_BONUS = 50;
   const SQUAD_COST = 100, SQUAD_POINTS = 2;
   const SETTINGS = { dt: 0.05, timeCap: 60, spacing: 3.5, minDmgPct: 15, absorbXp: 1, armorXp: 0.5, sight: 12, flameReach: 1.2 }; // flameReach: flame cones reach 1.2x the unit's range
   // XP a squad needs in total to reach level 1, 2, 3, as multiples of its own starting health.
@@ -11,7 +11,7 @@ const Game = (() => {
   const XP_STEPS = [5, 12, 24];
   const xpNeeded = (unit, level) => unit.bodies * unit.hp * XP_STEPS[level];
   // deployments: how many new squads a side may place per round; extra ones can be bought for the round
-  const CONFIG = { incomeStep: 100, levelCostPerTier: 50, firstRoundDeploys: 3, deploysPerRound: 2, extraDeployCost: 50, deployCap: true };
+  const CONFIG = { incomeStep: 100, levelCostPerTier: 50, firstRoundDeploys: 3, deploysPerRound: 2, extraDeployCost: 50, deployCap: true, moveCost: 50 };
   // Gold both players get at the start of a round: 250 going into round 2, then 100 more each round (like Mechabellum)
   const incomeFor = (round) => INCOME + CONFIG.incomeStep * Math.max(0, round - 2);
   const deploysAllowed = (m, side) => CONFIG.deployCap
@@ -47,7 +47,9 @@ const Game = (() => {
   const flankOpen = (m) => !!m && m.round >= FLANK.round;
   const isFlank = (side, col, row) => FLANK.cols.includes(col) && flankRows(side).includes(row);
   // a tile the other player already holds with a squad (or tower) you can see
-  const enemyHolds = (m, side, col, row) => !!m && (m.armies[1 - side].some(s => s.col === col && s.row === row && s.round < m.round) ||
+  // Where the other player sees a squad: a squad moved this round still shows on its old tile until the fight
+  const seenAt = (m, sq) => sq.from && sq.movedRound === m.round ? sq.from : sq;
+  const enemyHolds = (m, side, col, row) => !!m && (m.armies[1 - side].some(s => { const p = seenAt(m, s); return p.col === col && p.row === row && s.round < m.round; }) ||
     (m.round > 1 && m.towers && m.towers[1 - side] && m.towers[1 - side].col === col && m.towers[1 - side].row === row));
   // the edge tiles of your zone that are the enemy's flank are reserved for them for the whole match
   const reserved = (side, col, row) => isFlank(1 - side, col, row);
@@ -104,7 +106,17 @@ const Game = (() => {
     m.pack[side] = k;
     if (!m.unlocks) m.unlocks = [{}, {}];
     for (const ui of m.packages[side][k].units) m.unlocks[side][ui] = m.round;
+    placeFree(m, side);
     return true;
+  }
+  // package squads go straight onto the board (before the tower); the player can drag them elsewhere
+  function placeFree(m, side) {
+    const r = rng(m.seed + 4242 + side);
+    for (const ui of freeLeft(m, side)) {
+      const spot = aiSpot(m, side, ui, [], r);
+      if (!spot) break;
+      m.armies[side].push({ id: m.nextId[side]++, unit: ui, col: spot.col, row: spot.row, round: m.round, xp: 0, level: 0, cost: 0, free: true });
+    }
   }
   // before a fight: pick the first package for a player who didn't choose, and put unplaced package squads down
   function ensurePack(m, side) {
@@ -123,6 +135,7 @@ const Game = (() => {
       round: 1, hp: [START_HP, START_HP], gold: [START_GOLD, START_GOLD],
       armies: [[], []], nextId: [1, 1], history: [], over: false, winner: -1,
       extraDeploys: [0, 0],
+      moved: [null, null], // id of the squad each player moved this round (one move per round, CONFIG.moveCost gold)
       tech: [{}, {}], // skills bought per unit type: tech[side][unitIdx] = [round bought or 0, round bought or 0]
       towers: [null, null], // { col, row } of each player's tower
       unlocks: [{}, {}], // units unlocked per player: unlocks[side][unitIdx] = round it was unlocked
@@ -218,6 +231,40 @@ const Game = (() => {
     return true;
   }
 
+  // ---------- moving squads ----------
+  // Squads placed this round can be moved freely. Once per round a player may also move one squad from an
+  // earlier round, for CONFIG.moveCost gold. Moving it back to where it was refunds the gold.
+  const movedId = (m, side) => (m.moved && m.moved[side] != null) ? m.moved[side] : null;
+  const canMove = (m, side, sq) => !!sq && (sq.round === m.round ||
+    (movedId(m, side) == null ? m.gold[side] >= CONFIG.moveCost : movedId(m, side) === sq.id));
+  function moveSquad(m, side, sqId, col, row) {
+    const sq = m.armies[side].find(s => s.id === sqId);
+    if (!sq || (sq.col === col && sq.row === row) || !canMove(m, side, sq)) return false;
+    if (!canPlaceAt(m, side, col, row) || occupied(m, side, col, row)) return false;
+    if (sq.round !== m.round && movedId(m, side) == null) {
+      if (!m.moved) m.moved = [null, null];
+      m.gold[side] -= CONFIG.moveCost;
+      m.moved[side] = sq.id;
+      sq.from = { col: sq.col, row: sq.row };
+      sq.movedRound = m.round;
+    }
+    sq.col = col; sq.row = row;
+    if (sq.from && sq.movedRound === m.round && sq.from.col === col && sq.from.row === row) undoMove(m, side);
+    return true;
+  }
+  // put this round's moved squad back on its old tile and refund the move
+  function undoMove(m, side) {
+    const id = movedId(m, side);
+    const sq = id != null && m.armies[side].find(s => s.id === id);
+    if (!sq || !sq.from) return false;
+    if ((sq.col !== sq.from.col || sq.row !== sq.from.row) && occupied(m, side, sq.from.col, sq.from.row)) return false;
+    sq.col = sq.from.col; sq.row = sq.from.row;
+    delete sq.from; delete sq.movedRound;
+    m.moved[side] = null;
+    m.gold[side] += CONFIG.moveCost;
+    return true;
+  }
+
   const towerAt = (m, side, col, row) => !!(m.towers && m.towers[side] && m.towers[side].col === col && m.towers[side].row === row);
   const occupied = (m, side, col, row) => towerAt(m, side, col, row) || m.armies[side].some(s => s.col === col && s.row === row);
   const needsTower = (m, side) => !!(m.towers && !m.towers[side]);
@@ -271,7 +318,7 @@ const Game = (() => {
     for (const sq of m.armies[side]) {
       const w = tileToWorld(sq.col, sq.row);
       const b = E.buildSquad(unitFor(m, side, sq.unit), side, w.x, w.y, sq.id, TILE, idx, sq.level);
-      if (isFlank(side, sq.col, sq.row) && sq.round === m.round) for (const x of b) x.delay = FLANK.delay; // only in its first fight
+      if (isFlank(side, sq.col, sq.row) && (sq.round === m.round || sq.movedRound === m.round)) for (const x of b) x.delay = FLANK.delay; // only in its first fight
       idx += b.length;
       out.push(...b);
     }
@@ -296,7 +343,7 @@ const Game = (() => {
       const value = sq ? (m.units[sq.unit].cost || 1) : 1; // pricier squads hit harder, like their price
       sum += SQUAD_POINTS * value * s.alive / s.total;
     }
-    return sum > 0 ? Math.max(1, Math.round(sum)) : 0;
+    return sum > 0 ? Math.min(MAX_ROUND_DMG, Math.max(1, Math.round(sum))) : 0; // at most MAX_ROUND_DMG per round
   }
 
   // Apply a finished battle to the match. Returns a summary for the results screen.
@@ -338,6 +385,8 @@ const Game = (() => {
     // next round
     m.round++;
     m.extraDeploys = [0, 0];
+    m.moved = [null, null];
+    for (const a of m.armies) for (const sq of a) { delete sq.from; delete sq.movedRound; }
     const income = incomeFor(m.round);
     m.gold[0] += income; m.gold[1] += income;
     summary.income = income;
@@ -496,6 +545,7 @@ const Game = (() => {
   }
 
   return {
+    MAX_ROUND_DMG, seenAt, movedId, canMove, moveSquad, undoMove,
     COLS, ROWS, TILE, ZONE, START_HP, START_GOLD, INCOME, incomeFor, LOSER_BONUS, SQUAD_COST, SQUAD_POINTS, SETTINGS, XP_STEPS, xpNeeded, unitCostOf,
     levelCost, isReady, levelUp, undoLevel, aiLevel, AI, CONFIG,
     deploysAllowed, deploysLeft, deployedThisRound, buyDeploy, refundDeploy,
