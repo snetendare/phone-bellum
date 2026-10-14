@@ -264,10 +264,10 @@
       "name": "Fire Mage",
       "cost": 100,
       "bodies": 1,
-      "hp": 150,
+      "hp": 155,
       "hit": 35,
       "aps": 0.8,
-      "range": 26,
+      "range": 20,
       "speed": 3,
       "splash": 4,
       "shape": "hexagon",
@@ -880,8 +880,8 @@
       "cost": 100,
       "bodies": 2,
       "hp": 400,
-      "hit": 30,
-      "aps": 1.2,
+      "hit": 25,
+      "aps": 1.1,
       "range": 4,
       "speed": 1.9,
       "splash": 0,
@@ -910,6 +910,56 @@
           "params": {
             "pct": 5
           }
+        }
+      ]
+    },
+    {
+      "burst": 1,
+      "pellets": 1,
+      "spinUp": 0.1,
+      "pierce": 0,
+      "projSpeed": 30,
+      "minRange": 0,
+      "charge": 1,
+      "knockback": 0,
+      "windUp": 0,
+      "flame": 0,
+      "defense": "none",
+      "defVal": 0,
+      "level": 0,
+      "name": "Slimeshots",
+      "cost": 200,
+      "unlock": 100,
+      "bodies": 10,
+      "hp": 95,
+      "hit": 7,
+      "aps": 0.8,
+      "range": 21,
+      "speed": 6,
+      "splash": 3,
+      "shape": "diamond",
+      "color": "#20d300",
+      "skills": [
+        "range",
+        "heavy"
+      ],
+      "skillsOn": [
+        false,
+        false
+      ],
+      "skillsInnate": [
+        false,
+        false
+      ],
+      "skillMods": [
+        null,
+        {
+          "params": {
+            "hit": 25,
+            "slow": 0,
+            "instant": 0
+          },
+          "cost": 150
         }
       ]
     }

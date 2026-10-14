@@ -264,6 +264,11 @@ const Engine = (() => {
     const dist = (a, b) => hyp(a.x - b.x, a.y - b.y);
     // current range: shortsight can shrink it for a while, but never below 1 m (or the unit's own range if shorter)
     const R = (b) => b.shrinkT > 0 ? Math.max(Math.min(b.u.range, 1), b.u.range - b.shrinkM) : b.u.range;
+    // How far an attack reaches. Flame cones can reach further than where the unit stops (g.flameReach x range),
+    // so a flamer keeps burning the enemies behind the first one without walking up to each.
+    const reachOf = (b) => b.u.flame > 0 && g.flameReach > 1 ? R(b) * g.flameReach : R(b);
+    // Where a unit stops walking: by default a little inside its range (g.stopPct: a share of range instead)
+    const stopAt = (rg) => g.stopPct > 0 && g.stopPct < 1 ? rg * g.stopPct : rg - Math.min(APPROACH, rg * 0.25);
     // deterministic random numbers for healing targets (same on every device)
     let seed = (A.length * 7919 + B.length * 104729 + 1) >>> 0;
     const rnd = () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let x = Math.imul(seed ^ seed >>> 15, 1 | seed); x = x + Math.imul(x ^ x >>> 7, 61 | x) ^ x; return ((x ^ x >>> 14) >>> 0) / 4294967296; };
@@ -363,7 +368,7 @@ const Engine = (() => {
       for (const f of sides[1 - b.side]) {
         if (!f.alive || f.hidden) continue;
         const d = dist(f, b);
-        if (d <= R(b) + 0.01 && d >= b.u.minRange) valid.push([d, f]);
+        if (d <= reachOf(b) + 0.01 && d >= b.u.minRange) valid.push([d, f]);
       }
       valid.sort((p, q) => p[0] - q[0]);
       return valid.map(v => v[1]);
@@ -389,7 +394,7 @@ const Engine = (() => {
     // flame cone: every enemy in range inside the cone toward the target, hidden ones too
     function flameTargets(b, primary) {
       const ax = primary.x - b.x, ay = primary.y - b.y, al = hyp(ax, ay);
-      const c = cosDeg(b.u.flame), reach = R(b) + 0.01;
+      const c = cosDeg(b.u.flame), reach = reachOf(b) + 0.01;
       const out = [];
       for (const f of sides[1 - b.side]) {
         if (!f.alive) continue;
@@ -430,7 +435,7 @@ const Engine = (() => {
       }
       // a flame is drawn once, as a wedge from the unit out to its range
       if (opts.record && targets.flame) {
-        const [ax, ay, al] = targets.flame, r = R(b), k = al ? r / al : 0;
+        const [ax, ay, al] = targets.flame, r = reachOf(b), k = al ? r / al : 0;
         shots.push([b.x, b.y, b.x + ax * k, b.y + ay * k, b.side, 0, charged ? 1 : 0, 0, b.u.flame]);
       }
     }
@@ -454,7 +459,7 @@ const Engine = (() => {
         }
         b.near = near;
         const rg = R(b);
-        if (near && nd > rg) {
+        if (near && nd > (g.stopPct > 0 && g.stopPct < 1 && b.engaged ? stopAt(rg) : rg)) {
           const step = b.u.speed * (b.slowT > 0 ? 1 - b.slowMove / 100 : 1) * (cripple[b.side] > 0 ? 1 - towerDown.move / 100 : 1) * dt;
           let mv;
           // March straight ahead until an enemy comes within sight (range + SIGHT), or no enemy is left
@@ -481,7 +486,7 @@ const Engine = (() => {
           if (hl < 1e-6) { hx = wx; hy = wy; hl = 1; }
           b.hx = hx / hl; b.hy = hy / hl;
           // walk a little inside max range, so being nudged by allies doesn't leave the unit just out of reach
-          mv = b.engaged ? Math.min(step, nd - (rg - Math.min(APPROACH, rg * 0.25))) : step;
+          mv = b.engaged ? Math.min(step, nd - stopAt(rg)) : step;
           b.x += b.hx * mv;
           b.y += b.hy * mv;
           b.moved += mv;
