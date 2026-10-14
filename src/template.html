@@ -208,6 +208,7 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
       <div class="field"><label for="s-floor">Armor floor (%)</label><input id="s-floor" type="number" min="0" max="100" step="1" data-s="minDmgPct"><span class="hint">Share of a hit that always gets through armor.</span></div>
       <div class="field"><label for="s-cap">Time limit (s)</label><input id="s-cap" type="number" min="5" step="5" data-s="timeCap"><span class="hint">After this, the side with more health left wins.</span></div>
       <div class="field"><label for="s-sight">Sight (m)</label><input id="s-sight" type="number" min="0" step="1" data-s="sight"><span class="hint">Units march straight ahead until an enemy is this far beyond their range, then turn to it. 200 = chase the nearest enemy anywhere.</span></div>
+      <div class="field"><label for="s-flamereach">Flame reach (×)</label><input id="s-flamereach" type="number" min="1" step="0.05" data-s="flameReach"><span class="hint">How far flame cones reach, as a multiple of the unit's range. The unit still stops at its range, so it keeps burning the enemies behind the first one.</span></div>
     </div>
   </section>
 
@@ -322,7 +323,7 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
       <div class="rule"><h3>Ward</h3><p>No single hit can deal more than the ward value. It shuts down big hits and ignores small ones.</p></div>
       <div class="rule"><h3>Range vs speed</h3><p>A ranged unit gets free shots while the enemy closes the gap. Fast units shrink that window.</p></div>
       <div class="rule"><h3>Burst and shotgun</h3><p>A burst fires its shots 0.15 s apart along the line toward its first target. Each shot hits the first body in its path: the target while it lives, then whoever stands behind it. If the line is empty, the shot misses. A shotgun fires all its pellets at once into a 60° cone, each at a different body, wrapping back to bodies already hit when it runs out.</p></div>
-      <div class="rule"><h3>Flame cone</h3><p>Like the Vulcan: every attack hits all enemies in range inside a cone toward the target, stealthed ones too, instantly. Damage grows with how many enemies stand in the fire, so it melts swarms, while armor eats a big share of each small tick and longer-ranged units can shoot it before it gets close.</p></div>
+      <div class="rule"><h3>Flame cone</h3><p>Like the Vulcan: every attack hits all enemies inside a cone toward the target, out to the flame reach (a multiple of the unit’s range, see Battle settings), stealthed ones too, instantly. Damage grows with how many enemies stand in the fire, so it melts swarms, while armor eats a big share of each small tick and longer-ranged units can shoot it before it gets close.</p></div>
       <div class="rule"><h3>Wind-up</h3><p>The first time an enemy is in range, the unit sets up for the wind-up time, like a sniper lying down. Once set up, it fires at its normal rate at anything in range. If it has to move, it gets up, and it sets up again when an enemy is next in range. Moving during the setup cancels it.</p></div>
       <div class="rule"><h3>Spin-up</h3><p>Raises attack speed every second the unit keeps hitting the same target, up to three times its base speed. It stays on that target while it can, and the ramp starts over when it has to switch, so swarms keep it slow and big targets let it melt them.</p></div>
       <div class="rule"><h3>Pierce and projectiles</h3><p>A piercing shot also hits bodies lined up behind its target. A projectile with a speed travels in a straight line and hits the first enemy it touches, so units moving sideways can dodge it while units charging straight at it get hit.</p></div>
@@ -352,7 +353,7 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
     ['minRange', 'Minimum range (m)', 1, 'Can’t hit anything closer than this.'],
     ['charge', 'Charge (× damage)', 0.5, 'Next hit after running 5 m. 1 = off.'],
     ['knockback', 'Knockback (m)', 0.5, 'How far a big hit pushes a small body.'],
-    ['flame', 'Flame cone (°)', 5, 'Sprays fire this many degrees to each side, hitting every enemy in range inside the cone at once. Pellets, splash, pierce and projectile speed are ignored. 0 = off.'],
+    ['flame', 'Flame cone (°)', 5, 'Sprays fire this many degrees to each side, hitting every enemy inside the cone at once, out to the flame reach (Battle settings). Pellets, splash, pierce and projectile speed are ignored. 0 = off.'],
     ['windUp', 'Wind-up (s)', 0.1, 'Sets up this long when an enemy first comes in range, then fires normally. Has to set up again after moving.'],
   ];
   const LEVERS = [
@@ -409,7 +410,7 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
       skillsInnate: [0, 1].map(k => !!(Array.isArray(u.skillsInnate) && u.skillsInnate[k])),
       skillMods: [0, 1].map(k => cleanMod(Array.isArray(u.skillMods) ? u.skillMods[k] : null)),
     })));
-    return { settings: { sight: 12, ...SAMPLE.settings, ...p.settings }, skills, units };
+    return { settings: { sight: 12, flameReach: 1.2, ...SAMPLE.settings, ...p.settings }, skills, units };
   }
   function validSkill(sk) { return sk && typeof sk.id === 'string' && typeof sk.name === 'string' && Engine.SKILL_TYPES[sk.type]; }
   const skillById = (id) => state.skills.find(sk => sk.id === id) || null;

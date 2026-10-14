@@ -7,7 +7,8 @@
     "spacing": 3.5,
     "minDmgPct": 15,
     "timeCap": 60,
-    "dt": 0.05
+    "dt": 0.05,
+    "flameReach": 1.2
   },
   "skills": [
     {
@@ -531,7 +532,7 @@
       "cost": 400,
       "bodies": 1,
       "hp": 2000,
-      "hit": 20,
+      "hit": 13,
       "aps": 4,
       "range": 15,
       "speed": 2,

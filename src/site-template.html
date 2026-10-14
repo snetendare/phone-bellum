@@ -192,7 +192,7 @@ a { color: var(--you); }
   // ---------- unit sets: built-in, or loaded from Counter Lab ----------
   const BUILTIN = { units: DATA.units, matrix: DATA.matrix, skills: DATA.skills || [] };
   const STORE = 'phonebellum.units.v1';
-  const MATRIX_SETTINGS = { budget: 2, distance: 42, spacing: 3.5, minDmgPct: 15, timeCap: 60, dt: 0.05, sight: 12 }; // distance = gap between the front rows on the board
+  const MATRIX_SETTINGS = { budget: 2, distance: 42, spacing: 3.5, minDmgPct: 15, timeCap: 60, dt: 0.05, sight: 12, flameReach: Game.SETTINGS.flameReach }; // distance = gap between the front rows on the board
   const LEVERS = ['cost', 'bodies', 'hp', 'hit', 'aps', 'range', 'speed', 'splash'];
   let units, M, customSet = false, rawSet = BUILTIN;
   const validUnits = (list) => Array.isArray(list) && list.length >= 2 && list.length <= 30 &&
@@ -1310,7 +1310,7 @@ Actions run in this order: package and tower (round 1 only), sell, levelUp, unlo
     const bad = units.map((v, j) => [row[j], v.name]).filter(x => x[0] < -0.3).sort((a, b) => a[0] - b[0]).slice(0, 3);
     const tr = [];
     if (u.burst > 1) tr.push(`Burst ${u.burst}`);
-    if (u.flame > 0) tr.push(`Flame cone ${u.flame}°`);
+    if (u.flame > 0) tr.push(`Flame cone ${u.flame}°, reaches ${Math.round(u.range * (Game.SETTINGS.flameReach || 1) * 10) / 10} m`);
     else if (u.pellets > 1) tr.push(`Shotgun ${u.pellets}`);
     if (u.spinUp > 0) tr.push(`Spin-up ${u.spinUp}%/s`);
     if (u.pierce > 0) tr.push(`Pierce ${u.pierce}`);
