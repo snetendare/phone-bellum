@@ -1795,8 +1795,8 @@ if (typeof module !== 'undefined') module.exports = Game;
   }
   const roleIcons = (r) => ico(IS_SVG[r.is], 'is') + (r.beats ? ico(BEATS_SVG[r.beats], 'beats') : '') + (r.extra ? ico(EXTRA_SVG[r.extra], 'ex') : '');
   const roleRow = (i) => { const r = roleOf(i); return `<span class="roles" title="${r.text}">${roleIcons(r)}${rangeSvg(r.range)}</span>`; };
-  const DEPLOY_SECONDS = 30;   // deploy countdown each round
-  const FIRST_DEPLOY_SECONDS = 60;   // round 1: package, tower and squads
+  const DEPLOY_SECONDS = 60;   // deploy countdown each round
+  const FIRST_DEPLOY_SECONDS = 60;   // round 1: package and squads
   const deployMs = () => (m && m.round === 1 ? FIRST_DEPLOY_SECONDS : DEPLOY_SECONDS) * 1000;
   const NEXT_SECONDS = 20;     // results screen moves on by itself after this long
   const PEER_PREFIX = 'phonebellum-v1-';
@@ -2351,7 +2351,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
         <li>Your tower stands in the back of your zone. If it falls in a fight, your army is crippled for a few seconds. Tap the enemy tower to see their character.</li>
         <li>Place squads in the bottom six rows. They stay for the whole match. From round ${Game.FLANK.round}, the edge columns on the enemy's half of the board open up for flanking. The red edge columns on your half are theirs, never yours; a squad placed there waits ${Game.FLANK.delay} s before it moves or attacks, in its first fight only.</li>
         <li>Columns are lanes: squads march straight ahead and fight what they meet, so an empty lane lets a squad walk around the side.</li>
-        <li>You have ${FIRST_DEPLOY_SECONDS} seconds to deploy in round 1 and ${DEPLOY_SECONDS} after that, then the armies fight on their own.</li>
+        <li>You have ${DEPLOY_SECONDS} seconds to deploy every round, then the armies fight on their own.</li>
         <li>The loser takes damage from every enemy squad still standing.</li>
         <li>You see the enemy’s earlier squads while you deploy, so build counters.</li>
         <li>3 deployments in round 1, then 2 per round. Extra ones cost ${Game.CONFIG.extraDeployCost} gold.</li>
