@@ -282,7 +282,7 @@
       "cost": 100,
       "bodies": 1,
       "hp": 155,
-      "hit": 35,
+      "hit": 33,
       "aps": 0.75,
       "range": 20,
       "speed": 3,
@@ -347,7 +347,11 @@
             "aps": 20
           }
         },
-        null
+        {
+          "params": {
+            "waves": 3
+          }
+        }
       ],
       "skillsInnate": [
         false,
@@ -465,7 +469,7 @@
       "hit": 21,
       "aps": 0.45,
       "range": 27,
-      "speed": 6,
+      "speed": 5,
       "splash": 0,
       "shape": "hexagon",
       "color": "#00d200",
@@ -545,7 +549,7 @@
       "level": 0,
       "unlock": 100,
       "name": "Flame Wizard",
-      "cost": 400,
+      "cost": 300,
       "bodies": 1,
       "hp": 2000,
       "hit": 12,
@@ -588,7 +592,7 @@
       "level": 0,
       "unlock": 100,
       "name": "Steel Wizard",
-      "cost": 400,
+      "cost": 300,
       "bodies": 1,
       "hp": 1900,
       "hit": 150,
@@ -636,7 +640,7 @@
       "level": 0,
       "unlock": 100,
       "name": "Slime Wizard",
-      "cost": 400,
+      "cost": 300,
       "bodies": 1,
       "hp": 700,
       "hit": 480,
@@ -692,7 +696,7 @@
         null
       ],
       "name": "Ether Golem",
-      "cost": 600,
+      "cost": 500,
       "bodies": 1,
       "hp": 3450,
       "hit": 69,
@@ -735,7 +739,7 @@
         null
       ],
       "name": "Sun Priest",
-      "cost": 600,
+      "cost": 500,
       "bodies": 1,
       "hp": 2800,
       "hit": 38,
@@ -778,7 +782,7 @@
         null
       ],
       "name": "Meteor Caller",
-      "cost": 600,
+      "cost": 500,
       "bodies": 1,
       "hp": 400,
       "hit": 114,
@@ -821,7 +825,7 @@
         null
       ],
       "name": "War Mammoth",
-      "cost": 600,
+      "cost": 500,
       "bodies": 1,
       "hp": 2300,
       "hit": 169,
@@ -865,13 +869,13 @@
         null
       ],
       "name": "Necromancer",
-      "cost": 600,
+      "cost": 500,
       "bodies": 1,
       "hp": 2300,
       "hit": 56,
       "aps": 1,
       "range": 20,
-      "speed": 2.5,
+      "speed": 2.2,
       "shape": "hexagon",
       "color": "#9D4EDD",
       "skills": [

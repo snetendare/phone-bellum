@@ -48,7 +48,7 @@ const Engine = (() => {
     poison:  { label: 'Poison shot', params: [['pct', 'Poison damage (% of hit, in total)', 100, 10], ['duration', 'Poison lasts (s)', 4, 0.5], ['slow', 'Longer time between attacks (%)', 30, 5]] },
     stealth: { label: 'Stealth', params: [] },
     armorHp: { label: 'Armor and health', params: [['armor', 'Armor (blocked from every hit)', 8, 1], ['hp', 'Health (+%)', 25, 5]] },
-    spawn:   { label: 'Spawn goblins', params: [['unit', 'Spawns (unit name)', 'Goblin Swarm', null], ['count', 'Bodies per spawn', 2, 1], ['every', 'Every (s)', 4, 0.5], ['max', 'Most alive at once', 6, 1]] },
+    spawn:   { label: 'Spawn goblins', params: [['unit', 'Spawns (unit name)', 'Goblin Swarm', null], ['count', 'Bodies per spawn', 2, 1], ['every', 'Every (s)', 4, 0.5], ['max', 'Most alive at once', 6, 1], ['waves', 'Most waves per fight (0 = no limit)', 0, 1]] },
     rapid:   { label: 'Rapid fire', params: [['aps', 'Attack speed (+%)', 50, 5], ['range', 'Range (−%)', 30, 5]] },
     swift:   { label: 'Swift strikes', params: [['speed', 'Move speed (+%)', 30, 5], ['hit', 'Hit size (+%)', 25, 5]] },
     heavy:   { label: 'Heavy shot', params: [['slow', 'Projectile speed (−%)', 40, 5], ['instant', 'Projectile speed if the unit hits instantly (m/s)', 30, 5], ['hit', 'Hit size (+%)', 40, 5]] },
@@ -77,7 +77,7 @@ const Engine = (() => {
       case 'poison': return `Hits poison the target for ${n('pct')}% of the hit over ${n('duration')} s, ignoring armor and ward. ${n('slow')}% more time between attacks.`;
       case 'stealth': return 'Can’t be targeted until it attacks for the first time. Splash and piercing shots can still hit it.';
       case 'armorHp': return `+${n('armor')} armor and +${n('hp')}% health.`;
-      case 'spawn': return `Every ${n('every')} s, spawns ${n('count')} ${String(P('unit'))} ${+P('count') === 1 ? 'body' : 'bodies'}, up to ${n('max')} alive at once.`;
+      case 'spawn': return `Every ${n('every')} s, spawns ${n('count')} ${String(P('unit'))} ${+P('count') === 1 ? 'body' : 'bodies'}, up to ${n('max')} alive at once${+P('waves') > 0 ? `, at most ${n('waves')} ${+P('waves') === 1 ? 'wave' : 'waves'} per fight` : ''}.`;
       case 'rapid': return `+${n('aps')}% attack speed, −${n('range')}% range.`;
       case 'swift': return `+${n('speed')}% move speed and +${n('hit')}% hit size.`;
       case 'heavy': return `Projectiles fly ${n('slow')}% slower (${n('instant')} m/s if it normally hits instantly), +${n('hit')}% hit size.`;
@@ -112,7 +112,7 @@ const Engine = (() => {
           const src = (roster || []).find(r => r && r.name === name);
           if (src) {
             const { skills, skillDefs, skillsOn, ...plain } = src;
-            u.spawn = { unit: withTraits({ ...plain, level: 0 }), count: Math.max(1, Math.round(P('count'))), every: Math.max(0.5, P('every')), max: Math.max(1, Math.round(P('max'))) };
+            u.spawn = { unit: withTraits({ ...plain, level: 0 }), count: Math.max(1, Math.round(P('count'))), every: Math.max(0.5, P('every')), max: Math.max(1, Math.round(P('max'))), waves: Math.max(0, Math.round(P('waves'))) };
           }
           break;
         }
@@ -591,8 +591,10 @@ const Engine = (() => {
         if (b.slowT > 0) { b.slowT -= dt; if (b.slowT <= 0) { b.slowT = 0; b.slowMove = 0; b.slowAtk = 0; } }
         if (b.u.spawn) {
           b.spawnT -= dt;
+          if (b.spawnT <= 0 && b.u.spawn.waves > 0 && (b.waves || 0) >= b.u.spawn.waves) b.spawnT = Infinity; // used up its waves
           if (b.spawnT <= 0) {
             b.spawnT += b.u.spawn.every;
+            b.waves = (b.waves || 0) + 1;
             b.kids = (b.kids || []).filter(k => k.alive);
             const n = Math.min(b.u.spawn.count, b.u.spawn.max - b.kids.length);
             for (let k = 0; k < n; k++) {
