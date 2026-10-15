@@ -928,7 +928,7 @@ const Engine = (() => {
           if (opts.record) shots.push([b.x, b.y, a.x, a.y, b.side, 0, 0, 1]);
         }
       }
-      const hit = b.u.hit * (charged ? b.u.charge : 1);
+      const hit = b.u.hit * (charged ? b.u.charge : 1) * (b.startBuff > 0 ? 1 + b.startBuff : 1); // startBuff: a bonus until the body first moves
       // trample: a charged hit doesn't stop the unit; it runs on through its target and over every body in its path
       if (charged && b.u.trample > 0 && targets.length && !targets.flame) {
         const tgt = targets[0], dx = tgt.x - b.x, dy = tgt.y - b.y, d = hyp(dx, dy);
@@ -971,6 +971,7 @@ const Engine = (() => {
           const [ux, uy] = b.trampleDir;
           b.x += ux * mv; b.y += uy * mv; b.hx = ux; b.hy = uy;
           b.trampleLeft -= mv;
+          if (mv > 0) b.startBuff = 0;
           const tHit = b.u.hit * b.u.trample / 100;
           for (const f of foes) {
             if (!f.alive || b.trampled.includes(f) || hyp(f.x - b.x, f.y - b.y) > TRAMPLE_WIDTH) continue;
@@ -1020,6 +1021,7 @@ const Engine = (() => {
           b.x += b.hx * mv;
           b.y += b.hy * mv;
           b.moved += mv;
+          if (mv > 0) b.startBuff = 0; // a start-of-fight bonus (Zoe's buff tiles) ends with the first step
           // a unit with wind-up has to set up again after it moves; a charge in progress is lost
           if (b.u.windUp > 0 && mv > 0) {
             b.setUp = false;

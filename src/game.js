@@ -2,7 +2,7 @@
 const Game = (() => {
   const E = (typeof Engine !== 'undefined') ? Engine : require('./engine.js');
 
-  const COLS = 12, ROWS = 16, TILE = 6, ZONE = 5; // each side builds in ZONE rows; the rows between are no man's land
+  const COLS = 12, ROWS = 16, TILE = 6, ZONE = 6; // each side builds in ZONE rows; the rows between are no man's land
   const START_HP = 60, MAX_ROUND_DMG = 20, START_GOLD = 250, INCOME = 250, LOSER_BONUS = 50;
   const SQUAD_COST = 100, SQUAD_POINTS = 2;
   const SETTINGS = { dt: 0.05, timeCap: 60, spacing: 3.5, minDmgPct: 15, absorbXp: 1, armorXp: 0.5, sight: 12, flameReach: 1.2 }; // flameReach: flame cones reach 1.2x the unit's range
@@ -23,11 +23,24 @@ const Game = (() => {
   const unitCostOf = (unit) => Math.max(10, Math.round((unit.cost || 1) * SQUAD_COST / 10) * 10);
   // Upgrades cost half the unit's price at the default setting (50 for a 100-gold squad)
   const levelCost = (unit) => Math.max(10, Math.round(CONFIG.levelCostPerTier * (unit.cost || 1) / 5) * 5);
-  // Each player has one tower, placed before anything else in round 1, on either side of their zone
-  // (not in the middle columns). It has a short, light attack. If it falls, that player's army is
+  // Each player has one tower. It stands on a fixed tile (TOWER_SPOT): column 8, second row from the back,
+  // and the opponent's sits straight across the board from it. It has a short, light attack. If it falls, that player's army is
   // crippled for a few seconds (see Engine.TOWER_DOWN). It is rebuilt for every round.
   const TOWER = { name: 'Tower', cost: 0, bodies: 1, hp: 650, hit: 30, aps: 1.2, range: 8, speed: 0, splash: 0, structure: true, shape: 'square', color: '#C9B79C' };
   const TOWER_MID = [4, 7]; // columns the tower can't stand in
+  const TOWER_SPOT = [{ col: 8, row: ROWS - 2 }, { col: 8, row: 1 }];
+
+  // ---------- characters ----------
+  // Each starting package comes with a character, who gives that player a passive ability for the whole match.
+  const CHARACTERS = [
+    { id: 'cage', name: 'Frickolas Cage', ability: 'All your units have 10% more health.' },
+    { id: 'zoe', name: 'Zoe', ability: 'Every round, 2 random tiles in your zone become buff tiles. A squad that starts the fight on one deals 20% more damage until it first moves.' },
+    { id: 'emile', name: 'Emile', ability: 'Tier 1 units are free to unlock.' },
+    { id: 'wilhelm', name: 'Wilhelm', ability: 'Your squads on flank tiles and in no man’s land get +4 armor, and flank squads start twice as fast.' },
+  ];
+  const CHAR = { cageHp: 10, zoeTiles: 2, zoeDmg: 20, wilhelmArmor: 4, wilhelmDelay: 0.5 };
+  const charOf = (m, side) => (m && m.chars && m.chars[side]) || null;
+  const charInfo = (id) => CHARACTERS.find(c => c.id === id) || null;
   const towerColOk = (col) => col >= 0 && col < COLS && (col < TOWER_MID[0] || col > TOWER_MID[1]);
   const AI = { levelPolicy: 'smart', maxExtraDeploys: 3, skills: true }; // levelPolicy: smart | never | all (for experiments)
 
@@ -69,7 +82,7 @@ const Game = (() => {
   // ---------- starting packages ----------
   // Before round 1 each player picks one of 3 packages (their own, not mirrored): two tier 1-2 unit types,
   // both unlocked for free, plus free squads of them worth exactly PACKAGE.value gold.
-  const PACKAGE = { value: 300, maxPrice: 200, options: 3 };
+  const PACKAGE = { value: 300, maxPrice: 200, options: 4 };
   function allPackages(units) {
     const out = [], ok = units.map((u, i) => unitCostOf(u) <= PACKAGE.maxPrice ? i : -1).filter(i => i >= 0);
     for (const a of ok) for (const b of ok) {
@@ -93,7 +106,10 @@ const Game = (() => {
       if (pick.includes(p) || (guard < 120 && pick.some(q => q.units.some(u => p.units.includes(u))))) continue;
       pick.push(p);
     }
-    return pick;
+    // one character per package, in random order, so every character is on offer
+    const ids = CHARACTERS.map(c => c.id);
+    for (let i = ids.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [ids[i], ids[j]] = [ids[j], ids[i]]; }
+    return pick.map((p, k) => ({ ...p, char: ids[k % ids.length] }));
   }
   const packOf = (m, side) => m.packages && m.pack && m.pack[side] != null ? m.packages[side][m.pack[side]] : null;
   const needsPack = (m, side) => !!(m.packages && m.packages[side] && m.packages[side].length && m.pack[side] == null);
@@ -108,6 +124,9 @@ const Game = (() => {
   function choosePack(m, side, k) {
     if (m.round !== 1 || !needsPack(m, side) || !(k >= 0 && k < m.packages[side].length)) return false;
     m.pack[side] = k;
+    if (!m.chars) m.chars = [null, null];
+    m.chars[side] = m.packages[side][k].char || null;
+    rollBuffTiles(m, side);
     if (!m.unlocks) m.unlocks = [{}, {}];
     for (const ui of m.packages[side][k].units) m.unlocks[side][ui] = m.round;
     placeFree(m, side);
@@ -141,9 +160,11 @@ const Game = (() => {
       extraDeploys: [0, 0],
       moved: [null, null], // id of the squad each player moved this round (one move per round, CONFIG.moveCost gold)
       tech: [{}, {}], // skills bought per unit type: tech[side][unitIdx] = [round bought or 0, round bought or 0]
-      towers: [null, null], // { col, row } of each player's tower
+      towers: TOWER_SPOT.map(t => ({ ...t })), // { col, row } of each player's tower (fixed)
+      chars: [null, null], // each player's character id (comes with the package)
+      buff: [[], []], // Zoe's buff tiles for this round: [{ col, row }, ...]
       unlocks: [{}, {}], // units unlocked per player: unlocks[side][unitIdx] = round it was unlocked
-      packages: [dealPackages(units, r), dealPackages(units, r)], // each player's 3 starting package options
+      packages: [dealPackages(units, r), dealPackages(units, r)], // each player's 4 starting package options, one per character
       pack: [null, null], // which one each player picked
     };
   }
@@ -160,16 +181,25 @@ const Game = (() => {
   function unitFor(m, side, ui) {
     const base = m.units[ui];
     const defs = [0, 1].filter(k => hasSkill(m, side, ui, k)).map(k => skillDef(m, ui, k));
-    return defs.length ? E.applySkills(base, defs, m.units) : base;
+    let u = defs.length ? E.applySkills(base, defs, m.units) : base;
+    if (charOf(m, side) === 'cage') { // Frickolas Cage: +10% health for every unit, spawned ones too
+      const k = 1 + CHAR.cageHp / 100;
+      u = { ...u, hp: u.hp * k };
+      if (u.spawn) u.spawn = { ...u.spawn, unit: { ...u.spawn.unit, hp: u.spawn.unit.hp * k } };
+    }
+    return u;
   }
   // ---------- unlocks (like Mechabellum: some units start unlocked, the rest cost gold once per match) ----------
-  const unlockCost = (m, ui) => Math.max(0, Math.round(+m.units[ui].unlock || 0));
-  const isUnlocked = (m, side, ui) => unlockCost(m, ui) === 0 || !!(m.unlocks && m.unlocks[side] && m.unlocks[side][ui] > 0);
+  // tier 1 = the cheapest price in the roster
+  const isTier1 = (m, ui) => unitCostOf(m.units[ui]) === Math.min(...m.units.map(unitCostOf));
+  // side (optional): that player's price, so Emile's tier 1 unlocks are free
+  const unlockCost = (m, ui, side) => side != null && charOf(m, side) === 'emile' && isTier1(m, ui) ? 0 : Math.max(0, Math.round(+m.units[ui].unlock || 0));
+  const isUnlocked = (m, side, ui) => unlockCost(m, ui, side) === 0 || !!(m.unlocks && m.unlocks[side] && m.unlocks[side][ui] > 0);
   // an unlock bought this round is hidden from the opponent until the fight
-  const unlockVisible = (m, side, ui) => unlockCost(m, ui) === 0 || (isUnlocked(m, side, ui) && m.unlocks[side][ui] < m.round);
+  const unlockVisible = (m, side, ui) => unlockCost(m, ui, side) === 0 || (isUnlocked(m, side, ui) && m.unlocks[side][ui] < m.round);
   function unlock(m, side, ui) {
     if (ui < 0 || ui >= m.units.length || isUnlocked(m, side, ui)) return false;
-    const cost = unlockCost(m, ui);
+    const cost = unlockCost(m, ui, side);
     if (m.gold[side] < cost) return false;
     if (!m.unlocks) m.unlocks = [{}, {}];
     m.gold[side] -= cost;
@@ -182,7 +212,7 @@ const Game = (() => {
     const p = packOf(m, side); if (p && p.units.includes(ui)) return false; // package units stay unlocked
     if (m.armies[side].some(s => s.unit === ui)) return false;
     delete m.unlocks[side][ui];
-    m.gold[side] += unlockCost(m, ui);
+    m.gold[side] += unlockCost(m, ui, side);
     return true;
   }
 
@@ -283,12 +313,11 @@ const Game = (() => {
     m.towers[side] = { col, row };
     return true;
   }
-  // a player who never placed a tower gets one in the back corner on the left
+  // a match without a tower (saved before towers were fixed) gets the fixed one
   function ensureTower(m, side) {
     if (!m.towers) m.towers = [null, null];
     if (m.towers[side]) return;
-    const rows = zoneRows(side), back = rows[rows.length - 1];
-    for (const col of [1, 10, 0, 11, 2, 9, 3, 8]) for (const row of [back, rows[rows.length - 2]]) if (placeTower(m, side, col, row)) return;
+    m.towers[side] = { ...TOWER_SPOT[side] };
   }
 
   function place(m, side, unitIdx, col, row) {
@@ -324,8 +353,12 @@ const Game = (() => {
     let idx = 0;
     for (const sq of m.armies[side]) {
       const w = tileToWorld(sq.col, sq.row);
-      const b = E.buildSquad(unitFor(m, side, sq.unit), side, w.x, w.y, sq.id, TILE, idx, sq.level);
-      if (isFlank(side, sq.col, sq.row) && (sq.round === m.round || sq.movedRound === m.round)) for (const x of b) x.delay = FLANK.delay; // only in its first fight
+      const ch = charOf(m, side), forward = isFlank(side, sq.col, sq.row) || inNoMans(sq.row);
+      let u = unitFor(m, side, sq.unit);
+      if (ch === 'wilhelm' && forward) u = { ...u, bonusArmor: (u.bonusArmor || 0) + CHAR.wilhelmArmor };
+      const b = E.buildSquad(u, side, w.x, w.y, sq.id, TILE, idx, sq.level);
+      if (isFlank(side, sq.col, sq.row) && (sq.round === m.round || sq.movedRound === m.round)) for (const x of b) x.delay = FLANK.delay * (ch === 'wilhelm' ? CHAR.wilhelmDelay : 1); // only in its first fight
+      if (onBuffTile(m, side, sq.col, sq.row)) for (const x of b) x.startBuff = CHAR.zoeDmg / 100; // Zoe: until it first moves
       idx += b.length;
       out.push(...b);
     }
@@ -333,6 +366,20 @@ const Game = (() => {
     if (t) { const w = tileToWorld(t.col, t.row); out.push(...E.buildSquad(TOWER, side, w.x, w.y, -2, TILE, idx)); }
     return out;
   }
+
+  // ---------- Zoe's buff tiles ----------
+  // Rolled at the start of every round (and when Zoe is picked): random free-standing tiles in her zone,
+  // never the tower's tile. Seeded from the match, so both phones get the same tiles.
+  function rollBuffTiles(m, side) {
+    if (!m.buff) m.buff = [[], []];
+    m.buff[side] = [];
+    if (charOf(m, side) !== 'zoe') return;
+    const r = rng(m.seed + m.round * 6151 + side * 3571 + 99);
+    const spots = [];
+    for (const row of zoneRows(side)) for (let col = 0; col < COLS; col++) if (!reserved(side, col, row) && !towerAt(m, side, col, row)) spots.push({ col, row });
+    for (let k = 0; k < CHAR.zoeTiles && spots.length; k++) m.buff[side].push(spots.splice(Math.floor(r() * spots.length), 1)[0]);
+  }
+  const onBuffTile = (m, side, col, row) => charOf(m, side) === 'zoe' && !!(m.buff && m.buff[side] || []).some(t => t.col === col && t.row === row);
 
   function startBattle(m) {
     ensureTower(m, 0); ensureTower(m, 1);
@@ -394,6 +441,7 @@ const Game = (() => {
     m.extraDeploys = [0, 0];
     m.moved = [null, null];
     for (const a of m.armies) for (const sq of a) { delete sq.from; delete sq.movedRound; }
+    rollBuffTiles(m, 0); rollBuffTiles(m, 1);
     const income = incomeFor(m.round);
     m.gold[0] += income; m.gold[1] += income;
     summary.income = income;
@@ -499,7 +547,7 @@ const Game = (() => {
       const budget = m.gold[side] - reserve;
       let best = -1, bs = -Infinity;
       m.units.forEach((u, i) => {
-        const extra = isUnlocked(m, side, i) ? 0 : unlockCost(m, i); // a locked unit costs its unlock on top
+        const extra = isUnlocked(m, side, i) ? 0 : unlockCost(m, i, side); // a locked unit costs its unlock on top
         if (unitCostOf(u) + extra > budget) return;
         let s = 0, tot = 0;
         for (const t in oppCount) { s += oppCount[t] * (m.matrix[i][t] || 0); tot += oppCount[t]; }
@@ -561,6 +609,7 @@ const Game = (() => {
     skillDef, skillCost, isInnate, hasSkill, skillVisible, unitFor, canBuySkill, buySkill, undoSkill, sellValue, sell,
     TOWER, TOWER_MID, towerColOk, towerAt, needsTower, placeTower, ensureTower,
     FLANK, flankRows, flankOpen, isFlank, reserved, canPlaceAt, enemyHolds, inNoMans, hasSkillType,
+    CHARACTERS, CHAR, charOf, charInfo, isTier1, rollBuffTiles, onBuffTile, TOWER_SPOT,
     zoneRows, inZone, tileToWorld, createMatch, place, unplace, bodiesFor, startBattle, resolve, aiDeploy, occupied,
   };
 })();

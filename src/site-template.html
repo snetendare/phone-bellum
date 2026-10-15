@@ -73,7 +73,7 @@ a { color: var(--you); }
   <div class="net" id="net" hidden aria-live="polite"><i></i><span id="net-text"></span></div>
 
   <div class="board-wrap" id="wrap" style="aspect-ratio: 12 / 16; width: min(100%, calc((100svh - 300px) * 0.75)); margin: 0 auto;">
-    <canvas id="board" aria-label="Battlefield. Your zone is the bottom five rows, the enemy zone the top five, with six rows of no man's land between."></canvas>
+    <canvas id="board" aria-label="Battlefield. Your zone is the bottom six rows, the enemy zone the top six, with four rows of no man's land between."></canvas>
     <span class="tag-clock" id="clock"></span>
     <div class="overlay" id="overlay"></div>
   </div>
@@ -295,6 +295,16 @@ a { color: var(--you); }
       for (const col of Game.FLANK.cols) for (const row of Game.flankRows(side)) ctx.fillRect(scol(col) * t, srow(row) * t, t, t);
     }
     ctx.globalAlpha = 1;
+    if (m && m.buff) for (const side of [0, 1]) { // Zoe's buff tiles: a gold tile with a star
+      if (!charVisible(side)) continue;
+      for (const b of m.buff[side] || []) {
+        const x = scol(b.col) * t, y = srow(b.row) * t;
+        ctx.fillStyle = css('--gold'); ctx.globalAlpha = 0.16; ctx.fillRect(x, y, t, t);
+        ctx.globalAlpha = 0.75; ctx.font = `${Math.round(t * 0.42)}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText('★', x + t / 2, y + t / 2);
+      }
+      ctx.globalAlpha = 1;
+    }
     ctx.strokeStyle = 'rgba(200, 230, 225, 0.06)'; ctx.lineWidth = 1;
     for (let i = 1; i < Game.COLS; i++) { ctx.beginPath(); ctx.moveTo(i * t, 0); ctx.lineTo(i * t, H); ctx.stroke(); }
     for (let i = 1; i < Game.ROWS; i++) { ctx.beginPath(); ctx.moveTo(0, i * t); ctx.lineTo(W, i * t); ctx.stroke(); }
@@ -352,7 +362,10 @@ a { color: var(--you); }
     ctx.fillStyle = c; ctx.fillRect(x - m * 0.5, y0 + h - m * 1.6, m, m * 1.6);
     ctx.globalAlpha = 1;
   }
-  const towerVisible = (side) => m && m.towers && m.towers[side] && (side === me || !(phase === 'deploy' && m.round === 1));
+  const towerVisible = (side) => !!(m && m.towers && m.towers[side]);
+  // the opponent's character (and Zoe's buff tiles) stay hidden until the first fight starts
+  const charVisible = (side) => !!m && (side === me || m.round > 1 || phase !== 'deploy');
+  const charLine = (id) => { const c = Game.charInfo(id); return c ? `<b>${esc(c.name)}</b> · ${esc(c.ability)}` : ''; };
   function drawTowerTile(side) {
     const tw = m.towers[side], t = tilePx();
     drawKeep((scol(tw.col) + 0.5) * t, (srow(tw.row) + 0.5) * t, t, side);
@@ -578,16 +591,16 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
     else {
       hint = selected !== null
         ? (canBuy(selected) ? `Tap a tile in your zone${Game.flankOpen(m) ? ' or a flank tile in theirs' : ''} to place ${esc(units[selected].name)}.` : left <= 0 ? 'No deployments left this round.' : `Not enough gold for ${esc(units[selected].name)}.`)
-        : (fresh ? 'Drag a squad you placed this round to move it, or tap it to take it back.' : 'Pick a unit, then tap a tile in the bottom five rows.');
+        : (fresh ? 'Drag a squad you placed this round to move it, or tap it to take it back.' : 'Pick a unit, then tap a tile in the bottom six rows.');
       if (left <= 0 && selected === null) hint = `No deployments left. Buy one more for ${Game.CONFIG.extraDeployCost} gold, or spend gold on upgrades.`;
       if (readyN && selected === null) hint = `${readyN} squad${readyN === 1 ? ' is' : 's are'} ready to level up. Tap ${readyN === 1 ? 'it' : 'one'} to upgrade.`;
-      if (m.round === 1 && selected === null && m.towers && m.towers[me]) hint += ' Tap your tower to move it (round 1 only).';
+      if (Game.charOf(m, me) === 'zoe' && selected === null && (m.buff && m.buff[me] || []).length) hint += ' Starred tiles are your buff tiles this round: +20% damage until the squad first moves.';
       if (m.round === Game.FLANK.round && selected === null && !fresh) hint = `Flank columns are open: you can now also deploy on the blue edge columns on the enemy's half, and they can on the red ones on yours. A squad placed there can't move or attack for the first ${Game.FLANK.delay} s of its first fight; after that it starts like any other.`;
       if (m.round === 1 && selected === null && m.armies[me].some(s => s.free)) hint = 'Your package squads are already on the board. Drag them where you want them, or tap one to take it back.';
       if (moveMode) hint = moving == null ? `Tap one of your squads from an earlier round to move it (${Game.CONFIG.moveCost} gold, once per round).` : `Tap a free tile to move ${esc(units[m.armies[me].find(s => s.id === moving).unit].name)} there, or drag it.`;
       const freeL = Game.freeLeft(m, me);
       if (freeL.length && !placingTower() && selected === null) hint = `Place your free package squads: ${[...new Set(freeL)].map(ui => `${freeL.filter(x => x === ui).length}× ${esc(units[ui].name)}`).join(', ')}. They cost no gold and no deployments.`;
-      if (choosingPack()) hint = `Pick your starting package. Both units are unlocked for you and you get their squads for free, plus ${m.gold[me]} gold to spend. Your opponent picks from their own packages.`;
+      if (choosingPack()) hint = `Pick your starting package and character. Both units are unlocked for you and you get their squads for free, plus ${m.gold[me]} gold to spend. The character’s ability lasts the whole match. Your opponent picks from their own packages.`;
       if (placingTower()) hint = 'Next, place your tower: tap a gold tile on the left or right side of your zone. If it falls in a fight, your army is crippled for a few seconds.';
     }
     const extraBtns = `<span style="display:flex;gap:6px;flex-wrap:wrap">
@@ -621,13 +634,14 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
       ${choosingPack() && can ? `<div class="packs" style="display:grid;gap:8px">${m.packages[me].map((p, k) => `
         <button class="btn pack" data-pack="${k}" style="display:grid;gap:4px;text-align:left;padding:10px 12px">
           <span style="display:flex;gap:8px;align-items:center">${p.units.map(ui => `<span style="color:${units[ui].color};display:inline-flex">${Shapes.svg(units[ui].shape, 16)}</span>`).join('')}<b>${packText(p)}</b></span>
+          ${p.char ? `<span style="white-space:normal;color:var(--gold)">${charLine(p.char)}</span>` : ''}
           <span class="hint" style="white-space:normal">${p.units.map(ui => ROLES[units[ui].name] && !customSet ? esc(ROLES[units[ui].name]) : '').filter(Boolean).join(' ')}</span>
         </button>`).join('')}</div>` : `<div class="shop" id="shop">${units.map((u, i) => tierOf(i) !== shopTier ? '' : `
         <div class="uwrap" style="--tier:${tierColor(tierOf(i))}">
-          <button class="ucard" data-i="${i}" aria-pressed="${selected === i}" aria-disabled="${!canBuy(i) && !(locked(i) && can)}" ${locked(i) ? `data-locked="1" style="border-style:dashed" aria-label="${esc(u.name)}, locked, unlock for ${Game.unlockCost(m, i)} gold"` : ''}>
+          <button class="ucard" data-i="${i}" aria-pressed="${selected === i}" aria-disabled="${!canBuy(i) && !(locked(i) && can)}" ${locked(i) ? `data-locked="1" style="border-style:dashed" aria-label="${esc(u.name)}, locked, unlock for ${Game.unlockCost(m, i, me)} gold"` : ''}>
             <span class="t"><span style="color:${u.color};display:inline-flex">${Shapes.svg(u.shape, 13)}</span> ${tag(u)} <span class="tier">T${tierOf(i)}</span></span><span class="n">${esc(u.name)}</span>
             ${roleRow(i)}
-            ${locked(i) ? `<span class="lock">${LOCK_SVG} Locked · ${Game.unlockCost(m, i)}g</span>` : ''}
+            ${locked(i) ? `<span class="lock">${LOCK_SVG} Locked · ${Game.unlockCost(m, i, me)}g</span>` : ''}
             ${freeN(i) ? `<span class="c" style="color:var(--win, #6FD08C)">Free ×${freeN(i)}</span>` : ''}
             <span class="c">${price(i)} · ${u.bodies} ${u.bodies === 1 ? 'body' : 'bodies'}${[0, 1].filter(k => Game.hasSkill(m, me, i, k)).length ? ` · ${[0, 1].filter(k => Game.hasSkill(m, me, i, k)).length}★` : ''}</span>
           </button>
@@ -717,9 +731,9 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
       <h2>Phone Bellum</h2>
       <ul>
         <li>Buy squads with gold each round. A standard squad costs ${Game.SQUAD_COST}. Income grows by ${Game.CONFIG.incomeStep} every round.</li>
-        <li>Start by picking one of three packages: two units unlocked for free with free squads worth ${Game.PACKAGE.value}, plus ${Game.START_GOLD} gold.</li>
-        <li>Then place your tower on the left or right side of your zone. If it falls in a fight, your army is crippled for a few seconds.</li>
-        <li>Place squads in the bottom five rows. They stay for the whole match. From round ${Game.FLANK.round}, the edge columns on the enemy's half of the board open up for flanking. The red edge columns on your half are theirs, never yours; a squad placed there waits ${Game.FLANK.delay} s before it moves or attacks, in its first fight only.</li>
+        <li>Start by picking one of four packages: two units unlocked for free with free squads worth ${Game.PACKAGE.value}, plus ${Game.START_GOLD} gold. Each package comes with a character whose ability lasts the whole match: ${Game.CHARACTERS.map(c => `${esc(c.name)}: ${esc(c.ability)}`).join(' ')}</li>
+        <li>Your tower stands in the back of your zone. If it falls in a fight, your army is crippled for a few seconds. Tap the enemy tower to see their character.</li>
+        <li>Place squads in the bottom six rows. They stay for the whole match. From round ${Game.FLANK.round}, the edge columns on the enemy's half of the board open up for flanking. The red edge columns on your half are theirs, never yours; a squad placed there waits ${Game.FLANK.delay} s before it moves or attacks, in its first fight only.</li>
         <li>Columns are lanes: squads march straight ahead and fight what they meet, so an empty lane lets a squad walk around the side.</li>
         <li>You have ${FIRST_DEPLOY_SECONDS} seconds to deploy in round 1 and ${DEPLOY_SECONDS} after that, then the armies fight on their own.</li>
         <li>The loser takes damage from every enemy squad still standing.</li>
@@ -879,8 +893,8 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
     const p = withUnits(pre), you = me, them = foe();
     const entry = {
       round: sum.round,
-      you: { hpBefore: p.hp[you], gold: p.gold[you], army: armyOf(p, you), skills: skillsOf(p, you), tower: (p.towers && p.towers[you]) || null, unlocked: unlocksOf(p, you), package: Game.packOf(p, you) ? Game.packOf(p, you).squads.map(ui => units[ui].name) : null },
-      them: { hpBefore: p.hp[them], gold: p.gold[them], army: armyOf(p, them), skills: skillsOf(p, them), tower: (p.towers && p.towers[them]) || null, unlocked: unlocksOf(p, them), package: Game.packOf(p, them) ? Game.packOf(p, them).squads.map(ui => units[ui].name) : null },
+      you: { hpBefore: p.hp[you], gold: p.gold[you], army: armyOf(p, you), skills: skillsOf(p, you), tower: (p.towers && p.towers[you]) || null, unlocked: unlocksOf(p, you), character: Game.charOf(p, you), package: Game.packOf(p, you) ? Game.packOf(p, you).squads.map(ui => units[ui].name) : null },
+      them: { hpBefore: p.hp[them], gold: p.gold[them], army: armyOf(p, them), skills: skillsOf(p, them), tower: (p.towers && p.towers[them]) || null, unlocked: unlocksOf(p, them), character: Game.charOf(p, them), package: Game.packOf(p, them) ? Game.packOf(p, them).squads.map(ui => units[ui].name) : null },
       result: { winner: sum.winner === you ? 'you' : sum.winner === them ? 'them' : 'draw', timeout: !!sum.timeout, seconds: Math.round(sum.time), damageToYou: sum.dmg[you], damageToThem: sum.dmg[them], yourTowerFell: !!(sum.towerFell && sum.towerFell[you]), theirTowerFell: !!(sum.towerFell && sum.towerFell[them]) },
     };
     if (mode === 'claude') entry.claude = { said: claude.say || null, alsoDid: claude.did.slice(), leveledUp: lastAiLevels.map(x => `${units[x.unit].name} to level ${x.level + 1}`), botPlayed: !!claude.bot, note: claude.note || null };
@@ -975,7 +989,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
       if (u.deathBlast > 0) t.push(`explodes on death for ${u.deathBlast}% of max health within ${Engine.BLAST_RADIUS} m`);
       if (u.windUp > 0) t.push(`wind-up ${u.windUp} s`);
       const sk = (u.skillDefs || []).map((d, k) => d ? `skill ${k + 1} "${d.name}" (${Game.isInnate(m, i, k) ? 'BUILT IN: always on for both players, free' : `${Game.skillCost(m, i, k)} gold${Game.hasSkill(m, 1, i, k) ? ', YOU OWN IT' : ''}`}): ${Engine.describeSkill(d)}` : null).filter(Boolean);
-      const lock = Game.isUnlocked(m, 1, i) ? (Game.unlockCost(m, i) ? ' [unlocked]' : '') : ` [LOCKED: unlock once for ${Game.unlockCost(m, i)} gold before you can place it]`;
+      const lock = Game.isUnlocked(m, 1, i) ? (Game.unlockCost(m, i, 1) ? ' [unlocked]' : '') : ` [LOCKED: unlock once for ${Game.unlockCost(m, i, 1)} gold before you can place it]`;
       return `- ${u.name}${lock}: price ${Game.unitCostOf(u)}, ${u.bodies} ${u.bodies === 1 ? 'body' : 'bodies'} x ${n1(u.hp, 0)} hp each, hit ${n1(u.hit)} x ${n1(u.aps, 2)}/s, range ${u.range} m, speed ${u.speed} m/s${t.length ? ', ' + t.join(', ') : ''}. Level-up cost ${Game.levelCost(u)}.${sk.length ? '\n    ' + sk.join('\n    ') : ''}`;
     };
     const tag = (u) => u.name;
@@ -1026,7 +1040,7 @@ RULES
 - This round you may place ${Game.deploysAllowed(m, 1)} new squad(s). Each extra deployment costs ${Game.CONFIG.extraDeployCost} gold.
 - Squads earn XP by dealing and taking damage. A squad marked READY TO LEVEL UP can be upgraded for its unit's level-up cost: level 2 doubles health and hit, level 3 triples them. Leveling up chaff (many cheap bodies) gives the enemy lots of XP when they die.
 ${Game.needsPack(m, 1) ? `- STARTING PACKAGE (round 1, choose first): add "package": N to your reply. Each one unlocks its two units for free and gives you its squads for free (no gold, no deployment); you place them with "place" like any squad, and any you leave out are placed for you. Your options:
-${m.packages[1].map((p, k) => `  ${k}: ${p.squads.map(ui => units[ui].name).join(' + ')} (counter-table average of its units: ${p.units.map(ui => `${units[ui].name} ${Math.round(M[ui].reduce((a, b) => a + b, 0) / Math.max(1, units.length - 1) * 100)}`).join(', ')})`).join('\n')}
+${m.packages[1].map((p, k) => `  ${k}: ${p.squads.map(ui => units[ui].name).join(' + ')}${p.char ? ` with character ${Game.charInfo(p.char).name} (${Game.charInfo(p.char).ability})` : ''} (counter-table average of its units: ${p.units.map(ui => `${units[ui].name} ${Math.round(M[ui].reduce((a, b) => a + b, 0) / Math.max(1, units.length - 1) * 100)}`).join(', ')})`).join('\n')}
 ` : Game.freeLeft(m, 1).length ? `- FREE package squads still to place (no gold, no deployment): ${Game.freeLeft(m, 1).map(ui => units[ui].name).join(', ')}.
 ` : ''}- Unlocks: units marked LOCKED must be unlocked once (their unlock price, on top of the squad price) before you can place them; it lasts the whole match. List them under "unlock", or just place them and they're unlocked automatically if you can afford it.${(() => { const t = units.map((u, i) => Game.unlockCost(m, i) > 0 && Game.unlockVisible(m, 0, i) ? u.name : null).filter(Boolean); return t.length ? ' The opponent has unlocked: ' + t.join(', ') + '.' : ''; })()}
 - Skills: each unit has 2. Buying one (its price) gives it to ALL your squads of that unit, now and later. You need at least one squad of that unit on the board (placing one this round counts).
@@ -1057,13 +1071,17 @@ ${theirSkills.length ? 'Their skills: ' + theirSkills.join(', ') : ''}
 
 TOWERS
 - Each player has one tower (${Game.TOWER.hp} hp, hit ${Game.TOWER.hit} x ${Game.TOWER.aps}/s, range ${Game.TOWER.range} m). It never moves, is rebuilt every round and doesn't count for winning a round. If a tower falls during a fight, its owner's whole army deals ${Engine.TOWER_DOWN.attack}% less damage, moves ${Engine.TOWER_DOWN.move}% slower and takes ${Engine.TOWER_DOWN.taken}% more damage for ${Engine.TOWER_DOWN.secs} s. Sending a squad down an empty lane to break their tower can turn a fight; guard the lane to yours.
-- Your tower: ${m.towers && m.towers[1] ? `col ${m.towers[1].col}, row ${m.towers[1].row}` : `NOT PLACED YET. Add "tower":{"col":C,"row":R} to your reply: R in your zone (rows 0-${Game.ZONE - 1}), C in columns 0-${Game.TOWER_MID[0] - 1} or ${Game.TOWER_MID[1] + 1}-${Game.COLS - 1} (not the middle). Squads can't share its tile.`}
-- Their tower: ${m.round > 1 && m.towers && m.towers[0] ? `col ${m.towers[0].col}, row ${m.towers[0].row}` : 'hidden until the first fight'}
+- Your tower: col ${m.towers[1].col}, row ${m.towers[1].row} (fixed; squads can't share its tile).
+- Their tower: col ${m.towers[0].col}, row ${m.towers[0].row}.
+
+CHARACTERS (each package comes with one; its ability lasts the whole match)
+- Yours: ${Game.charOf(m, 1) ? `${Game.charInfo(Game.charOf(m, 1)).name}: ${Game.charInfo(Game.charOf(m, 1)).ability}` : 'the one that comes with the package you pick'}${Game.charOf(m, 1) === 'zoe' ? ` Your buff tiles this round: ${(m.buff[1] || []).map(t => `col ${t.col}, row ${t.row}`).join('; ')}. Long-range squads that can shoot without walking get the most from them.` : ''}
+- Theirs: ${m.round > 1 && Game.charOf(m, 0) ? `${Game.charInfo(Game.charOf(m, 0)).name}: ${Game.charInfo(Game.charOf(m, 0)).ability}` : 'hidden until the first fight'}
 
 Reply with only a JSON object in this shape:
 {${Game.needsPack(m, 1) ? '"package":0,' : ''}"unlock":["unit name"],"sell":[squad ids],"levelUp":[squad ids, list one twice to level it twice],"skills":[{"unit":"unit name","slot":1}],"extraDeployments":0,"move":{"id":squad id,"col":5,"row":3} or null,"place":[{"unit":"unit name","col":5,"row":3}],"say":"one short playful line to your opponent, at most 15 words, shown after the fight"}
 For "say": make it about what is happening in this match, and never repeat a line.${claude.history.length ? ' Lines you already used:\n' + claude.history.slice(-6).map(x => '- ' + x).join('\n') : ''}
-Actions run in this order: package and tower (round 1 only), sell, levelUp, unlock, skills, extraDeployments, move, place. Anything you can't afford or that breaks a rule is skipped, so keep the total cost within your gold (${m.gold[1]} plus any sales). Use exact unit names. Unspent gold isn't lost, but squads on the board win rounds.`;
+Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills, extraDeployments, move, place. Anything you can't afford or that breaks a rule is skipped, so keep the total cost within your gold (${m.gold[1]} plus any sales). Use exact unit names. Unspent gold isn't lost, but squads on the board win rounds.`;
   }
 
   function applyClaudeMove(mv) {
@@ -1106,7 +1124,7 @@ Actions run in this order: package and tower (round 1 only), sell, levelUp, unlo
     }
     for (const pl of list(mv.place)) {
       const ui = unitIdx(pl && pl.unit);
-      if (ui >= 0 && !Game.isUnlocked(m, 1, ui) && m.gold[1] >= Game.unlockCost(m, ui) + Game.unitCostOf(units[ui]) && Game.unlock(m, 1, ui)) did.push(`unlocked ${units[ui].name}`);
+      if (ui >= 0 && !Game.isUnlocked(m, 1, ui) && m.gold[1] >= Game.unlockCost(m, ui, 1) + Game.unitCostOf(units[ui]) && Game.unlock(m, 1, ui)) did.push(`unlocked ${units[ui].name}`);
       if (ui >= 0) Game.place(m, 1, ui, int(pl.col), int(pl.row));
     }
     trySkills(); // skills for units placed just now
@@ -1282,8 +1300,7 @@ Actions run in this order: package and tower (round 1 only), sell, levelUp, unlo
       return;
     }
     if (Game.towerAt(m, me, t.col, t.row)) {
-      if (m.round === 1 && editable()) { m.towers[me] = null; selected = null; changed(); } // pick it up to move it
-      else openTowerSheet(me);
+      openTowerSheet(me);
       return;
     }
     if (towerVisible(foe()) && Game.towerAt(m, foe(), t.col, t.row)) { openTowerSheet(foe()); return; }
@@ -1305,8 +1322,8 @@ Actions run in this order: package and tower (round 1 only), sell, levelUp, unlo
 
   // ---------- unit sheet ----------
   function unlockBlock(i, side) {
-    if (!m || Game.unlockCost(m, i) === 0) return '';
-    const cost = Game.unlockCost(m, i);
+    if (!m || Game.unlockCost(m, i, me) === 0) return '';
+    const cost = Game.unlockCost(m, i, me);
     if (side !== undefined && side !== me) return ''; // an enemy squad on the board is unlocked by definition
     if (Game.isUnlocked(m, me, i)) {
       const undo = phase === 'deploy' && editable() && m.unlocks[me][i] === m.round && !m.armies[me].some(q => q.unit === i);
@@ -1353,7 +1370,8 @@ Actions run in this order: package and tower (round 1 only), sell, levelUp, unlo
     const T = Game.TOWER, D = Engine.TOWER_DOWN;
     $('sheet').innerHTML = `
       <div class="bar"><h3 id="sheet-h">${side === me ? 'Your tower' : `${esc(foeName())}'s tower`}</h3><button class="btn small" id="close">Close</button></div>
-      <p class="role" style="margin:0">Stands where it was placed and shoots anything that comes close. It is rebuilt for every round.</p>
+      <p style="margin:0">${(() => { const id = Game.charOf(m, side); return !charVisible(side) ? 'Character: hidden until the first fight.' : id ? `Character: ${charLine(id)}` : 'Character: not picked yet.'; })()}</p>
+      <p class="role" style="margin:0">The tower stands in the back of the zone and shoots anything that comes close. It is rebuilt for every round.</p>
       <p style="margin:0"><span style="color:var(--foe)">If it falls:</span> that army deals ${D.attack}% less damage, moves ${D.move}% slower and takes ${D.taken}% more damage for ${D.secs} s.</p>
       <div class="stats"><div><span>Health</span><b class="num">${T.hp}</b></div><div><span>Hit</span><b class="num">${T.hit}</b></div><div><span>Attacks/s</span><b class="num">${T.aps}</b></div><div><span>Range</span><b class="num">${T.range} m</b></div></div>`;
     $('sheet-back').hidden = false;
@@ -1661,7 +1679,10 @@ Actions run in this order: package and tower (round 1 only), sell, levelUp, unlo
       if (s.moved) s.moved[0] = null;
       // skills bought this round stay hidden too
       for (const ui in (s.tech && s.tech[0]) || {}) s.tech[0][ui] = s.tech[0][ui].map(r => r === m.round ? 0 : r);
-      if (m.round === 1 && s.towers) s.towers = [null, s.towers[1]]; // the host's tower stays hidden until the first fight
+      if (m.round === 1) { // the host's character and buff tiles stay hidden until the first fight
+        if (s.chars) s.chars = [null, s.chars[1]];
+        if (s.buff) s.buff = [[], s.buff[1]];
+      }
       if (s.unlocks && s.unlocks[0]) for (const ui in s.unlocks[0]) if (s.unlocks[0][ui] === m.round) delete s.unlocks[0][ui]; // so do this round's unlocks
       if (m.round === 1 && s.packages) { s.packages = [[], s.packages[1]]; s.pack = [null, s.pack ? s.pack[1] : null]; } // and the host's package
     }
@@ -1733,12 +1754,7 @@ Actions run in this order: package and tower (round 1 only), sell, levelUp, unlo
     for (const ui in m.unlocks[1]) if (m.unlocks[1][ui] < m.round) unl[ui] = m.unlocks[1][ui];
     if (d.unlocks && typeof d.unlocks === 'object') for (const ui in d.unlocks) { const i = +ui; if (Number.isInteger(i) && i >= 0 && i < n && (d.unlocks[ui] | 0) === m.round) unl[i] = m.round; }
     m.unlocks[1] = unl;
-    // the guest's tower, which can only be set or moved in round 1
-    if (m.round === 1 && m.towers) {
-      const tw = d.tower;
-      m.towers[1] = null;
-      if (tw && Number.isInteger(tw.col) && Number.isInteger(tw.row)) Game.placeTower(m, 1, tw.col, tw.row);
-    }
+    // towers are fixed, so the guest's tower isn't taken from the guest
   }
 
   function checkNext() {
@@ -1872,7 +1888,9 @@ Actions run in this order: package and tower (round 1 only), sell, levelUp, unlo
           if (!incoming.towers) incoming.towers = [null, null];
           if (!incoming.unlocks) incoming.unlocks = [{}, {}];
           if (!incoming.pack) incoming.pack = [null, null];
-          for (const k of ['armies', 'gold', 'extraDeploys', 'nextId', 'tech', 'towers', 'unlocks', 'pack']) incoming[k][1] = (m[k] || [null, null])[1];
+          if (!incoming.chars) incoming.chars = [null, null];
+          if (!incoming.buff) incoming.buff = [[], []];
+          for (const k of ['armies', 'gold', 'extraDeploys', 'nextId', 'tech', 'towers', 'unlocks', 'pack', 'chars', 'buff']) incoming[k][1] = (m[k] || [null, null])[1];
           m = incoming; ready[0] = theirReady;
           deadline = d.remaining > 0 ? now() + d.remaining - 300 : 0;
           timeUp = false;
