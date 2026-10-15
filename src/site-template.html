@@ -108,7 +108,7 @@ a { color: var(--you); }
     'Slime Wizard': 'Lobs huge, slow globs of slime that splash over a wide area.',
     'Ether Golem': 'A walking wall. Heavy armor shrugs off small hits while it holds its lane.',
     'Slimeshots': 'A pack of slime spitters lobbing small splashing globs. Shreds packed swarms.',
-    'Ent': 'Slow, sturdy tree guardians whose sweeping branches hit everything in a wide arc in front.',
+    'Ent': 'Slow tree guardians sweeping a wide arc in front. Each one explodes when it falls, hurting everything around it.',
     'Sun Priest': 'Channels a beam that burns hotter the longer it holds one target. Melts giants.',
     'Meteor Caller': 'Drops slow meteors from far behind the lines. Helpless once something reaches it.',
     'War Mammoth': 'Charges straight through the enemy line, trampling every body in its path, then turns to charge again.',
@@ -242,6 +242,13 @@ a { color: var(--you); }
   let hoverTile = null;
   let moveMode = false;     // the Move ability is active: tap an older squad, then a tile
   let moving = null;        // id of the older squad picked to move
+  // the unit being placed or moved right now (some units may use extra tiles, e.g. Forward planting)
+  function placingUnit() {
+    if (selected !== null) return selected;
+    const id = moving != null ? moving : drag && drag.moved ? drag.id : null;
+    const sq = id != null && m && m.armies[me].find(s => s.id === id);
+    return sq ? sq.unit : null;
+  }
   let drag = null, dragEndAt = 0; // dragging one of your squads to another tile
   let timerOn = true;       // vs AI: deploy countdown on or off
   let deadline = 0;         // local time the deploy phase ends (0 = no countdown running)
@@ -374,12 +381,13 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
     }
     if ((selected !== null || (drag && drag.moved) || moving != null) && phase === 'deploy') {
       ctx.strokeStyle = css('--you'); ctx.globalAlpha = 0.25; ctx.lineWidth = 1;
+      const pu = placingUnit();
       for (let row = 0; row < Game.ROWS; row++) for (let c = 0; c < Game.COLS; c++) {
-        if (Game.canPlaceAt(m, me, c, row) && !Game.occupied(m, me, c, row)) ctx.strokeRect(scol(c) * t + 3, srow(row) * t + 3, t - 6, t - 6);
+        if (Game.canPlaceAt(m, me, c, row, pu) && !Game.occupied(m, me, c, row)) ctx.strokeRect(scol(c) * t + 3, srow(row) * t + 3, t - 6, t - 6);
       }
       ctx.globalAlpha = 1;
     }
-    if (hoverTile && (selected !== null || moving != null) && Game.canPlaceAt(m, me, hoverTile.col, hoverTile.row) && !Game.occupied(m, me, hoverTile.col, hoverTile.row)) {
+    if (hoverTile && (selected !== null || moving != null) && Game.canPlaceAt(m, me, hoverTile.col, hoverTile.row, placingUnit()) && !Game.occupied(m, me, hoverTile.col, hoverTile.row)) {
       ctx.fillStyle = css('--you'); ctx.globalAlpha = 0.18;
       ctx.fillRect(scol(hoverTile.col) * t, srow(hoverTile.row) * t, t, t); ctx.globalAlpha = 1;
     }
@@ -964,6 +972,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
       if (u.charge > 1) t.push(`charge x${u.charge}`);
       if (u.knockback > 0) t.push(`knockback ${u.knockback} m`);
       if (u.trample > 0) t.push(`tramples ${u.trample}%`);
+      if (u.deathBlast > 0) t.push(`explodes on death for ${u.deathBlast}% of max health within ${Engine.BLAST_RADIUS} m`);
       if (u.windUp > 0) t.push(`wind-up ${u.windUp} s`);
       const sk = (u.skillDefs || []).map((d, k) => d ? `skill ${k + 1} "${d.name}" (${Game.isInnate(m, i, k) ? 'BUILT IN: always on for both players, free' : `${Game.skillCost(m, i, k)} gold${Game.hasSkill(m, 1, i, k) ? ', YOU OWN IT' : ''}`}): ${Engine.describeSkill(d)}` : null).filter(Boolean);
       const lock = Game.isUnlocked(m, 1, i) ? (Game.unlockCost(m, i) ? ' [unlocked]' : '') : ` [LOCKED: unlock once for ${Game.unlockCost(m, i)} gold before you can place it]`;
@@ -1286,7 +1295,7 @@ Actions run in this order: package and tower (round 1 only), sell, levelUp, unlo
     }
     const enemy = m.armies[foe()].find(s => { const p = Game.seenAt(m, s); return p.col === t.col && p.row === t.row && s.round < m.round; });
     if (enemy) { openSheet(enemy.unit, enemy, foe()); return; }
-    if (selected !== null && editable() && Game.canPlaceAt(m, me, t.col, t.row)) {
+    if (selected !== null && editable() && Game.canPlaceAt(m, me, t.col, t.row, selected)) {
       if (Game.place(m, me, selected, t.col, t.row)) {
         if (!Game.freeLeft(m, me).includes(selected) && (m.gold[me] < Game.unitCostOf(units[selected]) || Game.deploysLeft(m, me) <= 0)) selected = null;
         changed();
@@ -1388,6 +1397,7 @@ Actions run in this order: package and tower (round 1 only), sell, levelUp, unlo
     if (u.charge > 1) tr.push(`Charge ×${u.charge}`);
     if (u.knockback > 0) tr.push(`Knockback ${u.knockback} m`);
     if (u.trample > 0) tr.push(`Tramples (${u.trample}% hit)`);
+    if (u.deathBlast > 0) tr.push(`Death blast ${u.deathBlast}% health`);
     if (u.windUp > 0) tr.push(`Wind-up ${u.windUp} s`);
     if (u.defense === 'armor') tr.push(`Armor ${u.defVal}`);
     if (u.defense === 'ward') tr.push(`Ward ${u.defVal}`);
@@ -1687,7 +1697,15 @@ Actions run in this order: package and tower (round 1 only), sell, levelUp, unlo
   function applySide(d) {
     if (!Array.isArray(d.army)) return;
     const n = units.length;
-    const army = d.army.filter(s => s && Number.isInteger(s.unit) && s.unit >= 0 && s.unit < n && Number.isInteger(s.col) && s.col >= 0 && s.col < Game.COLS && Number.isInteger(s.row) && Game.canPlaceAt(m, 1, s.col, s.row));
+    // skills first: they decide where some squads may stand (Forward planting)
+    const tech = {};
+    if (d.tech && typeof d.tech === 'object') for (const ui in d.tech) {
+      const i = +ui, t = d.tech[ui];
+      if (Number.isInteger(i) && i >= 0 && i < n && Array.isArray(t)) tech[i] = [0, 1].map(k => Math.max(0, Math.min(m.round, t[k] | 0)));
+    }
+    if (!m.tech) m.tech = [{}, {}];
+    m.tech[1] = tech;
+    const army = d.army.filter(s => s && Number.isInteger(s.unit) && s.unit >= 0 && s.unit < n && Number.isInteger(s.col) && s.col >= 0 && s.col < Game.COLS && Number.isInteger(s.row) && Game.canPlaceAt(m, 1, s.col, s.row, s.unit));
     const seen = new Set();
     m.armies[1] = army.filter(s => { const k = s.col + ',' + s.row; if (seen.has(k)) return false; seen.add(k); return true; }).map(s => ({
       id: s.id | 0, unit: s.unit, col: s.col, row: s.row, round: s.round | 0, xp: Math.max(0, +s.xp || 0),
@@ -1703,13 +1721,6 @@ Actions run in this order: package and tower (round 1 only), sell, levelUp, unlo
     m.extraDeploys[1] = Math.max(0, d.extra | 0);
     m.nextId[1] = Math.max(m.nextId[1], d.nextId | 0);
     ready[1] = !!d.ready;
-    const tech = {};
-    if (d.tech && typeof d.tech === 'object') for (const ui in d.tech) {
-      const i = +ui, t = d.tech[ui];
-      if (Number.isInteger(i) && i >= 0 && i < n && Array.isArray(t)) tech[i] = [0, 1].map(k => Math.max(0, Math.min(m.round, t[k] | 0)));
-    }
-    if (!m.tech) m.tech = [{}, {}];
-    m.tech[1] = tech;
     // the guest's package: picked once in round 1; package squads beyond what it holds are dropped
     if (m.round === 1 && m.pack && m.pack[1] == null && Number.isInteger(d.pack)) Game.choosePack(m, 1, d.pack);
     if (m.round === 1) {

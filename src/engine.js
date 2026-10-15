@@ -1,6 +1,6 @@
 // ===== Battle engine (shared by headless tests and the page) =====
 const Engine = (() => {
-  const TRAIT_DEFAULTS = { burst: 1, pellets: 1, spinUp: 0, pierce: 0, projSpeed: 0, minRange: 0, charge: 1, knockback: 0, windUp: 0, flame: 0, trample: 0 };
+  const TRAIT_DEFAULTS = { burst: 1, pellets: 1, spinUp: 0, pierce: 0, projSpeed: 0, minRange: 0, charge: 1, knockback: 0, windUp: 0, flame: 0, trample: 0, deathBlast: 0 };
   const BURST_GAP = 0.15;      // seconds between shots in a burst
   const SHOTGUN_COS = Math.sqrt(3) / 2; // pellets spread 30 degrees to each side of the target (cos 30)
   // Only + - * / and sqrt from here on: those give identical results in every browser,
@@ -17,6 +17,7 @@ const Engine = (() => {
   const CHARGE_RUN = 5;        // metres a unit must run before its next attack counts as a charge
   const TRAMPLE_RUN = 8;       // after a charged hit, a trampler keeps running this far past its target
   const TRAMPLE_WIDTH = 1.5;   // bodies within this distance of a trampler's path get run over
+  const BLAST_RADIUS = 4;      // a body with deathBlast explodes when it dies, hitting enemies within this distance
   const PIERCE_DEPTH = 10;     // metres a piercing shot travels past its target
   const PIERCE_WIDTH = 1;      // half-width of the pierce corridor (m)
   const APPROACH = 0.5;         // metres a moving unit steps inside its max range
@@ -56,6 +57,7 @@ const Engine = (() => {
     shrink:  { label: 'Shortsight', params: [['m', 'Enemy range (−m)', 4, 0.5], ['duration', 'Lasts (s)', 3, 0.5]] },
     ward:    { label: 'Ward', params: [['cap', 'Most damage one hit can deal', 40, 5]] },
     slow:    { label: 'Slow', params: [['move', 'Enemy move speed (−%)', 40, 5], ['attack', 'Enemy attack speed (−%)', 20, 5], ['duration', 'Lasts (s)', 3, 0.5]] },
+    forward: { label: 'Forward planting', params: [] },
     split:   { label: 'Split beam', params: [['beams', 'Targets at once', 4, 1], ['range', 'Range (−%)', 30, 5], ['hit', 'Hit per target (−%)', 0, 5]] },
   };
   const skillParam = (d, k) => {
@@ -84,6 +86,7 @@ const Engine = (() => {
       case 'shrink': return `Hits cut the target’s range by ${n('m')} m for ${n('duration')} s, but not below 1 m.`;
       case 'ward': return `No single hit can deal more than ${n('cap')} damage to it.`;
       case 'slow': return `Hits slow the target for ${n('duration')} s: −${n('move')}% move speed and −${n('attack')}% attack speed.`;
+      case 'forward': return 'Squads of this unit can also be placed in no man’s land.';
       case 'split': return `Attacks ${n('beams')} different enemies at once${+P('hit') > 0 ? `, −${n('hit')}% hit each` : ''}. −${n('range')}% range.`;
     }
     return '';
@@ -267,7 +270,15 @@ const Engine = (() => {
     const sight = g.sight == null ? SIGHT : g.sight;
     const cripple = [0, 0];      // seconds left of the tower-down penalty for each side
     const towerDown = g.towerDown || TOWER_DOWN;
-    const fell = (v) => { if (v.u.structure) cripple[v.side] = towerDown.secs; };
+    // a body died: a fallen tower cripples its side; a body with deathBlast explodes (deathBlast % of its max health)
+    const fell = (v) => {
+      if (v.u.structure) cripple[v.side] = towerDown.secs;
+      if (v.u.deathBlast > 0) {
+        const dmg = v.u.hp * v.u.deathBlast / 100;
+        if (opts.record) shots.push([v.x, v.y, v.x, v.y, v.side, BLAST_RADIUS, 1, 0, 0]);
+        for (const f of sides[1 - v.side]) if (f.alive && hyp(f.x - v.x, f.y - v.y) <= BLAST_RADIUS) hurt(v, f, dmg, v.x, v.y);
+      }
+    };
     let projectiles = [];
     let t = 0, shots = [], over = false, tick = 0;
     const dist = (a, b) => hyp(a.x - b.x, a.y - b.y);
@@ -754,6 +765,6 @@ const Engine = (() => {
     return m;
   }
 
-  return { TOWER_DOWN, SKILL_TYPES, skillParam, describeSkill, applySkills, innateUnit, fairBudget, battle, makeArmy, matrix, createBattle, buildSquad, rawStrength, squadsFor, withTraits, leveled, TRAIT_DEFAULTS, SPIN_CAP, CHARGE_RUN, TRAMPLE_RUN, LEVEL_BONUS, MAX_LEVEL };
+  return { TOWER_DOWN, SKILL_TYPES, skillParam, describeSkill, applySkills, innateUnit, fairBudget, battle, makeArmy, matrix, createBattle, buildSquad, rawStrength, squadsFor, withTraits, leveled, TRAIT_DEFAULTS, SPIN_CAP, CHARGE_RUN, TRAMPLE_RUN, BLAST_RADIUS, LEVEL_BONUS, MAX_LEVEL };
 })();
 if (typeof module !== 'undefined') module.exports = Engine;

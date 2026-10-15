@@ -97,6 +97,13 @@
    "name": "Split beam",
    "cost": 100,
    "params": {}
+  },
+  {
+   "id": "forward",
+   "type": "forward",
+   "name": "Forward planting",
+   "cost": 100,
+   "params": {}
   }
  ],
  "assign": {

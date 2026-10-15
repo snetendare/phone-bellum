@@ -355,6 +355,7 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
     ['charge', 'Charge (× damage)', 0.5, 'Next hit after running 5 m. 1 = off.'],
     ['knockback', 'Knockback (m)', 0.5, 'How far a big hit pushes a small body.'],
     ['trample', 'Trample (% of hit)', 10, 'After a charged hit the unit keeps running 8 m through its target, hitting each body it runs over for this share of its hit. 0 = off.'],
+    ['deathBlast', 'Death blast (% of max health)', 5, 'When a body dies it explodes, dealing this share of its max health to every enemy within 4 m. Grows with level. 0 = off.'],
     ['flame', 'Flame cone (°)', 5, 'Sprays fire this many degrees to each side, hitting every enemy inside the cone at once, out to the flame reach (Battle settings). Pellets, splash, pierce and projectile speed are ignored. 0 = off.'],
     ['windUp', 'Wind-up (s)', 0.1, 'Sets up this long when an enemy first comes in range, then fires normally. Has to set up again after moving.'],
   ];
@@ -582,6 +583,7 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
       if (u.charge > 1) tr.push(`charge ×${fmt(u.charge, 1)}`);
       if (u.knockback > 0) tr.push(`knockback ${fmt(u.knockback, 1)} m`);
       if (u.trample > 0) tr.push(`trample ${fmt(u.trample, 0)}%`);
+      if (u.deathBlast > 0) tr.push(`death blast ${fmt(u.deathBlast, 0)}%`);
       if (u.windUp > 0) tr.push(`wind-up ${fmt(u.windUp, 1)} s`);
       if (u.level > 0) tr.push(`${u.level + 1}× stats`);
       [0, 1].forEach(k => { const sk = slotDef(u, k); if (sk) tr.push(`${sk.name}${isCustom(u, k) ? '*' : ''}${u.skillsInnate[k] ? ' (built in)' : u.skillsOn[k] ? ' (on)' : ''}`); });

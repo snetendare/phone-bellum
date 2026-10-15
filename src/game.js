@@ -53,8 +53,12 @@ const Game = (() => {
     (m.round > 1 && m.towers && m.towers[1 - side] && m.towers[1 - side].col === col && m.towers[1 - side].row === row));
   // the edge tiles of your zone that are the enemy's flank are reserved for them for the whole match
   const reserved = (side, col, row) => isFlank(1 - side, col, row);
-  const canPlaceAt = (m, side, col, row) => col >= 0 && col < COLS && !reserved(side, col, row) &&
-    (inZone(side, row) || (flankOpen(m) && isFlank(side, col, row))) && !enemyHolds(m, side, col, row);
+  // no man's land: the rows between the two zones. A unit with the Forward planting skill may be placed there.
+  const inNoMans = (row) => row >= ZONE && row < ROWS - ZONE;
+  const hasSkillType = (m, side, ui, type) => !!m && ui != null && !!m.units[ui] && [0, 1].some(k => hasSkill(m, side, ui, k) && skillDef(m, ui, k).type === type);
+  // ui (optional): the unit being placed, for unit-specific tiles
+  const canPlaceAt = (m, side, col, row, ui) => col >= 0 && col < COLS && !reserved(side, col, row) &&
+    (inZone(side, row) || (flankOpen(m) && isFlank(side, col, row)) || (inNoMans(row) && hasSkillType(m, side, ui, 'forward'))) && !enemyHolds(m, side, col, row);
   const tileToWorld = (col, row) => ({ x: (col - (COLS - 1) / 2) * TILE, y: ((ROWS - 1) / 2 - row) * TILE });
 
   function rng(seed) { // mulberry32
@@ -199,6 +203,9 @@ const Game = (() => {
   function undoSkill(m, side, ui, k) {
     const t = m.tech && m.tech[side][ui];
     if (!t || t[k] !== m.round) return false;
+    // Forward planting can't be taken back while a squad of that unit stands in no man's land
+    const d = skillDef(m, ui, k);
+    if (d && d.type === 'forward' && m.armies[side].some(s => s.unit === ui && inNoMans(s.row))) return false;
     t[k] = 0;
     m.gold[side] += skillCost(m, ui, k);
     return true;
@@ -240,7 +247,7 @@ const Game = (() => {
   function moveSquad(m, side, sqId, col, row) {
     const sq = m.armies[side].find(s => s.id === sqId);
     if (!sq || (sq.col === col && sq.row === row) || !canMove(m, side, sq)) return false;
-    if (!canPlaceAt(m, side, col, row) || occupied(m, side, col, row)) return false;
+    if (!canPlaceAt(m, side, col, row, sq.unit) || occupied(m, side, col, row)) return false;
     if (sq.round !== m.round && movedId(m, side) == null) {
       if (!m.moved) m.moved = [null, null];
       m.gold[side] -= CONFIG.moveCost;
@@ -285,7 +292,7 @@ const Game = (() => {
   }
 
   function place(m, side, unitIdx, col, row) {
-    if (!canPlaceAt(m, side, col, row)) return null;
+    if (!canPlaceAt(m, side, col, row, unitIdx)) return null;
     if (needsTower(m, side)) return null; // the tower goes down first
     if (!isUnlocked(m, side, unitIdx)) return null;
     if (occupied(m, side, col, row)) return null;
@@ -553,7 +560,7 @@ const Game = (() => {
     unlockCost, isUnlocked, unlockVisible, unlock, undoUnlock,
     skillDef, skillCost, isInnate, hasSkill, skillVisible, unitFor, canBuySkill, buySkill, undoSkill, sellValue, sell,
     TOWER, TOWER_MID, towerColOk, towerAt, needsTower, placeTower, ensureTower,
-    FLANK, flankRows, flankOpen, isFlank, reserved, canPlaceAt, enemyHolds,
+    FLANK, flankRows, flankOpen, isFlank, reserved, canPlaceAt, enemyHolds, inNoMans, hasSkillType,
     zoneRows, inZone, tileToWorld, createMatch, place, unplace, bodiesFor, startBattle, resolve, aiDeploy, occupied,
   };
 })();

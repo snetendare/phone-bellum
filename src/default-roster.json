@@ -124,6 +124,13 @@
       "name": "Split beam",
       "cost": 100,
       "params": {}
+    },
+    {
+      "id": "forward",
+      "type": "forward",
+      "name": "Forward planting",
+      "cost": 100,
+      "params": {}
     }
   ],
   "units": [
@@ -900,7 +907,7 @@
       "color": "#0d3000",
       "skills": [
         "armorHp",
-        "regen"
+        "forward"
       ],
       "skillsOn": [
         false,
@@ -917,12 +924,9 @@
             "hp": 20
           }
         },
-        {
-          "params": {
-            "pct": 5
-          }
-        }
-      ]
+        null
+      ],
+      "deathBlast": 30
     },
     {
       "burst": 1,
