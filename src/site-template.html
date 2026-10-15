@@ -731,7 +731,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
       <h2>Phone Bellum</h2>
       <ul>
         <li>Buy squads with gold each round. A standard squad costs ${Game.SQUAD_COST}. Income grows by ${Game.CONFIG.incomeStep} every round.</li>
-        <li>Start by picking one of four packages: two units unlocked for free with free squads worth ${Game.PACKAGE.value}, plus ${Game.START_GOLD} gold. Each package comes with a character whose ability lasts the whole match: ${Game.CHARACTERS.map(c => `${esc(c.name)}: ${esc(c.ability)}`).join(' ')}</li>
+        <li>Start by picking one of three packages: two units unlocked for free with free squads worth ${Game.PACKAGE.value}, plus ${Game.START_GOLD} gold. Each package comes with a random character (never two the same) whose ability lasts the whole match: ${Game.CHARACTERS.map(c => `${esc(c.name)}: ${esc(c.ability)}`).join(' ')}</li>
         <li>Your tower stands in the back of your zone. If it falls in a fight, your army is crippled for a few seconds. Tap the enemy tower to see their character.</li>
         <li>Place squads in the bottom six rows. They stay for the whole match. From round ${Game.FLANK.round}, the edge columns on the enemy's half of the board open up for flanking. The red edge columns on your half are theirs, never yours; a squad placed there waits ${Game.FLANK.delay} s before it moves or attacks, in its first fight only.</li>
         <li>Columns are lanes: squads march straight ahead and fight what they meet, so an empty lane lets a squad walk around the side.</li>

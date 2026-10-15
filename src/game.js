@@ -82,7 +82,7 @@ const Game = (() => {
   // ---------- starting packages ----------
   // Before round 1 each player picks one of 3 packages (their own, not mirrored): two tier 1-2 unit types,
   // both unlocked for free, plus free squads of them worth exactly PACKAGE.value gold.
-  const PACKAGE = { value: 300, maxPrice: 200, options: 4 };
+  const PACKAGE = { value: 300, maxPrice: 200, options: 3 };
   function allPackages(units) {
     const out = [], ok = units.map((u, i) => unitCostOf(u) <= PACKAGE.maxPrice ? i : -1).filter(i => i >= 0);
     for (const a of ok) for (const b of ok) {
@@ -106,7 +106,7 @@ const Game = (() => {
       if (pick.includes(p) || (guard < 120 && pick.some(q => q.units.some(u => p.units.includes(u))))) continue;
       pick.push(p);
     }
-    // one character per package, in random order, so every character is on offer
+    // a random character for each package, never the same one twice among a player's options
     const ids = CHARACTERS.map(c => c.id);
     for (let i = ids.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [ids[i], ids[j]] = [ids[j], ids[i]]; }
     return pick.map((p, k) => ({ ...p, char: ids[k % ids.length] }));
@@ -164,7 +164,7 @@ const Game = (() => {
       chars: [null, null], // each player's character id (comes with the package)
       buff: [[], []], // Zoe's buff tiles for this round: [{ col, row }, ...]
       unlocks: [{}, {}], // units unlocked per player: unlocks[side][unitIdx] = round it was unlocked
-      packages: [dealPackages(units, r), dealPackages(units, r)], // each player's 4 starting package options, one per character
+      packages: [dealPackages(units, r), dealPackages(units, r)], // each player's 3 starting package options, each with a different random character
       pack: [null, null], // which one each player picked
     };
   }
