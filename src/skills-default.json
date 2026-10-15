@@ -90,6 +90,13 @@
    "name": "Slow",
    "cost": 100,
    "params": {}
+  },
+  {
+   "id": "split",
+   "type": "split",
+   "name": "Split beam",
+   "cost": 100,
+   "params": {}
   }
  ],
  "assign": {

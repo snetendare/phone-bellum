@@ -117,6 +117,13 @@
         "every": 2,
         "max": 12
       }
+    },
+    {
+      "id": "split",
+      "type": "split",
+      "name": "Split beam",
+      "cost": 100,
+      "params": {}
     }
   ],
   "units": [
@@ -731,7 +738,7 @@
       "shape": "star",
       "color": "#FFD23F",
       "skills": [
-        "range",
+        "split",
         "shrink"
       ]
     },
@@ -819,7 +826,8 @@
       "skills": [
         "swift",
         "armorHp"
-      ]
+      ],
+      "trample": 50
     },
     {
       "burst": 1,

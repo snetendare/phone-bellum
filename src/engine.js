@@ -1,6 +1,6 @@
 // ===== Battle engine (shared by headless tests and the page) =====
 const Engine = (() => {
-  const TRAIT_DEFAULTS = { burst: 1, pellets: 1, spinUp: 0, pierce: 0, projSpeed: 0, minRange: 0, charge: 1, knockback: 0, windUp: 0, flame: 0 };
+  const TRAIT_DEFAULTS = { burst: 1, pellets: 1, spinUp: 0, pierce: 0, projSpeed: 0, minRange: 0, charge: 1, knockback: 0, windUp: 0, flame: 0, trample: 0 };
   const BURST_GAP = 0.15;      // seconds between shots in a burst
   const SHOTGUN_COS = Math.sqrt(3) / 2; // pellets spread 30 degrees to each side of the target (cos 30)
   // Only + - * / and sqrt from here on: those give identical results in every browser,
@@ -15,6 +15,8 @@ const Engine = (() => {
   }
   const SPIN_CAP = 3;          // spin-up tops out at 3x attack speed
   const CHARGE_RUN = 5;        // metres a unit must run before its next attack counts as a charge
+  const TRAMPLE_RUN = 8;       // after a charged hit, a trampler keeps running this far past its target
+  const TRAMPLE_WIDTH = 1.5;   // bodies within this distance of a trampler's path get run over
   const PIERCE_DEPTH = 10;     // metres a piercing shot travels past its target
   const PIERCE_WIDTH = 1;      // half-width of the pierce corridor (m)
   const APPROACH = 0.5;         // metres a moving unit steps inside its max range
@@ -54,6 +56,7 @@ const Engine = (() => {
     shrink:  { label: 'Shortsight', params: [['m', 'Enemy range (−m)', 4, 0.5], ['duration', 'Lasts (s)', 3, 0.5]] },
     ward:    { label: 'Ward', params: [['cap', 'Most damage one hit can deal', 40, 5]] },
     slow:    { label: 'Slow', params: [['move', 'Enemy move speed (−%)', 40, 5], ['attack', 'Enemy attack speed (−%)', 20, 5], ['duration', 'Lasts (s)', 3, 0.5]] },
+    split:   { label: 'Split beam', params: [['beams', 'Targets at once', 4, 1], ['range', 'Range (−%)', 30, 5], ['hit', 'Hit per target (−%)', 0, 5]] },
   };
   const skillParam = (d, k) => {
     const v = d.params && d.params[k];
@@ -81,6 +84,7 @@ const Engine = (() => {
       case 'shrink': return `Hits cut the target’s range by ${n('m')} m for ${n('duration')} s, but not below 1 m.`;
       case 'ward': return `No single hit can deal more than ${n('cap')} damage to it.`;
       case 'slow': return `Hits slow the target for ${n('duration')} s: −${n('move')}% move speed and −${n('attack')}% attack speed.`;
+      case 'split': return `Attacks ${n('beams')} different enemies at once${+P('hit') > 0 ? `, −${n('hit')}% hit each` : ''}. −${n('range')}% range.`;
     }
     return '';
   }
@@ -123,6 +127,11 @@ const Engine = (() => {
           u.slowMove = Math.max(u.slowMove || 0, Math.min(90, P('move')));
           u.slowAtk = Math.max(u.slowAtk || 0, Math.min(90, P('attack')));
           u.slowDur = Math.max(u.slowDur || 0, Math.max(0.5, P('duration')));
+          break;
+        case 'split':
+          u.beams = Math.max(u.beams || 1, Math.round(P('beams')));
+          u.range = Math.max(0.5, u.range * (1 - Math.min(90, P('range')) / 100));
+          u.hit = u.hit * (1 - Math.min(90, P('hit')) / 100);
           break;
       }
     }
@@ -381,6 +390,12 @@ const Engine = (() => {
     function aim(b, primary, valid) {
       if (b.u.flame > 0) return flameTargets(b, primary);
       const n = Math.max(1, Math.round(b.u.pellets));
+      if (n === 1 && b.u.beams > 1) {
+        // split beam: the target plus the next nearest enemies in reach, each hit once
+        const out = [primary];
+        for (const f of valid) { if (out.length >= b.u.beams) break; if (f !== primary) out.push(f); }
+        return out;
+      }
       if (n === 1) return [primary];
       const ax = primary.x - b.x, ay = primary.y - b.y, al = hyp(ax, ay);
       const cone = valid.filter(f => {
@@ -424,6 +439,11 @@ const Engine = (() => {
         }
       }
       const hit = b.u.hit * (charged ? b.u.charge : 1);
+      // trample: a charged hit doesn't stop the unit; it runs on through its target and over every body in its path
+      if (charged && b.u.trample > 0 && targets.length && !targets.flame) {
+        const tgt = targets[0], dx = tgt.x - b.x, dy = tgt.y - b.y, d = hyp(dx, dy);
+        if (d > 0) { b.trampleDir = [dx / d, dy / d]; b.trampleLeft = d + TRAMPLE_RUN; b.trampled = [tgt]; }
+      }
       for (const tgt of targets) {
         const dx = tgt.x - b.x, dy = tgt.y - b.y, d = hyp(dx, dy) || 1;
         const dirX = dx / d, dirY = dy / d;
@@ -455,6 +475,22 @@ const Engine = (() => {
       for (const b of all) {
         if (!b.alive || b.delay > 0) continue;
         const foes = sides[1 - b.side];
+        if (b.trampleLeft > 0) {
+          // running through after a charge: straight on, hitting each body it runs over once
+          const mv = Math.min(b.trampleLeft, b.u.speed * (b.slowT > 0 ? 1 - b.slowMove / 100 : 1) * (cripple[b.side] > 0 ? 1 - towerDown.move / 100 : 1) * dt);
+          const [ux, uy] = b.trampleDir;
+          b.x += ux * mv; b.y += uy * mv; b.hx = ux; b.hy = uy;
+          b.trampleLeft -= mv;
+          const tHit = b.u.hit * b.u.trample / 100;
+          for (const f of foes) {
+            if (!f.alive || b.trampled.includes(f) || hyp(f.x - b.x, f.y - b.y) > TRAMPLE_WIDTH) continue;
+            b.trampled.push(f);
+            if (opts.record) shots.push([b.x, b.y, f.x, f.y, b.side, 1, 1, 0, 0]);
+            hurt(b, f, tHit, b.x, b.y);
+          }
+          if (b.trampleLeft <= 1e-9) { b.trampleLeft = 0; b.trampled = null; }
+          continue;
+        }
         let near = null, nd = Infinity;
         for (const f of foes) {
           if (!f.alive || f.hidden) continue;
@@ -718,6 +754,6 @@ const Engine = (() => {
     return m;
   }
 
-  return { TOWER_DOWN, SKILL_TYPES, skillParam, describeSkill, applySkills, innateUnit, fairBudget, battle, makeArmy, matrix, createBattle, buildSquad, rawStrength, squadsFor, withTraits, leveled, TRAIT_DEFAULTS, SPIN_CAP, CHARGE_RUN, LEVEL_BONUS, MAX_LEVEL };
+  return { TOWER_DOWN, SKILL_TYPES, skillParam, describeSkill, applySkills, innateUnit, fairBudget, battle, makeArmy, matrix, createBattle, buildSquad, rawStrength, squadsFor, withTraits, leveled, TRAIT_DEFAULTS, SPIN_CAP, CHARGE_RUN, TRAMPLE_RUN, LEVEL_BONUS, MAX_LEVEL };
 })();
 if (typeof module !== 'undefined') module.exports = Engine;
