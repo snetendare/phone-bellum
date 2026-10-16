@@ -1482,8 +1482,10 @@ const Game = (() => {
       let u = unitFor(m, side, sq.unit);
       if (ch === 'wilhelm' && forward) u = { ...u, bonusArmor: (u.bonusArmor || 0) + CHAR.wilhelmArmor };
       // Zoe: a squad that starts the fight on a buff tile keeps the bonus for the whole fight
-      if (onBuffTile(m, side, sq.col, sq.row)) u = { ...u, hit: u.hit * (1 + CHAR.zoeDmg / 100), hp: u.hp * (1 + CHAR.zoeHp / 100), aps: u.aps * (1 + CHAR.zoeAps / 100) };
+      const zoe = onBuffTile(m, side, sq.col, sq.row);
+      if (zoe) u = { ...u, hit: u.hit * (1 + CHAR.zoeDmg / 100), hp: u.hp * (1 + CHAR.zoeHp / 100), aps: u.aps * (1 + CHAR.zoeAps / 100) };
       const b = E.buildSquad(u, side, w.x, w.y, sq.id, TILE, idx, sq.level);
+      if (zoe) for (const x of b) x.zoe = true; // for the rising-stars effect
       if (isFlank(side, sq.col, sq.row) && (sq.round === m.round || sq.movedRound === m.round)) for (const x of b) x.delay = FLANK.delay * (ch === 'wilhelm' ? CHAR.wilhelmDelay : 1); // only in its first fight
       idx += b.length;
       out.push(...b);
@@ -2135,6 +2137,16 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
       if (b.level > 0) {
         ctx.strokeStyle = gold; ctx.lineWidth = Math.min(2.5, 0.8 + b.level * 0.5);
         Shapes.outline(ctx, b.u.shape, PX(b.x), PY(b.y), r + 3.5, upOf(b.side));
+      }
+      if (b.zoe) { // Zoe buff: two faint stars drifting up from the body, looping
+        ctx.fillStyle = gold; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.font = `${Math.max(7, Math.round(r * 0.7))}px sans-serif`;
+        for (let k = 0; k < 2; k++) {
+          const s = (b.squad * 0.37 + b.x * 0.13 + k * 0.5) % 1, p = (bt.time() * 0.7 + s) % 1;
+          ctx.globalAlpha = 0.55 * Math.sin(p * Math.PI);
+          ctx.fillText('★', PX(b.x) + (k ? 1 : -1) * r * (0.35 + 0.25 * Math.sin((p + s) * 6)), PY(b.y) - r * (0.4 + 1.8 * p));
+        }
+        ctx.globalAlpha = 1;
       }
     }
     for (const e of fx) {

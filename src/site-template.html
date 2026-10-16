@@ -485,6 +485,16 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
         ctx.strokeStyle = gold; ctx.lineWidth = Math.min(2.5, 0.8 + b.level * 0.5);
         Shapes.outline(ctx, b.u.shape, PX(b.x), PY(b.y), r + 3.5, upOf(b.side));
       }
+      if (b.zoe) { // Zoe buff: two faint stars drifting up from the body, looping
+        ctx.fillStyle = gold; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.font = `${Math.max(7, Math.round(r * 0.7))}px sans-serif`;
+        for (let k = 0; k < 2; k++) {
+          const s = (b.squad * 0.37 + b.x * 0.13 + k * 0.5) % 1, p = (bt.time() * 0.7 + s) % 1;
+          ctx.globalAlpha = 0.55 * Math.sin(p * Math.PI);
+          ctx.fillText('★', PX(b.x) + (k ? 1 : -1) * r * (0.35 + 0.25 * Math.sin((p + s) * 6)), PY(b.y) - r * (0.4 + 1.8 * p));
+        }
+        ctx.globalAlpha = 1;
+      }
     }
     for (const e of fx) {
       const a = 1 - e.age / e.life;

@@ -357,8 +357,10 @@ const Game = (() => {
       let u = unitFor(m, side, sq.unit);
       if (ch === 'wilhelm' && forward) u = { ...u, bonusArmor: (u.bonusArmor || 0) + CHAR.wilhelmArmor };
       // Zoe: a squad that starts the fight on a buff tile keeps the bonus for the whole fight
-      if (onBuffTile(m, side, sq.col, sq.row)) u = { ...u, hit: u.hit * (1 + CHAR.zoeDmg / 100), hp: u.hp * (1 + CHAR.zoeHp / 100), aps: u.aps * (1 + CHAR.zoeAps / 100) };
+      const zoe = onBuffTile(m, side, sq.col, sq.row);
+      if (zoe) u = { ...u, hit: u.hit * (1 + CHAR.zoeDmg / 100), hp: u.hp * (1 + CHAR.zoeHp / 100), aps: u.aps * (1 + CHAR.zoeAps / 100) };
       const b = E.buildSquad(u, side, w.x, w.y, sq.id, TILE, idx, sq.level);
+      if (zoe) for (const x of b) x.zoe = true; // for the rising-stars effect
       if (isFlank(side, sq.col, sq.row) && (sq.round === m.round || sq.movedRound === m.round)) for (const x of b) x.delay = FLANK.delay * (ch === 'wilhelm' ? CHAR.wilhelmDelay : 1); // only in its first fight
       idx += b.length;
       out.push(...b);
