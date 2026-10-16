@@ -1245,8 +1245,8 @@ const Game = (() => {
   // Tower types: each player picks one in round 1 (before the first fight); it stays for the whole match.
   const TOWER_TYPES = [
     { id: 'keep', name: 'Keep', text: 'The standard tower: steady, light shots at short range.', unit: TOWER },
-    { id: 'sniper', name: 'Sniper tower', text: 'Shoots across most of the board, slowly, for double damage.', unit: { ...TOWER, name: 'Sniper Tower', hit: 60, aps: 0.4, range: 30, color: '#B9C7D6' } },
-    { id: 'bastion', name: 'Bastion', text: 'Much tougher, with a shorter, slower attack that splashes the units around its target.', unit: { ...TOWER, name: 'Bastion', hp: 1000, aps: 0.8, range: 5, splash: 2, color: '#B79C8A' } },
+    { id: 'sniper', name: 'Sniper tower', text: 'Shoots across most of the board, slowly, for double damage.', unit: { ...TOWER, name: 'Sniper Tower', kind: 'sniper', hp: 500, hit: 60, aps: 0.4, range: 30, color: '#B9C7D6' } },
+    { id: 'bastion', name: 'Bastion', text: 'Much tougher, with a shorter, slower attack that splashes the units around its target.', unit: { ...TOWER, name: 'Bastion', kind: 'bastion', hp: 1000, aps: 0.8, range: 5, splash: 2, color: '#B79C8A' } },
   ];
   const towerType = (m, side) => { const t = m && m.towers && m.towers[side]; return TOWER_TYPES.find(x => x.id === (t && t.type)) || TOWER_TYPES[0]; };
   // the type can be changed during round 1 only
@@ -2595,17 +2595,29 @@ if (typeof module !== 'undefined') module.exports = Game;
     }
   }
 
-  // a little keep with battlements, in the team colour
-  function drawKeep(x, y, s, side, hpr, fill) {
-    const c = teamCol(side);
+  // a little keep with battlements, in the team colour. kind: 'keep', 'sniper' (tall and skinny, a yellow
+  // stripe) or 'bastion' (wide and squat, a shield on the front)
+  function drawKeep(x, y, s, side, hpr, kind) {
+    const c = teamCol(side), tt = Game.TOWER_TYPES.find(k => k.id === kind) || Game.TOWER_TYPES[0];
     ctx.globalAlpha = 0.35 + 0.65 * (hpr == null ? 1 : hpr);
-    ctx.fillStyle = fill || Game.TOWER.color; ctx.strokeStyle = c; ctx.lineWidth = Math.max(1.5, s * 0.08);
-    const w = s * 0.62, h = s * 0.62, x0 = x - w / 2, y0 = y - h / 2 + s * 0.06, m = w / 5;
+    ctx.fillStyle = tt.unit.color; ctx.strokeStyle = c; ctx.lineWidth = Math.max(1.5, s * 0.08);
+    const [w, h, n] = tt.id === 'sniper' ? [s * 0.36, s * 0.74, 3] : tt.id === 'bastion' ? [s * 0.86, s * 0.54, 7] : [s * 0.62, s * 0.62, 5];
+    const x0 = x - w / 2, y0 = y - h / 2 + s * 0.06, m = w / n, mh = Math.min(m, s * 0.124) * 0.9;
     ctx.beginPath();
     ctx.moveTo(x0, y0 + h); ctx.lineTo(x0, y0);
-    for (let k = 0; k < 5; k++) { const xa = x0 + k * m; if (k % 2 === 0) { ctx.lineTo(xa, y0 - m * 0.9); ctx.lineTo(xa + m, y0 - m * 0.9); ctx.lineTo(xa + m, y0); } else ctx.lineTo(xa + m, y0); }
+    for (let k = 0; k < n; k++) { const xa = x0 + k * m; if (k % 2 === 0) { ctx.lineTo(xa, y0 - mh); ctx.lineTo(xa + m, y0 - mh); ctx.lineTo(xa + m, y0); } else ctx.lineTo(xa + m, y0); }
     ctx.lineTo(x0 + w, y0 + h); ctx.closePath(); ctx.fill(); ctx.stroke();
-    ctx.fillStyle = c; ctx.fillRect(x - m * 0.5, y0 + h - m * 1.6, m, m * 1.6);
+    if (tt.id === 'sniper') { // a yellow band across the top, a slit window below it
+      ctx.fillStyle = '#F2C94C'; ctx.fillRect(x0 + ctx.lineWidth / 2, y0 + h * 0.18, w - ctx.lineWidth, h * 0.14);
+      ctx.fillStyle = c; ctx.fillRect(x - w * 0.09, y0 + h * 0.5, w * 0.18, h * 0.3);
+    } else if (tt.id === 'bastion') { // a shield in the team colour
+      const sw = h * 0.68, sh = h * 0.78, sx = x - sw / 2, sy = y0 + h * 0.12;
+      ctx.fillStyle = c; ctx.beginPath();
+      ctx.moveTo(sx, sy); ctx.lineTo(sx + sw, sy); ctx.lineTo(sx + sw, sy + sh * 0.5);
+      ctx.quadraticCurveTo(sx + sw, sy + sh * 0.85, x, sy + sh); ctx.quadraticCurveTo(sx, sy + sh * 0.85, sx, sy + sh * 0.5);
+      ctx.closePath(); ctx.fill();
+      ctx.fillStyle = tt.unit.color; ctx.fillRect(x - sw * 0.07, sy + sh * 0.12, sw * 0.14, sh * 0.62); ctx.fillRect(sx + sw * 0.2, sy + sh * 0.3, sw * 0.6, sh * 0.13);
+    } else { ctx.fillStyle = c; ctx.fillRect(x - m * 0.5, y0 + h - m * 1.6, m, m * 1.6); }
     ctx.globalAlpha = 1;
   }
   const towerVisible = (side) => !!(m && m.towers && m.towers[side]);
@@ -2616,7 +2628,7 @@ if (typeof module !== 'undefined') module.exports = Game;
   const charLine = (id) => { const c = Game.charInfo(id); return c ? `<b>${esc(c.name)}</b> · ${esc(c.ability)}` : ''; };
   function drawTowerTile(side) {
     const tw = m.towers[side], t = tilePx();
-    drawKeep((scol(tw.col) + 0.5) * t, (srow(tw.row) + 0.5) * t, t, side, null, towerTypeVisible(side) ? Game.towerType(m, side).unit.color : null);
+    drawKeep((scol(tw.col) + 0.5) * t, (srow(tw.row) + 0.5) * t, t, side, null, towerTypeVisible(side) ? Game.towerType(m, side).id : null);
   }
   // the neutral elf tower: a slim pale spire with a leaf-green roof. range = show its reach as a faint ring
   function drawElfTower(v, range) {
@@ -2740,7 +2752,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
     for (const b of bt.bodies) {
       if (!b.alive || !b.u.structure) continue;
       const hpr = b.hp / b.u.hp, t = tilePx();
-      drawKeep(PX(b.x), PY(b.y), t, b.side, hpr, b.u.color);
+      drawKeep(PX(b.x), PY(b.y), t, b.side, hpr, b.u.kind);
       ctx.strokeStyle = teamCol(b.side); ctx.lineWidth = 2;
       ctx.beginPath(); ctx.arc(PX(b.x), PY(b.y), t * 0.5, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * hpr); ctx.stroke();
       if (b.walls) drawWalls(b.x, b.y, b.walls);

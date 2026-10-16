@@ -30,8 +30,8 @@ const Game = (() => {
   // Tower types: each player picks one in round 1 (before the first fight); it stays for the whole match.
   const TOWER_TYPES = [
     { id: 'keep', name: 'Keep', text: 'The standard tower: steady, light shots at short range.', unit: TOWER },
-    { id: 'sniper', name: 'Sniper tower', text: 'Shoots across most of the board, slowly, for double damage.', unit: { ...TOWER, name: 'Sniper Tower', hit: 60, aps: 0.4, range: 30, color: '#B9C7D6' } },
-    { id: 'bastion', name: 'Bastion', text: 'Much tougher, with a shorter, slower attack that splashes the units around its target.', unit: { ...TOWER, name: 'Bastion', hp: 1000, aps: 0.8, range: 5, splash: 2, color: '#B79C8A' } },
+    { id: 'sniper', name: 'Sniper tower', text: 'Shoots across most of the board, slowly, for double damage.', unit: { ...TOWER, name: 'Sniper Tower', kind: 'sniper', hp: 500, hit: 60, aps: 0.4, range: 30, color: '#B9C7D6' } },
+    { id: 'bastion', name: 'Bastion', text: 'Much tougher, with a shorter, slower attack that splashes the units around its target.', unit: { ...TOWER, name: 'Bastion', kind: 'bastion', hp: 1000, aps: 0.8, range: 5, splash: 2, color: '#B79C8A' } },
   ];
   const towerType = (m, side) => { const t = m && m.towers && m.towers[side]; return TOWER_TYPES.find(x => x.id === (t && t.type)) || TOWER_TYPES[0]; };
   // the type can be changed during round 1 only
