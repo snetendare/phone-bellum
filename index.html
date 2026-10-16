@@ -186,8 +186,8 @@ a { color: var(--you); }
 <script>
 // ===== Unit shapes (shared by Counter Lab and the demo) =====
 const Shapes = (() => {
-  const LIST = ['circle', 'ring', 'square', 'triangle', 'diamond', 'pentagon', 'hexagon', 'star', 'cross', 'bar'];
-  const LABELS = { circle: 'Circle', ring: 'Ring', square: 'Square', triangle: 'Triangle', diamond: 'Diamond', pentagon: 'Pentagon', hexagon: 'Hexagon', star: 'Star', cross: 'Cross', bar: 'Bar' };
+  const LIST = ['circle', 'ring', 'square', 'triangle', 'diamond', 'pentagon', 'hexagon', 'star', 'cross', 'bar', 'horse'];
+  const LABELS = { circle: 'Circle', ring: 'Ring', square: 'Square', triangle: 'Triangle', diamond: 'Diamond', pentagon: 'Pentagon', hexagon: 'Hexagon', star: 'Star', cross: 'Cross', bar: 'Bar', horse: 'Horse' };
   const DEFAULTS = {
     'Goblin Swarm': 'triangle', 'Skeleton Archers': 'diamond', 'Ember Imps': 'star', 'Fire Mage': 'hexagon',
     'Sniper': 'cross', 'Brute': 'square', 'Wisps': 'ring', 'Crossbow Volley': 'pentagon', 'Ballista': 'bar',
@@ -224,6 +224,11 @@ const Shapes = (() => {
       return out;
     });
   }
+
+  // A horse seen from the side, facing right: rump, back, neck and head, chest, front leg, belly, hind leg, tail.
+  // Points are in units of r around the centre; it always stands upright, whichever side it is on.
+  const HORSE = [[-0.95, -0.3], [0.3, -0.3], [0.62, -0.95], [0.82, -0.85], [1.12, -0.5], [1.02, -0.36], [0.74, -0.46], [0.66, -0.05], [0.62, 0.3],
+    [0.62, 1.05], [0.42, 1.05], [0.38, 0.32], [-0.52, 0.32], [-0.58, 1.05], [-0.78, 1.05], [-0.86, 0.22], [-1.18, 0.55], [-1.08, 0.05]];
 
   // Points of a regular polygon; up = 1 points toward the top of the screen, -1 toward the bottom
   function poly(ctx, x, y, r, n, rot) {
@@ -264,6 +269,7 @@ const Shapes = (() => {
       }
       case 'bar': ctx.beginPath(); ctx.rect(x - r * 1.3, y - r * 0.55, r * 2.6, r * 1.1); return false;
       case 'ring': ctx.beginPath(); ctx.arc(x, y, r * 0.8, 0, Math.PI * 2); return true;
+      case 'horse': ctx.beginPath(); HORSE.forEach(([px, py], i) => i ? ctx.lineTo(x + px * r, y + py * r) : ctx.moveTo(x + px * r, y + py * r)); ctx.closePath(); return false;
       default: ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); return false;
     }
   }
@@ -295,6 +301,7 @@ const Shapes = (() => {
       case 'star': body = `<polygon points="${Array.from({ length: 10 }, (_, i) => { const a = -Math.PI / 2 + i * Math.PI / 5, rr = i % 2 ? r * 0.55 : r * 1.3; return `${(c + Math.cos(a) * rr).toFixed(2)},${(c + Math.sin(a) * rr).toFixed(2)}`; }).join(' ')}"/>`; break;
       case 'cross': { const a = r * 1.15, b = r * 0.42; body = `<polygon points="${[[-b, -a], [b, -a], [b, -b], [a, -b], [a, b], [b, b], [b, a], [-b, a], [-b, b], [-a, b], [-a, -b], [-b, -b]].map(([px, py]) => `${(c + px).toFixed(2)},${(c + py).toFixed(2)}`).join(' ')}"/>`; break; }
       case 'bar': body = `<rect x="${c - r * 1.3}" y="${c - r * 0.55}" width="${r * 2.6}" height="${r * 1.1}"/>`; break;
+      case 'horse': { const rr = r * 0.95; body = `<polygon points="${HORSE.map(([px, py]) => `${(c + px * rr).toFixed(2)},${(c + py * rr).toFixed(2)}`).join(' ')}"/>`; break; }
       case 'ring': body = `<circle cx="${c}" cy="${c}" r="${r * 0.8}" fill="none" stroke="currentColor" stroke-width="${Math.max(1.5, r * 0.45)}"/>`; break;
       default: body = `<circle cx="${c}" cy="${c}" r="${r}"/>`;
     }
@@ -314,7 +321,7 @@ const Shapes = (() => {
 
 // ===== Battle engine (shared by headless tests and the page) =====
 const Engine = (() => {
-  const TRAIT_DEFAULTS = { burst: 1, pellets: 1, spinUp: 0, spinHit: 0, pierce: 0, projSpeed: 0, minRange: 0, charge: 1, knockback: 0, windUp: 0, flame: 0, trample: 0, deathBlast: 0 };
+  const TRAIT_DEFAULTS = { burst: 1, pellets: 1, spinUp: 0, spinHit: 0, pierce: 0, projSpeed: 0, minRange: 0, charge: 1, knockback: 0, windUp: 0, flame: 0, trample: 0, deathBlast: 0, ram: 0, noFlank: 0, carrier: 0 };
   const BURST_GAP = 0.15;      // seconds between shots in a burst
   const SHOTGUN_COS = Math.sqrt(3) / 2; // pellets spread 30 degrees to each side of the target (cos 30)
   // Only + - * / and sqrt from here on: those give identical results in every browser,
@@ -332,6 +339,11 @@ const Engine = (() => {
   const CHARGE_RUN = 5;        // metres a unit must run before its next attack counts as a charge
   const TRAMPLE_RUN = 8;       // after a charged hit, a trampler keeps running this far past its target
   const TRAMPLE_WIDTH = 1.5;   // bodies within this distance of a trampler's path get run over
+  // ram: the unit never attacks; it heads straight for the enemy tower (the nearest enemy once the tower is down),
+  // and on reaching it deals its hit to it once and is destroyed. carrier: a squad of another unit can ride inside
+  // (see createBattle: bodies with `carrier` set stay out of the fight until that body dies). noFlank: can't be
+  // deployed on flank tiles (the game checks it)
+  const RAM_REACH = 2;         // metres from its target at which a ram hits
   const BLAST_RADIUS = 4;      // a body with deathBlast explodes when it dies, hitting enemies within this distance
   const PIERCE_DEPTH = 10;     // metres a piercing shot travels past its target
   const PIERCE_WIDTH = 1;      // half-width of the pierce corridor (m)
@@ -378,6 +390,7 @@ const Engine = (() => {
     split:   { label: 'Split beam', params: [['beams', 'Targets at once', 4, 1], ['range', 'Range (−%)', 30, 5], ['hit', 'Hit per target (−%)', 0, 5]] },
     deathSpawn: { label: 'Spawn on death', params: [['unit', 'Spawns (unit name)', 'Goblin Swarm', null], ['count', 'Bodies per death', 2, 1], ['strength', 'Strength of each spawn (% health and damage; 50 = half)', 100, 10]] },
     shield:  { label: 'Shield', params: [['hits', 'Hits blocked per body', 3, 1]] },
+    blast:   { label: 'Death burst', params: [['radius', 'Radius (m)', 7, 0.5], ['pct', 'Damage (% of hit)', 100, 10]] },
   };
   const skillParam = (d, k) => {
     const v = d.params && d.params[k];
@@ -398,7 +411,7 @@ const Engine = (() => {
       case 'armorHp': return `+${n('armor')} armor and +${n('hp')}% health.`;
       case 'spawn': return `Every ${n('every')} s, spawns ${n('count')} ${String(P('unit'))} ${+P('count') === 1 ? 'body' : 'bodies'}, up to ${n('max')} alive at once${+P('waves') > 0 ? `, at most ${n('waves')} ${+P('waves') === 1 ? 'wave' : 'waves'} per fight` : ''}.`;
       case 'rapid': return `+${n('aps')}% attack speed, −${n('range')}% range.`;
-      case 'swift': return `+${n('speed')}% move speed and +${n('hit')}% hit size.`;
+      case 'swift': return +P('hit') ? `+${n('speed')}% move speed and +${n('hit')}% hit size.` : `+${n('speed')}% move speed.`;
       case 'heavy': return `Projectiles fly ${n('slow')}% slower (${n('instant')} m/s if it normally hits instantly), +${n('hit')}% hit size.`;
       case 'healer': return `Each attack heals a random wounded ally for ${n('pct')}% of its hit.`;
       case 'range': return `+${n('m')} m range.`;
@@ -408,6 +421,7 @@ const Engine = (() => {
       case 'forward': return 'Squads of this unit can also be placed in no man’s land.';
       case 'split': return `Attacks ${n('beams')} different enemies at once${+P('hit') > 0 ? `, −${n('hit')}% hit each` : ''}. −${n('range')}% range.`;
       case 'deathSpawn': return `When a body dies, ${n('count')} ${String(P('unit'))} ${+P('count') === 1 ? 'body takes' : 'bodies take'} its place${+P('strength') !== 100 ? `, at ${n('strength')}% health and damage` : ''}. A spawn of the unit itself starts from the dead body's own stats. Spawns don’t spawn again.`;
+      case 'blast': return `When a body dies it explodes, dealing ${+P('pct') === 100 ? 'the damage of its hit' : `${n('pct')}% of its hit`} (for a ram, what it deals to the tower) to every enemy within ${n('radius')} m.`;
       case 'shield': return `Each body fully blocks the first ${n('hits')} ${+P('hits') === 1 ? 'hit' : 'hits'} it takes in a fight, however big. Poison already on it still ticks.`;
     }
     return '';
@@ -462,6 +476,7 @@ const Engine = (() => {
           break;
         }
         case 'shield': u.shield = (u.shield || 0) + Math.max(0, Math.round(P('hits'))); break;
+        case 'blast': u.blastR = Math.max(u.blastR || 0, Math.max(0, P('radius'))); u.blastPct = (u.blastPct || 0) + Math.max(0, P('pct')); break;
         case 'split':
           u.beams = Math.max(u.beams || 1, Math.round(P('beams')));
           u.range = Math.max(0.5, u.range * (1 - Math.min(90, P('range')) / 100));
@@ -609,6 +624,22 @@ const Engine = (() => {
         const dmg = v.u.hp * v.u.deathBlast / 100;
         if (opts.record) shots.push([v.x, v.y, v.x, v.y, v.side, BLAST_RADIUS, 1, 0, 0]);
         for (const f of sides[1 - v.side]) if (f.alive && hyp(f.x - v.x, f.y - v.y) <= BLAST_RADIUS) hurt(v, f, dmg, v.x, v.y);
+      }
+      // Death burst: its hit to every enemy within blastR (a ram's target already took the ram itself)
+      if (v.u.blastR > 0) {
+        const dmg = v.u.hit * v.u.blastPct / 100;
+        if (opts.record) shots.push([v.x, v.y, v.x, v.y, v.side, v.u.blastR, 1, 0, 0]);
+        for (const f of sides[1 - v.side]) if (f.alive && f !== v.rammed && hyp(f.x - v.x, f.y - v.y) <= v.u.blastR) hurt(v, f, dmg, v.x, v.y);
+      }
+      // a carrier is gone: whoever rode inside jumps out where it fell
+      if (v.u.carrier) {
+        let k = 0;
+        for (const r of sides[v.side]) {
+          if (r.carrier !== v || !r.boarded) continue;
+          const [ox, oy] = SPAWN_SPOTS[k++ % SPAWN_SPOTS.length], fwd = v.side === 0 ? 1 : -1;
+          r.boarded = false; r.alive = true; r.carrier = null;
+          r.x = v.x + ox * g.spacing * 0.5; r.y = v.y + oy * fwd * g.spacing * 0.5;
+        }
       }
       // Spawn on death: new bodies take its place (they join at the end of this tick).
       // A spawn of the unit itself copies the dead body's stats (level, skills, buffs). Spawns never carry deathSpawn.
@@ -857,6 +888,24 @@ const Engine = (() => {
       }
     }
 
+    // a ram's turn: run at the enemy tower (or, once it is down, the nearest enemy); on reaching it, hit it once and fall
+    function ram(b, foes) {
+      let tgt = null, td = Infinity;
+      for (const f of foes) if (f.alive && f.u.structure) { const d = dist(f, b); if (d < td) { td = d; tgt = f; } }
+      if (!tgt) for (const f of foes) if (f.alive && !f.hidden) { const d = dist(f, b); if (d < td) { td = d; tgt = f; } }
+      if (!tgt) return;
+      if (td > RAM_REACH) {
+        const mv = Math.min(td - RAM_REACH * 0.5, b.u.speed * (b.slowT > 0 ? 1 - b.slowMove / 100 : 1) * (cripple[b.side] > 0 ? 1 - towerDown.move / 100 : 1) * dt);
+        b.hx = (tgt.x - b.x) / td; b.hy = (tgt.y - b.y) / td;
+        b.x += b.hx * mv; b.y += b.hy * mv; b.moved += mv;
+        if (dist(tgt, b) > RAM_REACH) return;
+      }
+      if (opts.record) shots.push([b.x, b.y, tgt.x, tgt.y, b.side, 0, 1, 0, 0]);
+      b.rammed = tgt;
+      hurt(b, tgt, b.u.hit, b.x, b.y);
+      if (b.alive) { b.hp = 0; b.alive = false; b.diedTick = tick; fell(b); }
+    }
+
     function step() {
       if (over) return false;
       if (t >= g.timeCap || !aliveCount(A) || !aliveCount(B)) { over = true; return false; }
@@ -890,6 +939,7 @@ const Engine = (() => {
           if (b.trampleLeft <= 1e-9) { b.trampleLeft = 0; b.trampled = null; }
           continue;
         }
+        if (b.u.ram) { ram(b, foes); continue; }
         let near = null, nd = Infinity;
         for (const f of foes) {
           if (!f.alive || f.hidden) continue;
@@ -999,7 +1049,7 @@ const Engine = (() => {
       // attacks. A body killed earlier in this same tick still gets its attack, so neither side
       // wins a trade just by being processed first (side 0 used to win one-shot duels like Sniper vs Sniper)
       for (const b of all) {
-        if ((!b.alive && b.diedTick !== tick) || b.delay > 0) continue;
+        if ((!b.alive && b.diedTick !== tick) || b.delay > 0 || b.u.ram || b.boarded) continue;
         b.cd -= dt * (b.slowT > 0 ? 1 - b.slowAtk / 100 : 1); // slowed units reload slower
         if (b.firing >= 0) b.firing += dt;
         // follow-up shots of a running burst fly along the direction locked at the start
@@ -1163,7 +1213,8 @@ const Engine = (() => {
     }
 
     function result() {
-      const remHp = sides.map(arr => arr.reduce((s, b) => s + (b.alive && !b.u.structure ? b.hp : 0), 0));
+      const inside = (b) => b.boarded && b.carrier && b.carrier.alive; // still riding in a carrier that made it
+      const remHp = sides.map(arr => arr.reduce((s, b) => s + ((b.alive || inside(b)) && !b.u.structure ? b.hp : 0), 0));
       const frac = [remHp[0] / stats[0].totalHp, remHp[1] / stats[1].totalHp];
       const aliveA = aliveCount(A), aliveB = aliveCount(B);
       let winner = -1, timeout = false;
@@ -1175,7 +1226,7 @@ const Engine = (() => {
       for (const b of all) {
         const k = b.side + ':' + b.squad;
         const s = squads[k] || (squads[k] = { side: b.side, squad: b.squad, total: 0, alive: 0, xp: 0, dealt: 0 });
-        s.total++; if (b.alive) s.alive++;
+        s.total++; if (b.alive || inside(b)) s.alive++;
         s.xp += b.xp; s.dealt += b.dealt || 0;
       }
       return {
@@ -1207,7 +1258,7 @@ const Engine = (() => {
     return m;
   }
 
-  return { TOWER_DOWN, SKILL_SLOTS, SLOTS, SKILL_TYPES, skillParam, describeSkill, applySkills, innateUnit, fairBudget, battle, makeArmy, matrix, createBattle, buildSquad, rawStrength, squadsFor, withTraits, leveled, TRAIT_DEFAULTS, SPIN_CAP, CHARGE_RUN, TRAMPLE_RUN, BLAST_RADIUS, LEVEL_BONUS, MAX_LEVEL };
+  return { TOWER_DOWN, SKILL_SLOTS, SLOTS, SKILL_TYPES, skillParam, describeSkill, applySkills, innateUnit, fairBudget, battle, makeArmy, matrix, createBattle, buildSquad, rawStrength, squadsFor, withTraits, leveled, TRAIT_DEFAULTS, SPIN_CAP, CHARGE_RUN, TRAMPLE_RUN, BLAST_RADIUS, RAM_REACH, LEVEL_BONUS, MAX_LEVEL };
 })();
 if (typeof module !== 'undefined') module.exports = Engine;
 
@@ -1440,7 +1491,7 @@ const Game = (() => {
   // a tile the other player already holds with a squad (or tower) you can see
   // Where the other player sees a squad: a squad moved this round still shows on its old tile until the fight
   const seenAt = (m, sq) => sq.from && sq.movedRound === m.round ? sq.from : sq;
-  const enemyHolds = (m, side, col, row) => !!m && (m.armies[1 - side].some(s => { const p = seenAt(m, s); return p.col === col && p.row === row && s.round < m.round; }) ||
+  const enemyHolds = (m, side, col, row) => !!m && (m.armies[1 - side].some(s => { const p = seenAt(m, s); return !hiddenFromFoe(m, s) && p.col === col && p.row === row && s.round < m.round; }) ||
     (m.round > 1 && m.towers && m.towers[1 - side] && m.towers[1 - side].col === col && m.towers[1 - side].row === row));
   // the edge tiles of your zone that are the enemy's flank are reserved for them for the whole match
   const reserved = (side, col, row) => isFlank(1 - side, col, row);
@@ -1449,7 +1500,28 @@ const Game = (() => {
   const hasSkillType = (m, side, ui, type) => !!m && ui != null && !!m.units[ui] && E.SLOTS.some(k => hasSkill(m, side, ui, k) && skillDef(m, ui, k).type === type);
   // ui (optional): the unit being placed, for unit-specific tiles
   const canPlaceAt = (m, side, col, row, ui) => col >= 0 && col < COLS && !reserved(side, col, row) &&
+    !(ui != null && m && m.units[ui] && m.units[ui].noFlank && isFlank(side, col, row)) &&
     (inZone(side, row) || (flankOpen(m) && isFlank(side, col, row)) || (inNoMans(row) && hasSkillType(m, side, ui, 'forward'))) && !enemyHolds(m, side, col, row);
+  // ---------- carriers (Just a horse) ----------
+  // A squad of a carrier unit can hold one squad of any other unit inside. The rider is an ordinary squad in the
+  // army (it levels, sells and counts like any other) with `in` = the carrier's squad id, on the carrier's tile.
+  // The opponent never sees it on the board; in a fight it stays inside until the carrier dies (see Engine).
+  const isRider = (sq) => !!sq && sq.in != null;
+  // what the opponent can't see on the board: riders, and a squad that stepped out of a carrier this round (it is
+  // still inside as far as they know)
+  const hiddenFromFoe = (m, s) => isRider(s) || !!(s.from && s.movedRound === m.round && s.from.in != null);
+  const isCarrier = (m, ui) => !!(m && m.units[ui] && m.units[ui].carrier);
+  const riderOf = (m, side, sq) => sq ? m.armies[side].find(s => s.in === sq.id) || null : null;
+  const carrierOf = (m, side, sq) => isRider(sq) ? m.armies[side].find(s => s.id === sq.in) || null : null;
+  // the squad standing on a tile (a carrier, never its rider)
+  const squadAt = (m, side, col, row) => m.armies[side].find(s => !isRider(s) && s.col === col && s.row === row) || null;
+  // the carrier on a tile that has room for a squad of unit ui
+  function boardable(m, side, col, row, ui) {
+    const c = squadAt(m, side, col, row);
+    return c && isCarrier(m, c.unit) && !isCarrier(m, ui) && !riderOf(m, side, c) ? c : null;
+  }
+  // riders follow their carrier's tile
+  const syncRiders = (m, side) => { for (const s of m.armies[side]) if (isRider(s)) { const c = carrierOf(m, side, s); if (c) { s.col = c.col; s.row = c.row; } else delete s.in; } };
   const tileToWorld = (col, row) => ({ x: (col - (COLS - 1) / 2) * TILE, y: ((ROWS - 1) / 2 - row) * TILE });
 
   function rng(seed) { // mulberry32
@@ -1630,6 +1702,7 @@ const Game = (() => {
     const i = m.armies[side].findIndex(s => s.id === sqId && s.round < m.round);
     if (i < 0) return 0;
     const [sq] = m.armies[side].splice(i, 1);
+    syncRiders(m, side); // a sold carrier's rider steps out onto the tile
     const v = sellValue(m, sq);
     m.gold[side] += v;
     return v;
@@ -1659,16 +1732,21 @@ const Game = (() => {
   function moveSquad(m, side, sqId, col, row) {
     const sq = m.armies[side].find(s => s.id === sqId);
     if (!sq || (sq.col === col && sq.row === row) || !canMove(m, side, sq)) return false;
-    if (!canPlaceAt(m, side, col, row, sq.unit) || occupied(m, side, col, row)) return false;
+    // a squad can move onto a free tile, or into a carrier with room (a rider can also step out, or change carriers)
+    const into = boardable(m, side, col, row, sq.unit);
+    if (into && into.id === sq.in) return false;
+    if (!canPlaceAt(m, side, col, row, sq.unit) || (occupied(m, side, col, row) && !into)) return false;
     if (sq.round !== m.round && movedId(m, side) == null) {
       if (!m.moved) m.moved = [null, null];
       m.gold[side] -= CONFIG.moveCost;
       m.moved[side] = sq.id;
-      sq.from = { col: sq.col, row: sq.row };
+      sq.from = { col: sq.col, row: sq.row, ...(isRider(sq) ? { in: sq.in } : {}) };
       sq.movedRound = m.round;
     }
     sq.col = col; sq.row = row;
-    if (sq.from && sq.movedRound === m.round && sq.from.col === col && sq.from.row === row) undoMove(m, side);
+    if (into) sq.in = into.id; else delete sq.in;
+    syncRiders(m, side);
+    if (sq.from && sq.movedRound === m.round && sq.from.col === col && sq.from.row === row && sq.from.in === sq.in) undoMove(m, side);
     return true;
   }
   // put this round's moved squad back on its old tile and refund the move
@@ -1676,9 +1754,13 @@ const Game = (() => {
     const id = movedId(m, side);
     const sq = id != null && m.armies[side].find(s => s.id === id);
     if (!sq || !sq.from) return false;
-    if ((sq.col !== sq.from.col || sq.row !== sq.from.row) && occupied(m, side, sq.from.col, sq.from.row)) return false;
+    const back = sq.from.in != null ? m.armies[side].find(s => s.id === sq.from.in) : null;
+    if (sq.from.in != null ? !(back && back.col === sq.from.col && back.row === sq.from.row && (sq.in === back.id || !riderOf(m, side, back)))
+      : (sq.col !== sq.from.col || sq.row !== sq.from.row) && occupied(m, side, sq.from.col, sq.from.row)) return false;
     sq.col = sq.from.col; sq.row = sq.from.row;
+    if (back) sq.in = back.id; else delete sq.in;
     delete sq.from; delete sq.movedRound;
+    syncRiders(m, side);
     m.moved[side] = null;
     m.gold[side] += CONFIG.moveCost;
     return true;
@@ -1706,27 +1788,35 @@ const Game = (() => {
     if (!canPlaceAt(m, side, col, row, unitIdx)) return null;
     if (needsTower(m, side)) return null; // the tower goes down first
     if (!isUnlocked(m, side, unitIdx)) return null;
-    if (occupied(m, side, col, row)) return null;
+    const into = boardable(m, side, col, row, unitIdx); // a carrier with room: the new squad rides inside
+    if (occupied(m, side, col, row) && !into) return null;
+    const ride = into ? { in: into.id } : {};
     if (freeLeft(m, side).includes(unitIdx)) { // a package squad: no gold, no deployment
-      const sq = { id: m.nextId[side]++, unit: unitIdx, col, row, round: m.round, xp: 0, level: 0, cost: 0, free: true };
+      const sq = { id: m.nextId[side]++, unit: unitIdx, col, row, round: m.round, xp: 0, level: 0, cost: 0, free: true, ...ride };
       m.armies[side].push(sq);
       return sq;
     }
     const cost = unitCostOf(m.units[unitIdx]);
     if (m.gold[side] < cost) return null;
     if (deploysLeft(m, side) <= 0) return null;
-    const sq = { id: m.nextId[side]++, unit: unitIdx, col, row, round: m.round, xp: 0, level: 0, cost };
+    const sq = { id: m.nextId[side]++, unit: unitIdx, col, row, round: m.round, xp: 0, level: 0, cost, ...ride };
     m.armies[side].push(sq);
     m.gold[side] -= cost;
     return sq;
   }
 
-  // Only squads bought this round can be taken back
+  // Only squads bought this round can be taken back (by tile: the squad standing there, not a rider inside it).
+  // A carrier taken back leaves its rider standing on the tile.
   function unplace(m, side, col, row) {
-    const i = m.armies[side].findIndex(s => s.col === col && s.row === row && s.round === m.round);
+    const sq = squadAt(m, side, col, row);
+    return !!sq && unplaceSquad(m, side, sq.id);
+  }
+  function unplaceSquad(m, side, id) {
+    const i = m.armies[side].findIndex(s => s.id === id && s.round === m.round);
     if (i < 0) return false;
     const [sq] = m.armies[side].splice(i, 1);
     m.gold[side] += sq.cost;
+    syncRiders(m, side);
     return true;
   }
 
@@ -1751,6 +1841,12 @@ const Game = (() => {
       if (isFlank(side, sq.col, sq.row) && (sq.round === m.round || sq.movedRound === m.round)) for (const x of b) x.delay = FLANK.delay * (ch === 'wilhelm' ? CHAR.wilhelmDelay : 1); // only in its first fight
       idx += b.length;
       out.push(...b);
+    }
+    // riders sit inside their carrier's first body until it dies
+    for (const sq of m.armies[side]) {
+      if (!isRider(sq)) continue;
+      const c = out.find(x => x.squad === sq.in);
+      for (const x of out) if (x.squad === sq.id) { if (c) { x.boarded = true; x.alive = false; x.carrier = c; x.x = c.x; x.y = c.y; x.delay = 0; } }
     }
     const t = m.towers && m.towers[side];
     if (t) {
@@ -2034,6 +2130,7 @@ const Game = (() => {
     PACKAGE, allPackages, packOf, needsPack, freeLeft, choosePack, ensurePack,
     unlockCost, isUnlocked, unlockVisible, unlock, undoUnlock,
     skillDef, skillCost, isInnate, hasSkill, skillVisible, unitFor, canBuySkill, buySkill, undoSkill, sellValue, sell,
+    isRider, hiddenFromFoe, isCarrier, riderOf, carrierOf, squadAt, boardable, unplaceSquad,
     TOWER, TOWER_MID, towerColOk, towerAt, needsTower, placeTower, ensureTower,
     FLANK, flankRows, flankOpen, isFlank, reserved, canPlaceAt, enemyHolds, inNoMans, hasSkillType,
     ICE, ALTAR, GOLEM, isIce, hailRound, altarRound, stormShift, stormRows, hailTiles, altarCost, altarBought, addAltar, buyAltar, undoAltar, snowgres, snowgreUnit,
@@ -2047,7 +2144,7 @@ if (typeof module !== 'undefined') module.exports = Game;
 </script>
 <script>
 (() => {
-  const DATA = {"units":[{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Goblin Swarm","cost":1,"bodies":12,"hp":26,"hit":17,"aps":1.2,"range":2,"speed":8,"splash":0,"shape":"triangle","color":"#9BD35A","skills":["swift","shrink"],"skillMods":[null,null],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Skeleton Archers","cost":1,"bodies":8,"hp":32,"hit":14,"aps":0.75,"range":19,"speed":2.1,"splash":0,"shape":"triangle","color":"#E9E3CF","skills":["range","rapid"],"skillMods":[null,null],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Ember Imps","cost":1,"bodies":4,"hp":110,"hit":20,"aps":0.8,"range":10,"speed":4,"splash":3,"shape":"pentagon","color":"#FFA94D","skills":["swift","heavy"],"skillMods":[null,null],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Fire Mage","cost":1,"bodies":1,"hp":155,"hit":33,"aps":0.75,"range":20,"speed":3,"splash":4,"shape":"hexagon","color":"#fb0022","skills":["range","armorHp"],"skillMods":[null,null],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":1,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Sniper","cost":1,"bodies":1,"hp":140,"hit":210,"aps":0.25,"range":33,"speed":2,"splash":0,"shape":"cross","color":"#F7D154","skills":["rapid","spawn"],"skillMods":[{"params":{"range":0,"aps":20}},{"params":{"waves":3}}],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"armor","defVal":6,"level":0,"unlock":50,"name":"Brute","cost":2,"bodies":1,"hp":1100,"hit":98,"aps":1.1,"range":2,"speed":5,"splash":0,"shape":"square","color":"#8D99AE","skills":["armorHp","swift"],"skillMods":[null,null],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":20,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":40,"level":0,"unlock":50,"name":"Wisps","cost":1,"bodies":2,"hp":80,"hit":75,"aps":0.8,"range":19,"speed":4,"splash":0,"shape":"ring","color":"#ff90ff","skills":["stealth","skmv5oxj501"],"skillMods":[null,{"params":{},"cost":200}],"skillsInnate":[false,false]},{"burst":6,"pellets":2,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0.2,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Leaf Wizard","cost":2,"bodies":1,"hp":240,"hit":21,"aps":0.45,"range":27,"speed":5,"splash":0,"shape":"hexagon","color":"#00d200","skills":["rapid","range"],"skillMods":[null,null],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":5,"projSpeed":35,"minRange":0,"charge":1,"knockback":0,"windUp":0.5,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Earth Wizard","cost":2,"bodies":1,"hp":650,"hit":440,"aps":0.2,"range":24,"speed":3,"splash":2,"shape":"circle","color":"#24590d","skills":["regen","range"],"skillMods":[null,null],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":30,"defense":"none","defVal":0,"level":0,"unlock":100,"name":"Flame Wizard","cost":3,"bodies":1,"hp":2000,"hit":12,"aps":4,"range":15,"speed":2,"splash":0,"shape":"bar","color":"#b95018","skills":["armorHp","range"],"skillMods":[null,null],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":100,"name":"Steel Wizard","cost":3,"bodies":1,"hp":1900,"hit":150,"aps":0.9,"range":15,"speed":2,"splash":2,"shape":"bar","color":"#57535a","skills":["range","heavy"],"skillMods":[null,{"params":{"slow":20,"hit":20}}],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":40,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":100,"name":"Slime Wizard","cost":3,"bodies":1,"hp":700,"hit":480,"aps":0.2,"range":22,"speed":2,"splash":6,"shape":"ring","color":"#81f038","skills":["skmv5oxpgk2","range"],"skillMods":[null,null],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"armor","defVal":15,"level":0,"unlock":150,"splash":3,"skillsInnate":[false,false],"skillMods":[null,null],"name":"Ether Golem","cost":5,"bodies":1,"hp":3450,"hit":69,"aps":0.6,"range":5,"speed":2.5,"shape":"square","color":"#51005c","skills":["regen","armorHp"]},{"burst":1,"pellets":1,"spinUp":50,"spinHit":50,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":150,"splash":0,"skillsInnate":[false,false],"skillMods":[null,null],"name":"Sun Priest","cost":5,"bodies":1,"hp":2800,"hit":38,"aps":2,"range":18,"speed":3,"shape":"star","color":"#FFD23F","skills":["split","shrink"]},{"burst":3,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":22,"minRange":12,"charge":1,"knockback":0,"windUp":2,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":150,"splash":6,"skillsInnate":[false,false],"skillMods":[null,null],"name":"Meteor Caller","cost":5,"bodies":1,"hp":400,"hit":114,"aps":0.3,"range":50,"speed":2,"shape":"diamond","color":"#FF6B35","skills":["range","skmv5oxpgk2"]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":3,"knockback":4,"windUp":0,"flame":0,"defense":"armor","defVal":6,"level":0,"unlock":150,"splash":3,"skillsInnate":[false,false],"skillMods":[null,null],"name":"War Mammoth","cost":5,"bodies":1,"hp":2300,"hit":169,"aps":0.5,"range":3,"speed":9,"shape":"pentagon","color":"#A0785A","skills":["swift","armorHp"],"trample":50},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":150,"splash":0,"skillsInnate":[true,false],"skillMods":[null,null],"name":"Necromancer","cost":5,"bodies":1,"hp":2300,"hit":56,"aps":1,"range":20,"speed":2.2,"shape":"hexagon","color":"#9D4EDD","skills":["raiseDead","healer"]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":90,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Ent","cost":1,"bodies":2,"hp":400,"hit":25,"aps":1.1,"range":4,"speed":2,"splash":0,"shape":"square","color":"#0d3000","skills":["armorHp","forward"],"skillsInnate":[false,false],"skillMods":[{"params":{"armor":4,"hp":20}},null],"deathBlast":30},{"burst":1,"pellets":1,"spinUp":0.1,"pierce":0,"projSpeed":30,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"name":"Slimeshots","cost":2,"unlock":100,"bodies":10,"hp":95,"hit":7,"aps":0.8,"range":21,"speed":6,"splash":3,"shape":"diamond","color":"#20d300","skills":["range","heavy"],"skillsInnate":[false,false],"skillMods":[null,{"params":{"hit":25,"slow":0,"instant":0},"cost":150}]}],"matrix":[[0,-1,-0.866,-1,0.833,0.122,0.022,-1,0.489,-1,-0.404,-0.277,-0.938,0.442,-0.674,-0.484,0.301,-0.8,-0.722],[1,0,0.315,-0.91,0.375,0.375,0.667,-1,0.362,-0.803,0.246,-0.35,-0.779,-0.68,-0.936,0.558,-0.398,0.819,-0.529],[0.866,-0.315,0,-0.83,0.217,0.554,-0.242,-0.833,0.033,-1,-0.497,-0.511,-0.663,0.428,-0.925,-0.341,0.151,0.303,0.182],[1,0.91,0.83,0,-1,-0.204,0.734,-0.917,-0.868,-0.652,-0.12,-0.896,-0.47,-0.405,-1,-0.587,-0.186,1,0.298],[-0.833,-0.375,-0.217,1,0,-0.034,0.782,0.655,-0.137,-0.085,0.467,1,0.869,0.406,-0.746,-0.445,-0.456,1,-0.5],[-0.122,-0.375,-0.554,0.204,0.034,0,-0.567,0.453,-0.799,0.32,-0.535,-1,0.058,-0.547,0.069,-0.593,0.4,-0.673,0.897],[-0.022,-0.667,0.242,-0.734,-0.782,0.567,0,-1,-0.39,-0.676,-0.168,-0.529,0.594,0.275,-0.875,-0.245,-0.564,0.968,-0.643],[1,1,0.833,0.917,-0.655,-0.453,1,0,-0.51,-0.353,-0.105,-0.374,-0.69,-0.307,-0.412,-0.759,0.451,1,0.233],[-0.489,-0.362,-0.033,0.868,0.137,0.799,0.39,0.51,0,0.294,0.846,-0.274,0.851,0.489,-0.5,-0.154,-0.15,1,0.419],[1,0.803,1,0.652,0.085,-0.32,0.676,0.353,-0.294,0,0.585,-0.722,-0.698,-0.157,-1,-0.67,0.762,1,0.841],[0.404,-0.246,0.497,0.12,-0.467,0.535,0.168,0.105,-0.846,-0.585,0,-1,0.724,-0.479,-1,-0.114,-0.352,0.402,0.392],[0.277,0.35,0.511,0.896,-1,1,0.529,0.374,0.274,0.722,1,0,1,0.771,-1,0.855,0.844,1,0.494],[0.938,0.779,0.663,0.47,-0.869,-0.058,-0.594,0.69,-0.851,0.698,-0.724,-1,0,-0.901,-0.776,-0.753,-0.004,-0.098,0.86],[-0.442,0.68,-0.428,0.405,-0.406,0.547,-0.275,0.307,-0.489,0.157,0.479,-0.771,0.901,0,-0.38,0.361,0.426,-0.256,-0.285],[0.674,0.936,0.925,1,0.746,-0.069,0.875,0.412,0.5,1,1,1,0.776,0.38,0,-0.601,0.597,1,0.392],[0.484,-0.558,0.341,0.587,0.445,0.593,0.245,0.759,0.154,0.67,0.114,-0.855,0.753,-0.361,0.601,0,0.217,-0.142,0.909],[-0.301,0.398,-0.151,0.186,0.456,-0.4,0.564,-0.451,0.15,-0.762,0.352,-0.844,0.004,-0.426,-0.597,-0.217,0,-0.023,-0.176],[0.8,-0.819,-0.303,-1,-1,0.673,-0.968,-1,-1,-1,-0.402,-1,0.098,0.256,-1,0.142,0.023,0,0.093],[0.722,0.529,-0.182,-0.298,0.5,-0.897,0.643,-0.233,-0.419,-0.841,-0.392,-0.494,-0.86,0.285,-0.392,-0.909,0.176,-0.093,0]],"skills":[{"id":"regen","type":"regen","name":"Regeneration","cost":100,"params":{}},{"id":"poison","type":"poison","name":"Poison shot","cost":100,"params":{"pct":150}},{"id":"stealth","type":"stealth","name":"Stealth","cost":100,"params":{}},{"id":"armorHp","type":"armorHp","name":"Armor and health","cost":200,"params":{}},{"id":"spawn","type":"spawn","name":"Spawn goblins","cost":200,"params":{"every":7}},{"id":"rapid","type":"rapid","name":"Rapid fire","cost":100,"params":{}},{"id":"swift","type":"swift","name":"Swift strikes","cost":100,"params":{}},{"id":"heavy","type":"heavy","name":"Heavy shot","cost":100,"params":{}},{"id":"healer","type":"healer","name":"Healing touch","cost":200,"params":{}},{"id":"range","type":"range","name":"Long reach","cost":200,"params":{}},{"id":"shrink","type":"shrink","name":"Shortsight","cost":100,"params":{}},{"id":"skmv5oxj501","type":"ward","name":"Ward","cost":100,"params":{}},{"id":"skmv5oxpgk2","type":"slow","name":"Slow","cost":100,"params":{}},{"id":"raiseDead","type":"spawn","name":"Raise dead","cost":0,"params":{"unit":"Skeleton Archers","count":3,"every":2,"max":12}},{"id":"split","type":"split","name":"Split beam","cost":100,"params":{}},{"id":"forward","type":"forward","name":"Forward planting","cost":100,"params":{}}]};
+  const DATA = {"units":[{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Goblin Swarm","cost":1,"bodies":12,"hp":26,"hit":17,"aps":1.2,"range":2,"speed":8,"splash":0,"shape":"triangle","color":"#9BD35A","skills":["swift","shrink"],"skillMods":[null,null],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Skeleton Archers","cost":1,"bodies":8,"hp":32,"hit":14,"aps":0.75,"range":19,"speed":2.1,"splash":0,"shape":"triangle","color":"#E9E3CF","skills":["range","rapid"],"skillMods":[null,null],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Ember Imps","cost":1,"bodies":4,"hp":110,"hit":20,"aps":0.8,"range":10,"speed":4,"splash":3,"shape":"pentagon","color":"#FFA94D","skills":["swift","heavy"],"skillMods":[null,null],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Fire Mage","cost":1,"bodies":1,"hp":155,"hit":33,"aps":0.75,"range":20,"speed":3,"splash":4,"shape":"hexagon","color":"#fb0022","skills":["range","armorHp"],"skillMods":[null,null],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":1,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Sniper","cost":1,"bodies":1,"hp":140,"hit":210,"aps":0.25,"range":33,"speed":2,"splash":0,"shape":"cross","color":"#F7D154","skills":["rapid","spawn"],"skillMods":[{"params":{"range":0,"aps":20}},{"params":{"waves":3}}],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"armor","defVal":6,"level":0,"unlock":50,"name":"Brute","cost":2,"bodies":1,"hp":1100,"hit":98,"aps":1.1,"range":2,"speed":5,"splash":0,"shape":"square","color":"#8D99AE","skills":["armorHp","swift"],"skillMods":[null,null],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":20,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":40,"level":0,"unlock":50,"name":"Wisps","cost":1,"bodies":2,"hp":80,"hit":75,"aps":0.8,"range":19,"speed":4,"splash":0,"shape":"ring","color":"#ff90ff","skills":["stealth","skmv5oxj501"],"skillMods":[null,{"params":{},"cost":200}],"skillsInnate":[false,false]},{"burst":6,"pellets":2,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0.2,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Leaf Wizard","cost":2,"bodies":1,"hp":240,"hit":21,"aps":0.45,"range":27,"speed":5,"splash":0,"shape":"hexagon","color":"#00d200","skills":["rapid","range"],"skillMods":[null,null],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":5,"projSpeed":35,"minRange":0,"charge":1,"knockback":0,"windUp":0.5,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Earth Wizard","cost":2,"bodies":1,"hp":650,"hit":440,"aps":0.2,"range":24,"speed":3,"splash":2,"shape":"circle","color":"#24590d","skills":["regen","range"],"skillMods":[null,null],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":30,"defense":"none","defVal":0,"level":0,"unlock":100,"name":"Flame Wizard","cost":3,"bodies":1,"hp":2000,"hit":12,"aps":4,"range":15,"speed":2,"splash":0,"shape":"bar","color":"#b95018","skills":["armorHp","range"],"skillMods":[null,null],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":100,"name":"Steel Wizard","cost":3,"bodies":1,"hp":1900,"hit":150,"aps":0.9,"range":15,"speed":2,"splash":2,"shape":"bar","color":"#57535a","skills":["range","heavy"],"skillMods":[null,{"params":{"slow":20,"hit":20}}],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":40,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":100,"name":"Slime Wizard","cost":3,"bodies":1,"hp":700,"hit":480,"aps":0.2,"range":22,"speed":2,"splash":6,"shape":"ring","color":"#81f038","skills":["skmv5oxpgk2","range"],"skillMods":[null,null],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"armor","defVal":15,"level":0,"unlock":150,"splash":3,"skillsInnate":[false,false],"skillMods":[null,null],"name":"Ether Golem","cost":5,"bodies":1,"hp":3450,"hit":69,"aps":0.6,"range":5,"speed":2.5,"shape":"square","color":"#51005c","skills":["regen","armorHp"]},{"burst":1,"pellets":1,"spinUp":50,"spinHit":50,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":150,"splash":0,"skillsInnate":[false,false],"skillMods":[null,null],"name":"Sun Priest","cost":5,"bodies":1,"hp":2800,"hit":38,"aps":2,"range":18,"speed":3,"shape":"star","color":"#FFD23F","skills":["split","shrink"]},{"burst":3,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":22,"minRange":12,"charge":1,"knockback":0,"windUp":2,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":150,"splash":6,"skillsInnate":[false,false],"skillMods":[null,null],"name":"Meteor Caller","cost":5,"bodies":1,"hp":400,"hit":114,"aps":0.3,"range":50,"speed":2,"shape":"diamond","color":"#FF6B35","skills":["range","skmv5oxpgk2"]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":3,"knockback":4,"windUp":0,"flame":0,"defense":"armor","defVal":6,"level":0,"unlock":150,"splash":3,"skillsInnate":[false,false],"skillMods":[null,null],"name":"War Mammoth","cost":5,"bodies":1,"hp":2300,"hit":169,"aps":0.5,"range":3,"speed":9,"shape":"pentagon","color":"#A0785A","skills":["swift","armorHp"],"trample":50},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":150,"splash":0,"skillsInnate":[true,false],"skillMods":[null,null],"name":"Necromancer","cost":5,"bodies":1,"hp":2300,"hit":56,"aps":1,"range":20,"speed":2.2,"shape":"hexagon","color":"#9D4EDD","skills":["raiseDead","healer"]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":90,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Ent","cost":1,"bodies":2,"hp":400,"hit":25,"aps":1.1,"range":4,"speed":2,"splash":0,"shape":"square","color":"#0d3000","skills":["armorHp","forward"],"skillsInnate":[false,false],"skillMods":[{"params":{"armor":4,"hp":20}},null],"deathBlast":30},{"burst":1,"pellets":1,"spinUp":0.1,"pierce":0,"projSpeed":30,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"name":"Slimeshots","cost":2,"unlock":100,"bodies":10,"hp":95,"hit":7,"aps":0.8,"range":21,"speed":6,"splash":3,"shape":"diamond","color":"#20d300","skills":["range","heavy"],"skillsInnate":[false,false],"skillMods":[null,{"params":{"hit":25,"slow":0,"instant":0},"cost":150}]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Just a horse","cost":2,"bodies":1,"hp":700,"hit":200,"aps":1,"range":1,"speed":6,"splash":0,"shape":"horse","color":"#C8A27A","ram":1,"noFlank":1,"carrier":1,"skills":["gallop","armorHp","deathBurst"],"skillMods":[null,{"params":{"armor":4,"hp":20},"cost":150},null],"skillsInnate":[false,false,false]}],"matrix":[[0,-1,-0.866,-1,0.833,0.122,0.022,-1,0.489,-1,-0.404,-0.277,-0.938,0.442,-0.674,-0.484,0.301,-0.8,-0.722,0.958],[1,0,0.315,-0.91,0.375,0.375,0.667,-1,0.362,-0.803,0.246,-0.35,-0.779,-0.68,-0.936,0.558,-0.398,0.819,-0.529,0.946],[0.866,-0.315,0,-0.83,0.217,0.554,-0.242,-0.833,0.033,-1,-0.497,-0.511,-0.663,0.428,-0.925,-0.341,0.151,0.303,0.182,0.875],[1,0.91,0.83,0,-1,-0.204,0.734,-0.917,-0.868,-0.652,-0.12,-0.896,-0.47,-0.405,-1,-0.587,-0.186,1,0.298,0.7],[-0.833,-0.375,-0.217,1,0,-0.034,0.782,0.655,-0.137,-0.085,0.467,1,0.869,0.406,-0.746,-0.445,-0.456,1,-0.5,0.767],[-0.122,-0.375,-0.554,0.204,0.034,0,-0.567,0.453,-0.799,0.32,-0.535,-1,0.058,-0.547,0.069,-0.593,0.4,-0.673,0.897,0.824],[-0.022,-0.667,0.242,-0.734,-0.782,0.567,0,-1,-0.39,-0.676,-0.168,-0.529,0.594,0.275,-0.875,-0.245,-0.564,0.968,-0.643,0.883],[1,1,0.833,0.917,-0.655,-0.453,1,0,-0.51,-0.353,-0.105,-0.374,-0.69,-0.307,-0.412,-0.759,0.451,1,0.233,0.644],[-0.489,-0.362,-0.033,0.868,0.137,0.799,0.39,0.51,0,0.294,0.846,-0.274,0.851,0.489,-0.5,-0.154,-0.15,1,0.419,1],[1,0.803,1,0.652,0.085,-0.32,0.676,0.353,-0.294,0,0.585,-0.722,-0.698,-0.157,-1,-0.67,0.762,1,0.841,0.89],[0.404,-0.246,0.497,0.12,-0.467,0.535,0.168,0.105,-0.846,-0.585,0,-1,0.724,-0.479,-1,-0.114,-0.352,0.402,0.392,0.853],[0.277,0.35,0.511,0.896,-1,1,0.529,0.374,0.274,0.722,1,0,1,0.771,-1,0.855,0.844,1,0.494,1],[0.938,0.779,0.663,0.47,-0.869,-0.058,-0.594,0.69,-0.851,0.698,-0.724,-1,0,-0.901,-0.776,-0.753,-0.004,-0.098,0.86,0.866],[-0.442,0.68,-0.428,0.405,-0.406,0.547,-0.275,0.307,-0.489,0.157,0.479,-0.771,0.901,0,-0.38,0.361,0.426,-0.256,-0.285,0.845],[0.674,0.936,0.925,1,0.746,-0.069,0.875,0.412,0.5,1,1,1,0.776,0.38,0,-0.601,0.597,1,0.392,0.917],[0.484,-0.558,0.341,0.587,0.445,0.593,0.245,0.759,0.154,0.67,0.114,-0.855,0.753,-0.361,0.601,0,0.217,-0.142,0.909,0.831],[-0.301,0.398,-0.151,0.186,0.456,-0.4,0.564,-0.451,0.15,-0.762,0.352,-0.844,0.004,-0.426,-0.597,-0.217,0,-0.023,-0.176,0.937],[0.8,-0.819,-0.303,-1,-1,0.673,-0.968,-1,-1,-1,-0.402,-1,0.098,0.256,-1,0.142,0.023,0,0.093,0.875],[0.722,0.529,-0.182,-0.298,0.5,-0.897,0.643,-0.233,-0.419,-0.841,-0.392,-0.494,-0.86,0.285,-0.392,-0.909,0.176,-0.093,0,0.9],[-0.958,-0.946,-0.875,-0.7,-0.767,-0.824,-0.883,-0.644,-1,-0.89,-0.853,-1,-0.866,-0.845,-0.917,-0.831,-0.937,-0.875,-0.9,0]],"skills":[{"id":"regen","type":"regen","name":"Regeneration","cost":100,"params":{}},{"id":"poison","type":"poison","name":"Poison shot","cost":100,"params":{"pct":150}},{"id":"stealth","type":"stealth","name":"Stealth","cost":100,"params":{}},{"id":"armorHp","type":"armorHp","name":"Armor and health","cost":200,"params":{}},{"id":"spawn","type":"spawn","name":"Spawn goblins","cost":200,"params":{"every":7}},{"id":"rapid","type":"rapid","name":"Rapid fire","cost":100,"params":{}},{"id":"swift","type":"swift","name":"Swift strikes","cost":100,"params":{}},{"id":"heavy","type":"heavy","name":"Heavy shot","cost":100,"params":{}},{"id":"healer","type":"healer","name":"Healing touch","cost":200,"params":{}},{"id":"range","type":"range","name":"Long reach","cost":200,"params":{}},{"id":"shrink","type":"shrink","name":"Shortsight","cost":100,"params":{}},{"id":"skmv5oxj501","type":"ward","name":"Ward","cost":100,"params":{}},{"id":"skmv5oxpgk2","type":"slow","name":"Slow","cost":100,"params":{}},{"id":"raiseDead","type":"spawn","name":"Raise dead","cost":0,"params":{"unit":"Skeleton Archers","count":3,"every":2,"max":12}},{"id":"split","type":"split","name":"Split beam","cost":100,"params":{}},{"id":"forward","type":"forward","name":"Forward planting","cost":100,"params":{}},{"id":"gallop","type":"swift","name":"Gallop","cost":200,"params":{"speed":25,"hit":0}},{"id":"deathBurst","type":"blast","name":"Death burst","cost":200,"params":{"radius":7,"pct":100}}]};
   const ROLES = {
     'Goblin Swarm': 'Fast melee swarm. Soaks shots and overwhelms single-target units.',
     'Skeleton Archers': 'Cheap ranged squad that deals steady damage from behind.',
@@ -2071,6 +2168,7 @@ if (typeof module !== 'undefined') module.exports = Game;
     'Crossbow Volley': 'Fires 4-bolt bursts down one line. Lined-up targets take every bolt.',
     'Ballista': 'Slow piercing bolts from long range. Can’t hit anything close.',
     'Boar Riders': 'Fast chargers whose first hit doubles and knocks small bodies back.',
+    'Just a horse': 'Just a horse. Gallops past everything to ram the enemy tower, and might have something hiding inside: place a squad on its tile and it rides along unseen until the horse falls.',
   };
   // ---------- role symbols: what a unit is, what it beats, one extra trait, and its range ----------
   // [is, beats, extra] for the built-in units. Units from Counter Lab get theirs from their stats (autoRole).
@@ -2084,10 +2182,11 @@ if (typeof module !== 'undefined') module.exports = Game;
     'Sun Priest': ['giant', 'giants'],
     'Steel Wizard': ['giant', 'both'], 'Earth Wizard': ['giant', 'both'],
     'War Mammoth': ['giant', null, 'charger'], 'Necromancer': ['giant', null, 'summoner'],
+    'Just a horse': ['single', null, 'raider'],
   };
   const IS_TXT = { swarm: 'Swarm', group: 'Small group', single: 'Single', giant: 'Giant' };
   const BEATS_TXT = { crowds: 'beats crowds', giants: 'beats giants', both: 'beats crowds and giants' };
-  const EXTRA_TXT = { tank: 'tank', artillery: 'artillery', summoner: 'summoner', charger: 'charger', ward: 'ward' };
+  const EXTRA_TXT = { tank: 'tank', artillery: 'artillery', summoner: 'summoner', charger: 'charger', ward: 'ward', raider: 'rams the tower, carries a hidden squad' };
   const RANGE_TXT = ['melee', 'mid range', 'long range'];
   const ico = (body, cls) => `<svg class="${cls}" viewBox="0 0 16 16" aria-hidden="true">${body}</svg>`;
   const dots = (pts, r) => pts.map(([x, y]) => `<circle cx="${x}" cy="${y}" r="${r}"/>`).join('');
@@ -2108,6 +2207,7 @@ if (typeof module !== 'undefined') module.exports = Game;
     ward: '<circle cx="8" cy="8" r="6.2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="2.4 1.6"/><circle cx="8" cy="8" r="2.4"/>',
     artillery: '<path d="M2 14Q6 -2 13 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="2.2 1.6"/><circle cx="13" cy="12.6" r="2.2"/>',
     charger: '<path d="M2 3l5.5 5L2 13M8.5 3 14 8l-5.5 5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/>',
+    raider: '<path d="M3 15V6h2v2h2V6h2v2h2V6h2v9z"/>',
     summoner: '<circle cx="8" cy="8" r="6.3" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M8 4.5v7M4.5 8h7" stroke="currentColor" stroke-width="2"/>',
   };
   const rangeSvg = (n) => ico(`<circle cx="1.8" cy="8" r="1.6"/>${[4, 7.5, 11].map((r, k) => {
@@ -2119,7 +2219,7 @@ if (typeof module !== 'undefined') module.exports = Game;
     const aoe = u.splash >= 2 || u.pellets > 1 || u.flame > 0 || u.pierce > 0;
     const big = u.hit >= 100 || u.spinUp > 0 || u.bodies >= 6;
     const beats = aoe && big ? 'both' : aoe ? 'crowds' : big ? 'giants' : null;
-    const extra = u.charge > 1 ? 'charger' : u.spawn ? 'summoner' : u.defense === 'ward' ? 'ward'
+    const extra = u.ram || u.carrier ? 'raider' : u.charge > 1 ? 'charger' : u.spawn ? 'summoner' : u.defense === 'ward' ? 'ward'
       : u.defense === 'armor' && u.defVal >= 10 ? 'tank' : u.minRange > 0 || u.range >= 40 ? 'artillery' : null;
     return [is, beats, extra];
   }
@@ -2657,15 +2757,18 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
       for (let row = 0; row < Game.ROWS; row++) for (let c = 0; c < Game.COLS; c++) {
         if (Game.canPlaceAt(m, me, c, row, pu) && !Game.occupied(m, me, c, row)) ctx.strokeRect(scol(c) * t + 3, srow(row) * t + 3, t - 6, t - 6);
       }
+      // your carriers with room for this unit
+      ctx.strokeStyle = css('--gold'); ctx.globalAlpha = 0.8; ctx.lineWidth = 1.5;
+      if (pu != null) for (const sq of m.armies[me]) if (Game.boardable(m, me, sq.col, sq.row, pu) && !(drag && drag.id === sq.id)) ctx.strokeRect(scol(sq.col) * t + 2, srow(sq.row) * t + 2, t - 4, t - 4);
       ctx.globalAlpha = 1;
     }
-    if (hoverTile && (selected !== null || moving != null) && Game.canPlaceAt(m, me, hoverTile.col, hoverTile.row, placingUnit()) && !Game.occupied(m, me, hoverTile.col, hoverTile.row)) {
+    if (hoverTile && (selected !== null || moving != null) && Game.canPlaceAt(m, me, hoverTile.col, hoverTile.row, placingUnit()) && (!Game.occupied(m, me, hoverTile.col, hoverTile.row) || (placingUnit() != null && Game.boardable(m, me, hoverTile.col, hoverTile.row, placingUnit())))) {
       ctx.fillStyle = css('--you'); ctx.globalAlpha = 0.18;
       ctx.fillRect(scol(hoverTile.col) * t, srow(hoverTile.row) * t, t, t); ctx.globalAlpha = 1;
     }
     // the opponent's squads from this round stay hidden until the fight
     // a squad they moved this round still shows on its old tile
-    for (const sq of m.armies[foe()]) if (sq.round < m.round || phase !== 'deploy') {
+    for (const sq of m.armies[foe()]) if ((sq.round < m.round || phase !== 'deploy') && !Game.hiddenFromFoe(m, sq)) {
       const p = phase === 'deploy' ? Game.seenAt(m, sq) : sq;
       drawSquad(p === sq ? sq : { ...sq, col: p.col, row: p.row }, foe(), false);
     }
@@ -2674,8 +2777,16 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
         ctx.strokeStyle = css('--muted'); ctx.setLineDash([2, 4]); ctx.lineWidth = 1;
         ctx.strokeRect(scol(sq.from.col) * t + 4, srow(sq.from.row) * t + 4, t - 8, t - 8); ctx.setLineDash([]);
       }
+      if (Game.isRider(sq)) continue; // drawn as a badge on its carrier
       const at = drag && drag.moved && drag.id === sq.id ? { ...sq, col: drag.over.col, row: drag.over.row } : sq;
       drawSquad(at, me, (sq.round === m.round || sq.movedRound === m.round) && phase === 'deploy');
+      const rider = Game.riderOf(m, me, sq);
+      if (rider) { // what rides inside: a small disc with its shape, bottom left of the tile (only you see it)
+        const ru = units[rider.unit], br = Math.max(6, t * 0.2), bx = scol(at.col) * t + br + 2, by = (srow(at.row) + 1) * t - br - 2;
+        ctx.fillStyle = css('--bg'); ctx.strokeStyle = teamCol(me); ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(bx, by, br, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = ru.color; Shapes.draw(ctx, ru.shape, bx, by, br * 0.55, 1);
+      }
       if (moving === sq.id && phase === 'deploy') {
         ctx.strokeStyle = css('--gold'); ctx.lineWidth = 2;
         ctx.strokeRect(scol(sq.col) * t + 1, srow(sq.row) * t + 1, t - 2, t - 2);
@@ -2716,7 +2827,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
     }
     ctx.globalAlpha = 1;
     for (const b of bt.bodies) {
-      if (b.alive) continue;
+      if (b.alive || b.boarded) continue; // a rider still inside its carrier isn't a corpse
       ctx.fillStyle = muted; ctx.globalAlpha = 0.18;
       ctx.beginPath(); ctx.arc(PX(b.x), PY(b.y), Math.max(1.5, radius(b.u) * 0.45), 0, Math.PI * 2); ctx.fill();
     }
@@ -2899,6 +3010,8 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
       if (m.round === Game.FLANK.round && selected === null && !fresh) hint = `Flank columns are open: you can now also deploy on the blue edge columns on the enemy's half, and they can on the red ones on yours. A squad placed there can't move or attack for the first ${Game.FLANK.delay} s of its first fight; after that it starts like any other.`;
       if (m.round === 1 && selected === null && m.armies[me].some(s => s.free)) hint = 'Your package squads are already on the board. Drag them where you want them, or tap one to take it back.';
       if (moveMode) hint = moving == null ? `Tap one of your squads from an earlier round to move it (${Game.CONFIG.moveCost} gold, once per round).` : `Tap a free tile to move ${esc(units[m.armies[me].find(s => s.id === moving).unit].name)} there, or drag it.`;
+      if (selected !== null && !moveMode && m.armies[me].some(q => Game.boardable(m, me, q.col, q.row, selected))) hint += ` Or tap your ${esc(units[m.armies[me].find(q => Game.boardable(m, me, q.col, q.row, selected)).unit].name)} (gold outline) to hide this squad inside it.`;
+      if (selected !== null && Game.isCarrier(m, selected)) hint += ` It carries one squad of any other unit, hidden from your opponent: place one on its tile.`;
       const freeL = Game.freeLeft(m, me);
       if (freeL.length && !placingTower() && selected === null) hint = `Place your free package squads: ${[...new Set(freeL)].map(ui => `${freeL.filter(x => x === ui).length}× ${esc(units[ui].name)}`).join(', ')}. They cost no gold and no deployments.`;
       if (choosingPack()) hint = `Pick your starting package and character. Both units are unlocked for you and you get their squads for free, plus ${m.gold[me]} gold to spend. The character’s ability lasts the whole match. Your opponent picks from their own packages.${(() => { const mp = Game.mapOf(m); return mp ? ` Map: <b>${esc(mp.name)}</b>. ${esc(mp.text)}` : ''; })()}`;
@@ -3291,6 +3404,9 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
       if (u.trample > 0) t.push(`tramples ${u.trample}%`);
       if (u.deathBlast > 0) t.push(`explodes on death for ${u.deathBlast}% of max health within ${Engine.BLAST_RADIUS} m`);
       if (u.windUp > 0) t.push(`wind-up ${u.windUp} s`);
+      if (u.ram) t.push(`NEVER ATTACKS: runs straight at the enemy tower (the nearest enemy once it is down) and rams it once for its hit (${n1(u.hit)}), then is destroyed`);
+      if (u.carrier) t.push('CARRIES ONE SQUAD of any other unit, hidden from the opponent until it is destroyed: place a squad on its tile (price and deployment as usual) and it rides inside, then jumps out where the carrier falls');
+      if (u.noFlank) t.push('can\'t be placed on flank tiles');
       const sk = (u.skillDefs || []).map((d, k) => d ? `skill ${k + 1} "${d.name}" (${Game.isInnate(m, i, k) ? 'BUILT IN: always on for both players, free' : `${Game.skillCost(m, i, k)} gold${Game.hasSkill(m, 1, i, k) ? ', YOU OWN IT' : ''}`}): ${Engine.describeSkill(d)}` : null).filter(Boolean);
       const lock = Game.isUnlocked(m, 1, i) ? (Game.unlockCost(m, i, 1) ? ' [unlocked]' : '') : ` [LOCKED: unlock once for ${Game.unlockCost(m, i, 1)} gold before you can place it]`;
       return `- ${u.name}${lock}: price ${Game.unitCostOf(u)}, ${u.bodies} ${u.bodies === 1 ? 'body' : 'bodies'} x ${n1(u.hp, 0)} hp each, hit ${n1(u.hit)} x ${n1(u.aps, 2)}/s, range ${u.range} m, speed ${u.speed} m/s${t.length ? ', ' + t.join(', ') : ''}. Level-up cost ${Game.levelCost(u)}.${sk.length ? '\n    ' + sk.join('\n    ') : ''}`;
@@ -3299,9 +3415,9 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
     const matrix = units.map((u, i) => `${tag(u)}: ` + units.map((v, j) => i === j ? null : `${tag(v)} ${M[i][j] > 0 ? '+' : ''}${Math.round(M[i][j] * 100)}`).filter(Boolean).join(', ')).join('\n');
     const mine = m.armies[1].map(s => {
       const u = units[s.unit], need = s.level < Engine.MAX_LEVEL ? Math.round(Game.xpNeeded(u, s.level)) : null;
-      return `- id ${s.id}: ${u.name} at col ${s.col}, row ${s.row}, level ${s.level + 1}${need ? `, XP ${Math.round(s.xp)}/${need}` : ', max level'}${Game.isReady(m, s) ? ', READY TO LEVEL UP' : ''}${s.round < m.round ? `, sells for ${Game.sellValue(m, s)}` : ''}`;
+      return `- id ${s.id}: ${u.name} at col ${s.col}, row ${s.row}${Game.isRider(s) ? ` (riding inside your ${units[(Game.carrierOf(m, 1, s) || s).unit].name}, id ${s.in})` : ''}, level ${s.level + 1}${need ? `, XP ${Math.round(s.xp)}/${need}` : ', max level'}${Game.isReady(m, s) ? ', READY TO LEVEL UP' : ''}${s.round < m.round ? `, sells for ${Game.sellValue(m, s)}` : ''}`;
     });
-    const theirs = m.armies[0].filter(s => s.round < m.round).map(s => { const p = Game.seenAt(m, s); return `- ${units[s.unit].name} at col ${p.col}, row ${p.row}, level ${s.level + 1}`; });
+    const theirs = m.armies[0].filter(s => s.round < m.round && !Game.hiddenFromFoe(m, s)).map(s => { const p = Game.seenAt(m, s); return `- ${units[s.unit].name} at col ${p.col}, row ${p.row}, level ${s.level + 1}`; });
     const theirSkills = [];
     units.forEach((u, i) => Engine.SLOTS.forEach(k => { if (Game.skillVisible(m, 0, i, k)) theirSkills.push(`${(u.skillDefs[k] || {}).name} on ${u.name}`); }));
     const hist = m.history.slice(-4).map(h => `- round ${h.round}: ${h.timeout ? 'time ran out' : h.winner === 1 ? 'you won' : h.winner === 0 ? 'you lost' : 'draw'}; you took ${h.dmg[1]} damage, they took ${h.dmg[0]}`);
@@ -3570,7 +3686,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   cv.addEventListener('pointerdown', (ev) => {
     if (phase !== 'deploy' || !m || !editable() || choosingPack() || placingTower()) return;
     const t = tileAt(ev); if (!t) return;
-    const sq = m.armies[me].find(s => s.col === t.col && s.row === t.row);
+    const sq = Game.squadAt(m, me, t.col, t.row);
     if (!sq) return;
     if (sq.round < m.round && !(moveMode || Game.movedId(m, me) === sq.id)) return;
     if (!Game.canMove(m, me, sq)) return;
@@ -3603,9 +3719,9 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (performance.now() - dragEndAt < 400) return;
     if (placingTower()) { if (editable() && Game.placeTower(m, me, t.col, t.row)) changed(); return; }
     if (moveMode && editable()) { // Move ability: pick an older squad, then a free tile
-      const own = m.armies[me].find(s => s.col === t.col && s.row === t.row);
+      const own = Game.squadAt(m, me, t.col, t.row), mv = moving != null && m.armies[me].find(s => s.id === moving);
+      if (mv && (!own || Game.boardable(m, me, t.col, t.row, mv.unit)) && Game.moveSquad(m, me, moving, t.col, t.row)) { moveMode = false; moving = null; changed(); return; }
       if (own && own.round < m.round) { moving = moving === own.id ? null : own.id; changed(); return; }
-      if (!own && moving != null && Game.moveSquad(m, me, moving, t.col, t.row)) { moveMode = false; moving = null; changed(); }
       return;
     }
     if (Game.towerAt(m, me, t.col, t.row)) {
@@ -3619,13 +3735,22 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (Game.altarRound(m) && selected === null && freeTile && Math.abs(t.col - (Game.COLS - 1) / 2) < 1 && Math.abs(t.row - (Game.ROWS - 1) / 2) < 1) { openAltarSheet(); return; }
     if (Game.hailRound(m) && selected === null && freeTile && Game.hailTiles(m).some(h => h.col === t.col && h.row === t.row)) { openMapSheet(); return; }
     if ((shroomShown(m, t.col, t.row) || myRemovalNow(t.col, t.row)) && selected === null && !Game.occupied(m, me, t.col, t.row) && !m.armies[foe()].some(s => { const p = Game.seenAt(m, s); return p.col === t.col && p.row === t.row && s.round < m.round; })) { openMapSheet(t); return; }
-    const own = m.armies[me].find(s => s.col === t.col && s.row === t.row);
+    const own = Game.squadAt(m, me, t.col, t.row);
+    // a unit selected in the shop goes inside your horse (or other carrier) with room
+    if (own && selected !== null && editable() && Game.boardable(m, me, t.col, t.row, selected)) {
+      if (Game.place(m, me, selected, t.col, t.row)) {
+        if (!Game.freeLeft(m, me).includes(selected) && (m.gold[me] < Game.unitCostOf(units[selected]) || Game.deploysLeft(m, me) <= 0)) selected = null;
+        changed();
+      }
+      return;
+    }
     if (own) {
-      if (own.round === m.round) { if (editable() && Game.unplace(m, me, t.col, t.row)) changed(); }
+      if (Game.riderOf(m, me, own)) openPairSheet(own, Game.riderOf(m, me, own));
+      else if (own.round === m.round) { if (editable() && Game.unplace(m, me, t.col, t.row)) changed(); }
       else openSheet(own.unit, own, me);
       return;
     }
-    const enemy = m.armies[foe()].find(s => { const p = Game.seenAt(m, s); return p.col === t.col && p.row === t.row && s.round < m.round; });
+    const enemy = m.armies[foe()].find(s => { const p = Game.seenAt(m, s); return !Game.hiddenFromFoe(m, s) && p.col === t.col && p.row === t.row && s.round < m.round; });
     if (enemy) { openSheet(enemy.unit, enemy, foe()); return; }
     if (selected !== null && editable() && Game.canPlaceAt(m, me, t.col, t.row, selected)) {
       if (Game.place(m, me, selected, t.col, t.row)) {
@@ -3758,7 +3883,53 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if ($('unbribe')) $('unbribe').addEventListener('click', () => { if (editable() && Game.undoBribe(m, me)) { changed(); openMapSheet(tile); } });
     if (tile) bindShroom(tile.col, tile.row, () => openMapSheet(tile));
   }
+  // A unit's sheet. A carrier with a rider inside (yours) shows both squads side by side.
   function openSheet(i, sq, side) {
+    const owner = side === undefined ? me : side;
+    if (sq && m && owner === me) {
+      const c = Game.isRider(sq) ? Game.carrierOf(m, me, sq) : sq, r = c && Game.riderOf(m, me, c);
+      if (c && r) { openPairSheet(c, r); return; }
+    }
+    const p = sheetPane(i, sq, side);
+    $('sheet').innerHTML = `
+      <div class="bar"><h3 id="sheet-h"><span style="color:${p.u.color}">${Shapes.svg(p.u.shape, 18)}</span> ${esc(p.u.name)}</h3><button class="btn small" id="close">Close</button></div>
+      ${p.html}`;
+    $('sheet-back').hidden = false;
+    $('close').addEventListener('click', closeSheet);
+    bindPane($('sheet'), i, sq, side, () => openSheet(i, sq, side));
+    if (sq && m) { const q = side === me ? sq : Game.seenAt(m, sq); bindShroom(q.col, q.row, () => openSheet(i, sq, side)); }
+    if ($('unlock')) $('unlock').addEventListener('click', () => { unlockAsk = i; openSheet(i, sq, side); }); // ask first
+    if ($('unlock-no')) $('unlock-no').addEventListener('click', () => { unlockAsk = null; openSheet(i, sq, side); });
+    if ($('unlock-yes')) $('unlock-yes').addEventListener('click', () => { unlockAsk = null; if (editable() && Game.unlock(m, me, i)) { selected = i; shopTier = tierOf(i); changed(); openSheet(i, sq, side); } });
+    if ($('unlock-undo')) $('unlock-undo').addEventListener('click', () => { if (editable() && Game.undoUnlock(m, me, i)) { if (selected === i) selected = null; changed(); openSheet(i, sq, side); } });
+    ($('sheet').querySelector('[data-act="lvl-up"]') || $('close')).focus();
+  }
+  // your carrier and the squad riding inside it, side by side
+  function openPairSheet(c, r) {
+    const reopen = () => {
+      const c2 = m.armies[me].find(s => s.id === c.id), r2 = m.armies[me].find(s => s.id === r.id);
+      if (c2 && r2 && r2.in === c2.id) openPairSheet(c2, r2); else if (c2) openSheet(c2.unit, c2, me); else if (r2) openSheet(r2.unit, r2, me); else closeSheet();
+    };
+    const pc = sheetPane(c.unit, c, me, true), pr = sheetPane(r.unit, r, me, true);
+    const head = (p) => `<h4 style="margin:0;font-family:var(--font-display);font-size:16px;display:flex;gap:6px;align-items:center"><span style="color:${p.u.color};display:inline-flex">${Shapes.svg(p.u.shape, 16)}</span>${esc(p.u.name)}</h4>`;
+    $('sheet').innerHTML = `
+      <div class="bar"><h3 id="sheet-h">${esc(pc.u.name)} · carrying ${esc(pr.u.name)}</h3><button class="btn small" id="close">Close</button></div>
+      <p class="hint" style="margin:0">Your opponent can’t see what rides inside. It jumps out where ${esc(pc.u.name)} is destroyed.</p>
+      ${shroomBlock(c.col, c.row)}
+      <div class="pair" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start">
+        <div data-pane="c" style="display:grid;gap:10px;min-width:0">${head(pc)}${pc.html}</div>
+        <div data-pane="r" style="display:grid;gap:10px;min-width:0;border-left:1px solid var(--line);padding-left:12px">${head(pr)}${pr.html}</div>
+      </div>`;
+    $('sheet-back').hidden = false;
+    $('close').addEventListener('click', closeSheet);
+    bindPane($('sheet').querySelector('[data-pane="c"]'), c.unit, c, me, reopen);
+    bindPane($('sheet').querySelector('[data-pane="r"]'), r.unit, r, me, reopen);
+    bindShroom(c.col, c.row, reopen);
+    $('close').focus();
+  }
+  // the body of a unit's sheet (everything under the title). Buttons carry data-act, bound by bindPane.
+  // compact: for the side-by-side sheet (no shroom block; the tile's is shown once above)
+  function sheetPane(i, sq, side, compact) {
     const base = units[i];
     const owner = side === undefined ? me : side;
     const u = Engine.leveled(m ? Game.unitFor(m, owner, i) : base, sq ? sq.level : 0);
@@ -3772,12 +3943,14 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
         const boughtNow = sq.boughtLevels && sq.boughtLevels[m.round] > 0;
         const btns = [];
         if (Game.isReady(m, sq)) btns.push(m.gold[me] >= cost && editable()
-          ? `<button class="btn primary" id="lvl-up">Level up · ${cost} gold</button>`
+          ? `<button class="btn primary" data-act="lvl-up">Level up · ${cost} gold</button>`
           : `<button class="btn primary" disabled>${editable() ? `Need ${cost} gold` : `Level up · ${cost} gold`}</button>`);
-        if (boughtNow && editable()) btns.push(`<button class="btn" id="lvl-undo">Undo level-up</button>`);
-        if (sq.round < m.round && editable() && Game.movedId(m, me) === sq.id) btns.push(`<button class="btn" id="move-undo">Undo move · +${Game.CONFIG.moveCost}</button>`);
-        else if (sq.round < m.round && editable() && Game.movedId(m, me) == null) btns.push(`<button class="btn" id="move-sq" ${m.gold[me] >= Game.CONFIG.moveCost ? '' : 'disabled'}>Move · ${Game.CONFIG.moveCost} gold</button>`);
-        if (sq.round < m.round && editable()) btns.push(`<button class="btn" id="sell">Sell · ${Game.sellValue(m, sq)} gold</button>`);
+        if (boughtNow && editable()) btns.push(`<button class="btn" data-act="lvl-undo">Undo level-up</button>`);
+        if (sq.round === m.round && editable()) btns.push(`<button class="btn" data-act="take-back">Take back${sq.cost ? ` · +${sq.cost}` : ''}</button>`);
+        if (sq.round === m.round && editable() && Game.isRider(sq)) btns.push(`<button class="btn" data-act="move-sq">Take out</button>`);
+        if (sq.round < m.round && editable() && Game.movedId(m, me) === sq.id) btns.push(`<button class="btn" data-act="move-undo">Undo move · +${Game.CONFIG.moveCost}</button>`);
+        else if (sq.round < m.round && editable() && Game.movedId(m, me) == null) btns.push(`<button class="btn" data-act="move-sq" ${m.gold[me] >= Game.CONFIG.moveCost ? '' : 'disabled'}>${Game.isRider(sq) ? 'Take out' : 'Move'} · ${Game.CONFIG.moveCost} gold</button>`);
+        if (sq.round < m.round && editable()) btns.push(`<button class="btn" data-act="sell">Sell · ${Game.sellValue(m, sq)} gold</button>`);
         if (btns.length) lvl += `<div style="display:flex;gap:8px;flex-wrap:wrap">${btns.join('')}</div>`;
         else if (next) lvl += `<p class="hint" style="margin:0">Earns XP from damage it deals and takes. Killing leveled enemies pays extra.</p>`;
       }
@@ -3786,6 +3959,9 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     const good = units.map((v, j) => [row[j], v.name]).filter(x => x[0] > 0.3).sort((a, b) => b[0] - a[0]).slice(0, 3);
     const bad = units.map((v, j) => [row[j], v.name]).filter(x => x[0] < -0.3).sort((a, b) => a[0] - b[0]).slice(0, 3);
     const tr = [];
+    if (u.ram) tr.push(`Runs for the enemy tower and rams it for ${Math.round(u.hit)}`);
+    if (u.carrier) tr.push('Carries one squad inside, hidden');
+    if (u.noFlank) tr.push('Can’t deploy on flanks');
     if (u.burst > 1) tr.push(`Burst ${u.burst}`);
     if (u.flame > 0) tr.push(`Flame cone ${u.flame}°, reaches ${Math.round(u.range * (Game.SETTINGS.flameReach || 1) * 10) / 10} m`);
     else if (u.pellets > 1) tr.push(`Shotgun ${u.pellets}`);
@@ -3802,44 +3978,39 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (u.defense === 'armor') tr.push(`Armor ${u.defVal}`);
     if (u.defense === 'ward') tr.push(`Ward ${u.defVal}`);
     if (u.splash > 0) tr.push(`Splash ${u.splash} m`);
-    $('sheet').innerHTML = `
-      <div class="bar"><h3 id="sheet-h"><span style="color:${u.color}">${Shapes.svg(u.shape, 18)}</span> ${esc(u.name)}</h3><button class="btn small" id="close">Close</button></div>
+    const html = `
       ${(() => { const r = roleOf(i, owner === me ? me : null); return `<p class="roleline"><span class="roles">${roleIcons(r)}${rangeSvg(r.range)}</span><span>${r.text}</span></p>`; })()}
       <p class="role" style="margin:0">${ROLES[u.name] && !customSet ? ROLES[u.name] : customSet ? `From a Counter Lab roster · ${Game.unitCostOf(base)} gold` : ''}</p>
       ${lvl}
-      ${sq && m ? (() => { const p = side === me ? sq : Game.seenAt(m, sq); return shroomBlock(p.col, p.row); })() : ''}
+      ${sq && m && !compact ? (() => { const q = side === me ? sq : Game.seenAt(m, sq); return shroomBlock(q.col, q.row); })() : ''}
       ${unlockBlock(i, side)}
       ${tr.length ? `<div class="traits">${tr.map(x => `<span>${x}</span>`).join('')}</div>` : ''}
       ${skillBlock(i, side)}
       <div class="stats num">
         <div><span>Bodies</span>${u.bodies}</div><div><span>Health</span>${Math.round(u.hp)}</div>
-        <div><span>Hit</span>${Math.round(u.hit)}</div><div><span>Attacks/s</span>${u.aps}</div>
-        <div><span>Range</span>${u.range} m</div><div><span>Speed</span>${u.speed} m/s</div>
+        <div><span>${u.ram ? 'Ram' : 'Hit'}</span>${Math.round(u.hit)}</div>${u.ram ? '' : `<div><span>Attacks/s</span>${u.aps}</div>`}
+        ${u.ram ? '' : `<div><span>Range</span>${u.range} m</div>`}<div><span>Speed</span>${Math.round(u.speed * 100) / 100} m/s</div>
       </div>
       <div class="vs">
         <div class="good"><h4>Strong against</h4><ul>${good.length ? good.map(x => `<li>${esc(x[1])}</li>`).join('') : '<li>No hard counters</li>'}</ul></div>
         <div class="bad"><h4>Weak against</h4><ul>${bad.length ? bad.map(x => `<li>${esc(x[1])}</li>`).join('') : '<li>No hard counters</li>'}</ul></div>
       </div>`;
-    $('sheet-back').hidden = false;
-    $('close').addEventListener('click', closeSheet);
-    const after = () => { changed(); openSheet(i, sq, side); };
-    if (sq && m) { const p = side === me ? sq : Game.seenAt(m, sq); bindShroom(p.col, p.row, () => openSheet(i, sq, side)); }
-    if ($('lvl-up')) $('lvl-up').addEventListener('click', () => { if (editable() && Game.levelUp(m, me, sq.id)) after(); });
-    if ($('lvl-undo')) $('lvl-undo').addEventListener('click', () => { if (editable() && Game.undoLevel(m, me, sq.id)) after(); });
-    $('sheet').querySelectorAll('[data-skill]').forEach(b => b.addEventListener('click', () => { if (editable() && Game.buySkill(m, me, i, +b.dataset.skill)) after(); }));
-    if ($('unlock')) $('unlock').addEventListener('click', () => { unlockAsk = i; openSheet(i, sq, side); }); // ask first
-    if ($('unlock-no')) $('unlock-no').addEventListener('click', () => { unlockAsk = null; openSheet(i, sq, side); });
-    if ($('unlock-yes')) $('unlock-yes').addEventListener('click', () => { unlockAsk = null; if (editable() && Game.unlock(m, me, i)) { selected = i; shopTier = tierOf(i); after(); } });
-    if ($('unlock-undo')) $('unlock-undo').addEventListener('click', () => { if (editable() && Game.undoUnlock(m, me, i)) { if (selected === i) selected = null; after(); } });
-    $('sheet').querySelectorAll('[data-unskill]').forEach(b => b.addEventListener('click', () => { if (editable() && Game.undoSkill(m, me, i, +b.dataset.unskill)) after(); }));
-    if ($('move-sq')) $('move-sq').addEventListener('click', () => { if (!editable()) return; closeSheet(); moveMode = true; moving = sq.id; selected = null; changed(); });
-    if ($('move-undo')) $('move-undo').addEventListener('click', () => { if (editable() && Game.undoMove(m, me)) after(); });
-    if ($('sell')) $('sell').addEventListener('click', () => {
-      const btn = $('sell');
+    return { u, html };
+  }
+  function bindPane(root, i, sq, side, reopen) {
+    const on = (act, fn) => { const b = root.querySelector(`[data-act="${act}"]`); if (b) b.addEventListener('click', () => fn(b)); };
+    const after = () => { changed(); reopen(); };
+    on('lvl-up', () => { if (editable() && Game.levelUp(m, me, sq.id)) after(); });
+    on('lvl-undo', () => { if (editable() && Game.undoLevel(m, me, sq.id)) after(); });
+    on('take-back', () => { if (editable() && Game.unplaceSquad(m, me, sq.id)) after(); });
+    root.querySelectorAll('[data-skill]').forEach(b => b.addEventListener('click', () => { if (editable() && Game.buySkill(m, me, i, +b.dataset.skill)) after(); }));
+    root.querySelectorAll('[data-unskill]').forEach(b => b.addEventListener('click', () => { if (editable() && Game.undoSkill(m, me, i, +b.dataset.unskill)) after(); }));
+    on('move-sq', () => { if (!editable()) return; closeSheet(); moveMode = true; moving = sq.id; selected = null; changed(); });
+    on('move-undo', () => { if (editable() && Game.undoMove(m, me)) after(); });
+    on('sell', (btn) => {
       if (!btn.dataset.sure) { btn.dataset.sure = '1'; btn.textContent = `Tap again to sell for ${Game.sellValue(m, sq)}`; btn.classList.add('primary'); return; }
       if (editable() && Game.sell(m, me, sq.id)) { closeSheet(); changed(); }
     });
-    ($('lvl-up') || $('close')).focus();
   }
   function closeSheet() { $('sheet-back').hidden = true; loaderRun++; unlockAsk = null; }
 
@@ -4056,7 +4227,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   function syncState() {
     const s = snapshot(m);
     if (phase === 'deploy') {
-      s.armies[0] = s.armies[0].filter(q => q.round < m.round).map(q => { // a squad moved this round shows on its old tile
+      s.armies[0] = s.armies[0].filter(q => q.round < m.round && !Game.hiddenFromFoe(m, q)).map(q => { // a squad moved this round shows on its old tile
         if (q.from && q.movedRound === m.round) { q.col = q.from.col; q.row = q.from.row; }
         delete q.from; delete q.movedRound; return q;
       });
@@ -4115,12 +4286,21 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     m.tech[1] = tech;
     const army = d.army.filter(s => s && Number.isInteger(s.unit) && s.unit >= 0 && s.unit < n && Number.isInteger(s.col) && s.col >= 0 && s.col < Game.COLS && Number.isInteger(s.row) && Game.canPlaceAt(m, 1, s.col, s.row, s.unit));
     const seen = new Set();
-    m.armies[1] = army.filter(s => { const k = s.col + ',' + s.row; if (seen.has(k)) return false; seen.add(k); return true; }).map(s => ({
+    m.armies[1] = army.filter(s => { const k = Number.isInteger(s.in) ? 'in' + s.in : s.col + ',' + s.row; if (seen.has(k)) return false; seen.add(k); return true; }).map(s => ({
+      ...(Number.isInteger(s.in) ? { in: s.in } : {}),
       id: s.id | 0, unit: s.unit, col: s.col, row: s.row, round: s.round | 0, xp: Math.max(0, +s.xp || 0),
       level: Math.max(0, Math.min(Engine.MAX_LEVEL, s.level | 0)), cost: Math.max(0, +s.cost || 0), ...(s.free ? { free: true } : {}),
       ...(s.boughtLevels && typeof s.boughtLevels === 'object' ? { boughtLevels: s.boughtLevels } : {}),
-      ...(s.from && (s.movedRound | 0) === m.round && (s.round | 0) < m.round && Number.isInteger(s.from.col) && Number.isInteger(s.from.row) ? { from: { col: s.from.col, row: s.from.row }, movedRound: m.round } : {}),
+      ...(s.from && (s.movedRound | 0) === m.round && (s.round | 0) < m.round && Number.isInteger(s.from.col) && Number.isInteger(s.from.row) ? { from: { col: s.from.col, row: s.from.row, ...(Number.isInteger(s.from.in) ? { in: s.from.in } : {}) }, movedRound: m.round } : {}),
     }));
+    // riders: each inside a carrier squad on the same tile, one per carrier, never a carrier itself
+    const byId = new Map(m.armies[1].map(q => [q.id, q])), full = new Set();
+    m.armies[1] = m.armies[1].filter(q => {
+      if (q.in == null) return true;
+      const c = byId.get(q.in);
+      if (!c || c.in != null || !Game.isCarrier(m, c.unit) || Game.isCarrier(m, q.unit) || c.col !== q.col || c.row !== q.row || full.has(c.id)) return false;
+      full.add(c.id); return true;
+    });
     // the guest's move this round: one squad at most
     if (!m.moved) m.moved = [null, null];
     m.moved[1] = null;

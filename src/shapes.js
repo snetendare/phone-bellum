@@ -1,7 +1,7 @@
 // ===== Unit shapes (shared by Counter Lab and the demo) =====
 const Shapes = (() => {
-  const LIST = ['circle', 'ring', 'square', 'triangle', 'diamond', 'pentagon', 'hexagon', 'star', 'cross', 'bar'];
-  const LABELS = { circle: 'Circle', ring: 'Ring', square: 'Square', triangle: 'Triangle', diamond: 'Diamond', pentagon: 'Pentagon', hexagon: 'Hexagon', star: 'Star', cross: 'Cross', bar: 'Bar' };
+  const LIST = ['circle', 'ring', 'square', 'triangle', 'diamond', 'pentagon', 'hexagon', 'star', 'cross', 'bar', 'horse'];
+  const LABELS = { circle: 'Circle', ring: 'Ring', square: 'Square', triangle: 'Triangle', diamond: 'Diamond', pentagon: 'Pentagon', hexagon: 'Hexagon', star: 'Star', cross: 'Cross', bar: 'Bar', horse: 'Horse' };
   const DEFAULTS = {
     'Goblin Swarm': 'triangle', 'Skeleton Archers': 'diamond', 'Ember Imps': 'star', 'Fire Mage': 'hexagon',
     'Sniper': 'cross', 'Brute': 'square', 'Wisps': 'ring', 'Crossbow Volley': 'pentagon', 'Ballista': 'bar',
@@ -38,6 +38,11 @@ const Shapes = (() => {
       return out;
     });
   }
+
+  // A horse seen from the side, facing right: rump, back, neck and head, chest, front leg, belly, hind leg, tail.
+  // Points are in units of r around the centre; it always stands upright, whichever side it is on.
+  const HORSE = [[-0.95, -0.3], [0.3, -0.3], [0.62, -0.95], [0.82, -0.85], [1.12, -0.5], [1.02, -0.36], [0.74, -0.46], [0.66, -0.05], [0.62, 0.3],
+    [0.62, 1.05], [0.42, 1.05], [0.38, 0.32], [-0.52, 0.32], [-0.58, 1.05], [-0.78, 1.05], [-0.86, 0.22], [-1.18, 0.55], [-1.08, 0.05]];
 
   // Points of a regular polygon; up = 1 points toward the top of the screen, -1 toward the bottom
   function poly(ctx, x, y, r, n, rot) {
@@ -78,6 +83,7 @@ const Shapes = (() => {
       }
       case 'bar': ctx.beginPath(); ctx.rect(x - r * 1.3, y - r * 0.55, r * 2.6, r * 1.1); return false;
       case 'ring': ctx.beginPath(); ctx.arc(x, y, r * 0.8, 0, Math.PI * 2); return true;
+      case 'horse': ctx.beginPath(); HORSE.forEach(([px, py], i) => i ? ctx.lineTo(x + px * r, y + py * r) : ctx.moveTo(x + px * r, y + py * r)); ctx.closePath(); return false;
       default: ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); return false;
     }
   }
@@ -109,6 +115,7 @@ const Shapes = (() => {
       case 'star': body = `<polygon points="${Array.from({ length: 10 }, (_, i) => { const a = -Math.PI / 2 + i * Math.PI / 5, rr = i % 2 ? r * 0.55 : r * 1.3; return `${(c + Math.cos(a) * rr).toFixed(2)},${(c + Math.sin(a) * rr).toFixed(2)}`; }).join(' ')}"/>`; break;
       case 'cross': { const a = r * 1.15, b = r * 0.42; body = `<polygon points="${[[-b, -a], [b, -a], [b, -b], [a, -b], [a, b], [b, b], [b, a], [-b, a], [-b, b], [-a, b], [-a, -b], [-b, -b]].map(([px, py]) => `${(c + px).toFixed(2)},${(c + py).toFixed(2)}`).join(' ')}"/>`; break; }
       case 'bar': body = `<rect x="${c - r * 1.3}" y="${c - r * 0.55}" width="${r * 2.6}" height="${r * 1.1}"/>`; break;
+      case 'horse': { const rr = r * 0.95; body = `<polygon points="${HORSE.map(([px, py]) => `${(c + px * rr).toFixed(2)},${(c + py * rr).toFixed(2)}`).join(' ')}"/>`; break; }
       case 'ring': body = `<circle cx="${c}" cy="${c}" r="${r * 0.8}" fill="none" stroke="currentColor" stroke-width="${Math.max(1.5, r * 0.45)}"/>`; break;
       default: body = `<circle cx="${c}" cy="${c}" r="${r}"/>`;
     }
