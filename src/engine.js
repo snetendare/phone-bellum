@@ -316,6 +316,9 @@ const Engine = (() => {
     // units of both sides in turn. Each is { u, x, y, friends: [bool, bool] }. A side it is friends with
     // (bribed) is never shot; it gets small splash heals instead (u.healHit, u.healAps, u.healSplash).
     const neutrals = (opts.neutrals || []).map(n => ({ ...n, friends: n.friends || [false, false], cd: 1 / Math.max(0.01, n.u.aps), turn: 0, healCd: n.u.healAps > 0 ? 1 / n.u.healAps : 0, healTurn: 0 }));
+    // map tiles that act on any unit (either side) that starts on them or walks onto them, once per unit.
+    // Each is { x0, x1, y0, y1 (world rectangle), type: 'speed' | 'toxic', ...settings }.
+    const tiles = opts.tiles || [];
     let projectiles = [];
     let t = 0, shots = [], over = false, tick = 0;
     const dist = (a, b) => hyp(a.x - b.x, a.y - b.y);
@@ -341,6 +344,24 @@ const Engine = (() => {
       v.xp += applied * (g.absorbXp == null ? 0.5 : g.absorbXp);
       v.hp -= applied;
       if (v.hp <= 1e-9) { v.hp = 0; v.alive = false; v.diedTick = tick; owner.xp += v.u.hp * v.level; fell(v); }
+    }
+    // damage from the map itself (elf tower, toxic tiles): counts for neither side, earns no experience
+    function neutralDamage(v, dmg) {
+      if (cripple[v.side] > 0) dmg = dmg * (1 + towerDown.taken / 100);
+      v.hp -= dmg;
+      if (v.hp <= 1e-9) { v.hp = 0; v.alive = false; v.diedTick = tick; fell(v); }
+    }
+    // a unit is on a map tile: its effect, once per unit and tile type
+    function onTile(b, tl) {
+      const seen = b.tilesHit || (b.tilesHit = {});
+      if (seen[tl.type]) return;
+      seen[tl.type] = true;
+      if (tl.type === 'speed') { b.u = { ...b.u, speed: b.u.speed * (1 + tl.speed / 100) }; b.fast = true; }
+      if (tl.type === 'toxic') {
+        (b.poison || (b.poison = [])).push({ src: null, dps: b.u.hp * tl.poisonPct / 100, t: tl.poisonDur });
+        if (!(b.slowT > 0)) { b.slowMove = 0; b.slowAtk = 0; }
+        b.slowMove = Math.max(b.slowMove, tl.slowMove); b.slowAtk = Math.max(b.slowAtk, tl.slowAtk); b.slowT = Math.max(b.slowT, tl.slowDur);
+      }
     }
     // structures (towers) don't count: a side is beaten when its units are gone
     const aliveCount = (arr) => { let c = 0; for (const b of arr) if (b.alive && !b.u.structure) c++; return c; };
@@ -519,6 +540,11 @@ const Engine = (() => {
       shots = [];
       tick++;
       for (let k = 0; k < 2; k++) if (cripple[k] > 0) cripple[k] = Math.max(0, cripple[k] - dt);
+      // map tiles under the units (checked before moving, so the tile a unit starts on always counts)
+      if (tiles.length) for (const b of all) {
+        if (!b.alive || b.u.structure) continue;
+        for (const tl of tiles) if (b.x >= tl.x0 && b.x < tl.x1 && b.y >= tl.y0 && b.y < tl.y1) onTile(b, tl);
+      }
       // a body with a start delay (deployed on a flank) can't move or attack until it runs out
       for (const b of all) if (b.delay > 0) b.delay = Math.max(0, b.delay - dt);
       // movement + targeting
@@ -619,7 +645,8 @@ const Engine = (() => {
         if (b.poison && b.poison.length) {
           for (const p of b.poison) {
             if (!b.alive) break;
-            direct(p.src, b, p.dps * Math.min(dt, p.t));
+            if (p.src) direct(p.src, b, p.dps * Math.min(dt, p.t));
+            else neutralDamage(b, p.dps * Math.min(dt, p.t)); // poison from a map tile: nobody's damage
             p.t -= dt;
           }
           b.poison = b.poison.filter(p => p.t > 0);
@@ -769,10 +796,7 @@ const Engine = (() => {
         n.cd = Math.max(n.cd, -dt) + 1 / Math.max(0.01, n.u.aps);
         if (opts.record) shots.push([n.x, n.y, tgt.x, tgt.y, 2, 0, 0, 0, 0]);
         if (tgt.shield > 0) { tgt.shield--; continue; }
-        let dmg = damageAfterDefense(n.u.hit, tgt, g);
-        if (cripple[tgt.side] > 0) dmg = dmg * (1 + towerDown.taken / 100);
-        tgt.hp -= dmg;
-        if (tgt.hp <= 1e-9) { tgt.hp = 0; tgt.alive = false; tgt.diedTick = tick; fell(tgt); }
+        neutralDamage(tgt, damageAfterDefense(n.u.hit, tgt, g));
       }
       // projectiles in flight
       if (projectiles.length) {

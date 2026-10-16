@@ -289,7 +289,7 @@ a { color: var(--you); }
   // closing in on both flanks. Kept dark and muted so the squads stand out. Drawn once per board size.
   let mapBg = null;
   function forestBg() {
-    const key = W + 'x' + H;
+    const key = 'forest' + W + 'x' + H;
     if (mapBg && mapBg.key === key) return mapBg.cv;
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     const oc = document.createElement('canvas'); oc.width = Math.round(W * dpr); oc.height = Math.round(H * dpr);
@@ -354,12 +354,83 @@ a { color: var(--you); }
     return oc;
   }
 
+  // Mushroom Cavern: a dim purple cave floor, darker rock shading the flanks, and faded glowing mushrooms
+  // (big and small) scattered around. Drawn once per board size.
+  function cavernBg() {
+    const key = 'cavern' + W + 'x' + H;
+    if (mapBg && mapBg.key === key) return mapBg.cv;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const oc = document.createElement('canvas'); oc.width = Math.round(W * dpr); oc.height = Math.round(H * dpr);
+    const c = oc.getContext('2d'); c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    let sd = 7654321; const rr = () => { sd = (sd * 1103515245 + 12345) % 2147483648; return sd / 2147483648; };
+    const t = tilePx();
+    c.fillStyle = '#16111D'; c.fillRect(0, 0, W, H);
+    const gl = c.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, Math.max(W, H) * 0.6);
+    gl.addColorStop(0, '#221A2C'); gl.addColorStop(0.6, '#1B1524'); gl.addColorStop(1, '#130F19');
+    c.fillStyle = gl; c.fillRect(0, 0, W, H);
+    // uneven rock floor: soft darker and lighter patches
+    for (let k = 0; k < 30; k++) {
+      c.globalAlpha = 0.3; c.fillStyle = k % 2 ? '#2A2033' : '#120E17';
+      c.beginPath(); c.ellipse(rr() * W, rr() * H, t * (0.5 + rr() * 1.3), t * (0.3 + rr() * 0.8), rr() * 3, 0, Math.PI * 2); c.fill();
+    }
+    // the flanks: cave walls closing in, darker toward the edge, with rough boulders
+    for (const left of [true, false]) {
+      const x0 = left ? 0 : W, x1 = left ? t * 1.5 : W - t * 1.5;
+      const sh = c.createLinearGradient(x0, 0, x1, 0);
+      sh.addColorStop(0, 'rgba(5,3,8,0.9)'); sh.addColorStop(0.5, 'rgba(8,5,12,0.5)'); sh.addColorStop(1, 'rgba(8,5,12,0)');
+      c.globalAlpha = 1; c.fillStyle = sh; c.fillRect(Math.min(x0, x1), 0, Math.abs(x1 - x0), H);
+      for (let k = 0; k < Math.round(H / t * 3); k++) {
+        const depth = rr() * rr(), r = t * (0.25 + rr() * 0.3) * (1 - depth * 0.4), dx = -t * 0.2 + depth * t;
+        const x = left ? dx : W - dx, y = rr() * H;
+        c.globalAlpha = 0.8 - depth * 0.5; c.fillStyle = ['#0B0810', '#100C16', '#151019'][Math.floor(rr() * 3)];
+        c.beginPath(); c.ellipse(x, y, r * 1.2, r, rr() * 3, 0, Math.PI * 2); c.fill();
+        c.globalAlpha = (0.8 - depth * 0.5) * 0.35; c.fillStyle = '#2A2135'; // a faint lit edge
+        c.beginPath(); c.ellipse(x - r * 0.25, y - r * 0.3, r * 0.5, r * 0.3, 0, 0, Math.PI * 2); c.fill();
+      }
+    }
+    // faded glowing mushrooms, big and small
+    const shroom = (x, y, sz, a) => {
+      const glow = c.createRadialGradient(x, y - sz * 0.4, 0, x, y - sz * 0.4, sz * 2.2);
+      glow.addColorStop(0, 'rgba(176,110,240,0.35)'); glow.addColorStop(1, 'rgba(176,110,240,0)');
+      c.globalAlpha = a; c.fillStyle = glow; c.beginPath(); c.arc(x, y - sz * 0.4, sz * 2.2, 0, Math.PI * 2); c.fill();
+      c.fillStyle = '#6B5A78'; c.fillRect(x - sz * 0.13, y - sz * 0.5, sz * 0.26, sz * 0.75); // stem
+      c.fillStyle = '#8A5DB8'; c.beginPath(); c.ellipse(x, y - sz * 0.5, sz * 0.6, sz * 0.38, 0, Math.PI, 0); c.fill(); // cap
+      c.fillStyle = '#D2B4F2'; for (let k = 0; k < 3; k++) { c.beginPath(); c.arc(x + (k - 1) * sz * 0.25, y - sz * 0.68 + (k === 1 ? -sz * 0.06 : 0), sz * 0.06, 0, Math.PI * 2); c.fill(); }
+    };
+    const list = [];
+    for (let k = 0; k < 34; k++) { // clusters: one bigger mushroom with a couple of small ones next to it
+      const x = rr() * W, y = rr() * H, edge = Math.min(x, W - x) < t * 1.3;
+      list.push({ x, y, sz: t * (edge ? 0.35 : 0.22 + rr() * 0.28), a: edge ? 0.26 : 0.16 });
+      const n = Math.floor(rr() * 3);
+      for (let j = 0; j < n; j++) list.push({ x: x + (rr() - 0.5) * t * 0.7, y: y + (rr() - 0.2) * t * 0.4, sz: t * (0.1 + rr() * 0.08), a: 0.18 });
+    }
+    list.sort((a, b) => a.y - b.y).forEach(q => shroom(q.x, q.y, q.sz, q.a));
+    c.globalAlpha = 1;
+    mapBg = { key, cv: oc };
+    return oc;
+  }
+  // a mushroom tile: tinted tile with a small glowing mushroom in the tile's colour
+  const SHROOM_COL = { purple: '#B57BFF', yellow: '#F2D25C', green: '#7BD66A' };
+  function drawShroomTile(tl) {
+    const t = tilePx(), x = scol(tl.col) * t, y = srow(tl.row) * t, col = SHROOM_COL[tl.type];
+    ctx.fillStyle = col; ctx.globalAlpha = 0.13; ctx.fillRect(x, y, t, t);
+    ctx.strokeStyle = col; ctx.globalAlpha = 0.45; ctx.lineWidth = 1; ctx.strokeRect(x + 1.5, y + 1.5, t - 3, t - 3);
+    const cx = x + t / 2, cy = y + t * 0.62, sz = t * 0.34;
+    const glow = ctx.createRadialGradient(cx, cy - sz * 0.4, 0, cx, cy - sz * 0.4, sz * 1.4);
+    glow.addColorStop(0, col); glow.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.globalAlpha = 0.22; ctx.fillStyle = glow; ctx.beginPath(); ctx.arc(cx, cy - sz * 0.4, sz * 1.4, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 0.6; ctx.fillStyle = '#CFC3D6'; ctx.fillRect(cx - sz * 0.12, cy - sz * 0.5, sz * 0.24, sz * 0.7);
+    ctx.fillStyle = col; ctx.beginPath(); ctx.ellipse(cx, cy - sz * 0.5, sz * 0.62, sz * 0.4, 0, Math.PI, 0); ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+
   function drawBoard() {
     const t = tilePx();
     const Z = Game.ZONE, mine = (Game.ROWS - Z) * t;
     const v = phase === 'battle' && battlePre ? battlePre : m; // during a fight: the board as it was when the fight began, not the next round's
     const mp = Game.mapOf(v);
     if (mp && mp.id === 'forest') ctx.drawImage(forestBg(), 0, 0, W, H);
+    else if (mp && mp.id === 'cavern') ctx.drawImage(cavernBg(), 0, 0, W, H);
     else { ctx.fillStyle = css('--board'); ctx.fillRect(0, 0, W, H); }
     ctx.globalAlpha = 0.08;
     ctx.fillStyle = css('--foe'); ctx.fillRect(0, 0, W, t * Z);
@@ -369,6 +440,7 @@ a { color: var(--you); }
       for (const col of Game.FLANK.cols) for (const row of Game.flankRows(side)) ctx.fillRect(scol(col) * t, srow(row) * t, t, t);
     }
     ctx.globalAlpha = 1;
+    if (mp && mp.shrooms) for (const tl of v.map.tiles || []) drawShroomTile(tl);
     if (v && v.buff) for (const side of [0, 1]) { // Zoe's buff tiles: a gold tile with a star
       if (!charVisible(side)) continue;
       for (const b of v.buff[side] || []) {
@@ -587,6 +659,21 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
       if (b.level > 0) {
         ctx.strokeStyle = gold; ctx.lineWidth = Math.min(2.5, 0.8 + b.level * 0.5);
         Shapes.outline(ctx, b.u.shape, PX(b.x), PY(b.y), r + 3.5, upOf(b.side));
+      }
+      if (b.shroom) { // purple mushroom buff: faint purple spores drifting up, looping
+        ctx.fillStyle = SHROOM_COL.purple;
+        for (let k = 0; k < 2; k++) {
+          const s0 = (b.squad * 0.29 + b.x * 0.11 + k * 0.5) % 1, p = (bt.time() * 0.6 + s0) % 1;
+          ctx.globalAlpha = 0.5 * Math.sin(p * Math.PI);
+          ctx.beginPath(); ctx.arc(PX(b.x) + (k ? 1 : -1) * r * (0.3 + 0.3 * Math.sin((p + s0) * 6)), PY(b.y) - r * (0.4 + 1.6 * p), Math.max(1.2, r * 0.16), 0, Math.PI * 2); ctx.fill();
+        }
+        ctx.globalAlpha = 1;
+      }
+      if (b.fast) { // yellow mushroom: a short speed streak behind the body
+        ctx.strokeStyle = SHROOM_COL.yellow; ctx.globalAlpha = 0.55; ctx.lineWidth = 1.2;
+        const hx = (b.hx || 0) * flip(), hy = -(b.hy || 0) * flip();
+        for (const o of [-0.4, 0.4]) { ctx.beginPath(); ctx.moveTo(PX(b.x) - hx * r * 1.2 + hy * r * o, PY(b.y) - hy * r * 1.2 - hx * r * o); ctx.lineTo(PX(b.x) - hx * r * 2.2 + hy * r * o, PY(b.y) - hy * r * 2.2 - hx * r * o); ctx.stroke(); }
+        ctx.globalAlpha = 1;
       }
       if (b.zoe) { // Zoe buff: two faint stars drifting up from the body, looping
         ctx.fillStyle = gold; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -1192,7 +1279,7 @@ TOWERS
 - Their tower: col ${m.towers[0].col}, row ${m.towers[0].row}.
 
 MAP
-${(() => { const mp = Game.mapOf(m), e = Game.elfSpot(m); return mp ? `- ${mp.name}: ${mp.text}${e ? ` The elf tower stands in column ${e.col}, on the line between rows ${Game.ROWS / 2 - 1} and ${Game.ROWS / 2}; it hits for ${Game.ELF_TOWER.hit}, ${Game.ELF_TOWER.aps} times a second, range ${Game.ELF_TOWER.range} m, and can't be attacked. Bribing the elves costs ${Game.BRIBE_COST} gold once per match ("bribe": true): from then on it never shoots your units and instead heals your wounded units near it for ${Game.ELF_TOWER.healHit} (x${mp.healMul || 1} on this map, ${Game.ELF_TOWER.healSplash} m splash) every ${Math.round(10 / Game.ELF_TOWER.healAps) / 10} s. You ${Game.bribed(m, 1) ? 'have' : "haven't"} bribed; they ${Game.bribeVisible(m, 0) ? 'have' : "haven't, as far as you know"}.` : ''}` : '- No special map.'; })()}
+${(() => { const mp = Game.mapOf(m), e = Game.elfSpot(m); return mp ? `- ${mp.name}: ${mp.text}${e ? ` The elf tower stands in column ${e.col}, on the line between rows ${Game.ROWS / 2 - 1} and ${Game.ROWS / 2}; it hits for ${Game.ELF_TOWER.hit}, ${Game.ELF_TOWER.aps} times a second, range ${Game.ELF_TOWER.range} m, and can't be attacked. Bribing the elves costs ${Game.BRIBE_COST} gold once per match ("bribe": true): from then on it never shoots your units and instead heals your wounded units near it for ${Game.ELF_TOWER.healHit} (x${mp.healMul || 1} on this map, ${Game.ELF_TOWER.healSplash} m splash) every ${Math.round(10 / Game.ELF_TOWER.healAps) / 10} s. You ${Game.bribed(m, 1) ? 'have' : "haven't"} bribed; they ${Game.bribeVisible(m, 0) ? 'have' : "haven't, as far as you know"}.` : ''}${mp.shrooms ? ` Mushroom tiles: ${(m.map.tiles || []).map(x => `${x.type} at col ${x.col}, row ${x.row}`).join('; ')}.` : ''}` : '- No special map.'; })()}
 
 CHARACTERS (each package comes with one; its ability lasts the whole match)
 - Yours: ${Game.charOf(m, 1) ? `${Game.charInfo(Game.charOf(m, 1)).name}: ${Game.charInfo(Game.charOf(m, 1)).ability}` : 'the one that comes with the package you pick'}${Game.charOf(m, 1) === 'zoe' ? ` Your buff tiles this round: ${(m.buff[1] || []).map(t => `col ${t.col}, row ${t.row}`).join('; ')}. A squad that starts the fight on one keeps the bonus all fight, even after it moves.` : ''}
@@ -1427,6 +1514,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (towerVisible(foe()) && Game.towerAt(m, foe(), t.col, t.row)) { openTowerSheet(foe()); return; }
     const elf = Game.elfSpot(m);
     if (elf && t.col === elf.col && (t.row === Game.ROWS / 2 - 1 || t.row === Game.ROWS / 2) && !Game.occupied(m, me, t.col, t.row)) { openMapSheet(); return; }
+    if (Game.shroomAt(m, t.col, t.row) && selected === null && !Game.occupied(m, me, t.col, t.row) && !m.armies[foe()].some(s => { const p = Game.seenAt(m, s); return p.col === t.col && p.row === t.row && s.round < m.round; })) { openMapSheet(); return; }
     const own = m.armies[me].find(s => s.col === t.col && s.row === t.row);
     if (own) {
       if (own.round === m.round) { if (editable() && Game.unplace(m, me, t.col, t.row)) changed(); }
@@ -1506,6 +1594,11 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     $('sheet').innerHTML = `
       <div class="bar"><h3 id="sheet-h">Map: ${esc(mp.name)}</h3><button class="btn small" id="close">Close</button></div>
       <p style="margin:0">${esc(mp.text)}</p>
+      ${mp.shrooms ? (() => { const S2 = Game.SHROOM, dot = (k) => `<b style="color:${SHROOM_COL[k]}">●</b>`; return `
+      <p style="margin:0">${dot('purple')} <b>Purple</b>: +${S2.purpleDmg}% damage, +${S2.purpleHp}% health, +${S2.purpleAps}% attack speed all fight for a squad that starts there. Never on the flank columns.</p>
+      <p style="margin:0">${dot('yellow')} <b>Yellow</b>: +${S2.speed}% move speed for the rest of the fight. Only on the flank columns and in no man’s land.</p>
+      <p style="margin:0">${dot('green')} <b>Green</b>: poison (${S2.poisonPct}% of max health per second for ${S2.poisonDur} s) and slow (−${S2.slowMove}% move, −${S2.slowAtk}% attack speed for ${S2.slowDur} s).</p>
+      <p class="role" style="margin:0">Each half has ${Game.SHROOM_SPLIT.purple} purple, ${Game.SHROOM_SPLIT.yellow} yellow and ${Game.SHROOM_SPLIT.green} green tile, mirrored. They work for both sides and can’t be removed.</p>`; })() : ''}
       ${mp.elfTower ? `<p class="role" style="margin:0">The elf tower stands in the middle of no man’s land, the same distance from both zones, and stays there all match. It can’t be attacked. Its shots take turns between the two sides, at the nearest unit in range.</p>
       <div class="stats"><div><span>Hit</span><b class="num">${T.hit}</b></div><div><span>Attacks/s</span><b class="num">${T.aps}</b></div><div><span>Range</span><b class="num">${T.range} m</b></div></div>
       <p style="margin:0"><span style="color:var(--gold)">Bribe the elves</span> for ${Game.BRIBE_COST} gold: for the rest of the match the tower never shoots your units. Instead it throws a small heal (${T.healHit} health, ${Math.round(T.healHit * (mp.healMul || 1))} on this map, to every unit within ${T.healSplash} m) on one of your wounded units every ${Math.round(10 / T.healAps) / 10} s. Its shots at a player who hasn’t bribed go on as before. Your bribe stays hidden from your opponent until the fight.</p>

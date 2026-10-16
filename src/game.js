@@ -48,7 +48,13 @@ const Game = (() => {
   // its shots alternate between the two sides.
   const MAPS = [
     { id: 'forest', name: 'Forest Clearing', text: 'Stealth units deal 20% more damage. Healing and regeneration are 1.5× as strong. A neutral elf tower in no man’s land shoots at both sides in turn; tap it to bribe the elves for 50 gold, and from then on it heals your units instead.', stealthDmg: 20, healMul: 1.5, elfTower: true },
+    { id: 'cavern', name: 'Mushroom Cavern', text: 'Glowing mushroom tiles stay on the same tiles all match, mirrored on both halves. Purple: a squad that starts the fight there gets +10% damage, +10% health and +5% attack speed. Yellow: a unit that starts on it or walks over it moves 30% faster for the rest of the fight. Green: a unit that starts on it or walks over it is poisoned and slowed. Yellow and green work once per unit, for both sides.', shrooms: true },
   ];
+  // Mushroom Cavern tiles. Each player's half of the board gets SHROOM_SPLIT of them; the other half is the mirror image
+  // (same column, row flipped, like the towers). purple: half a Zoe buff for squads that start there (never on the flank
+  // columns); yellow: move speed (only on the flank columns or in no man's land); green: poison and slow (anywhere).
+  const SHROOM_SPLIT = { purple: 2, yellow: 1, green: 1 };
+  const SHROOM = { purpleDmg: 10, purpleHp: 10, purpleAps: 5, speed: 30, poisonPct: 3, poisonDur: 4, slowMove: 40, slowAtk: 20, slowDur: 3 }; // poisonPct: % of max health per second
   // healHit/healAps/healSplash: the small splash heal it throws on the units of a player who bribed it
   const ELF_TOWER = { name: 'Elf Tower', cost: 0, bodies: 1, hp: 1, hit: 20, aps: 0.5, range: 12, speed: 0, splash: 0, structure: true, healHit: 15, healAps: 0.4, healSplash: 2.5 };
   // Bribing the elves: once per match, for BRIBE_COST gold. From the next fight on, the elf tower never shoots
@@ -77,8 +83,23 @@ const Game = (() => {
     const mp = MAPS[Math.floor(r() * MAPS.length)];
     const out = { id: mp.id };
     if (mp.elfTower) out.elfCol = ELF_COLS[0] + Math.floor(r() * (ELF_COLS[1] - ELF_COLS[0] + 1));
+    if (mp.shrooms) {
+      // rolled on side 0's half (rows ROWS/2 .. ROWS-1), then mirrored onto side 1's
+      const used = new Set([TOWER_SPOT[0].col + ',' + TOWER_SPOT[0].row]), half = [];
+      const edge = (col) => col === 0 || col === COLS - 1;
+      const ok = { purple: (c, rw) => !edge(c), yellow: (c, rw) => edge(c) || inNoMans(rw), green: () => true };
+      for (const type of ['yellow', 'purple', 'green']) for (let k = 0; k < SHROOM_SPLIT[type]; k++) {
+        const spots = [];
+        for (let row = ROWS / 2; row < ROWS; row++) for (let col = 0; col < COLS; col++) if (!used.has(col + ',' + row) && ok[type](col, row)) spots.push({ col, row });
+        const sp = spots[Math.floor(r() * spots.length)];
+        used.add(sp.col + ',' + sp.row);
+        half.push({ col: sp.col, row: sp.row, type });
+      }
+      out.tiles = half.concat(half.map(t => ({ ...t, row: ROWS - 1 - t.row })));
+    }
     return out;
   }
+  const shroomAt = (m, col, row) => { const mp = mapOf(m); return mp && mp.shrooms && m.map.tiles ? (m.map.tiles.find(t => t.col === col && t.row === row) || null) : null; };
   const mapOf = (m) => (m && m.map && MAPS.find(x => x.id === m.map.id)) || null;
   // where the elf tower stands (world coordinates), or null: on its column, on the line between the two middle rows
   const elfSpot = (m) => { const mp = mapOf(m); return mp && mp.elfTower && m.map.elfCol != null ? { x: tileToWorld(m.map.elfCol, 0).x, y: 0, col: m.map.elfCol } : null; };
@@ -400,12 +421,15 @@ const Game = (() => {
       let u = unitFor(m, side, sq.unit);
       const mp = mapOf(m);
       if (mp && mp.stealthDmg && u.stealth) u = { ...u, hit: u.hit * (1 + mp.stealthDmg / 100) }; // the map favours stealth units
+      const purple = (shroomAt(m, sq.col, sq.row) || {}).type === 'purple'; // a purple mushroom tile: half a Zoe buff
+      if (purple) u = { ...u, hit: u.hit * (1 + SHROOM.purpleDmg / 100), hp: u.hp * (1 + SHROOM.purpleHp / 100), aps: u.aps * (1 + SHROOM.purpleAps / 100) };
       if (ch === 'wilhelm' && forward) u = { ...u, bonusArmor: (u.bonusArmor || 0) + CHAR.wilhelmArmor };
       // Zoe: a squad that starts the fight on a buff tile keeps the bonus for the whole fight
       const zoe = onBuffTile(m, side, sq.col, sq.row);
       if (zoe) u = { ...u, hit: u.hit * (1 + CHAR.zoeDmg / 100), hp: u.hp * (1 + CHAR.zoeHp / 100), aps: u.aps * (1 + CHAR.zoeAps / 100) };
       const b = E.buildSquad(u, side, w.x, w.y, sq.id, TILE, idx, sq.level);
       if (zoe) for (const x of b) x.zoe = true; // for the rising-stars effect
+      if (purple) for (const x of b) x.shroom = true; // for the drifting spores effect
       if (isFlank(side, sq.col, sq.row) && (sq.round === m.round || sq.movedRound === m.round)) for (const x of b) x.delay = FLANK.delay * (ch === 'wilhelm' ? CHAR.wilhelmDelay : 1); // only in its first fight
       idx += b.length;
       out.push(...b);
@@ -424,7 +448,7 @@ const Game = (() => {
     if (charOf(m, side) !== 'zoe') return;
     const r = rng(m.seed + m.round * 6151 + side * 3571 + 99);
     const spots = [];
-    for (const row of zoneRows(side)) for (let col = 0; col < COLS; col++) if (!reserved(side, col, row) && !towerAt(m, side, col, row)) spots.push({ col, row });
+    for (const row of zoneRows(side)) for (let col = 0; col < COLS; col++) if (!reserved(side, col, row) && !towerAt(m, side, col, row) && !shroomAt(m, col, row)) spots.push({ col, row });
     for (let k = 0; k < CHAR.zoeTiles && spots.length; k++) m.buff[side].push(spots.splice(Math.floor(r() * spots.length), 1)[0]);
   }
   const onBuffTile = (m, side, col, row) => charOf(m, side) === 'zoe' && !!(m.buff && m.buff[side] || []).some(t => t.col === col && t.row === row);
@@ -434,7 +458,14 @@ const Game = (() => {
     ensurePack(m, 0); ensurePack(m, 1);
     const mp = mapOf(m), elf = elfSpot(m);
     const g = mp && mp.healMul ? { ...SETTINGS, healMul: mp.healMul } : SETTINGS;
-    return E.createBattle(bodiesFor(m, 0), bodiesFor(m, 1), g, { record: true, neutrals: elf ? [{ u: E.withTraits(ELF_TOWER), x: elf.x, y: elf.y, friends: [bribed(m, 0), bribed(m, 1)] }] : [] });
+    const T2 = TILE / 2, tiles = [];
+    if (mp && mp.shrooms) for (const t of m.map.tiles || []) {
+      if (t.type === 'purple') continue; // purple only counts for squads that start there (see bodiesFor)
+      const w = tileToWorld(t.col, t.row);
+      tiles.push(t.type === 'yellow' ? { type: 'speed', speed: SHROOM.speed, x0: w.x - T2, x1: w.x + T2, y0: w.y - T2, y1: w.y + T2 }
+        : { type: 'toxic', poisonPct: SHROOM.poisonPct, poisonDur: SHROOM.poisonDur, slowMove: SHROOM.slowMove, slowAtk: SHROOM.slowAtk, slowDur: SHROOM.slowDur, x0: w.x - T2, x1: w.x + T2, y0: w.y - T2, y1: w.y + T2 });
+    }
+    return E.createBattle(bodiesFor(m, 0), bodiesFor(m, 1), g, { record: true, tiles, neutrals: elf ? [{ u: E.withTraits(ELF_TOWER), x: elf.x, y: elf.y, friends: [bribed(m, 0), bribed(m, 1)] }] : [] });
   }
 
   // Damage a side deals = points of its squads, scaled by how much of each squad is still alive
@@ -644,7 +675,8 @@ const Game = (() => {
         const row = rows[zi];
         if (occupied(m, side, col, row) || !canPlaceAt(m, side, col, row)) continue;
         const rowCost = band.includes(zi) ? 0 : 3 * Math.min(Math.abs(zi - band[0]), Math.abs(zi - band[1]));
-        const c = Math.abs(col - target) + rowCost + r() * 0.8;
+        const sh = (shroomAt(m, col, row) || {}).type;
+        const c = Math.abs(col - target) + rowCost + r() * 0.8 + (sh === 'purple' ? -1.5 : sh === 'green' ? 4 : 0);
         if (c < bc) { bc = c; best = { col, row }; }
       }
     }
@@ -661,7 +693,7 @@ const Game = (() => {
     skillDef, skillCost, isInnate, hasSkill, skillVisible, unitFor, canBuySkill, buySkill, undoSkill, sellValue, sell,
     TOWER, TOWER_MID, towerColOk, towerAt, needsTower, placeTower, ensureTower,
     FLANK, flankRows, flankOpen, isFlank, reserved, canPlaceAt, enemyHolds, inNoMans, hasSkillType,
-    MAPS, ELF_TOWER, mapOf, elfSpot, rollMap, BRIBE_COST, bribed, bribeVisible, canBribe, bribe, undoBribe,
+    MAPS, ELF_TOWER, SHROOM, SHROOM_SPLIT, shroomAt, mapOf, elfSpot, rollMap, BRIBE_COST, bribed, bribeVisible, canBribe, bribe, undoBribe,
     CHARACTERS, CHAR, charOf, charInfo, isTier1, rollBuffTiles, onBuffTile, TOWER_SPOT,
     zoneRows, inZone, tileToWorld, createMatch, place, unplace, bodiesFor, startBattle, resolve, aiDeploy, occupied,
   };
