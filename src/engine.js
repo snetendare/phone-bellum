@@ -598,9 +598,21 @@ const Engine = (() => {
       }
       // a body with a start delay (deployed on a flank) can't move or attack until it runs out
       for (const b of all) if (b.delay > 0) b.delay = Math.max(0, b.delay - dt);
+      // home ground (band = { y0, y1, armor, hpPct, on }): extra armor and health while the body stands between
+      // y0 and y1 (its own zone); it loses both when it walks out, and gets them back if it returns
+      for (const b of all) {
+        if (!b.band || !b.alive) continue;
+        const inside = b.y >= b.band.y0 && b.y <= b.band.y1;
+        if (inside === b.band.on) continue;
+        const k = 1 + b.band.hpPct / 100, sign = inside ? 1 : -1;
+        b.band.on = inside;
+        b.u = { ...b.u, hp: inside ? b.u.hp * k : b.u.hp / k, bonusArmor: (b.u.bonusArmor || 0) + sign * b.band.armor };
+        b.hp = inside ? b.hp * k : b.hp / k;
+      }
       // movement + targeting
       for (const b of all) {
         if (!b.alive || b.delay > 0) continue;
+        if (b.holdT > 0) { b.holdT -= dt; continue; } // holding its ground (it still shoots)
         const foes = sides[1 - b.side];
         if (b.trampleLeft > 0) {
           // running through after a charge: straight on, hitting each body it runs over once

@@ -33,9 +33,12 @@ const Game = (() => {
   const TOWER_PICK_ROUND = 3, TOWER_OFFER = 3;
   const OUTPOST = { id: 'outpost', name: 'Outpost', text: 'A small watchtower that holds the line until round 3, when you pick your real tower.', unit: { ...TOWER, name: 'Outpost', kind: 'outpost', hp: 400, hit: 18, color: '#A88E6E' } };
   const TOWER_TYPES = [
-    { id: 'keep', name: 'Keep', text: 'The standard tower: steady, light shots at short range.', unit: TOWER },
-    { id: 'sniper', name: 'Sniper tower', text: 'Shoots across most of the board, slowly, for double damage.', unit: { ...TOWER, name: 'Sniper Tower', kind: 'sniper', hp: 500, hit: 60, aps: 0.4, range: 30, color: '#B9C7D6' } },
-    { id: 'bastion', name: 'Bastion', text: 'Much tougher, with a shorter, slower attack that splashes the units around its target.', unit: { ...TOWER, name: 'Bastion', kind: 'bastion', hp: 1000, aps: 0.8, range: 5, splash: 2, color: '#B79C8A' } },
+    { id: 'keep', name: 'Keep', text: 'The standard tower: steady, light shots at short range.', unit: TOWER,
+      skill: { name: 'Guards', text: 'Every fight, 4 guards (reskinned Wisps, without Wisp skills) stand by the keep for 5 s, shooting anything that comes close, then march on the enemy.' } },
+    { id: 'sniper', name: 'Sniper tower', text: 'Shoots across most of the board, slowly, for double damage.', unit: { ...TOWER, name: 'Sniper Tower', kind: 'sniper', hp: 500, hit: 60, aps: 0.4, range: 30, color: '#B9C7D6' },
+      skill: { name: 'Eagle eye', text: 'The sniper tower and all your Sniper squads get +3 m range and +10% attack speed.' } },
+    { id: 'bastion', name: 'Bastion', text: 'Much tougher, with a shorter, slower attack that splashes the units around its target.', unit: { ...TOWER, name: 'Bastion', kind: 'bastion', hp: 1000, aps: 0.8, range: 5, splash: 2, color: '#B79C8A' },
+      skill: { name: 'Home ground', text: 'In fights, your units get +2 armor and +10% health while they stand in your own zone. They lose it in no man’s land and get it back if they return.' } },
   ];
   // a picked type, or the Outpost until the pick is made (a match saved without a pick past it gets the Keep)
   const towerType = (m, side) => {
@@ -58,6 +61,29 @@ const Game = (() => {
     m.towers[side].type = id;
     return true;
   }
+  // Each tower type has one skill, bought once per match after the pick (TOWER_SKILL gold); it stays hidden from the
+  // opponent until the fight of the round it was bought in. m.towerSkill[side] = round it was bought (0 = not)
+  const TOWER_SKILL = { cost: 100, guards: 4, guardHold: 5, eagleRange: 3, eagleAps: 10, homeArmor: 2, homeHp: 10 };
+  const GUARD = { name: 'Wisps', cost: 1, bodies: 2, hp: 80, hit: 75, aps: 0.8, range: 19, speed: 4, splash: 0, projSpeed: 20 }; // used when the roster has no Wisps
+  const towerSkillOf = (m, side) => !!(m && m.towerSkill && m.towerSkill[side] > 0);
+  const towerSkillVisible = (m, side) => towerSkillOf(m, side) && m.towerSkill[side] < m.round;
+  const towerPicked = (m, side) => !!(m && m.round >= TOWER_PICK_ROUND && m.towers && m.towers[side] && m.towers[side].type);
+  const canBuyTowerSkill = (m, side) => towerPicked(m, side) && !towerSkillOf(m, side) && m.gold[side] >= TOWER_SKILL.cost;
+  function buyTowerSkill(m, side) {
+    if (!canBuyTowerSkill(m, side)) return false;
+    if (!m.towerSkill) m.towerSkill = [0, 0];
+    m.gold[side] -= TOWER_SKILL.cost;
+    m.towerSkill[side] = m.round;
+    return true;
+  }
+  function undoTowerSkill(m, side) {
+    if (!(m.towerSkill && m.towerSkill[side] === m.round)) return false;
+    m.towerSkill[side] = 0;
+    m.gold[side] += TOWER_SKILL.cost;
+    return true;
+  }
+  // the skill in force for a fight: the tower's type and whether it was bought
+  const towerSkillOn = (m, side, id) => towerSkillOf(m, side) && towerType(m, side).id === id;
   const TOWER_MID = [4, 7]; // columns the tower can't stand in
   const TOWER_SPOT = [{ col: 8, row: ROWS - 2 }, { col: 8, row: 1 }];
 
@@ -383,6 +409,7 @@ const Game = (() => {
       pack: [null, null], // which one each player picked
       map: rollMap(seed >>> 0), // { id, elfCol }: the map this match is fought on
       bribe: [0, 0], // round each player bribed the elf tower in (0 = not bribed)
+      towerSkill: [0, 0], // round each player bought their tower's skill in (0 = not bought)
     };
     m.towers = [towerSpot(m, 0), towerSpot(m, 1)];
     return m;
@@ -588,6 +615,12 @@ const Game = (() => {
   function bodiesFor(m, side) {
     const out = [];
     let idx = 0;
+    // tower skills in force: Eagle eye (sniper tower), Home ground (bastion: a band across this side's zone)
+    const eagle = towerSkillOn(m, side, 'sniper');
+    const home = towerSkillOn(m, side, 'bastion') ? (() => {
+      const ys = zoneRows(side).map(r => tileToWorld(0, r).y);
+      return { y0: Math.min(...ys) - TILE / 2, y1: Math.max(...ys) + TILE / 2, armor: TOWER_SKILL.homeArmor, hpPct: TOWER_SKILL.homeHp, on: false };
+    })() : null;
     for (const sq of m.armies[side]) {
       const w = tileToWorld(sq.col, sq.row);
       const ch = charOf(m, side), forward = isFlank(side, sq.col, sq.row) || inNoMans(sq.row);
@@ -600,7 +633,9 @@ const Game = (() => {
       // Zoe: a squad that starts the fight on a buff tile keeps the bonus for the whole fight
       const zoe = onBuffTile(m, side, sq.col, sq.row);
       if (zoe) u = { ...u, hit: u.hit * (1 + CHAR.zoeDmg / 100), hp: u.hp * (1 + CHAR.zoeHp / 100), aps: u.aps * (1 + CHAR.zoeAps / 100) };
+      if (eagle && u.name === 'Sniper') u = { ...u, range: u.range + TOWER_SKILL.eagleRange, aps: u.aps * (1 + TOWER_SKILL.eagleAps / 100) };
       const b = E.buildSquad(u, side, w.x, w.y, sq.id, TILE, idx, sq.level);
+      if (home) for (const x of b) x.band = { ...home };
       if (zoe) for (const x of b) x.zoe = true; // for the rising-stars effect
       if (purple) for (const x of b) x.shroom = true; // for the drifting spores effect
       if (isFlank(side, sq.col, sq.row) && (sq.round === m.round || sq.movedRound === m.round)) for (const x of b) x.delay = FLANK.delay * (ch === 'wilhelm' ? CHAR.wilhelmDelay : 1); // only in its first fight
@@ -615,9 +650,20 @@ const Game = (() => {
     }
     const t = m.towers && m.towers[side];
     if (t) {
-      const w = tileToWorld(t.col, t.row), tb = E.buildSquad(towerType(m, side).unit, side, w.x, w.y, -2, TILE, idx);
+      let tu = towerType(m, side).unit;
+      if (eagle) tu = { ...tu, range: tu.range + TOWER_SKILL.eagleRange, aps: tu.aps * (1 + TOWER_SKILL.eagleAps / 100) };
+      const w = tileToWorld(t.col, t.row), tb = E.buildSquad(tu, side, w.x, w.y, -2, TILE, idx);
       if (altarBought(m, side, 'walls')) for (const x of tb) x.walls = [ICE.wallHits, ICE.wallHits, ICE.wallHits, ICE.wallHits];
       idx += tb.length; out.push(...tb);
+      // Guards (keep): reskinned Wisps (base stats, no skills) a tile in front of the keep, holding there for a while
+      if (towerSkillOn(m, side, 'keep')) {
+        const src = (m.units || []).find(x => x && x.name === 'Wisps') || GUARD;
+        const { skills, skillDefs, skillsOn, skillsInnate, skillMods, ...plain } = src;
+        const gu = E.withTraits({ ...plain, name: 'Guard', level: 0, bodies: TOWER_SKILL.guards, shape: 'diamond', color: '#E2D3A6' });
+        const gb = E.buildSquad(gu, side, w.x, w.y + (side === 0 ? 1 : -1) * TILE, -3, TILE, idx);
+        for (const x of gb) x.holdT = TOWER_SKILL.guardHold;
+        idx += gb.length; out.push(...gb);
+      }
     }
     // Snowgres stand on their own tiles in no man's land; squad ids -10, -11, ... (not squads in the army)
     snowgres(m, side).forEach((sg, k) => {
@@ -784,6 +830,7 @@ const Game = (() => {
       if (!placeTower(m, side, col, rows[3 + Math.floor(r() * 2)])) ensureTower(m, side);
     }
     if (needsTowerPick(m, side)) { const ch = towerChoices(m, side); setTowerType(m, side, ch[Math.floor(rng(m.seed + side * 7477)() * ch.length)].id); } // own stream: the rest of the AI rolls stay as they were
+    if (canBuyTowerSkill(m, side) && rng(m.seed + m.round * 331 + side * 17)() < 0.5) buyTowerSkill(m, side); // own stream, as above
     const opp = 1 - side;
     const oppArmy = m.armies[opp].filter(s => s.round < m.round);
     for (const ui of freeLeft(m, side)) { const spot = aiSpot(m, side, ui, oppArmy, r); if (spot) place(m, side, ui, spot.col, spot.row); }
@@ -898,7 +945,7 @@ const Game = (() => {
     unlockCost, isUnlocked, unlockVisible, unlock, undoUnlock,
     skillDef, skillCost, isInnate, hasSkill, skillVisible, unitFor, canBuySkill, buySkill, undoSkill, sellValue, sell,
     isRider, hiddenFromFoe, isCarrier, riderOf, carrierOf, squadAt, boardable, unplaceSquad,
-    TOWER, TOWER_TYPES, OUTPOST, TOWER_PICK_ROUND, towerType, towerChoices, needsTowerPick, setTowerType, settleTowerPicks, TOWER_MID, towerColOk, towerAt, needsTower, placeTower, ensureTower,
+    TOWER, TOWER_TYPES, OUTPOST, TOWER_PICK_ROUND, towerType, towerChoices, needsTowerPick, setTowerType, settleTowerPicks, TOWER_SKILL, towerSkillOf, towerSkillVisible, towerPicked, canBuyTowerSkill, buyTowerSkill, undoTowerSkill, TOWER_MID, towerColOk, towerAt, needsTower, placeTower, ensureTower,
     FLANK, flankRows, flankOpen, isFlank, reserved, canPlaceAt, enemyHolds, inNoMans, hasSkillType,
     ICE, ALTAR, GOLEM, isIce, hailRound, altarRound, stormShift, stormRows, hailTiles, altarCost, altarBought, addAltar, buyAltar, undoAltar, snowgres, snowgreUnit,
     MAPS, ELF_TOWER, SHROOM, SHROOM_SPLIT, shroomAt, shroomTileAt, shroomRemoval, SHROOM_REMOVE, removeShroom, undoRemoveShroom, mapOf, elfSpot, rollMap, BRIBE_COST, bribed, bribeVisible, canBribe, bribe, undoBribe,

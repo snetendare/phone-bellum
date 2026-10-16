@@ -1021,7 +1021,7 @@
       "name": "Just a horse",
       "cost": 200,
       "bodies": 1,
-      "hp": 700,
+      "hp": 500,
       "hit": 200,
       "aps": 1,
       "range": 1,
