@@ -27,18 +27,35 @@ const Game = (() => {
   // and the opponent's sits straight across the board from it (on the Mushroom Cavern, mirrored as each player sees it: see towerSpot). It has a short, light attack. If it falls, that player's army is
   // crippled for a few seconds (see Engine.TOWER_DOWN). It is rebuilt for every round.
   const TOWER = { name: 'Tower', cost: 0, bodies: 1, hp: 650, hit: 30, aps: 1.2, range: 8, speed: 0, splash: 0, structure: true, shape: 'square', color: '#C9B79C' };
-  // Tower types: each player picks one in round 1 (before the first fight); it stays for the whole match.
+  // Tower types. Until TOWER_PICK_ROUND every player has the Outpost, a weaker keep (about 60%). At the start of
+  // that round, before the deploy countdown runs, each player picks one of the offered types (towerChoices); the pick
+  // can't be changed and stays for the rest of the match.
+  const TOWER_PICK_ROUND = 3, TOWER_OFFER = 3;
+  const OUTPOST = { id: 'outpost', name: 'Outpost', text: 'A small watchtower that holds the line until round 3, when you pick your real tower.', unit: { ...TOWER, name: 'Outpost', kind: 'outpost', hp: 400, hit: 18, color: '#A88E6E' } };
   const TOWER_TYPES = [
     { id: 'keep', name: 'Keep', text: 'The standard tower: steady, light shots at short range.', unit: TOWER },
     { id: 'sniper', name: 'Sniper tower', text: 'Shoots across most of the board, slowly, for double damage.', unit: { ...TOWER, name: 'Sniper Tower', kind: 'sniper', hp: 500, hit: 60, aps: 0.4, range: 30, color: '#B9C7D6' } },
     { id: 'bastion', name: 'Bastion', text: 'Much tougher, with a shorter, slower attack that splashes the units around its target.', unit: { ...TOWER, name: 'Bastion', kind: 'bastion', hp: 1000, aps: 0.8, range: 5, splash: 2, color: '#B79C8A' } },
   ];
-  const towerType = (m, side) => { const t = m && m.towers && m.towers[side]; return TOWER_TYPES.find(x => x.id === (t && t.type)) || TOWER_TYPES[0]; };
-  // the type can be changed during round 1 only
+  // a picked type, or the Outpost until the pick is made (a match saved without a pick past it gets the Keep)
+  const towerType = (m, side) => {
+    const t = m && m.towers && m.towers[side];
+    if (!m || m.round < TOWER_PICK_ROUND || needsTowerPick(m, side)) return OUTPOST;
+    return TOWER_TYPES.find(x => x.id === (t && t.type)) || TOWER_TYPES[0];
+  };
+  // the types a player is offered: all of them while there are TOWER_OFFER or fewer, else a seeded draw
+  function towerChoices(m, side) {
+    if (TOWER_TYPES.length <= TOWER_OFFER) return TOWER_TYPES.slice();
+    const r = rng(m.seed + side * 4241 + 17), pool = TOWER_TYPES.slice(), out = [];
+    while (out.length < TOWER_OFFER) out.push(pool.splice(Math.floor(r() * pool.length), 1)[0]);
+    return out;
+  }
+  const needsTowerPick = (m, side) => !!(m && m.round === TOWER_PICK_ROUND && m.towers && m.towers[side] && !m.towers[side].type);
+  // a player who didn't pick in time gets the first type on offer (the Keep)
+  function settleTowerPicks(m) { for (const sd of [0, 1]) if (needsTowerPick(m, sd)) m.towers[sd].type = towerChoices(m, sd)[0].id; }
   function setTowerType(m, side, id) {
-    const t = m.towers && m.towers[side];
-    if (m.round !== 1 || !t || !TOWER_TYPES.some(x => x.id === id)) return false;
-    if (id === 'keep') delete t.type; else t.type = id;
+    if (!needsTowerPick(m, side) || !towerChoices(m, side).some(x => x.id === id)) return false;
+    m.towers[side].type = id;
     return true;
   }
   const TOWER_MID = [4, 7]; // columns the tower can't stand in
@@ -581,6 +598,7 @@ const Game = (() => {
 
   function startBattle(m) {
     ensureTower(m, 0); ensureTower(m, 1);
+    settleTowerPicks(m);
     ensurePack(m, 0); ensurePack(m, 1);
     const mp = mapOf(m), elf = elfSpot(m);
     const g = mp && mp.healMul ? { ...SETTINGS, healMul: mp.healMul } : SETTINGS;
@@ -720,7 +738,7 @@ const Game = (() => {
       const col = r() < 0.5 ? 1 + Math.floor(r() * 2) : 9 + Math.floor(r() * 2);
       if (!placeTower(m, side, col, rows[3 + Math.floor(r() * 2)])) ensureTower(m, side);
     }
-    if (m.round === 1 && m.towers && m.towers[side]) setTowerType(m, side, TOWER_TYPES[Math.floor(rng(m.seed + side * 7477)() * TOWER_TYPES.length)].id); // own stream: the rest of the AI rolls stay as they were
+    if (needsTowerPick(m, side)) { const ch = towerChoices(m, side); setTowerType(m, side, ch[Math.floor(rng(m.seed + side * 7477)() * ch.length)].id); } // own stream: the rest of the AI rolls stay as they were
     const opp = 1 - side;
     const oppArmy = m.armies[opp].filter(s => s.round < m.round);
     for (const ui of freeLeft(m, side)) { const spot = aiSpot(m, side, ui, oppArmy, r); if (spot) place(m, side, ui, spot.col, spot.row); }
@@ -834,7 +852,7 @@ const Game = (() => {
     PACKAGE, allPackages, packOf, needsPack, freeLeft, choosePack, ensurePack,
     unlockCost, isUnlocked, unlockVisible, unlock, undoUnlock,
     skillDef, skillCost, isInnate, hasSkill, skillVisible, unitFor, canBuySkill, buySkill, undoSkill, sellValue, sell,
-    TOWER, TOWER_TYPES, towerType, setTowerType, TOWER_MID, towerColOk, towerAt, needsTower, placeTower, ensureTower,
+    TOWER, TOWER_TYPES, OUTPOST, TOWER_PICK_ROUND, towerType, towerChoices, needsTowerPick, setTowerType, settleTowerPicks, TOWER_MID, towerColOk, towerAt, needsTower, placeTower, ensureTower,
     FLANK, flankRows, flankOpen, isFlank, reserved, canPlaceAt, enemyHolds, inNoMans, hasSkillType,
     ICE, ALTAR, GOLEM, isIce, hailRound, altarRound, stormShift, stormRows, hailTiles, altarCost, altarBought, addAltar, buyAltar, undoAltar, snowgres, snowgreUnit,
     MAPS, ELF_TOWER, SHROOM, SHROOM_SPLIT, shroomAt, shroomTileAt, shroomRemoval, SHROOM_REMOVE, removeShroom, undoRemoveShroom, mapOf, elfSpot, rollMap, BRIBE_COST, bribed, bribeVisible, canBribe, bribe, undoBribe,
