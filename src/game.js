@@ -41,6 +41,26 @@ const Game = (() => {
   const CHAR = { cageHp: 10, zoeTiles: 2, zoeDmg: 20, zoeHp: 20, zoeAps: 10, wilhelmArmor: 4, wilhelmDelay: 0.5 };
   const charOf = (m, side) => (m && m.chars && m.chars[side]) || null;
   const charInfo = (id) => CHARACTERS.find(c => c.id === id) || null;
+  // ---------- maps ----------
+  // Each match is fought on one map, picked at random when the match is created. A map can change the
+  // rules of every fight. Elf tower: a neutral tower standing on the centre line of no man's land, the same
+  // distance from both zones, in a random column that stays for the whole match. It can't be attacked, and
+  // its shots alternate between the two sides.
+  const MAPS = [
+    { id: 'forest', name: 'Forest Clearing', text: 'Stealth units deal 20% more damage. Healing and regeneration are 1.5× as strong. A neutral elf tower in no man’s land shoots at both sides in turn.', stealthDmg: 20, healMul: 1.5, elfTower: true },
+  ];
+  const ELF_TOWER = { name: 'Elf Tower', cost: 0, bodies: 1, hp: 1, hit: 20, aps: 0.5, range: 12, speed: 0, splash: 0, structure: true };
+  const ELF_COLS = [2, 9]; // the elf tower's column is picked from these (never the flank edges)
+  function rollMap(seed) {
+    const r = rng(seed + 31337);
+    const mp = MAPS[Math.floor(r() * MAPS.length)];
+    const out = { id: mp.id };
+    if (mp.elfTower) out.elfCol = ELF_COLS[0] + Math.floor(r() * (ELF_COLS[1] - ELF_COLS[0] + 1));
+    return out;
+  }
+  const mapOf = (m) => (m && m.map && MAPS.find(x => x.id === m.map.id)) || null;
+  // where the elf tower stands (world coordinates), or null: on its column, on the line between the two middle rows
+  const elfSpot = (m) => { const mp = mapOf(m); return mp && mp.elfTower && m.map.elfCol != null ? { x: tileToWorld(m.map.elfCol, 0).x, y: 0, col: m.map.elfCol } : null; };
   const towerColOk = (col) => col >= 0 && col < COLS && (col < TOWER_MID[0] || col > TOWER_MID[1]);
   const AI = { levelPolicy: 'smart', maxExtraDeploys: 3, skills: true }; // levelPolicy: smart | never | all (for experiments)
 
@@ -166,6 +186,7 @@ const Game = (() => {
       unlocks: [{}, {}], // units unlocked per player: unlocks[side][unitIdx] = round it was unlocked
       packages: [dealPackages(units, r), dealPackages(units, r)], // each player's 3 starting package options, each with a different random character
       pack: [null, null], // which one each player picked
+      map: rollMap(seed >>> 0), // { id, elfCol }: the map this match is fought on
     };
   }
 
@@ -355,6 +376,8 @@ const Game = (() => {
       const w = tileToWorld(sq.col, sq.row);
       const ch = charOf(m, side), forward = isFlank(side, sq.col, sq.row) || inNoMans(sq.row);
       let u = unitFor(m, side, sq.unit);
+      const mp = mapOf(m);
+      if (mp && mp.stealthDmg && u.stealth) u = { ...u, hit: u.hit * (1 + mp.stealthDmg / 100) }; // the map favours stealth units
       if (ch === 'wilhelm' && forward) u = { ...u, bonusArmor: (u.bonusArmor || 0) + CHAR.wilhelmArmor };
       // Zoe: a squad that starts the fight on a buff tile keeps the bonus for the whole fight
       const zoe = onBuffTile(m, side, sq.col, sq.row);
@@ -387,7 +410,9 @@ const Game = (() => {
   function startBattle(m) {
     ensureTower(m, 0); ensureTower(m, 1);
     ensurePack(m, 0); ensurePack(m, 1);
-    return E.createBattle(bodiesFor(m, 0), bodiesFor(m, 1), SETTINGS, { record: true });
+    const mp = mapOf(m), elf = elfSpot(m);
+    const g = mp && mp.healMul ? { ...SETTINGS, healMul: mp.healMul } : SETTINGS;
+    return E.createBattle(bodiesFor(m, 0), bodiesFor(m, 1), g, { record: true, neutrals: elf ? [{ u: E.withTraits(ELF_TOWER), x: elf.x, y: elf.y }] : [] });
   }
 
   // Damage a side deals = points of its squads, scaled by how much of each squad is still alive
@@ -612,6 +637,7 @@ const Game = (() => {
     skillDef, skillCost, isInnate, hasSkill, skillVisible, unitFor, canBuySkill, buySkill, undoSkill, sellValue, sell,
     TOWER, TOWER_MID, towerColOk, towerAt, needsTower, placeTower, ensureTower,
     FLANK, flankRows, flankOpen, isFlank, reserved, canPlaceAt, enemyHolds, inNoMans, hasSkillType,
+    MAPS, ELF_TOWER, mapOf, elfSpot, rollMap,
     CHARACTERS, CHAR, charOf, charInfo, isTier1, rollBuffTiles, onBuffTile, TOWER_SPOT,
     zoneRows, inZone, tileToWorld, createMatch, place, unplace, bodiesFor, startBattle, resolve, aiDeploy, occupied,
   };

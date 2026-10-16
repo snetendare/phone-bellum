@@ -280,17 +280,90 @@ a { color: var(--you); }
   const srow = (r) => me === 1 ? Game.ROWS - 1 - r : r;
   const tilePx = () => Game.TILE * S;
   const radius = (u) => Math.max(0.6, Math.min(2.4, 0.55 + Math.sqrt(u.hp) / 30)) * S;
-  const teamCol = (side) => side === me ? css('--you') : css('--foe');
+  const ELF_COL = '#D8E68C'; // the neutral elf tower and its arrows
+  const teamCol = (side) => side === 2 ? ELF_COL : side === me ? css('--you') : css('--foe');
   const upOf = (side) => side === me ? 1 : -1;
+
+  // ---------- map backgrounds ----------
+  // Forest Clearing: an open, faded green glade in the middle, with the edge of a dense forest
+  // closing in on both flanks. Kept dark and muted so the squads stand out. Drawn once per board size.
+  let mapBg = null;
+  function forestBg() {
+    const key = W + 'x' + H;
+    if (mapBg && mapBg.key === key) return mapBg.cv;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const oc = document.createElement('canvas'); oc.width = Math.round(W * dpr); oc.height = Math.round(H * dpr);
+    const c = oc.getContext('2d'); c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    let sd = 1234567; const rr = () => { sd = (sd * 1103515245 + 12345) % 2147483648; return sd / 2147483648; };
+    const t = tilePx();
+    // the clearing: a soft lighter patch in the middle of a dark green floor
+    c.fillStyle = '#132219'; c.fillRect(0, 0, W, H);
+    const gl = c.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, Math.max(W, H) * 0.62);
+    gl.addColorStop(0, '#1F3923'); gl.addColorStop(0.55, '#1A301F'); gl.addColorStop(1, '#13241A');
+    c.fillStyle = gl; c.fillRect(0, 0, W, H);
+    // patches of slightly different greens and faint grass tufts
+    const tints = ['#223D27', '#1B321F', '#26392A', '#182C1C'];
+    for (let k = 0; k < 26; k++) {
+      c.globalAlpha = 0.35; c.fillStyle = tints[k % tints.length];
+      c.beginPath(); c.ellipse(t + rr() * (W - 2 * t), rr() * H, t * (0.6 + rr() * 1.4), t * (0.4 + rr() * 0.9), rr() * 3, 0, Math.PI * 2); c.fill();
+    }
+    c.strokeStyle = '#3E5E40'; c.lineWidth = 1;
+    for (let k = 0; k < 260; k++) {
+      const x = rr() * W, y = rr() * H, h = 2 + rr() * 3;
+      c.globalAlpha = 0.12 + rr() * 0.1;
+      c.beginPath(); c.moveTo(x, y); c.lineTo(x - 1, y - h); c.moveTo(x, y); c.lineTo(x + 1.2, y - h * 0.8); c.stroke();
+    }
+    // the forest edge: shade darkening toward both sides of the board
+    for (const left of [true, false]) {
+      const x0 = left ? 0 : W, x1 = left ? t * 1.6 : W - t * 1.6;
+      const sh = c.createLinearGradient(x0, 0, x1, 0);
+      sh.addColorStop(0, 'rgba(6,14,9,0.85)'); sh.addColorStop(0.45, 'rgba(8,18,11,0.45)'); sh.addColorStop(1, 'rgba(8,18,11,0)');
+      c.globalAlpha = 1; c.fillStyle = sh; c.fillRect(Math.min(x0, x1), 0, Math.abs(x1 - x0), H);
+    }
+    // trees: crowded canopies at the very edge, thinning out toward the clearing
+    const trees = [];
+    for (const left of [true, false]) {
+      for (let k = 0; k < Math.round(H / t * 5); k++) {
+        const depth = rr() * rr();                       // most trees close to the edge
+        const r = t * (0.28 + rr() * 0.3) * (1 - depth * 0.35);
+        const dx = -t * 0.25 + depth * t * 1.15;          // from just past the edge to a little into column 2
+        trees.push({ x: left ? dx : W - dx, y: rr() * (H + t) - t / 2, r, depth });
+      }
+    }
+    trees.sort((a, b) => a.y - b.y);
+    const leaf = ['#0B1C10', '#0F2414', '#132B18', '#17311C'];
+    for (const tr of trees) { // shadow cast down and away from the clearing
+      c.globalAlpha = 0.35; c.fillStyle = '#050B07';
+      c.beginPath(); c.ellipse(tr.x + (tr.x < W / 2 ? -1 : 1) * tr.r * 0.15, tr.y + tr.r * 0.35, tr.r * 1.05, tr.r * 0.8, 0, 0, Math.PI * 2); c.fill();
+    }
+    for (const tr of trees) {
+      const a = 0.92 - tr.depth * 0.45;                  // trees further into the clearing are fainter
+      c.globalAlpha = a; c.fillStyle = leaf[Math.floor(rr() * leaf.length)];
+      c.beginPath();
+      for (let k = 0; k < 7; k++) { // a lumpy canopy: a ring of overlapping blobs
+        const ang = k / 7 * Math.PI * 2, br = tr.r * (0.55 + rr() * 0.15);
+        c.moveTo(tr.x + Math.cos(ang) * tr.r * 0.5 + br, tr.y + Math.sin(ang) * tr.r * 0.5);
+        c.arc(tr.x + Math.cos(ang) * tr.r * 0.5, tr.y + Math.sin(ang) * tr.r * 0.5, br, 0, Math.PI * 2);
+      }
+      c.fill();
+      c.globalAlpha = a * 0.3; c.fillStyle = '#2A4A2C'; // light from the top left
+      c.beginPath(); c.arc(tr.x - tr.r * 0.25, tr.y - tr.r * 0.3, tr.r * 0.45, 0, Math.PI * 2); c.fill();
+    }
+    c.globalAlpha = 1;
+    mapBg = { key, cv: oc };
+    return oc;
+  }
 
   function drawBoard() {
     const t = tilePx();
     const Z = Game.ZONE, mine = (Game.ROWS - Z) * t;
-    ctx.fillStyle = css('--board'); ctx.fillRect(0, 0, W, H);
+    const v = phase === 'battle' && battlePre ? battlePre : m; // during a fight: the board as it was when the fight began, not the next round's
+    const mp = Game.mapOf(v);
+    if (mp && mp.id === 'forest') ctx.drawImage(forestBg(), 0, 0, W, H);
+    else { ctx.fillStyle = css('--board'); ctx.fillRect(0, 0, W, H); }
     ctx.globalAlpha = 0.08;
     ctx.fillStyle = css('--foe'); ctx.fillRect(0, 0, W, t * Z);
     ctx.fillStyle = css('--you'); ctx.fillRect(0, mine, W, t * Z);
-    const v = phase === 'battle' && battlePre ? battlePre : m; // during a fight: the board as it was when the fight began, not the next round's
     if (v) for (const side of [0, 1]) { // flank tiles inside the other zone: reserved from the start, usable from round 3
       ctx.fillStyle = side === me ? css('--you') : css('--foe'); ctx.globalAlpha = Game.flankOpen(v) ? 0.22 : 0.12;
       for (const col of Game.FLANK.cols) for (const row of Game.flankRows(side)) ctx.fillRect(scol(col) * t, srow(row) * t, t, t);
@@ -371,6 +444,24 @@ a { color: var(--you); }
     const tw = m.towers[side], t = tilePx();
     drawKeep((scol(tw.col) + 0.5) * t, (srow(tw.row) + 0.5) * t, t, side);
   }
+  // the neutral elf tower: a slim pale spire with a leaf-green roof. range = show its reach as a faint ring
+  function drawElfTower(v, range) {
+    const e = Game.elfSpot(v); if (!e) return;
+    const x = PX(e.x), y = PY(e.y), s = tilePx() * 1.25;
+    if (range) {
+      ctx.strokeStyle = ELF_COL; ctx.globalAlpha = 0.22; ctx.lineWidth = 1; ctx.setLineDash([3, 5]);
+      ctx.beginPath(); ctx.arc(x, y, Game.ELF_TOWER.range * S, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
+    }
+    ctx.globalAlpha = 0.35; ctx.fillStyle = '#000';
+    ctx.beginPath(); ctx.ellipse(x, y + s * 0.26, s * 0.22, s * 0.08, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 1;
+    const w = s * 0.2, top = y - s * 0.12, base = y + s * 0.26;
+    ctx.fillStyle = '#CFC6A8'; ctx.strokeStyle = '#3F5A35'; ctx.lineWidth = Math.max(1, s * 0.035);
+    ctx.beginPath(); ctx.moveTo(x - w / 2 - s * 0.03, base); ctx.lineTo(x - w / 2, top); ctx.lineTo(x + w / 2, top); ctx.lineTo(x + w / 2 + s * 0.03, base); ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#5E9A4E';
+    ctx.beginPath(); ctx.moveTo(x - w * 0.85, top + s * 0.02); ctx.lineTo(x, top - s * 0.3); ctx.lineTo(x + w * 0.85, top + s * 0.02); ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = ELF_COL; ctx.fillRect(x - s * 0.025, top + s * 0.08, s * 0.05, s * 0.09); // a lit window
+  }
   // tiers by squad price: 100 = tier 1, 200 = tier 2, 400 = tier 3, 600 = tier 4 (any other prices rank in between)
   const TIER_COLORS = ['#9AA5A8', '#6FD08C', '#5BA8F5', '#C58BF2', '#F2B84B'];
   const tierOf = (i) => { const prices = [...new Set(units.map(u => Game.unitCostOf(u)))].sort((a, b) => a - b); return prices.indexOf(Game.unitCostOf(units[i])) + 1; };
@@ -424,6 +515,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
       }
     }
     for (const side of [me, foe()]) if (towerVisible(side)) drawTowerTile(side);
+    drawElfTower(m, true);
   }
 
   function drawBattle() {
@@ -457,6 +549,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
       ctx.strokeStyle = teamCol(b.side); ctx.lineWidth = 2;
       ctx.beginPath(); ctx.arc(PX(b.x), PY(b.y), t * 0.5, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * hpr); ctx.stroke();
     }
+    drawElfTower(battlePre || m, false);
     for (const b of bt.bodies) {
       if (!b.alive || b.u.structure) continue;
       const c = teamCol(b.side), r = radius(b.u), hpr = b.hp / b.u.hp;
@@ -611,7 +704,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
       if (moveMode) hint = moving == null ? `Tap one of your squads from an earlier round to move it (${Game.CONFIG.moveCost} gold, once per round).` : `Tap a free tile to move ${esc(units[m.armies[me].find(s => s.id === moving).unit].name)} there, or drag it.`;
       const freeL = Game.freeLeft(m, me);
       if (freeL.length && !placingTower() && selected === null) hint = `Place your free package squads: ${[...new Set(freeL)].map(ui => `${freeL.filter(x => x === ui).length}× ${esc(units[ui].name)}`).join(', ')}. They cost no gold and no deployments.`;
-      if (choosingPack()) hint = `Pick your starting package and character. Both units are unlocked for you and you get their squads for free, plus ${m.gold[me]} gold to spend. The character’s ability lasts the whole match. Your opponent picks from their own packages.`;
+      if (choosingPack()) hint = `Pick your starting package and character. Both units are unlocked for you and you get their squads for free, plus ${m.gold[me]} gold to spend. The character’s ability lasts the whole match. Your opponent picks from their own packages.${(() => { const mp = Game.mapOf(m); return mp ? ` Map: <b>${esc(mp.name)}</b>. ${esc(mp.text)}` : ''; })()}`;
       if (placingTower()) hint = 'Next, place your tower: tap a gold tile on the left or right side of your zone. If it falls in a fight, your army is crippled for a few seconds.';
     }
     const extraBtns = `<span style="display:flex;gap:6px;flex-wrap:wrap">
@@ -745,6 +838,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
         <li>Start by picking one of three packages: two units unlocked for free with free squads worth ${Game.PACKAGE.value}, plus ${Game.START_GOLD} gold. Each package comes with a random character (never two the same) whose ability lasts the whole match: ${Game.CHARACTERS.map(c => `${esc(c.name)}: ${esc(c.ability)}`).join(' ')}</li>
         <li>Your tower stands in the back of your zone. If it falls in a fight, your army is crippled for a few seconds. Tap the enemy tower to see their character.</li>
         <li>Place squads in the bottom six rows. They stay for the whole match. From round ${Game.FLANK.round}, the edge columns on the enemy's half of the board open up for flanking. The red edge columns on your half are theirs, never yours; a squad placed there waits ${Game.FLANK.delay} s before it moves or attacks, in its first fight only.</li>
+        <li>Every match is fought on a random map that changes the rules: ${Game.MAPS.map(mp => `${esc(mp.name)}: ${esc(mp.text)}`).join(' ')}</li>
         <li>Columns are lanes: squads march straight ahead and fight what they meet, so an empty lane lets a squad walk around the side.</li>
         <li>You have ${DEPLOY_SECONDS} seconds to deploy every round, then the armies fight on their own.</li>
         <li>The loser takes damage from every enemy squad still standing.</li>
@@ -1086,6 +1180,9 @@ TOWERS
 - Your tower: col ${m.towers[1].col}, row ${m.towers[1].row} (fixed; squads can't share its tile).
 - Their tower: col ${m.towers[0].col}, row ${m.towers[0].row}.
 
+MAP
+${(() => { const mp = Game.mapOf(m), e = Game.elfSpot(m); return mp ? `- ${mp.name}: ${mp.text}${e ? ` The elf tower stands in column ${e.col}, on the line between rows ${Game.ROWS / 2 - 1} and ${Game.ROWS / 2}; it hits for ${Game.ELF_TOWER.hit}, ${Game.ELF_TOWER.aps} times a second, range ${Game.ELF_TOWER.range} m, and can't be attacked.` : ''}` : '- No special map.'; })()}
+
 CHARACTERS (each package comes with one; its ability lasts the whole match)
 - Yours: ${Game.charOf(m, 1) ? `${Game.charInfo(Game.charOf(m, 1)).name}: ${Game.charInfo(Game.charOf(m, 1)).ability}` : 'the one that comes with the package you pick'}${Game.charOf(m, 1) === 'zoe' ? ` Your buff tiles this round: ${(m.buff[1] || []).map(t => `col ${t.col}, row ${t.row}`).join('; ')}. A squad that starts the fight on one keeps the bonus all fight, even after it moves.` : ''}
 - Theirs: ${m.round > 1 && Game.charOf(m, 0) ? `${Game.charInfo(Game.charOf(m, 0)).name}: ${Game.charInfo(Game.charOf(m, 0)).ability}` : 'hidden until the first fight'}
@@ -1316,6 +1413,8 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       return;
     }
     if (towerVisible(foe()) && Game.towerAt(m, foe(), t.col, t.row)) { openTowerSheet(foe()); return; }
+    const elf = Game.elfSpot(m);
+    if (elf && t.col === elf.col && (t.row === Game.ROWS / 2 - 1 || t.row === Game.ROWS / 2) && !Game.occupied(m, me, t.col, t.row)) { openMapSheet(); return; }
     const own = m.armies[me].find(s => s.col === t.col && s.row === t.row);
     if (own) {
       if (own.round === m.round) { if (editable() && Game.unplace(m, me, t.col, t.row)) changed(); }
@@ -1386,6 +1485,17 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       <p class="role" style="margin:0">The tower stands in the back of the zone and shoots anything that comes close. It is rebuilt for every round.</p>
       <p style="margin:0"><span style="color:var(--foe)">If it falls:</span> that army deals ${D.attack}% less damage, moves ${D.move}% slower and takes ${D.taken}% more damage for ${D.secs} s.</p>
       <div class="stats"><div><span>Health</span><b class="num">${T.hp}</b></div><div><span>Hit</span><b class="num">${T.hit}</b></div><div><span>Attacks/s</span><b class="num">${T.aps}</b></div><div><span>Range</span><b class="num">${T.range} m</b></div></div>`;
+    $('sheet-back').hidden = false;
+    $('close').addEventListener('click', closeSheet);
+  }
+  function openMapSheet() {
+    const mp = Game.mapOf(m); if (!mp) return;
+    const T = Game.ELF_TOWER;
+    $('sheet').innerHTML = `
+      <div class="bar"><h3 id="sheet-h">Map: ${esc(mp.name)}</h3><button class="btn small" id="close">Close</button></div>
+      <p style="margin:0">${esc(mp.text)}</p>
+      ${mp.elfTower ? `<p class="role" style="margin:0">The elf tower stands in the middle of no man’s land, the same distance from both zones, and stays there all match. It can’t be attacked. Its shots take turns between the two sides, at the nearest unit in range.</p>
+      <div class="stats"><div><span>Hit</span><b class="num">${T.hit}</b></div><div><span>Attacks/s</span><b class="num">${T.aps}</b></div><div><span>Range</span><b class="num">${T.range} m</b></div></div>` : ''}`;
     $('sheet-back').hidden = false;
     $('close').addEventListener('click', closeSheet);
   }
