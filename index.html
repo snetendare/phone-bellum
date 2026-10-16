@@ -375,6 +375,7 @@ const Engine = (() => {
     slow:    { label: 'Slow', params: [['move', 'Enemy move speed (−%)', 40, 5], ['attack', 'Enemy attack speed (−%)', 20, 5], ['duration', 'Lasts (s)', 3, 0.5]] },
     forward: { label: 'Forward planting', params: [] },
     split:   { label: 'Split beam', params: [['beams', 'Targets at once', 4, 1], ['range', 'Range (−%)', 30, 5], ['hit', 'Hit per target (−%)', 0, 5]] },
+    deathSpawn: { label: 'Spawn on death', params: [['unit', 'Spawns (unit name)', 'Goblin Swarm', null], ['count', 'Bodies per death', 2, 1], ['strength', 'Strength of each spawn (% health and damage; 50 = half)', 100, 10]] },
   };
   const skillParam = (d, k) => {
     const v = d.params && d.params[k];
@@ -404,6 +405,7 @@ const Engine = (() => {
       case 'slow': return `Hits slow the target for ${n('duration')} s: −${n('move')}% move speed and −${n('attack')}% attack speed.`;
       case 'forward': return 'Squads of this unit can also be placed in no man’s land.';
       case 'split': return `Attacks ${n('beams')} different enemies at once${+P('hit') > 0 ? `, −${n('hit')}% hit each` : ''}. −${n('range')}% range.`;
+      case 'deathSpawn': return `When a body dies, ${n('count')} ${String(P('unit'))} ${+P('count') === 1 ? 'body takes' : 'bodies take'} its place${+P('strength') !== 100 ? `, at ${n('strength')}% health and damage` : ''}. A spawn of the unit itself starts from the dead body's own stats. Spawns don’t spawn again.`;
     }
     return '';
   }
@@ -447,6 +449,15 @@ const Engine = (() => {
           u.slowAtk = Math.max(u.slowAtk || 0, Math.min(90, P('attack')));
           u.slowDur = Math.max(u.slowDur || 0, Math.max(0.5, P('duration')));
           break;
+        case 'deathSpawn': {
+          const name = String(skillParam(d, 'unit'));
+          const src = (roster || []).find(r => r && r.name === name);
+          if (src) {
+            const { skills, skillDefs, skillsOn, ...plain } = src;
+            u.deathSpawn = { name, unit: withTraits({ ...plain, level: 0 }), count: Math.max(1, Math.round(P('count'))), strength: Math.max(1, P('strength')) / 100 };
+          }
+          break;
+        }
         case 'split':
           u.beams = Math.max(u.beams || 1, Math.round(P('beams')));
           u.range = Math.max(0.5, u.range * (1 - Math.min(90, P('range')) / 100));
@@ -594,7 +605,20 @@ const Engine = (() => {
         if (opts.record) shots.push([v.x, v.y, v.x, v.y, v.side, BLAST_RADIUS, 1, 0, 0]);
         for (const f of sides[1 - v.side]) if (f.alive && hyp(f.x - v.x, f.y - v.y) <= BLAST_RADIUS) hurt(v, f, dmg, v.x, v.y);
       }
+      // Spawn on death: new bodies take its place (they join at the end of this tick).
+      // A spawn of the unit itself copies the dead body's stats (level, skills, buffs). Spawns never carry deathSpawn.
+      const ds = v.u.deathSpawn;
+      if (ds) {
+        const base = ds.name === v.u.name ? v.u : ds.unit;
+        const { deathSpawn, ...rest } = base;
+        const ku = { ...rest, hp: base.hp * ds.strength, hit: base.hit * ds.strength };
+        for (let k = 0; k < ds.count; k++) {
+          const [ox, oy] = SPAWN_SPOTS[k % SPAWN_SPOTS.length], fwd = v.side === 0 ? 1 : -1;
+          pendingKids.push(newBody(ku, v.side, v.x + ox * g.spacing * 0.7, v.y + oy * fwd * g.spacing * 0.7, spawnIdx++, -1));
+        }
+      }
     };
+    const pendingKids = [];
     let projectiles = [];
     let t = 0, shots = [], over = false, tick = 0;
     const dist = (a, b) => hyp(a.x - b.x, a.y - b.y);
@@ -1026,6 +1050,9 @@ const Engine = (() => {
         }
         projectiles = next;
       }
+      // bodies spawned by deaths this tick join the fight
+      for (const kid of pendingKids) { all.push(kid); sides[kid.side].push(kid); stats[kid.side].totalHp += kid.u.hp; }
+      pendingKids.length = 0;
       t += dt;
       return true;
     }
