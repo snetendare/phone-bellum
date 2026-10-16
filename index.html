@@ -1230,7 +1230,7 @@ const Game = (() => {
   // Upgrades cost half the unit's price at the default setting (50 for a 100-gold squad)
   const levelCost = (unit) => Math.max(10, Math.round(CONFIG.levelCostPerTier * (unit.cost || 1) / 5) * 5);
   // Each player has one tower. It stands on a fixed tile (TOWER_SPOT): column 8, second row from the back,
-  // and the opponent's sits straight across the board from it. It has a short, light attack. If it falls, that player's army is
+  // and the opponent's sits straight across the board from it (on the Mushroom Cavern, mirrored as each player sees it: see towerSpot). It has a short, light attack. If it falls, that player's army is
   // crippled for a few seconds (see Engine.TOWER_DOWN). It is rebuilt for every round.
   const TOWER = { name: 'Tower', cost: 0, bodies: 1, hp: 650, hit: 30, aps: 1.2, range: 8, speed: 0, splash: 0, structure: true, shape: 'square', color: '#C9B79C' };
   const TOWER_MID = [4, 7]; // columns the tower can't stand in
@@ -1254,10 +1254,10 @@ const Game = (() => {
   // its shots alternate between the two sides.
   const MAPS = [
     { id: 'forest', name: 'Forest Clearing', text: 'Stealth units deal 20% more damage. Healing and regeneration are 1.5× as strong. A neutral elf tower in no man’s land shoots at both sides in turn; tap it to bribe the elves for 50 gold, and from then on it heals your units instead.', stealthDmg: 20, healMul: 1.5, elfTower: true },
-    { id: 'cavern', name: 'Mushroom Cavern', text: 'Glowing mushroom tiles stay on the same tiles all match, mirrored on both halves. Purple: a squad that starts the fight there gets +10% damage, +10% health and +5% attack speed. Yellow: a unit that starts on it or walks over it moves 30% faster for the rest of the fight. Green: a unit that starts on it or walks over it is poisoned and slowed. Yellow and green work once per unit, for both sides.', shrooms: true },
+    { id: 'cavern', name: 'Mushroom Cavern', text: 'Glowing mushroom tiles stay on the same tiles all match, mirrored on both halves. Purple: a squad that starts the fight there gets +10% damage, +10% health and +5% attack speed. Yellow: a unit that starts on it or walks over it moves 30% faster for the rest of the fight. Green: a unit that starts on it or walks over it is poisoned and slowed. Yellow and green work once per unit, for both sides.', shrooms: true, pointMirror: true },
   ];
   // Mushroom Cavern tiles. Each player's half of the board gets SHROOM_SPLIT of them; the other half is the mirror image
-  // (same column, row flipped, like the towers). purple: half a Zoe buff for squads that start there (never on the flank
+  // as each player sees it (column and row both flipped: a tile on your right is a tile on their right). purple: half a Zoe buff for squads that start there (never on the flank
   // columns); yellow: move speed (only on the flank columns or in no man's land); green: poison and slow (anywhere).
   const SHROOM_SPLIT = { purple: 2, yellow: 1, green: 1 };
   const SHROOM = { purpleDmg: 10, purpleHp: 10, purpleAps: 5, speed: 30, poisonPct: 3, poisonDur: 4, slowMove: 40, slowAtk: 20, slowDur: 3 }; // poisonPct: % of max health per second
@@ -1301,11 +1301,17 @@ const Game = (() => {
         used.add(sp.col + ',' + sp.row);
         half.push({ col: sp.col, row: sp.row, type });
       }
-      out.tiles = half.concat(half.map(t => ({ ...t, row: ROWS - 1 - t.row })));
+      out.tiles = half.concat(half.map(t => ({ ...t, col: COLS - 1 - t.col, row: ROWS - 1 - t.row })));
     }
     return out;
   }
   const shroomAt = (m, col, row) => { const mp = mapOf(m); return mp && mp.shrooms && m.map.tiles ? (m.map.tiles.find(t => t.col === col && t.row === row) || null) : null; };
+  // Where a player's tower stands. On a pointMirror map the board is mirrored as each player sees it, so the
+  // second tower moves to the flipped column too (on your right for you means on their right for them).
+  const towerSpot = (m, side) => {
+    const t = TOWER_SPOT[side], mp = mapOf(m);
+    return side === 1 && mp && mp.pointMirror ? { col: COLS - 1 - t.col, row: t.row } : { ...t };
+  };
   const mapOf = (m) => (m && m.map && MAPS.find(x => x.id === m.map.id)) || null;
   // where the elf tower stands (world coordinates), or null: on its column, on the line between the two middle rows
   const elfSpot = (m) => { const mp = mapOf(m); return mp && mp.elfTower && m.map.elfCol != null ? { x: tileToWorld(m.map.elfCol, 0).x, y: 0, col: m.map.elfCol } : null; };
@@ -1421,14 +1427,14 @@ const Game = (() => {
 
   function createMatch(units, matrix, seed) {
     const r = rng((seed >>> 0) + 777);
-    return {
+    const m = {
       units, matrix, seed: seed >>> 0,
       round: 1, hp: [START_HP, START_HP], gold: [START_GOLD, START_GOLD],
       armies: [[], []], nextId: [1, 1], history: [], over: false, winner: -1,
       extraDeploys: [0, 0],
       moved: [null, null], // id of the squad each player moved this round (one move per round, CONFIG.moveCost gold)
       tech: [{}, {}], // skills bought per unit type: tech[side][unitIdx] = [round bought or 0, round bought or 0]
-      towers: TOWER_SPOT.map(t => ({ ...t })), // { col, row } of each player's tower (fixed)
+      towers: null, // { col, row } of each player's tower (fixed; set below, as it depends on the map)
       chars: [null, null], // each player's character id (comes with the package)
       buff: [[], []], // Zoe's buff tiles for this round: [{ col, row }, ...]
       unlocks: [{}, {}], // units unlocked per player: unlocks[side][unitIdx] = round it was unlocked
@@ -1437,6 +1443,8 @@ const Game = (() => {
       map: rollMap(seed >>> 0), // { id, elfCol }: the map this match is fought on
       bribe: [0, 0], // round each player bribed the elf tower in (0 = not bribed)
     };
+    m.towers = [towerSpot(m, 0), towerSpot(m, 1)];
+    return m;
   }
 
   // ---------- skills (bought per unit type, for all squads of that type) ----------
@@ -1587,7 +1595,7 @@ const Game = (() => {
   function ensureTower(m, side) {
     if (!m.towers) m.towers = [null, null];
     if (m.towers[side]) return;
-    m.towers[side] = { ...TOWER_SPOT[side] };
+    m.towers[side] = towerSpot(m, side);
   }
 
   function place(m, side, unitIdx, col, row) {
@@ -1900,7 +1908,7 @@ const Game = (() => {
     TOWER, TOWER_MID, towerColOk, towerAt, needsTower, placeTower, ensureTower,
     FLANK, flankRows, flankOpen, isFlank, reserved, canPlaceAt, enemyHolds, inNoMans, hasSkillType,
     MAPS, ELF_TOWER, SHROOM, SHROOM_SPLIT, shroomAt, mapOf, elfSpot, rollMap, BRIBE_COST, bribed, bribeVisible, canBribe, bribe, undoBribe,
-    CHARACTERS, CHAR, charOf, charInfo, isTier1, rollBuffTiles, onBuffTile, TOWER_SPOT,
+    CHARACTERS, CHAR, charOf, charInfo, isTier1, rollBuffTiles, onBuffTile, TOWER_SPOT, towerSpot,
     zoneRows, inZone, tileToWorld, createMatch, place, unplace, bodiesFor, startBattle, resolve, aiDeploy, occupied,
   };
 })();
