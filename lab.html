@@ -869,6 +869,7 @@ const Engine = (() => {
     // neutral structures (a map's elf tower): they belong to neither side, can't be hit, and shoot at
     // units of both sides in turn. Each is { u, x, y, friends: [bool, bool] }. A side it is friends with
     // (bribed) is never shot; it gets small splash heals instead (u.healHit, u.healAps, u.healSplash).
+    // side (optional): the player it belongs to, so its shots are drawn in their colour. u.strong: drawn as heavier shots.
     const neutrals = (opts.neutrals || []).map(n => ({ ...n, friends: n.friends || [false, false], cd: 1 / Math.max(0.01, n.u.aps), turn: 0, healCd: n.u.healAps > 0 ? 1 / n.u.healAps : 0, healTurn: 0 }));
     // map tiles that act on any unit (either side) that starts on them or walks onto them, once per unit.
     // Each is { x0, x1, y0, y1 (world rectangle), type: 'speed' | 'toxic' | 'hail', ...settings }.
@@ -1405,7 +1406,7 @@ const Engine = (() => {
               n.healCd = Math.max(n.healCd, -dt) + 1 / n.u.healAps;
               const amt = n.u.healHit * healMul;
               for (const f of sides[tgt.side]) if (f.alive && !f.u.structure && hyp(f.x - tgt.x, f.y - tgt.y) <= n.u.healSplash) f.hp = Math.min(f.u.hp, f.hp + amt);
-              if (opts.record) shots.push([n.x, n.y, tgt.x, tgt.y, 2, n.u.healSplash, 0, 1]);
+              if (opts.record) shots.push([n.x, n.y, tgt.x, tgt.y, n.side != null ? n.side : 2, n.u.healSplash, n.u.strong ? 1 : 0, 1]);
             }
           }
         }
@@ -1425,7 +1426,7 @@ const Engine = (() => {
         if (!tgt) { n.cd = Math.max(n.cd, -dt); continue; }
         n.turn = 1 - tgt.side;
         n.cd = Math.max(n.cd, -dt) + 1 / Math.max(0.01, n.u.aps);
-        if (opts.record) shots.push([n.x, n.y, tgt.x, tgt.y, 2, 0, 0, 0, 0]);
+        if (opts.record) shots.push([n.x, n.y, tgt.x, tgt.y, n.side != null ? n.side : 2, 0, n.u.strong ? 1 : 0, 0, 0]);
         if (tgt.shield > 0) { tgt.shield--; continue; }
         neutralDamage(tgt, damageAfterDefense(n.u.hit, tgt, g));
       }
