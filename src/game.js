@@ -53,7 +53,7 @@ const Game = (() => {
   // Mushroom Cavern tiles. Each player's half of the board gets SHROOM_SPLIT of them; the other half is the mirror image
   // as each player sees it (column and row both flipped: a tile on your right is a tile on their right). purple: half a Zoe buff for squads that start there (never on the flank
   // columns); yellow: move speed (only on the flank columns or in no man's land); green: poison and slow (anywhere).
-  const SHROOM_SPLIT = { purple: 2, yellow: 1, green: 1 };
+  const SHROOM_SPLIT = { purple: 2, yellow: 1, green: 2 };
   const SHROOM = { purpleDmg: 10, purpleHp: 10, purpleAps: 5, speed: 30, poisonPct: 3, poisonDur: 4, slowMove: 40, slowAtk: 20, slowDur: 3 }; // poisonPct: % of max health per second
   // healHit/healAps/healSplash: the small splash heal it throws on the units of a player who bribed it
   const ELF_TOWER = { name: 'Elf Tower', cost: 0, bodies: 1, hp: 1, hit: 20, aps: 0.5, range: 12, speed: 0, splash: 0, structure: true, healHit: 15, healAps: 0.4, healSplash: 2.5 };

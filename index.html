@@ -1259,7 +1259,7 @@ const Game = (() => {
   // Mushroom Cavern tiles. Each player's half of the board gets SHROOM_SPLIT of them; the other half is the mirror image
   // as each player sees it (column and row both flipped: a tile on your right is a tile on their right). purple: half a Zoe buff for squads that start there (never on the flank
   // columns); yellow: move speed (only on the flank columns or in no man's land); green: poison and slow (anywhere).
-  const SHROOM_SPLIT = { purple: 2, yellow: 1, green: 1 };
+  const SHROOM_SPLIT = { purple: 2, yellow: 1, green: 2 };
   const SHROOM = { purpleDmg: 10, purpleHp: 10, purpleAps: 5, speed: 30, poisonPct: 3, poisonDur: 4, slowMove: 40, slowAtk: 20, slowDur: 3 }; // poisonPct: % of max health per second
   // healHit/healAps/healSplash: the small splash heal it throws on the units of a player who bribed it
   const ELF_TOWER = { name: 'Elf Tower', cost: 0, bodies: 1, hp: 1, hit: 20, aps: 0.5, range: 12, speed: 0, splash: 0, structure: true, healHit: 15, healAps: 0.4, healSplash: 2.5 };
@@ -3422,7 +3422,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       <p style="margin:0">${dot('purple')} <b>Purple</b>: +${S2.purpleDmg}% damage, +${S2.purpleHp}% health, +${S2.purpleAps}% attack speed all fight for a squad that starts there. Never on the flank columns.</p>
       <p style="margin:0">${dot('yellow')} <b>Yellow</b>: +${S2.speed}% move speed for the rest of the fight. Only on the flank columns and in no man’s land.</p>
       <p style="margin:0">${dot('green')} <b>Green</b>: poison (${S2.poisonPct}% of max health per second for ${S2.poisonDur} s) and slow (−${S2.slowMove}% move, −${S2.slowAtk}% attack speed for ${S2.slowDur} s).</p>
-      <p class="role" style="margin:0">Each half has ${Game.SHROOM_SPLIT.purple} purple, ${Game.SHROOM_SPLIT.yellow} yellow and ${Game.SHROOM_SPLIT.green} green tile, mirrored. They work for both sides and can’t be removed.</p>`; })() : ''}
+      <p class="role" style="margin:0">Each half has ${Game.SHROOM_SPLIT.purple} purple, ${Game.SHROOM_SPLIT.yellow} yellow and ${Game.SHROOM_SPLIT.green} green ${Game.SHROOM_SPLIT.green === 1 ? "tile" : "tiles"}, mirrored. They work for both sides and can’t be removed.</p>`; })() : ''}
       ${mp.elfTower ? `<p class="role" style="margin:0">The elf tower stands in the middle of no man’s land, the same distance from both zones, and stays there all match. It can’t be attacked. Its shots take turns between the two sides, at the nearest unit in range.</p>
       <div class="stats"><div><span>Hit</span><b class="num">${T.hit}</b></div><div><span>Attacks/s</span><b class="num">${T.aps}</b></div><div><span>Range</span><b class="num">${T.range} m</b></div></div>
       <p style="margin:0"><span style="color:var(--gold)">Bribe the elves</span> for ${Game.BRIBE_COST} gold: for the rest of the match the tower never shoots your units. Instead it throws a small heal (${T.healHit} health, ${Math.round(T.healHit * (mp.healMul || 1))} on this map, to every unit within ${T.healSplash} m) on one of your wounded units every ${Math.round(10 / T.healAps) / 10} s. Its shots at a player who hasn’t bribed go on as before. Your bribe stays hidden from your opponent until the fight.</p>
