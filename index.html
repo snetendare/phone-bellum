@@ -1908,14 +1908,15 @@ if (typeof module !== 'undefined') module.exports = Game;
     ctx.globalAlpha = 0.08;
     ctx.fillStyle = css('--foe'); ctx.fillRect(0, 0, W, t * Z);
     ctx.fillStyle = css('--you'); ctx.fillRect(0, mine, W, t * Z);
-    if (m) for (const side of [0, 1]) { // flank tiles inside the other zone: reserved from the start, usable from round 3
-      ctx.fillStyle = side === me ? css('--you') : css('--foe'); ctx.globalAlpha = Game.flankOpen(m) ? 0.22 : 0.12;
+    const v = phase === 'battle' && battlePre ? battlePre : m; // during a fight: the board as it was when the fight began, not the next round's
+    if (v) for (const side of [0, 1]) { // flank tiles inside the other zone: reserved from the start, usable from round 3
+      ctx.fillStyle = side === me ? css('--you') : css('--foe'); ctx.globalAlpha = Game.flankOpen(v) ? 0.22 : 0.12;
       for (const col of Game.FLANK.cols) for (const row of Game.flankRows(side)) ctx.fillRect(scol(col) * t, srow(row) * t, t, t);
     }
     ctx.globalAlpha = 1;
-    if (m && m.buff) for (const side of [0, 1]) { // Zoe's buff tiles: a gold tile with a star
+    if (v && v.buff) for (const side of [0, 1]) { // Zoe's buff tiles: a gold tile with a star
       if (!charVisible(side)) continue;
-      for (const b of m.buff[side] || []) {
+      for (const b of v.buff[side] || []) {
         const x = scol(b.col) * t, y = srow(b.row) * t;
         ctx.fillStyle = css('--gold'); ctx.globalAlpha = 0.16; ctx.fillRect(x, y, t, t);
         ctx.globalAlpha = 0.75; ctx.font = `${Math.round(t * 0.42)}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
