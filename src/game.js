@@ -48,7 +48,7 @@ const Game = (() => {
   // its shots alternate between the two sides.
   const MAPS = [
     { id: 'forest', name: 'Forest Clearing', text: 'Stealth units deal 20% more damage. Healing and regeneration are 1.5× as strong. A neutral elf tower in no man’s land shoots at both sides in turn; tap it to bribe the elves for 50 gold, and from then on it heals your units instead.', stealthDmg: 20, healMul: 1.5, elfTower: true },
-    { id: 'cavern', name: 'Mushroom Cavern', text: 'Glowing mushroom tiles stay on the same tiles all match, mirrored on both halves. Purple: a squad that starts the fight there gets +10% damage, +10% health and +5% attack speed. Yellow: a unit that starts on it or walks over it moves 30% faster for the rest of the fight. Green: a unit that starts on it or walks over it is poisoned and slowed. Yellow and green work once per unit, for both sides.', shrooms: true, pointMirror: true },
+    { id: 'cavern', name: 'Mushroom Cavern', text: 'Glowing mushroom tiles stay on the same tiles all match, mirrored on both halves. Purple: a squad that starts the fight there gets +10% damage, +10% health and +5% attack speed. Yellow: a unit that starts on it or walks over it moves 30% faster for the rest of the fight. Green: a unit that starts on it or walks over it is poisoned and slowed. Yellow and green work once per unit, for both sides. Either player can remove a mushroom tile for 50 gold.', shrooms: true, pointMirror: true },
   ];
   // Mushroom Cavern tiles. Each player's half of the board gets SHROOM_SPLIT of them; the other half is the mirror image
   // as each player sees it (column and row both flipped: a tile on your right is a tile on their right). purple: half a Zoe buff for squads that start there (never on the flank
@@ -99,7 +99,29 @@ const Game = (() => {
     }
     return out;
   }
-  const shroomAt = (m, col, row) => { const mp = mapOf(m); return mp && mp.shrooms && m.map.tiles ? (m.map.tiles.find(t => t.col === col && t.row === row) || null) : null; };
+  // the mushroom tile on a square, if it is still there (removed tiles are gone for the rest of the match)
+  const shroomTileAt = (m, col, row) => { const mp = mapOf(m); return mp && mp.shrooms && m.map.tiles ? (m.map.tiles.find(t => t.col === col && t.row === row) || null) : null; };
+  const shroomRemoval = (m, col, row) => (m && m.map && m.map.removed || []).find(x => x.col === col && x.row === row) || null;
+  const shroomAt = (m, col, row) => shroomRemoval(m, col, row) ? null : shroomTileAt(m, col, row);
+  // Removing a mushroom tile: SHROOM_REMOVE gold, any tile, either player. It is gone from the next fight on.
+  // Like a bribe, a removal stays hidden from the opponent until the fight and can be taken back in the same round.
+  const SHROOM_REMOVE = 50;
+  // (both players may pick the same tile in the same round, since neither can see the other's choice; both pay)
+  function removeShroom(m, side, col, row) {
+    if (!shroomTileAt(m, col, row) || m.gold[side] < SHROOM_REMOVE) return false;
+    if ((m.map.removed || []).some(x => x.col === col && x.row === row && (x.round < m.round || x.side === side))) return false;
+    if (!m.map.removed) m.map.removed = [];
+    m.gold[side] -= SHROOM_REMOVE;
+    m.map.removed.push({ col, row, side, round: m.round });
+    return true;
+  }
+  function undoRemoveShroom(m, side, col, row) {
+    const x = (m.map && m.map.removed || []).find(q => q.col === col && q.row === row && q.side === side && q.round === m.round);
+    if (!x) return false;
+    m.map.removed.splice(m.map.removed.indexOf(x), 1);
+    m.gold[side] += SHROOM_REMOVE;
+    return true;
+  }
   // Where a player's tower stands. On a pointMirror map the board is mirrored as each player sees it, so the
   // second tower moves to the flipped column too (on your right for you means on their right for them).
   const towerSpot = (m, side) => {
@@ -468,7 +490,7 @@ const Game = (() => {
     const g = mp && mp.healMul ? { ...SETTINGS, healMul: mp.healMul } : SETTINGS;
     const T2 = TILE / 2, tiles = [];
     if (mp && mp.shrooms) for (const t of m.map.tiles || []) {
-      if (t.type === 'purple') continue; // purple only counts for squads that start there (see bodiesFor)
+      if (t.type === 'purple' || shroomRemoval(m, t.col, t.row)) continue; // purple only counts for squads that start there (see bodiesFor)
       const w = tileToWorld(t.col, t.row);
       tiles.push(t.type === 'yellow' ? { type: 'speed', speed: SHROOM.speed, x0: w.x - T2, x1: w.x + T2, y0: w.y - T2, y1: w.y + T2 }
         : { type: 'toxic', poisonPct: SHROOM.poisonPct, poisonDur: SHROOM.poisonDur, slowMove: SHROOM.slowMove, slowAtk: SHROOM.slowAtk, slowDur: SHROOM.slowDur, x0: w.x - T2, x1: w.x + T2, y0: w.y - T2, y1: w.y + T2 });
@@ -619,6 +641,11 @@ const Game = (() => {
     const minCost = Math.min(...m.units.map(unitCostOf));
     // the elf tower: from round 2, sometimes bribe it while a squad is still affordable after
     if (m.round >= 2 && canBribe(m, side) && m.gold[side] - reserve - BRIBE_COST >= minCost && r() < 0.5) bribe(m, side);
+    // mushroom tiles: sometimes clear a green one out of its own zone
+    for (const row of zoneRows(side)) for (let col = 0; col < COLS; col++) {
+      const sh = shroomAt(m, col, row);
+      if (sh && sh.type === 'green' && m.gold[side] - reserve - SHROOM_REMOVE >= minCost && r() < 0.4) removeShroom(m, side, col, row);
+    }
     // skills: for unit types it has 2 or more squads of, sometimes buy a skill if a squad is still affordable after
     if (AI.skills) {
       const types = Object.keys(own).map(Number).filter(ui => own[ui] >= 2).sort((a, b) => own[b] - own[a]);
@@ -701,7 +728,7 @@ const Game = (() => {
     skillDef, skillCost, isInnate, hasSkill, skillVisible, unitFor, canBuySkill, buySkill, undoSkill, sellValue, sell,
     TOWER, TOWER_MID, towerColOk, towerAt, needsTower, placeTower, ensureTower,
     FLANK, flankRows, flankOpen, isFlank, reserved, canPlaceAt, enemyHolds, inNoMans, hasSkillType,
-    MAPS, ELF_TOWER, SHROOM, SHROOM_SPLIT, shroomAt, mapOf, elfSpot, rollMap, BRIBE_COST, bribed, bribeVisible, canBribe, bribe, undoBribe,
+    MAPS, ELF_TOWER, SHROOM, SHROOM_SPLIT, shroomAt, shroomTileAt, shroomRemoval, SHROOM_REMOVE, removeShroom, undoRemoveShroom, mapOf, elfSpot, rollMap, BRIBE_COST, bribed, bribeVisible, canBribe, bribe, undoBribe,
     CHARACTERS, CHAR, charOf, charInfo, isTier1, rollBuffTiles, onBuffTile, TOWER_SPOT, towerSpot,
     zoneRows, inZone, tileToWorld, createMatch, place, unplace, bodiesFor, startBattle, resolve, aiDeploy, occupied,
   };

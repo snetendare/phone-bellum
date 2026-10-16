@@ -1254,7 +1254,7 @@ const Game = (() => {
   // its shots alternate between the two sides.
   const MAPS = [
     { id: 'forest', name: 'Forest Clearing', text: 'Stealth units deal 20% more damage. Healing and regeneration are 1.5× as strong. A neutral elf tower in no man’s land shoots at both sides in turn; tap it to bribe the elves for 50 gold, and from then on it heals your units instead.', stealthDmg: 20, healMul: 1.5, elfTower: true },
-    { id: 'cavern', name: 'Mushroom Cavern', text: 'Glowing mushroom tiles stay on the same tiles all match, mirrored on both halves. Purple: a squad that starts the fight there gets +10% damage, +10% health and +5% attack speed. Yellow: a unit that starts on it or walks over it moves 30% faster for the rest of the fight. Green: a unit that starts on it or walks over it is poisoned and slowed. Yellow and green work once per unit, for both sides.', shrooms: true, pointMirror: true },
+    { id: 'cavern', name: 'Mushroom Cavern', text: 'Glowing mushroom tiles stay on the same tiles all match, mirrored on both halves. Purple: a squad that starts the fight there gets +10% damage, +10% health and +5% attack speed. Yellow: a unit that starts on it or walks over it moves 30% faster for the rest of the fight. Green: a unit that starts on it or walks over it is poisoned and slowed. Yellow and green work once per unit, for both sides. Either player can remove a mushroom tile for 50 gold.', shrooms: true, pointMirror: true },
   ];
   // Mushroom Cavern tiles. Each player's half of the board gets SHROOM_SPLIT of them; the other half is the mirror image
   // as each player sees it (column and row both flipped: a tile on your right is a tile on their right). purple: half a Zoe buff for squads that start there (never on the flank
@@ -1305,7 +1305,29 @@ const Game = (() => {
     }
     return out;
   }
-  const shroomAt = (m, col, row) => { const mp = mapOf(m); return mp && mp.shrooms && m.map.tiles ? (m.map.tiles.find(t => t.col === col && t.row === row) || null) : null; };
+  // the mushroom tile on a square, if it is still there (removed tiles are gone for the rest of the match)
+  const shroomTileAt = (m, col, row) => { const mp = mapOf(m); return mp && mp.shrooms && m.map.tiles ? (m.map.tiles.find(t => t.col === col && t.row === row) || null) : null; };
+  const shroomRemoval = (m, col, row) => (m && m.map && m.map.removed || []).find(x => x.col === col && x.row === row) || null;
+  const shroomAt = (m, col, row) => shroomRemoval(m, col, row) ? null : shroomTileAt(m, col, row);
+  // Removing a mushroom tile: SHROOM_REMOVE gold, any tile, either player. It is gone from the next fight on.
+  // Like a bribe, a removal stays hidden from the opponent until the fight and can be taken back in the same round.
+  const SHROOM_REMOVE = 50;
+  // (both players may pick the same tile in the same round, since neither can see the other's choice; both pay)
+  function removeShroom(m, side, col, row) {
+    if (!shroomTileAt(m, col, row) || m.gold[side] < SHROOM_REMOVE) return false;
+    if ((m.map.removed || []).some(x => x.col === col && x.row === row && (x.round < m.round || x.side === side))) return false;
+    if (!m.map.removed) m.map.removed = [];
+    m.gold[side] -= SHROOM_REMOVE;
+    m.map.removed.push({ col, row, side, round: m.round });
+    return true;
+  }
+  function undoRemoveShroom(m, side, col, row) {
+    const x = (m.map && m.map.removed || []).find(q => q.col === col && q.row === row && q.side === side && q.round === m.round);
+    if (!x) return false;
+    m.map.removed.splice(m.map.removed.indexOf(x), 1);
+    m.gold[side] += SHROOM_REMOVE;
+    return true;
+  }
   // Where a player's tower stands. On a pointMirror map the board is mirrored as each player sees it, so the
   // second tower moves to the flipped column too (on your right for you means on their right for them).
   const towerSpot = (m, side) => {
@@ -1674,7 +1696,7 @@ const Game = (() => {
     const g = mp && mp.healMul ? { ...SETTINGS, healMul: mp.healMul } : SETTINGS;
     const T2 = TILE / 2, tiles = [];
     if (mp && mp.shrooms) for (const t of m.map.tiles || []) {
-      if (t.type === 'purple') continue; // purple only counts for squads that start there (see bodiesFor)
+      if (t.type === 'purple' || shroomRemoval(m, t.col, t.row)) continue; // purple only counts for squads that start there (see bodiesFor)
       const w = tileToWorld(t.col, t.row);
       tiles.push(t.type === 'yellow' ? { type: 'speed', speed: SHROOM.speed, x0: w.x - T2, x1: w.x + T2, y0: w.y - T2, y1: w.y + T2 }
         : { type: 'toxic', poisonPct: SHROOM.poisonPct, poisonDur: SHROOM.poisonDur, slowMove: SHROOM.slowMove, slowAtk: SHROOM.slowAtk, slowDur: SHROOM.slowDur, x0: w.x - T2, x1: w.x + T2, y0: w.y - T2, y1: w.y + T2 });
@@ -1825,6 +1847,11 @@ const Game = (() => {
     const minCost = Math.min(...m.units.map(unitCostOf));
     // the elf tower: from round 2, sometimes bribe it while a squad is still affordable after
     if (m.round >= 2 && canBribe(m, side) && m.gold[side] - reserve - BRIBE_COST >= minCost && r() < 0.5) bribe(m, side);
+    // mushroom tiles: sometimes clear a green one out of its own zone
+    for (const row of zoneRows(side)) for (let col = 0; col < COLS; col++) {
+      const sh = shroomAt(m, col, row);
+      if (sh && sh.type === 'green' && m.gold[side] - reserve - SHROOM_REMOVE >= minCost && r() < 0.4) removeShroom(m, side, col, row);
+    }
     // skills: for unit types it has 2 or more squads of, sometimes buy a skill if a squad is still affordable after
     if (AI.skills) {
       const types = Object.keys(own).map(Number).filter(ui => own[ui] >= 2).sort((a, b) => own[b] - own[a]);
@@ -1907,7 +1934,7 @@ const Game = (() => {
     skillDef, skillCost, isInnate, hasSkill, skillVisible, unitFor, canBuySkill, buySkill, undoSkill, sellValue, sell,
     TOWER, TOWER_MID, towerColOk, towerAt, needsTower, placeTower, ensureTower,
     FLANK, flankRows, flankOpen, isFlank, reserved, canPlaceAt, enemyHolds, inNoMans, hasSkillType,
-    MAPS, ELF_TOWER, SHROOM, SHROOM_SPLIT, shroomAt, mapOf, elfSpot, rollMap, BRIBE_COST, bribed, bribeVisible, canBribe, bribe, undoBribe,
+    MAPS, ELF_TOWER, SHROOM, SHROOM_SPLIT, shroomAt, shroomTileAt, shroomRemoval, SHROOM_REMOVE, removeShroom, undoRemoveShroom, mapOf, elfSpot, rollMap, BRIBE_COST, bribed, bribeVisible, canBribe, bribe, undoBribe,
     CHARACTERS, CHAR, charOf, charInfo, isTier1, rollBuffTiles, onBuffTile, TOWER_SPOT, towerSpot,
     zoneRows, inZone, tileToWorld, createMatch, place, unplace, bodiesFor, startBattle, resolve, aiDeploy, occupied,
   };
@@ -2235,6 +2262,13 @@ if (typeof module !== 'undefined') module.exports = Game;
   }
   // a mushroom tile: tinted tile with a small glowing mushroom in the tile's colour
   const SHROOM_COL = { purple: '#B57BFF', yellow: '#F2D25C', green: '#7BD66A' };
+  // a mushroom tile as this screen shows it: an opponent's removal stays hidden until the fight
+  function shroomShown(v, col, row) {
+    const tl = Game.shroomTileAt(v, col, row); if (!tl) return null;
+    const gone = (v.map.removed || []).filter(x => x.col === col && x.row === row);
+    return gone.some(x => x.side === me || phase !== 'deploy' || x.round < v.round) ? null : tl;
+  }
+  const myRemovalNow = (col, row) => !!m && phase === 'deploy' && (m.map && m.map.removed || []).some(x => x.col === col && x.row === row && x.side === me && x.round === m.round);
   function drawShroomTile(tl) {
     const t = tilePx(), x = scol(tl.col) * t, y = srow(tl.row) * t, col = SHROOM_COL[tl.type];
     ctx.fillStyle = col; ctx.globalAlpha = 0.13; ctx.fillRect(x, y, t, t);
@@ -2264,7 +2298,14 @@ if (typeof module !== 'undefined') module.exports = Game;
       for (const col of Game.FLANK.cols) for (const row of Game.flankRows(side)) ctx.fillRect(scol(col) * t, srow(row) * t, t, t);
     }
     ctx.globalAlpha = 1;
-    if (mp && mp.shrooms) for (const tl of v.map.tiles || []) drawShroomTile(tl);
+    if (mp && mp.shrooms) for (const tl of v.map.tiles || []) {
+      if (shroomShown(v, tl.col, tl.row)) drawShroomTile(tl);
+      else if (myRemovalNow(tl.col, tl.row)) { // removed by you this round: a faint dashed outline until the fight
+        const t = tilePx(), x = scol(tl.col) * t, y = srow(tl.row) * t;
+        ctx.strokeStyle = SHROOM_COL[tl.type]; ctx.globalAlpha = 0.35; ctx.lineWidth = 1; ctx.setLineDash([3, 4]);
+        ctx.strokeRect(x + 2.5, y + 2.5, t - 5, t - 5); ctx.setLineDash([]); ctx.globalAlpha = 1;
+      }
+    }
     if (v && v.buff) for (const side of [0, 1]) { // Zoe's buff tiles: a gold tile with a star
       if (!charVisible(side)) continue;
       for (const b of v.buff[side] || []) {
@@ -3103,16 +3144,16 @@ TOWERS
 - Their tower: col ${m.towers[0].col}, row ${m.towers[0].row}.
 
 MAP
-${(() => { const mp = Game.mapOf(m), e = Game.elfSpot(m); return mp ? `- ${mp.name}: ${mp.text}${e ? ` The elf tower stands in column ${e.col}, on the line between rows ${Game.ROWS / 2 - 1} and ${Game.ROWS / 2}; it hits for ${Game.ELF_TOWER.hit}, ${Game.ELF_TOWER.aps} times a second, range ${Game.ELF_TOWER.range} m, and can't be attacked. Bribing the elves costs ${Game.BRIBE_COST} gold once per match ("bribe": true): from then on it never shoots your units and instead heals your wounded units near it for ${Game.ELF_TOWER.healHit} (x${mp.healMul || 1} on this map, ${Game.ELF_TOWER.healSplash} m splash) every ${Math.round(10 / Game.ELF_TOWER.healAps) / 10} s. You ${Game.bribed(m, 1) ? 'have' : "haven't"} bribed; they ${Game.bribeVisible(m, 0) ? 'have' : "haven't, as far as you know"}.` : ''}${mp.shrooms ? ` Mushroom tiles: ${(m.map.tiles || []).map(x => `${x.type} at col ${x.col}, row ${x.row}`).join('; ')}.` : ''}` : '- No special map.'; })()}
+${(() => { const mp = Game.mapOf(m), e = Game.elfSpot(m); return mp ? `- ${mp.name}: ${mp.text}${e ? ` The elf tower stands in column ${e.col}, on the line between rows ${Game.ROWS / 2 - 1} and ${Game.ROWS / 2}; it hits for ${Game.ELF_TOWER.hit}, ${Game.ELF_TOWER.aps} times a second, range ${Game.ELF_TOWER.range} m, and can't be attacked. Bribing the elves costs ${Game.BRIBE_COST} gold once per match ("bribe": true): from then on it never shoots your units and instead heals your wounded units near it for ${Game.ELF_TOWER.healHit} (x${mp.healMul || 1} on this map, ${Game.ELF_TOWER.healSplash} m splash) every ${Math.round(10 / Game.ELF_TOWER.healAps) / 10} s. You ${Game.bribed(m, 1) ? 'have' : "haven't"} bribed; they ${Game.bribeVisible(m, 0) ? 'have' : "haven't, as far as you know"}.` : ''}${mp.shrooms ? ` Removing a mushroom tile costs ${Game.SHROOM_REMOVE} gold ("removeTiles":[{"col":3,"row":6}]); it is gone from the next fight on. Mushroom tiles still there: ${(m.map.tiles || []).filter(x => Game.shroomAt(m, x.col, x.row)).map(x => `${x.type} at col ${x.col}, row ${x.row}`).join('; ')}.` : ''}` : '- No special map.'; })()}
 
 CHARACTERS (each package comes with one; its ability lasts the whole match)
 - Yours: ${Game.charOf(m, 1) ? `${Game.charInfo(Game.charOf(m, 1)).name}: ${Game.charInfo(Game.charOf(m, 1)).ability}` : 'the one that comes with the package you pick'}${Game.charOf(m, 1) === 'zoe' ? ` Your buff tiles this round: ${(m.buff[1] || []).map(t => `col ${t.col}, row ${t.row}`).join('; ')}. A squad that starts the fight on one keeps the bonus all fight, even after it moves.` : ''}
 - Theirs: ${m.round > 1 && Game.charOf(m, 0) ? `${Game.charInfo(Game.charOf(m, 0)).name}: ${Game.charInfo(Game.charOf(m, 0)).ability}` : 'hidden until the first fight'}
 
 Reply with only a JSON object in this shape:
-{${Game.needsPack(m, 1) ? '"package":0,' : ''}"unlock":["unit name"],"sell":[squad ids],"levelUp":[squad ids, list one twice to level it twice],"skills":[{"unit":"unit name","slot":1}],"extraDeployments":0,${Game.elfSpot(m) ? '"bribe":false,' : ''}"move":{"id":squad id,"col":5,"row":3} or null,"place":[{"unit":"unit name","col":5,"row":3}],"say":"one short playful line to your opponent, at most 15 words, shown after the fight"}
+{${Game.needsPack(m, 1) ? '"package":0,' : ''}"unlock":["unit name"],"sell":[squad ids],"levelUp":[squad ids, list one twice to level it twice],"skills":[{"unit":"unit name","slot":1}],"extraDeployments":0,${Game.elfSpot(m) ? '"bribe":false,' : ''}${(Game.mapOf(m) || {}).shrooms ? '"removeTiles":[],' : ''}"move":{"id":squad id,"col":5,"row":3} or null,"place":[{"unit":"unit name","col":5,"row":3}],"say":"one short playful line to your opponent, at most 15 words, shown after the fight"}
 For "say": make it about what is happening in this match, and never repeat a line.${claude.history.length ? ' Lines you already used:\n' + claude.history.slice(-6).map(x => '- ' + x).join('\n') : ''}
-Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills, ${Game.elfSpot(m) ? 'bribe, ' : ''}extraDeployments, move, place. Anything you can't afford or that breaks a rule is skipped, so keep the total cost within your gold (${m.gold[1]} plus any sales). Use exact unit names. Unspent gold isn't lost, but squads on the board win rounds.`;
+Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills, ${Game.elfSpot(m) ? 'bribe, ' : ''}${(Game.mapOf(m) || {}).shrooms ? 'removeTiles, ' : ''}extraDeployments, move, place. Anything you can't afford or that breaks a rule is skipped, so keep the total cost within your gold (${m.gold[1]} plus any sales). Use exact unit names. Unspent gold isn't lost, but squads on the board win rounds.`;
   }
 
   function applyClaudeMove(mv) {
@@ -3148,6 +3189,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     for (const name of list(mv.unlock)) { const ui = unitIdx(name); if (ui >= 0 && Game.unlock(m, 1, ui)) did.push(`unlocked ${units[ui].name}`); }
     trySkills();
     if (mv.bribe === true && Game.bribe(m, 1)) did.push('bribed the elves');
+    for (const q of list(mv.removeTiles)) if (q && Game.removeShroom(m, 1, int(q.col), int(q.row))) did.push(`removed the ${Game.shroomTileAt(m, int(q.col), int(q.row)).type} mushroom at col ${int(q.col)}, row ${int(q.row)}`);
     const extra = Math.max(0, Math.min(3, int(mv.extraDeployments) || 0));
     for (let k = 0; k < extra; k++) Game.buyDeploy(m, 1);
     if (mv.move && typeof mv.move === 'object') {
@@ -3338,7 +3380,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (towerVisible(foe()) && Game.towerAt(m, foe(), t.col, t.row)) { openTowerSheet(foe()); return; }
     const elf = Game.elfSpot(m);
     if (elf && t.col === elf.col && (t.row === Game.ROWS / 2 - 1 || t.row === Game.ROWS / 2) && !Game.occupied(m, me, t.col, t.row)) { openMapSheet(); return; }
-    if (Game.shroomAt(m, t.col, t.row) && selected === null && !Game.occupied(m, me, t.col, t.row) && !m.armies[foe()].some(s => { const p = Game.seenAt(m, s); return p.col === t.col && p.row === t.row && s.round < m.round; })) { openMapSheet(); return; }
+    if ((shroomShown(m, t.col, t.row) || myRemovalNow(t.col, t.row)) && selected === null && !Game.occupied(m, me, t.col, t.row) && !m.armies[foe()].some(s => { const p = Game.seenAt(m, s); return p.col === t.col && p.row === t.row && s.round < m.round; })) { openMapSheet(t); return; }
     const own = m.armies[me].find(s => s.col === t.col && s.row === t.row);
     if (own) {
       if (own.round === m.round) { if (editable() && Game.unplace(m, me, t.col, t.row)) changed(); }
@@ -3412,17 +3454,32 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     $('sheet-back').hidden = false;
     $('close').addEventListener('click', closeSheet);
   }
-  function openMapSheet() {
+  // the mushroom tile on a square and a button to remove it (or keep it, if you removed it this round)
+  function shroomBlock(col, row) {
+    if (phase !== 'deploy' || !m) return '';
+    const tl = Game.shroomTileAt(m, col, row); if (!tl) return '';
+    const name = `<b style="color:${SHROOM_COL[tl.type]}">${tl.type}</b> mushroom tile`;
+    if (myRemovalNow(col, row)) return `<div class="bar"><span class="hint">You’re removing the ${name} on this square. It’s gone from the next fight on.</span><button class="btn small" id="shroom-undo" ${editable() ? '' : 'disabled'}>Keep it · +${Game.SHROOM_REMOVE}</button></div>`;
+    if (!shroomShown(m, col, row)) return '';
+    return `<div class="bar"><span class="hint">A ${name} is on this square.</span><button class="btn small" id="shroom-rm" ${editable() && m.gold[me] >= Game.SHROOM_REMOVE ? '' : 'disabled'}>Remove it · ${Game.SHROOM_REMOVE} gold</button></div>`;
+  }
+  function bindShroom(col, row, reopen) {
+    if ($('shroom-rm')) $('shroom-rm').addEventListener('click', () => { if (editable() && Game.removeShroom(m, me, col, row)) { changed(); reopen(); } });
+    if ($('shroom-undo')) $('shroom-undo').addEventListener('click', () => { if (editable() && Game.undoRemoveShroom(m, me, col, row)) { changed(); reopen(); } });
+  }
+  // tile (optional): the square that was tapped, for its mushroom tile
+  function openMapSheet(tile) {
     const mp = Game.mapOf(m); if (!mp) return;
     const T = Game.ELF_TOWER;
     $('sheet').innerHTML = `
       <div class="bar"><h3 id="sheet-h">Map: ${esc(mp.name)}</h3><button class="btn small" id="close">Close</button></div>
+      ${tile ? shroomBlock(tile.col, tile.row) : ''}
       <p style="margin:0">${esc(mp.text)}</p>
       ${mp.shrooms ? (() => { const S2 = Game.SHROOM, dot = (k) => `<b style="color:${SHROOM_COL[k]}">●</b>`; return `
       <p style="margin:0">${dot('purple')} <b>Purple</b>: +${S2.purpleDmg}% damage, +${S2.purpleHp}% health, +${S2.purpleAps}% attack speed all fight for a squad that starts there. Never on the flank columns.</p>
       <p style="margin:0">${dot('yellow')} <b>Yellow</b>: +${S2.speed}% move speed for the rest of the fight. Only on the flank columns and in no man’s land.</p>
       <p style="margin:0">${dot('green')} <b>Green</b>: poison (${S2.poisonPct}% of max health per second for ${S2.poisonDur} s) and slow (−${S2.slowMove}% move, −${S2.slowAtk}% attack speed for ${S2.slowDur} s).</p>
-      <p class="role" style="margin:0">Each half has ${Game.SHROOM_SPLIT.purple} purple, ${Game.SHROOM_SPLIT.yellow} yellow and ${Game.SHROOM_SPLIT.green} green ${Game.SHROOM_SPLIT.green === 1 ? "tile" : "tiles"}, mirrored. They work for both sides and can’t be removed.</p>`; })() : ''}
+      <p class="role" style="margin:0">Each half has ${Game.SHROOM_SPLIT.purple} purple, ${Game.SHROOM_SPLIT.yellow} yellow and ${Game.SHROOM_SPLIT.green} green ${Game.SHROOM_SPLIT.green === 1 ? "tile" : "tiles"}, mirrored. They work for both sides. Either player can remove one for ${Game.SHROOM_REMOVE} gold (tap it, or a squad standing on it): it’s gone from the next fight on for the rest of the match. Your removal stays hidden from your opponent until the fight.</p>`; })() : ''}
       ${mp.elfTower ? `<p class="role" style="margin:0">The elf tower stands in the middle of no man’s land, the same distance from both zones, and stays there all match. It can’t be attacked. Its shots take turns between the two sides, at the nearest unit in range.</p>
       <div class="stats"><div><span>Hit</span><b class="num">${T.hit}</b></div><div><span>Attacks/s</span><b class="num">${T.aps}</b></div><div><span>Range</span><b class="num">${T.range} m</b></div></div>
       <p style="margin:0"><span style="color:var(--gold)">Bribe the elves</span> for ${Game.BRIBE_COST} gold: for the rest of the match the tower never shoots your units. Instead it throws a small heal (${T.healHit} health, ${Math.round(T.healHit * (mp.healMul || 1))} on this map, to every unit within ${T.healSplash} m) on one of your wounded units every ${Math.round(10 / T.healAps) / 10} s. Its shots at a player who hasn’t bribed go on as before. Your bribe stays hidden from your opponent until the fight.</p>
@@ -3434,8 +3491,9 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
         : `<button class="btn primary" id="bribe" ${editable() && Game.canBribe(m, me) ? '' : 'disabled'}>Bribe the elves · ${Game.BRIBE_COST} gold</button>`}` : ''}`;
     $('sheet-back').hidden = false;
     $('close').addEventListener('click', closeSheet);
-    if ($('bribe')) $('bribe').addEventListener('click', () => { if (editable() && Game.bribe(m, me)) { changed(); openMapSheet(); } });
-    if ($('unbribe')) $('unbribe').addEventListener('click', () => { if (editable() && Game.undoBribe(m, me)) { changed(); openMapSheet(); } });
+    if ($('bribe')) $('bribe').addEventListener('click', () => { if (editable() && Game.bribe(m, me)) { changed(); openMapSheet(tile); } });
+    if ($('unbribe')) $('unbribe').addEventListener('click', () => { if (editable() && Game.undoBribe(m, me)) { changed(); openMapSheet(tile); } });
+    if (tile) bindShroom(tile.col, tile.row, () => openMapSheet(tile));
   }
   function openSheet(i, sq, side) {
     const base = units[i];
@@ -3486,6 +3544,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       ${(() => { const r = roleOf(i, owner === me ? me : null); return `<p class="roleline"><span class="roles">${roleIcons(r)}${rangeSvg(r.range)}</span><span>${r.text}</span></p>`; })()}
       <p class="role" style="margin:0">${ROLES[u.name] && !customSet ? ROLES[u.name] : customSet ? `From a Counter Lab roster · ${Game.unitCostOf(base)} gold` : ''}</p>
       ${lvl}
+      ${sq && m ? (() => { const p = side === me ? sq : Game.seenAt(m, sq); return shroomBlock(p.col, p.row); })() : ''}
       ${unlockBlock(i, side)}
       ${tr.length ? `<div class="traits">${tr.map(x => `<span>${x}</span>`).join('')}</div>` : ''}
       ${skillBlock(i, side)}
@@ -3501,6 +3560,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     $('sheet-back').hidden = false;
     $('close').addEventListener('click', closeSheet);
     const after = () => { changed(); openSheet(i, sq, side); };
+    if (sq && m) { const p = side === me ? sq : Game.seenAt(m, sq); bindShroom(p.col, p.row, () => openSheet(i, sq, side)); }
     if ($('lvl-up')) $('lvl-up').addEventListener('click', () => { if (editable() && Game.levelUp(m, me, sq.id)) after(); });
     if ($('lvl-undo')) $('lvl-undo').addEventListener('click', () => { if (editable() && Game.undoLevel(m, me, sq.id)) after(); });
     $('sheet').querySelectorAll('[data-skill]').forEach(b => b.addEventListener('click', () => { if (editable() && Game.buySkill(m, me, i, +b.dataset.skill)) after(); }));
@@ -3745,6 +3805,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
         if (s.buff) s.buff = [[], s.buff[1]];
       }
       if (s.bribe && s.bribe[0] === m.round) s.bribe[0] = 0; // a bribe bought this round too
+      if (s.map && s.map.removed) s.map.removed = s.map.removed.filter(x => !(x.side === 0 && x.round === m.round)); // and mushroom tiles removed this round
       if (s.unlocks && s.unlocks[0]) for (const ui in s.unlocks[0]) if (s.unlocks[0][ui] === m.round) delete s.unlocks[0][ui]; // so do this round's unlocks
       if (m.round === 1 && s.packages) { s.packages = [[], s.packages[1]]; s.pack = [null, s.pack ? s.pack[1] : null]; } // and the host's package
     }
@@ -3819,6 +3880,15 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     // the guest's elf bribe: an earlier one stays, one sent for this round is taken (gold was checked on their side)
     if (!m.bribe) m.bribe = [0, 0];
     if (!(m.bribe[1] > 0 && m.bribe[1] < m.round)) m.bribe[1] = Game.elfSpot(m) && (d.bribe | 0) === m.round ? m.round : 0;
+    // the guest's mushroom tile removals this round (gold was checked on their side)
+    if (m.map && Game.mapOf(m) && Game.mapOf(m).shrooms) {
+      m.map.removed = (m.map.removed || []).filter(x => !(x.side === 1 && x.round === m.round));
+      if (Array.isArray(d.shrooms)) for (const q of d.shrooms.slice(0, 20)) {
+        if (!q || !Number.isInteger(q.col) || !Number.isInteger(q.row) || !Game.shroomTileAt(m, q.col, q.row)) continue;
+        if (m.map.removed.some(x => x.col === q.col && x.row === q.row && (x.round < m.round || x.side === 1))) continue;
+        m.map.removed.push({ col: q.col, row: q.row, side: 1, round: m.round });
+      }
+    }
     // towers are fixed, so the guest's tower isn't taken from the guest
   }
 
@@ -3933,7 +4003,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
 
   function sendSide() {
     if (mode !== 'guest' || !m || phase !== 'deploy') return;
-    send({ t: 'side', round: m.round, army: m.armies[1], gold: m.gold[1], extra: m.extraDeploys[1], nextId: m.nextId[1], tech: (m.tech && m.tech[1]) || {}, tower: (m.towers && m.towers[1]) || null, pack: m.pack ? m.pack[1] : null, unlocks: (m.unlocks && m.unlocks[1]) || {}, bribe: (m.bribe && m.bribe[1]) || 0, ready: ready[1] || timeUp });
+    send({ t: 'side', round: m.round, army: m.armies[1], gold: m.gold[1], extra: m.extraDeploys[1], nextId: m.nextId[1], tech: (m.tech && m.tech[1]) || {}, tower: (m.towers && m.towers[1]) || null, pack: m.pack ? m.pack[1] : null, unlocks: (m.unlocks && m.unlocks[1]) || {}, bribe: (m.bribe && m.bribe[1]) || 0, shrooms: ((m.map && m.map.removed) || []).filter(x => x.side === 1 && x.round === m.round).map(x => ({ col: x.col, row: x.row })), ready: ready[1] || timeUp });
   }
 
   function guestRecv(d) {
@@ -3958,6 +4028,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
           if (!incoming.bribe) incoming.bribe = [0, 0];
           if (!m.bribe) m.bribe = [0, 0];
           for (const k of ['armies', 'gold', 'extraDeploys', 'nextId', 'tech', 'towers', 'unlocks', 'pack', 'chars', 'buff', 'bribe']) incoming[k][1] = (m[k] || [null, null])[1];
+          if (incoming.map && m.map) incoming.map.removed = (incoming.map.removed || []).filter(x => !(x.side === 1 && x.round === incoming.round)).concat((m.map.removed || []).filter(x => x.side === 1 && x.round === incoming.round));
           m = incoming; ready[0] = theirReady;
           deadline = d.remaining > 0 ? now() + d.remaining - 300 : 0;
           timeUp = false;
