@@ -563,7 +563,7 @@ a { color: var(--you); }
       for (const col of Game.FLANK.cols) for (const row of Game.flankRows(side)) ctx.fillRect(scol(col) * t, srow(row) * t, t, t);
     }
     ctx.globalAlpha = 1;
-    if (mp && mp.ice) { drawStorm(v); if (Game.altarRound(v)) drawAltar(); }
+    if (mp && mp.ice) { drawStorm(v); if (phase === 'deploy' && Game.altarRound(v)) drawAltar(); } // the altar only stands while deploying
     if (mp && mp.shrooms) for (const tl of v.map.tiles || []) {
       if (shroomShown(v, tl.col, tl.row)) drawShroomTile(tl);
       else if (myRemovalNow(tl.col, tl.row)) { // removed by you this round: a faint dashed outline until the fight
@@ -1753,7 +1753,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   }
   // the altar of ice: three purchases, cheapest first, each once per altar round
   function openAltarSheet() {
-    if (!Game.altarRound(m)) return;
+    if (phase !== 'deploy' || !Game.altarRound(m)) return; // the altar is only open while deploying
     // where the band stands now (pushes from earlier rounds; an opponent's push this round stays hidden), toward the opponent = positive
     const off = Game.stormShift(m, m.round) * (me === 0 ? 1 : -1) + (Game.altarBought(m, me, 'push') ? Game.ICE.push : 0);
     const nSnow = (m.altar || []).filter(b => b.side === me && b.type === 'snowgre' && b.round < m.round).length;
