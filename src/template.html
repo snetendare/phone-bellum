@@ -397,15 +397,33 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
   function load() {
     try {
       const raw = localStorage.getItem(KEY);
-      if (raw) { let p = JSON.parse(raw); if (valid(p)) { p = toGold(p); return fromRoster(p); } }
+      if (raw) { let p = JSON.parse(raw); if (valid(p)) { p = toGold(p); return fromRoster(withNewSkills(p)); } }
     } catch (e) {}
     return fromRoster(clone(SAMPLE));
+  }
+  const DEFAULT_SKILL_IDS = (SAMPLE.skills || []).map(sk => sk.id);
+  // A save from before a skill joined the default library gets that skill too, and a unit of the same name as a
+  // default unit with that skill gets it in the same slot when that slot is empty. Nothing already set changes.
+  function withNewSkills(p) {
+    if (!Array.isArray(p.skills)) return p;
+    const have = new Set([...p.skills.map(sk => sk && sk.id), ...(Array.isArray(p.knownSkills) ? p.knownSkills : [])]); // knownSkills: default skills this save was already offered (one deleted on purpose stays gone)
+    const fresh = (SAMPLE.skills || []).filter(sk => !have.has(sk.id));
+    if (!fresh.length) return p;
+    const ids = new Set(fresh.map(sk => sk.id));
+    const units = p.units.map(u => {
+      const d = SAMPLE.units.find(x => x.name === u.name);
+      if (!d || !Array.isArray(d.skills)) return u;
+      const skills = Engine.SLOTS.map(k => (Array.isArray(u.skills) ? u.skills[k] : null) || null), mods = Engine.SLOTS.map(k => (Array.isArray(u.skillMods) ? u.skillMods[k] : null) || null);
+      Engine.SLOTS.forEach(k => { if (!skills[k] && ids.has(d.skills[k])) { skills[k] = d.skills[k]; mods[k] = (d.skillMods || [])[k] || null; } });
+      return { ...u, skills, skillMods: mods };
+    });
+    return { ...p, skills: [...p.skills, ...clone(fresh)], units };
   }
   function save() {
     try { localStorage.setItem(KEY, JSON.stringify(exportData())); } catch (e) {}
   }
   function exportData() {
-    return { goldCosts: true, settings: state.settings, skills: state.skills, units: state.units.map(({ id, ...u }) => u) };
+    return { goldCosts: true, knownSkills: DEFAULT_SKILL_IDS, settings: state.settings, skills: state.skills, units: state.units.map(({ id, ...u }) => u) };
   }
   // Rosters saved before skills existed get the default skill library, with no skills set on their units
   function fromRoster(p) {
