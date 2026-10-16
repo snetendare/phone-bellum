@@ -13,7 +13,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   await host.waitForFunction(() => !document.getElementById('start').disabled, null, { timeout: 20000 });
   await host.click('#start');
   await guest.waitForFunction(() => document.getElementById('phase').textContent === 'Deploy');
-  for (const pg of [host, guest]) { await pg.click('[data-pack="0"]'); await sleep(150); await tap(pg, 1, 15); await sleep(150); }
+  for (const pg of [host, guest]) { await pg.dblclick('[data-pack="0"]'); await sleep(150); await tap(pg, 1, 15); await sleep(150); }
   await host.click('.ucard:not([data-locked])'); await tap(host, 5, 12);
   await guest.click('[data-tier="2"]'); await guest.click('.ucard[data-locked] >> nth=0'); await sleep(200);
   await guest.click('#unlock'); await guest.click('#unlock-yes'); await guest.click('#close'); await tap(guest, 6, 12);

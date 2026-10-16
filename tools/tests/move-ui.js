@@ -11,7 +11,7 @@ const { chromium } = require('playwright-core');
   const hint = async () => (await p.locator('#panel .hint').first().textContent());
   await p.goto('http://127.0.0.1:8766/?test'); await p.waitForTimeout(500);
   await p.click('[data-tm="0"]'); await p.click('#go'); await p.waitForTimeout(300);
-  await p.click('[data-pack="0"]'); await p.waitForTimeout(200);
+  await p.dblclick('[data-pack="0"]'); await p.waitForTimeout(200);
   let s = await st(); console.log('hp', s.hp, '| pre-placed', JSON.stringify(s.army));
   await tap(1, 15);
   console.log('hint:', await hint());

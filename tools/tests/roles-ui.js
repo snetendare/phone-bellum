@@ -8,7 +8,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   const tap = async (c, r) => { const b2 = await p.locator('#board').boundingBox(); await p.mouse.click(b2.x + (c + .5) * b2.width / 12, b2.y + (r + .5) * b2.height / 16); };
   await p.goto('http://127.0.0.1:8766/'); await sleep(500);
   await p.click('[data-tm="0"]'); await p.click('#go'); await sleep(300);
-  await p.click('[data-pack="0"]'); await sleep(200); await tap(1, 15); await sleep(200);
+  await p.dblclick('[data-pack="0"]'); await sleep(200); await tap(1, 15); await sleep(200);
   for (const t of [1, 2, 3, 4]) {
     await p.click(`[data-tier="${t}"]`); await sleep(150);
     console.log(`T${t}:`, (await p.$$eval('.ucard', cs => cs.map(c => c.querySelector('.n').textContent + ' = ' + c.querySelector('.roles').title))).join(' | '));

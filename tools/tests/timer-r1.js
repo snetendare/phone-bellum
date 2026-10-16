@@ -8,7 +8,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   await p.goto('http://127.0.0.1:8766/'); await sleep(500);
   await p.click('[data-tm="1"]'); await p.click('#go'); await sleep(1200);
   console.log('round 1 timer:', await p.locator('#timer').textContent());
-  await p.click('[data-pack="0"]'); await sleep(200); await tap(1, 15); await sleep(200);
+  await p.dblclick('[data-pack="0"]'); await sleep(200); await tap(1, 15); await sleep(200);
   await p.click('.ucard:not([data-locked])'); await tap(5, 13); await p.click('#fight'); await sleep(500); await p.click('#skip'); await sleep(800);
   await p.click('#next').catch(e => console.log('no #next', e.message.slice(0, 60))); await sleep(1200);
   console.log('round 2 timer:', await p.locator('#timer').textContent(), '| phase', await p.locator('#phase').textContent());
