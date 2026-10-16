@@ -1,7 +1,9 @@
 {
   "goldCosts": true,
   "settings": {
-    "sight": 12,
+    "sight": 15,
+    "minSight": 18,
+    "drift": 15,
     "budget": 100,
     "distance": 40,
     "spacing": 3.5,
@@ -116,6 +118,17 @@
         "count": 3,
         "every": 2,
         "max": 12
+      }
+    },
+    {
+      "id": "spiderlings",
+      "type": "deathSpawn",
+      "name": "Spiderlings",
+      "cost": 0,
+      "params": {
+        "unit": "Spider",
+        "count": 2,
+        "strength": 50
       }
     },
     {
@@ -577,7 +590,7 @@
       "range": 15,
       "speed": 2,
       "splash": 0,
-      "shape": "bar",
+      "shape": "flame",
       "color": "#b95018",
       "skills": [
         "armorHp",
@@ -767,7 +780,7 @@
       "aps": 2,
       "range": 18,
       "speed": 3,
-      "shape": "star",
+      "shape": "sun",
       "color": "#FFD23F",
       "skills": [
         "split",

@@ -1,7 +1,7 @@
 // ===== Unit shapes (shared by Counter Lab and the demo) =====
 const Shapes = (() => {
-  const LIST = ['circle', 'ring', 'square', 'triangle', 'diamond', 'pentagon', 'hexagon', 'star', 'cross', 'bar', 'horse'];
-  const LABELS = { circle: 'Circle', ring: 'Ring', square: 'Square', triangle: 'Triangle', diamond: 'Diamond', pentagon: 'Pentagon', hexagon: 'Hexagon', star: 'Star', cross: 'Cross', bar: 'Bar', horse: 'Horse' };
+  const LIST = ['circle', 'ring', 'square', 'triangle', 'diamond', 'pentagon', 'hexagon', 'star', 'cross', 'bar', 'horse', 'spider', 'sun', 'flame'];
+  const LABELS = { circle: 'Circle', ring: 'Ring', square: 'Square', triangle: 'Triangle', diamond: 'Diamond', pentagon: 'Pentagon', hexagon: 'Hexagon', star: 'Star', cross: 'Cross', bar: 'Bar', horse: 'Horse', spider: 'Spider', sun: 'Sun', flame: 'Flame' };
   const DEFAULTS = {
     'Goblin Swarm': 'triangle', 'Skeleton Archers': 'diamond', 'Ember Imps': 'star', 'Fire Mage': 'hexagon',
     'Sniper': 'cross', 'Brute': 'square', 'Wisps': 'ring', 'Crossbow Volley': 'pentagon', 'Ballista': 'bar',
@@ -44,6 +44,26 @@ const Shapes = (() => {
   const HORSE = [[-0.95, -0.3], [0.3, -0.3], [0.62, -0.95], [0.82, -0.85], [1.12, -0.5], [1.02, -0.36], [0.74, -0.46], [0.66, -0.05], [0.62, 0.3],
     [0.62, 1.05], [0.42, 1.05], [0.38, 0.32], [-0.52, 0.32], [-0.58, 1.05], [-0.78, 1.05], [-0.86, 0.22], [-1.18, 0.55], [-1.08, 0.05]];
 
+  // Pictures made of several parts, in units of r around the centre, always upright: { c: [x, y, radius] } is a
+  // disc, { p: [[x, y], ...] } a polygon. Every part runs the same way round, so overlapping parts fill as one.
+  const clockwise = (pts) => pts.reduce((s, [x1, y1], i) => { const [x2, y2] = pts[(i + 1) % pts.length]; return s + x1 * y2 - x2 * y1; }, 0) > 0 ? pts : pts.slice().reverse();
+  // a leg drawn as a thin strip along a bent line (w = half its thickness)
+  function strip(line, w) {
+    const nrm = (i) => { const [ax, ay] = line[Math.max(0, i - 1)], [bx, by] = line[Math.min(line.length - 1, i + 1)], l = Math.hypot(bx - ax, by - ay); return [-(by - ay) / l * w, (bx - ax) / l * w]; };
+    const n = line.map((_, i) => nrm(i));
+    return line.map(([x, y], i) => [x + n[i][0], y + n[i][1]]).concat(line.map(([x, y], i) => [x - n[i][0], y - n[i][1]]).reverse());
+  }
+  const SPIDER_LEGS = [[[0.15, -0.5], [0.72, -0.95], [1.02, -1.28]], [[0.22, -0.3], [0.92, -0.5], [1.3, -0.42]],
+    [[0.24, -0.08], [0.92, 0.12], [1.3, 0.48]], [[0.2, 0.12], [0.72, 0.62], [0.98, 1.22]]];
+  const ray = (a) => [[Math.cos(a) * 1.32, Math.sin(a) * 1.32], [Math.cos(a + 0.3) * 0.56, Math.sin(a + 0.3) * 0.56], [Math.cos(a - 0.3) * 0.56, Math.sin(a - 0.3) * 0.56]];
+  const FIGURES = {
+    spider: [{ c: [0, 0.32, 0.56] }, { c: [0, -0.42, 0.33] }, ...SPIDER_LEGS.flatMap(l => [{ p: strip(l, 0.15) }, { p: strip(l.map(([x, y]) => [-x, y]), 0.15) }])],
+    sun: [{ c: [0, 0, 0.64] }, ...Array.from({ length: 8 }, (_, i) => ({ p: ray(-Math.PI / 2 + i * Math.PI / 4) }))],
+    flame: [{ p: [[0, -1.32], [0.2, -0.86], [0.42, -0.56], [0.54, -0.9], [0.74, -0.38], [0.88, 0.1], [0.82, 0.52], [0.6, 0.86], [0.26, 1.04],
+      [-0.16, 1.04], [-0.52, 0.9], [-0.8, 0.6], [-0.9, 0.18], [-0.8, -0.22], [-0.6, -0.54], [-0.54, -0.24], [-0.36, -0.58], [-0.2, -0.98]] }],
+  };
+  for (const parts of Object.values(FIGURES)) for (const pt of parts) if (pt.p) pt.p = clockwise(pt.p);
+
   // Points of a regular polygon; up = 1 points toward the top of the screen, -1 toward the bottom
   function poly(ctx, x, y, r, n, rot) {
     ctx.beginPath();
@@ -83,6 +103,13 @@ const Shapes = (() => {
       }
       case 'bar': ctx.beginPath(); ctx.rect(x - r * 1.3, y - r * 0.55, r * 2.6, r * 1.1); return false;
       case 'ring': ctx.beginPath(); ctx.arc(x, y, r * 0.8, 0, Math.PI * 2); return true;
+      case 'spider': case 'sun': case 'flame':
+        ctx.beginPath();
+        for (const pt of FIGURES[shape]) {
+          if (pt.c) { const [cx, cy, cr] = pt.c; ctx.moveTo(x + (cx + cr) * r, y + cy * r); ctx.arc(x + cx * r, y + cy * r, cr * r, 0, Math.PI * 2); }
+          else { pt.p.forEach(([px, py], i) => i ? ctx.lineTo(x + px * r, y + py * r) : ctx.moveTo(x + px * r, y + py * r)); ctx.closePath(); }
+        }
+        return false;
       case 'horse': ctx.beginPath(); HORSE.forEach(([px, py], i) => i ? ctx.lineTo(x + px * r, y + py * r) : ctx.moveTo(x + px * r, y + py * r)); ctx.closePath(); return false;
       default: ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); return false;
     }
@@ -116,6 +143,9 @@ const Shapes = (() => {
       case 'cross': { const a = r * 1.15, b = r * 0.42; body = `<polygon points="${[[-b, -a], [b, -a], [b, -b], [a, -b], [a, b], [b, b], [b, a], [-b, a], [-b, b], [-a, b], [-a, -b], [-b, -b]].map(([px, py]) => `${(c + px).toFixed(2)},${(c + py).toFixed(2)}`).join(' ')}"/>`; break; }
       case 'bar': body = `<rect x="${c - r * 1.3}" y="${c - r * 0.55}" width="${r * 2.6}" height="${r * 1.1}"/>`; break;
       case 'horse': { const rr = r * 0.95; body = `<polygon points="${HORSE.map(([px, py]) => `${(c + px * rr).toFixed(2)},${(c + py * rr).toFixed(2)}`).join(' ')}"/>`; break; }
+      case 'spider': case 'sun': case 'flame': { const rr = r * 0.95; body = FIGURES[shape].map(pt => pt.c
+        ? `<circle cx="${(c + pt.c[0] * rr).toFixed(2)}" cy="${(c + pt.c[1] * rr).toFixed(2)}" r="${(pt.c[2] * rr).toFixed(2)}"/>`
+        : `<polygon points="${pt.p.map(([px, py]) => `${(c + px * rr).toFixed(2)},${(c + py * rr).toFixed(2)}`).join(' ')}"/>`).join(''); break; }
       case 'ring': body = `<circle cx="${c}" cy="${c}" r="${r * 0.8}" fill="none" stroke="currentColor" stroke-width="${Math.max(1.5, r * 0.45)}"/>`; break;
       default: body = `<circle cx="${c}" cy="${c}" r="${r}"/>`;
     }
@@ -124,6 +154,13 @@ const Shapes = (() => {
 
   // A body: filled with the unit's colour, outlined in its team colour
   function body(ctx, shape, x, y, r, up, fill, team, fillAlpha = 1) {
+    if (FIGURES[shape]) {
+      // a picture made of parts: a thick team-coloured stroke underneath, so only its outer edge shows
+      ctx.strokeStyle = team; ctx.lineWidth = Math.max(2, Math.min(3.5, r * 0.3)); ctx.lineJoin = 'round';
+      path(ctx, shape, x, y, r, up); ctx.stroke(); ctx.lineJoin = 'miter';
+      ctx.globalAlpha = fillAlpha; ctx.fillStyle = fill; draw(ctx, shape, x, y, r, up); ctx.globalAlpha = 1;
+      return;
+    }
     ctx.globalAlpha = fillAlpha; ctx.fillStyle = fill;
     draw(ctx, shape, x, y, r, up);
     ctx.globalAlpha = 1; ctx.strokeStyle = team; ctx.lineWidth = Math.max(1.5, Math.min(2.5, r * 0.32));
