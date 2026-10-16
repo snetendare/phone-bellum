@@ -317,7 +317,8 @@ const Engine = (() => {
     // (bribed) is never shot; it gets small splash heals instead (u.healHit, u.healAps, u.healSplash).
     const neutrals = (opts.neutrals || []).map(n => ({ ...n, friends: n.friends || [false, false], cd: 1 / Math.max(0.01, n.u.aps), turn: 0, healCd: n.u.healAps > 0 ? 1 / n.u.healAps : 0, healTurn: 0 }));
     // map tiles that act on any unit (either side) that starts on them or walks onto them, once per unit.
-    // Each is { x0, x1, y0, y1 (world rectangle), type: 'speed' | 'toxic', ...settings }.
+    // Each is { x0, x1, y0, y1 (world rectangle), type: 'speed' | 'toxic' | 'hail', ...settings }.
+    // 'hail' is different: it hurts every unit standing in it, every tick (dps), unless the unit is hailImmune.
     const tiles = opts.tiles || [];
     let projectiles = [];
     let t = 0, shots = [], over = false, tick = 0;
@@ -353,6 +354,7 @@ const Engine = (() => {
     }
     // a unit is on a map tile: its effect, once per unit and tile type
     function onTile(b, tl) {
+      if (tl.type === 'hail') { if (!b.u.hailImmune) { neutralDamage(b, tl.dps * dt); b.hailT = tick; } return; }
       const seen = b.tilesHit || (b.tilesHit = {});
       if (seen[tl.type]) return;
       seen[tl.type] = true;
@@ -371,6 +373,13 @@ const Engine = (() => {
       if (cripple[owner.side] > 0) hit = hit * (1 - towerDown.attack / 100);
       // Shield: the whole hit is blocked, however big, and it brings no poison
       if (v.shield > 0) { v.shield--; st.blocked += hit; return; }
+      // ice walls (towers on the ice map): four walls, one per direction; each blocks a number of whole hits
+      // coming from its side. walls = [north (+y), east (+x), south (-y), west (-x)]
+      if (v.walls) {
+        const dx = fromX - v.x, dy = fromY - v.y;
+        const w = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 1 : 3) : (dy > 0 ? 0 : 2);
+        if (v.walls[w] > 0) { v.walls[w]--; st.blocked += hit; return; }
+      }
       let dmg = damageAfterDefense(hit, v, g);
       // damage the target's armor turned away earns it a little experience (g.armorXp per point, default 0.5)
       const armor = (v.u.defense === 'armor' ? v.u.defVal : 0) + (v.u.bonusArmor || 0);
@@ -543,7 +552,7 @@ const Engine = (() => {
       // map tiles under the units (checked before moving, so the tile a unit starts on always counts)
       if (tiles.length) for (const b of all) {
         if (!b.alive || b.u.structure) continue;
-        for (const tl of tiles) if (b.x >= tl.x0 && b.x < tl.x1 && b.y >= tl.y0 && b.y < tl.y1) onTile(b, tl);
+        for (const tl of tiles) if (b.alive && b.x >= tl.x0 && b.x < tl.x1 && b.y >= tl.y0 && b.y < tl.y1) onTile(b, tl);
       }
       // a body with a start delay (deployed on a flank) can't move or attack until it runs out
       for (const b of all) if (b.delay > 0) b.delay = Math.max(0, b.delay - dt);

@@ -49,7 +49,80 @@ const Game = (() => {
   const MAPS = [
     { id: 'forest', name: 'Forest Clearing', text: 'Stealth units deal 20% more damage. Healing and regeneration are 1.5× as strong. A neutral elf tower in no man’s land shoots at both sides in turn; tap it to bribe the elves for 50 gold, and from then on it heals your units instead.', stealthDmg: 20, healMul: 1.5, elfTower: true },
     { id: 'cavern', name: 'Mushroom Cavern', text: 'Glowing mushroom tiles stay on the same tiles all match, mirrored on both halves. Purple: a squad that starts the fight there gets +10% damage, +10% health and +5% attack speed. Yellow: a unit that starts on it or walks over it moves 30% faster for the rest of the fight. Green: a unit that starts on it or walks over it is poisoned and slowed. Yellow and green work once per unit, for both sides. Either player can remove a mushroom tile for 50 gold.', shrooms: true, pointMirror: true },
+    { id: 'ice', name: 'Frozen Peak', text: 'Odd rounds from round 3: a hailstorm drops 10 hail tiles in the storm band (no man’s land at first); units standing in hail take 5 damage per second. Even rounds: the altar of ice rises in the middle of the board. Tap it to buy ice walls for your tower, push the storm band toward your opponent, or summon a Snowgre.', ice: true },
   ];
+  // ---------- Frozen Peak: hailstorm and the altar of ice ----------
+  // The storm band is 4 rows deep: no man's land to start with. Each push moves it ICE.push rows toward the other
+  // player, for the rest of the match (side 0 pushes toward row 0, side 1 toward the last row); it never leaves the board.
+  const ICE = { hailTiles: 10, hailDps: 5, push: 2, wallHits: 10, costs: { walls: 50, push: 100, snowgre: 150 }, snowStep: 50, snowFirst: 0.25 };
+  // what the altar sells, cheapest first
+  const ALTAR = [
+    { id: 'walls', name: 'Ice walls', text: `Ice walls rise around your tower for this round’s fight. Each of the 4 walls blocks the first 10 hits coming from its side.` },
+    { id: 'push', name: 'Push the hailstorm', text: `Moves the storm band 2 rows toward your opponent for the rest of the match, starting with the next hailstorm. Your opponent can push it back.` },
+    { id: 'snowgre', name: 'Summon a Snowgre', text: 'A white golem made of snow joins your army for the rest of the match. It stands in your half of no man’s land at the start of every fight and doesn’t mind hail. The first is 25% as strong as an Ether Golem, and each one after is twice as strong as the last.' },
+  ];
+  // the Ether Golem a Snowgre is modelled on (taken from the roster when it has one)
+  const GOLEM = { name: 'Ether Golem', cost: 5, bodies: 1, hp: 3450, hit: 69, aps: 0.6, range: 5, speed: 2.5, splash: 3, defense: 'armor', defVal: 15 };
+  const isIce = (m) => !!(mapOf(m) && mapOf(m).ice);
+  const hailRound = (m) => isIce(m) && m.round >= 3 && m.round % 2 === 1;
+  const altarRound = (m) => isIce(m) && m.round % 2 === 0;
+  const altarBuys = (m) => (m && m.altar) || [];
+  // how far the storm band has been pushed (rows toward row 0) by purchases made before round `round`
+  function stormShift(m, round) {
+    let off = 0;
+    for (const b of altarBuys(m)) if (b.type === 'push' && b.round < round) off = Math.max(-ZONE, Math.min(ZONE, off + (b.side === 0 ? ICE.push : -ICE.push))); // the band stays on the board
+    return off; // positive: toward side 1 (row 0)
+  }
+  // rows of the storm band in a given round
+  const stormRows = (m, round) => { const off = stormShift(m, round == null ? m.round : round); return Array.from({ length: ROWS - 2 * ZONE }, (_, i) => ZONE + i - off); };
+  // this round's hail tiles (none outside hail rounds), the same on both phones
+  function hailTiles(m) {
+    if (!hailRound(m)) return [];
+    const r = rng(m.seed + m.round * 9137 + 55), spots = [];
+    for (const row of stormRows(m)) for (let col = 0; col < COLS; col++) spots.push({ col, row });
+    const out = [];
+    for (let k = 0; k < ICE.hailTiles && spots.length; k++) out.push(spots.splice(Math.floor(r() * spots.length), 1)[0]);
+    return out;
+  }
+  const altarCost = (m, side, type) => type === 'snowgre' ? ICE.costs.snowgre + ICE.snowStep * altarBuys(m).filter(b => b.side === side && b.type === 'snowgre' && b.round < m.round).length : ICE.costs[type];
+  const altarBought = (m, side, type) => altarBuys(m).some(b => b.side === side && b.type === type && b.round === m.round);
+  // a Snowgre's spot: a random tile in its owner's half of no man's land, picked when it is summoned
+  function snowSpot(m, side, k) {
+    const r = rng(m.seed + side * 7717 + k * 313 + 3);
+    const rows = Array.from({ length: ROWS / 2 - ZONE }, (_, i) => side === 0 ? ROWS / 2 + i : ROWS / 2 - 1 - i);
+    return { col: Math.floor(r() * COLS), row: rows[Math.floor(r() * rows.length)] };
+  }
+  // add a purchase without paying (paying is buyAltar's job; the host also uses this for the guest's purchases)
+  function addAltar(m, side, type) {
+    if (!altarRound(m) || !ALTAR.some(a => a.id === type) || altarBought(m, side, type)) return false;
+    if (!m.altar) m.altar = [];
+    const b = { side, round: m.round, type };
+    if (type === 'snowgre') { const k = altarBuys(m).filter(x => x.side === side && x.type === 'snowgre').length; Object.assign(b, snowSpot(m, side, k)); }
+    m.altar.push(b);
+    return true;
+  }
+  function buyAltar(m, side, type) {
+    const cost = altarCost(m, side, type);
+    if (!(cost > 0) || m.gold[side] < cost || !addAltar(m, side, type)) return false;
+    m.gold[side] -= cost;
+    return true;
+  }
+  // take back a purchase made this round, for a full refund
+  function undoAltar(m, side, type) {
+    const i = altarBuys(m).findIndex(b => b.side === side && b.type === type && b.round === m.round);
+    if (i < 0) return false;
+    const cost = altarCost(m, side, type);
+    m.altar.splice(i, 1);
+    m.gold[side] += cost;
+    return true;
+  }
+  // a player's Snowgres, oldest first: { col, row, strength, round }
+  const snowgres = (m, side) => altarBuys(m).filter(b => b.side === side && b.type === 'snowgre').map((b, k) => ({ col: b.col, row: b.row, round: b.round, strength: ICE.snowFirst * Math.pow(2, k) }));
+  function snowgreUnit(m, strength) {
+    const g = (m.units || []).find(u => u && u.name === GOLEM.name) || GOLEM;
+    const { skills, skillDefs, skillsOn, skillsInnate, skillMods, ...plain } = g;
+    return E.withTraits({ ...plain, name: 'Snowgre', level: 0, hp: plain.hp * strength, hit: plain.hit * strength, shape: 'square', color: '#F2F6FA', hailImmune: true, snowgre: strength });
+  }
   // Mushroom Cavern tiles. Each player's half of the board gets SHROOM_SPLIT of them; the other half is the mirror image
   // as each player sees it (column and row both flipped: a tile on your right is a tile on their right). purple: half a Zoe buff for squads that start there (never on the flank
   // columns); yellow: move speed (only on the flank columns or in no man's land); green: poison and slow (anywhere).
@@ -465,7 +538,16 @@ const Game = (() => {
       out.push(...b);
     }
     const t = m.towers && m.towers[side];
-    if (t) { const w = tileToWorld(t.col, t.row); out.push(...E.buildSquad(TOWER, side, w.x, w.y, -2, TILE, idx)); }
+    if (t) {
+      const w = tileToWorld(t.col, t.row), tb = E.buildSquad(TOWER, side, w.x, w.y, -2, TILE, idx);
+      if (altarBought(m, side, 'walls')) for (const x of tb) x.walls = [ICE.wallHits, ICE.wallHits, ICE.wallHits, ICE.wallHits];
+      idx += tb.length; out.push(...tb);
+    }
+    // Snowgres stand on their own tiles in no man's land; squad ids -10, -11, ... (not squads in the army)
+    snowgres(m, side).forEach((sg, k) => {
+      const w = tileToWorld(sg.col, sg.row), b = E.buildSquad(snowgreUnit(m, sg.strength), side, w.x, w.y, -10 - k, TILE, idx);
+      idx += b.length; out.push(...b);
+    });
     return out;
   }
 
@@ -495,6 +577,7 @@ const Game = (() => {
       tiles.push(t.type === 'yellow' ? { type: 'speed', speed: SHROOM.speed, x0: w.x - T2, x1: w.x + T2, y0: w.y - T2, y1: w.y + T2 }
         : { type: 'toxic', poisonPct: SHROOM.poisonPct, poisonDur: SHROOM.poisonDur, slowMove: SHROOM.slowMove, slowAtk: SHROOM.slowAtk, slowDur: SHROOM.slowDur, x0: w.x - T2, x1: w.x + T2, y0: w.y - T2, y1: w.y + T2 });
     }
+    for (const h of hailTiles(m)) { const w = tileToWorld(h.col, h.row); tiles.push({ type: 'hail', dps: ICE.hailDps, x0: w.x - T2, x1: w.x + T2, y0: w.y - T2, y1: w.y + T2 }); }
     return E.createBattle(bodiesFor(m, 0), bodiesFor(m, 1), g, { record: true, tiles, neutrals: elf ? [{ u: E.withTraits(ELF_TOWER), x: elf.x, y: elf.y, friends: [bribed(m, 0), bribed(m, 1)] }] : [] });
   }
 
@@ -503,7 +586,9 @@ const Game = (() => {
     let sum = 0;
     for (const k in res.squads) {
       const s = res.squads[k];
-      if (s.side !== side || s.alive <= 0 || s.squad < 0) continue; // spawned bodies don't count
+      if (s.side !== side || s.alive <= 0) continue;
+      if (s.squad <= -10) { const sg = snowgres(m, side)[-10 - s.squad]; if (sg) sum += SQUAD_POINTS * GOLEM.cost * sg.strength * s.alive / s.total; continue; } // a Snowgre
+      if (s.squad < 0) continue; // spawned bodies don't count
       const sq = m.armies[side].find(q => q.id === s.squad);
       const value = sq ? (m.units[sq.unit].cost || 1) : 1; // pricier squads hit harder, like their price
       sum += SQUAD_POINTS * value * s.alive / s.total;
@@ -641,6 +726,14 @@ const Game = (() => {
     const minCost = Math.min(...m.units.map(unitCostOf));
     // the elf tower: from round 2, sometimes bribe it while a squad is still affordable after
     if (m.round >= 2 && canBribe(m, side) && m.gold[side] - reserve - BRIBE_COST >= minCost && r() < 0.5) bribe(m, side);
+    // the altar of ice: walls now and then, push the storm away when it sits on its side, a Snowgre when gold allows
+    if (altarRound(m)) {
+      const spare = (c) => m.gold[side] - reserve - c >= minCost;
+      if (spare(altarCost(m, side, 'walls')) && r() < 0.4) buyAltar(m, side, 'walls');
+      const off = stormShift(m, m.round + 1);
+      if ((side === 0 ? off <= 0 : off >= 0) && spare(altarCost(m, side, 'push')) && r() < 0.4) buyAltar(m, side, 'push');
+      if (m.gold[side] - reserve - altarCost(m, side, 'snowgre') >= minCost * 2 && r() < 0.4) buyAltar(m, side, 'snowgre');
+    }
     // mushroom tiles: sometimes clear a green one out of its own zone
     for (const row of zoneRows(side)) for (let col = 0; col < COLS; col++) {
       const sh = shroomAt(m, col, row);
@@ -728,6 +821,7 @@ const Game = (() => {
     skillDef, skillCost, isInnate, hasSkill, skillVisible, unitFor, canBuySkill, buySkill, undoSkill, sellValue, sell,
     TOWER, TOWER_MID, towerColOk, towerAt, needsTower, placeTower, ensureTower,
     FLANK, flankRows, flankOpen, isFlank, reserved, canPlaceAt, enemyHolds, inNoMans, hasSkillType,
+    ICE, ALTAR, GOLEM, isIce, hailRound, altarRound, stormShift, stormRows, hailTiles, altarCost, altarBought, addAltar, buyAltar, undoAltar, snowgres, snowgreUnit,
     MAPS, ELF_TOWER, SHROOM, SHROOM_SPLIT, shroomAt, shroomTileAt, shroomRemoval, SHROOM_REMOVE, removeShroom, undoRemoveShroom, mapOf, elfSpot, rollMap, BRIBE_COST, bribed, bribeVisible, canBribe, bribe, undoBribe,
     CHARACTERS, CHAR, charOf, charInfo, isTier1, rollBuffTiles, onBuffTile, TOWER_SPOT, towerSpot,
     zoneRows, inZone, tileToWorld, createMatch, place, unplace, bodiesFor, startBattle, resolve, aiDeploy, occupied,

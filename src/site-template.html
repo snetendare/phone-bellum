@@ -411,6 +411,121 @@ a { color: var(--you); }
   }
   // a mushroom tile: tinted tile with a small glowing mushroom in the tile's colour
   const SHROOM_COL = { purple: '#B57BFF', yellow: '#F2D25C', green: '#7BD66A' };
+  // Frozen Peak: a dark icy floor with snow drifts and cracks in the ice, and snow-capped rock on both flanks.
+  function iceBg() {
+    const key = 'ice' + W + 'x' + H;
+    if (mapBg && mapBg.key === key) return mapBg.cv;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const oc = document.createElement('canvas'); oc.width = Math.round(W * dpr); oc.height = Math.round(H * dpr);
+    const c = oc.getContext('2d'); c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    let sd = 4242421; const rr = () => { sd = (sd * 1103515245 + 12345) % 2147483648; return sd / 2147483648; };
+    const t = tilePx();
+    c.fillStyle = '#131B22'; c.fillRect(0, 0, W, H);
+    const gl = c.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, Math.max(W, H) * 0.6);
+    gl.addColorStop(0, '#1D2833'); gl.addColorStop(0.6, '#18212A'); gl.addColorStop(1, '#121920');
+    c.fillStyle = gl; c.fillRect(0, 0, W, H);
+    // snow drifts: soft pale patches
+    for (let k = 0; k < 30; k++) {
+      c.globalAlpha = 0.12 + rr() * 0.08; c.fillStyle = k % 3 ? '#3A4B5A' : '#4B5E6E';
+      c.beginPath(); c.ellipse(rr() * W, rr() * H, t * (0.6 + rr() * 1.5), t * (0.25 + rr() * 0.5), (rr() - 0.5) * 0.6, 0, Math.PI * 2); c.fill();
+    }
+    // cracks in the ice
+    c.strokeStyle = '#9FC3D9'; c.lineWidth = 0.8;
+    for (let k = 0; k < 14; k++) {
+      let x = t + rr() * (W - 2 * t), y = rr() * H;
+      c.globalAlpha = 0.1 + rr() * 0.08; c.beginPath(); c.moveTo(x, y);
+      for (let j = 0; j < 4; j++) { x += (rr() - 0.5) * t * 0.9; y += (rr() - 0.5) * t * 0.9; c.lineTo(x, y); }
+      c.stroke();
+    }
+    // the flanks: mountain rock rising on both sides, with snow on top
+    for (const left of [true, false]) {
+      const x0 = left ? 0 : W, x1 = left ? t * 1.5 : W - t * 1.5;
+      const sh = c.createLinearGradient(x0, 0, x1, 0);
+      sh.addColorStop(0, 'rgba(6,9,12,0.9)'); sh.addColorStop(0.5, 'rgba(8,12,16,0.5)'); sh.addColorStop(1, 'rgba(8,12,16,0)');
+      c.globalAlpha = 1; c.fillStyle = sh; c.fillRect(Math.min(x0, x1), 0, Math.abs(x1 - x0), H);
+      const rocks = [];
+      for (let k = 0; k < Math.round(H / t * 2.6); k++) {
+        const depth = rr() * rr(), r = t * (0.3 + rr() * 0.35) * (1 - depth * 0.4), dx = -t * 0.2 + depth * t * 1.05;
+        rocks.push({ x: left ? dx : W - dx, y: rr() * (H + t) - t / 2, r, depth });
+      }
+      rocks.sort((a, b) => a.y - b.y);
+      for (const q of rocks) {
+        const a = 0.9 - q.depth * 0.5;
+        c.globalAlpha = a; c.fillStyle = ['#0D1318', '#111920', '#151E26'][Math.floor(rr() * 3)];
+        c.beginPath(); // a jagged rock
+        for (let j = 0; j < 6; j++) { const ang = j / 6 * Math.PI * 2 + rr() * 0.4, rad = q.r * (0.75 + rr() * 0.35); const px = q.x + Math.cos(ang) * rad, py = q.y + Math.sin(ang) * rad * 0.8; j ? c.lineTo(px, py) : c.moveTo(px, py); }
+        c.closePath(); c.fill();
+        c.globalAlpha = a * 0.45; c.fillStyle = '#C8D7E2'; // snow cap
+        c.beginPath(); c.ellipse(q.x - q.r * 0.1, q.y - q.r * 0.45, q.r * 0.55, q.r * 0.2, 0, 0, Math.PI * 2); c.fill();
+      }
+    }
+    // a few snowflakes
+    c.fillStyle = '#DCE8F0';
+    for (let k = 0; k < 120; k++) { c.globalAlpha = 0.08 + rr() * 0.14; c.beginPath(); c.arc(rr() * W, rr() * H, 0.6 + rr() * 0.9, 0, Math.PI * 2); c.fill(); }
+    c.globalAlpha = 1;
+    mapBg = { key, cv: oc };
+    return oc;
+  }
+  const ICE_COL = '#BFE3F5';
+  // the storm band (a faint frost) and this round's hail tiles (animated during the fight)
+  function drawStorm(v) {
+    const t = tilePx(), rows = Game.stormRows(v);
+    const y0 = Math.min(...rows.map(srow)) * t;
+    ctx.fillStyle = ICE_COL; ctx.globalAlpha = 0.05; ctx.fillRect(0, y0, W, rows.length * t);
+    ctx.strokeStyle = ICE_COL; ctx.globalAlpha = 0.25; ctx.lineWidth = 1; ctx.setLineDash([2, 5]);
+    ctx.strokeRect(1, y0 + 1, W - 2, rows.length * t - 2); ctx.setLineDash([]);
+    const time = phase === 'battle' && bt ? bt.time() : 0;
+    for (const h of Game.hailTiles(v)) {
+      const x = scol(h.col) * t, y = srow(h.row) * t;
+      ctx.fillStyle = ICE_COL; ctx.globalAlpha = 0.16; ctx.fillRect(x, y, t, t);
+      ctx.strokeStyle = ICE_COL; ctx.globalAlpha = 0.5; ctx.strokeRect(x + 1.5, y + 1.5, t - 3, t - 3);
+      // hailstones: falling streaks during the fight, resting pellets while deploying
+      ctx.save(); ctx.beginPath(); ctx.rect(x, y, t, t); ctx.clip();
+      for (let k = 0; k < 6; k++) {
+        const fx = ((k * 0.37 + h.col * 0.13) % 1), sp = 0.9 + (k % 3) * 0.25;
+        const fy = time ? (time * sp + k * 0.21 + h.row * 0.07) % 1 : ((k * 0.53 + h.row * 0.29) % 1);
+        const px = x + fx * t, py = y + fy * t;
+        ctx.globalAlpha = 0.7;
+        if (time) { ctx.strokeStyle = '#EAF6FF'; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(px + t * 0.06, py - t * 0.16); ctx.lineTo(px, py); ctx.stroke(); }
+        ctx.fillStyle = '#EAF6FF'; ctx.beginPath(); ctx.arc(px, py, Math.max(1, t * 0.035), 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.restore();
+    }
+    ctx.globalAlpha = 1;
+  }
+  // the altar of ice: a cluster of pale ice shards on a frosted plinth, in the middle of the board
+  function drawAltar() {
+    const x = W / 2, y = H / 2, s = tilePx();
+    const glow = ctx.createRadialGradient(x, y, 0, x, y, s * 1.1);
+    glow.addColorStop(0, 'rgba(191,227,245,0.35)'); glow.addColorStop(1, 'rgba(191,227,245,0)');
+    ctx.fillStyle = glow; ctx.beginPath(); ctx.arc(x, y, s * 1.1, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#5E7C8E'; ctx.globalAlpha = 0.9;
+    ctx.beginPath(); ctx.ellipse(x, y + s * 0.28, s * 0.42, s * 0.14, 0, 0, Math.PI * 2); ctx.fill();
+    const shard = (dx, h, w, col) => { ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(x + dx - w, y + s * 0.26); ctx.lineTo(x + dx, y + s * 0.26 - h); ctx.lineTo(x + dx + w, y + s * 0.26); ctx.closePath(); ctx.fill(); };
+    ctx.globalAlpha = 0.95;
+    shard(-s * 0.2, s * 0.45, s * 0.1, '#9CCBE3'); shard(s * 0.2, s * 0.5, s * 0.1, '#9CCBE3');
+    shard(0, s * 0.75, s * 0.14, '#D8F0FB');
+    ctx.strokeStyle = '#FFFFFF'; ctx.globalAlpha = 0.6; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(x, y + s * 0.26 - s * 0.75); ctx.lineTo(x - s * 0.04, y + s * 0.1); ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+  // ice walls around a tower: one arc per side, fading as it takes hits. walls = [north, east, south, west] (world)
+  function drawWalls(wx, wy, walls) {
+    const t = tilePx();
+    const dirs = [[0, 1], [1, 0], [0, -1], [-1, 0]];
+    walls.forEach((n, k) => {
+      if (!(n > 0)) return;
+      const cx = PX(wx + dirs[k][0] * Game.TILE * 0.5), cy = PY(wy + dirs[k][1] * Game.TILE * 0.5);
+      const horiz = Math.abs(PX(wx + dirs[k][0]) - PX(wx)) < 1e-6; // a wall facing up/down on screen lies flat
+      ctx.globalAlpha = 0.35 + 0.55 * n / Game.ICE.wallHits; ctx.fillStyle = '#CFEAF7'; ctx.strokeStyle = '#FFFFFF'; ctx.lineWidth = 1;
+      const L = t * 0.8, D = t * 0.12;
+      if (horiz) { ctx.fillRect(cx - L / 2, cy - D / 2, L, D); ctx.strokeRect(cx - L / 2, cy - D / 2, L, D); }
+      else { ctx.fillRect(cx - D / 2, cy - L / 2, D, L); ctx.strokeRect(cx - D / 2, cy - L / 2, D, L); }
+    });
+    ctx.globalAlpha = 1;
+  }
+  // whether this screen may show a player's altar purchase: an opponent's stays hidden until the fight
+  const altarShown = (v, b) => b.side === me || phase !== 'deploy' || b.round < v.round;
   // a mushroom tile as this screen shows it: an opponent's removal stays hidden until the fight
   function shroomShown(v, col, row) {
     const tl = Game.shroomTileAt(v, col, row); if (!tl) return null;
@@ -438,6 +553,7 @@ a { color: var(--you); }
     const mp = Game.mapOf(v);
     if (mp && mp.id === 'forest') ctx.drawImage(forestBg(), 0, 0, W, H);
     else if (mp && mp.id === 'cavern') ctx.drawImage(cavernBg(), 0, 0, W, H);
+    else if (mp && mp.id === 'ice') ctx.drawImage(iceBg(), 0, 0, W, H);
     else { ctx.fillStyle = css('--board'); ctx.fillRect(0, 0, W, H); }
     ctx.globalAlpha = 0.08;
     ctx.fillStyle = css('--foe'); ctx.fillRect(0, 0, W, t * Z);
@@ -447,6 +563,7 @@ a { color: var(--you); }
       for (const col of Game.FLANK.cols) for (const row of Game.flankRows(side)) ctx.fillRect(scol(col) * t, srow(row) * t, t, t);
     }
     ctx.globalAlpha = 1;
+    if (mp && mp.ice) { drawStorm(v); if (Game.altarRound(v)) drawAltar(); }
     if (mp && mp.shrooms) for (const tl of v.map.tiles || []) {
       if (shroomShown(v, tl.col, tl.row)) drawShroomTile(tl);
       else if (myRemovalNow(tl.col, tl.row)) { // removed by you this round: a faint dashed outline until the fight
@@ -612,6 +729,17 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
     }
     for (const side of [me, foe()]) if (towerVisible(side)) drawTowerTile(side);
     drawElfTower(m, true);
+    if (Game.isIce(m)) for (const side of [me, foe()]) {
+      // Snowgres on their tiles in no man's land (an opponent's new one shows up at the fight)
+      const buys = (m.altar || []).filter(b => b.side === side && b.type === 'snowgre');
+      Game.snowgres(m, side).forEach((sg, k) => {
+        if (!altarShown(m, buys[k])) return;
+        const u = Game.snowgreUnit(m, sg.strength), w = Game.tileToWorld(sg.col, sg.row);
+        Shapes.body(ctx, 'square', PX(w.x), PY(w.y), radius(u), upOf(side), u.color, teamCol(side), 0.95);
+      });
+      const wb = (m.altar || []).find(b => b.side === side && b.type === 'walls' && b.round === m.round);
+      if (wb && altarShown(m, wb) && m.towers && m.towers[side]) { const w = Game.tileToWorld(m.towers[side].col, m.towers[side].row); drawWalls(w.x, w.y, [1, 1, 1, 1].map(() => Game.ICE.wallHits)); }
+    }
   }
 
   function drawBattle() {
@@ -644,6 +772,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
       drawKeep(PX(b.x), PY(b.y), t, b.side, hpr);
       ctx.strokeStyle = teamCol(b.side); ctx.lineWidth = 2;
       ctx.beginPath(); ctx.arc(PX(b.x), PY(b.y), t * 0.5, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * hpr); ctx.stroke();
+      if (b.walls) drawWalls(b.x, b.y, b.walls);
     }
     drawElfTower(battlePre || m, false);
     for (const b of bt.bodies) {
@@ -811,6 +940,8 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
       if (left <= 0 && selected === null) hint = `No deployments left. Buy one more for ${Game.CONFIG.extraDeployCost} gold, or spend gold on upgrades.`;
       if (readyN && selected === null) hint = `${readyN} squad${readyN === 1 ? ' is' : 's are'} ready to level up. Tap ${readyN === 1 ? 'it' : 'one'} to upgrade.`;
       if (Game.charOf(m, me) === 'zoe' && selected === null && (m.buff && m.buff[me] || []).length) hint += ` Starred tiles are your buff tiles this round: +${Game.CHAR.zoeDmg}% damage, +${Game.CHAR.zoeHp}% health and +${Game.CHAR.zoeAps}% attack speed for a squad that starts the fight there.`;
+      if (Game.altarRound(m) && selected === null && !fresh) hint = 'The altar of ice has risen in the middle of the board. Tap it to buy ice walls, push the hailstorm or summon a Snowgre.';
+      if (Game.hailRound(m) && selected === null && !fresh) hint = `Hailstorm this round: units standing on the ${Game.ICE.hailTiles} hail tiles take ${Game.ICE.hailDps} damage per second.`;
       if (m.round === Game.FLANK.round && selected === null && !fresh) hint = `Flank columns are open: you can now also deploy on the blue edge columns on the enemy's half, and they can on the red ones on yours. A squad placed there can't move or attack for the first ${Game.FLANK.delay} s of its first fight; after that it starts like any other.`;
       if (m.round === 1 && selected === null && m.armies[me].some(s => s.free)) hint = 'Your package squads are already on the board. Drag them where you want them, or tap one to take it back.';
       if (moveMode) hint = moving == null ? `Tap one of your squads from an earlier round to move it (${Game.CONFIG.moveCost} gold, once per round).` : `Tap a free tile to move ${esc(units[m.armies[me].find(s => s.id === moving).unit].name)} there, or drag it.`;
@@ -1293,16 +1424,16 @@ TOWERS
 - Their tower: col ${m.towers[0].col}, row ${m.towers[0].row}.
 
 MAP
-${(() => { const mp = Game.mapOf(m), e = Game.elfSpot(m); return mp ? `- ${mp.name}: ${mp.text}${e ? ` The elf tower stands in column ${e.col}, on the line between rows ${Game.ROWS / 2 - 1} and ${Game.ROWS / 2}; it hits for ${Game.ELF_TOWER.hit}, ${Game.ELF_TOWER.aps} times a second, range ${Game.ELF_TOWER.range} m, and can't be attacked. Bribing the elves costs ${Game.BRIBE_COST} gold once per match ("bribe": true): from then on it never shoots your units and instead heals your wounded units near it for ${Game.ELF_TOWER.healHit} (x${mp.healMul || 1} on this map, ${Game.ELF_TOWER.healSplash} m splash) every ${Math.round(10 / Game.ELF_TOWER.healAps) / 10} s. You ${Game.bribed(m, 1) ? 'have' : "haven't"} bribed; they ${Game.bribeVisible(m, 0) ? 'have' : "haven't, as far as you know"}.` : ''}${mp.shrooms ? ` Removing a mushroom tile costs ${Game.SHROOM_REMOVE} gold ("removeTiles":[{"col":3,"row":6}]); it is gone from the next fight on. Mushroom tiles still there: ${(m.map.tiles || []).filter(x => Game.shroomAt(m, x.col, x.row)).map(x => `${x.type} at col ${x.col}, row ${x.row}`).join('; ')}.` : ''}` : '- No special map.'; })()}
+${(() => { const mp = Game.mapOf(m), e = Game.elfSpot(m); return mp ? `- ${mp.name}: ${mp.text}${e ? ` The elf tower stands in column ${e.col}, on the line between rows ${Game.ROWS / 2 - 1} and ${Game.ROWS / 2}; it hits for ${Game.ELF_TOWER.hit}, ${Game.ELF_TOWER.aps} times a second, range ${Game.ELF_TOWER.range} m, and can't be attacked. Bribing the elves costs ${Game.BRIBE_COST} gold once per match ("bribe": true): from then on it never shoots your units and instead heals your wounded units near it for ${Game.ELF_TOWER.healHit} (x${mp.healMul || 1} on this map, ${Game.ELF_TOWER.healSplash} m splash) every ${Math.round(10 / Game.ELF_TOWER.healAps) / 10} s. You ${Game.bribed(m, 1) ? 'have' : "haven't"} bribed; they ${Game.bribeVisible(m, 0) ? 'have' : "haven't, as far as you know"}.` : ''}${mp.ice ? ` Storm band rows now: ${Game.stormRows(m).join(', ')}.${Game.hailRound(m) ? ` Hail tiles this round: ${Game.hailTiles(m).map(h => `col ${h.col}, row ${h.row}`).join('; ')}.` : ''}${Game.altarRound(m) ? ` The altar of ice is up this round. "altar" can list any of: "walls" (${Game.altarCost(m, 1, 'walls')} gold: your tower's 4 walls each block the first ${Game.ICE.wallHits} hits from their side, this fight only), "push" (${Game.altarCost(m, 1, 'push')} gold: storm band moves ${Game.ICE.push} rows toward the opponent from the next hailstorm on), "snowgre" (${Game.altarCost(m, 1, 'snowgre')} gold: a permanent hail-immune Ether Golem at ${Math.round(Game.ICE.snowFirst * Math.pow(2, Game.snowgres(m, 1).length) * 100)}% strength, standing in your half of no man's land each fight).` : ''} Your Snowgres: ${Game.snowgres(m, 1).length}.` : ''}${mp.shrooms ? ` Removing a mushroom tile costs ${Game.SHROOM_REMOVE} gold ("removeTiles":[{"col":3,"row":6}]); it is gone from the next fight on. Mushroom tiles still there: ${(m.map.tiles || []).filter(x => Game.shroomAt(m, x.col, x.row)).map(x => `${x.type} at col ${x.col}, row ${x.row}`).join('; ')}.` : ''}` : '- No special map.'; })()}
 
 CHARACTERS (each package comes with one; its ability lasts the whole match)
 - Yours: ${Game.charOf(m, 1) ? `${Game.charInfo(Game.charOf(m, 1)).name}: ${Game.charInfo(Game.charOf(m, 1)).ability}` : 'the one that comes with the package you pick'}${Game.charOf(m, 1) === 'zoe' ? ` Your buff tiles this round: ${(m.buff[1] || []).map(t => `col ${t.col}, row ${t.row}`).join('; ')}. A squad that starts the fight on one keeps the bonus all fight, even after it moves.` : ''}
 - Theirs: ${m.round > 1 && Game.charOf(m, 0) ? `${Game.charInfo(Game.charOf(m, 0)).name}: ${Game.charInfo(Game.charOf(m, 0)).ability}` : 'hidden until the first fight'}
 
 Reply with only a JSON object in this shape:
-{${Game.needsPack(m, 1) ? '"package":0,' : ''}"unlock":["unit name"],"sell":[squad ids],"levelUp":[squad ids, list one twice to level it twice],"skills":[{"unit":"unit name","slot":1}],"extraDeployments":0,${Game.elfSpot(m) ? '"bribe":false,' : ''}${(Game.mapOf(m) || {}).shrooms ? '"removeTiles":[],' : ''}"move":{"id":squad id,"col":5,"row":3} or null,"place":[{"unit":"unit name","col":5,"row":3}],"say":"one short playful line to your opponent, at most 15 words, shown after the fight"}
+{${Game.needsPack(m, 1) ? '"package":0,' : ''}"unlock":["unit name"],"sell":[squad ids],"levelUp":[squad ids, list one twice to level it twice],"skills":[{"unit":"unit name","slot":1}],"extraDeployments":0,${Game.elfSpot(m) ? '"bribe":false,' : ''}${(Game.mapOf(m) || {}).shrooms ? '"removeTiles":[],' : ''}${Game.altarRound(m) ? '"altar":[],' : ''}"move":{"id":squad id,"col":5,"row":3} or null,"place":[{"unit":"unit name","col":5,"row":3}],"say":"one short playful line to your opponent, at most 15 words, shown after the fight"}
 For "say": make it about what is happening in this match, and never repeat a line.${claude.history.length ? ' Lines you already used:\n' + claude.history.slice(-6).map(x => '- ' + x).join('\n') : ''}
-Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills, ${Game.elfSpot(m) ? 'bribe, ' : ''}${(Game.mapOf(m) || {}).shrooms ? 'removeTiles, ' : ''}extraDeployments, move, place. Anything you can't afford or that breaks a rule is skipped, so keep the total cost within your gold (${m.gold[1]} plus any sales). Use exact unit names. Unspent gold isn't lost, but squads on the board win rounds.`;
+Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills, ${Game.elfSpot(m) ? 'bribe, ' : ''}${(Game.mapOf(m) || {}).shrooms ? 'removeTiles, ' : ''}${Game.altarRound(m) ? 'altar, ' : ''}extraDeployments, move, place. Anything you can't afford or that breaks a rule is skipped, so keep the total cost within your gold (${m.gold[1]} plus any sales). Use exact unit names. Unspent gold isn't lost, but squads on the board win rounds.`;
   }
 
   function applyClaudeMove(mv) {
@@ -1338,6 +1469,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     for (const name of list(mv.unlock)) { const ui = unitIdx(name); if (ui >= 0 && Game.unlock(m, 1, ui)) did.push(`unlocked ${units[ui].name}`); }
     trySkills();
     if (mv.bribe === true && Game.bribe(m, 1)) did.push('bribed the elves');
+    for (const a of list(mv.altar)) if (Game.buyAltar(m, 1, String(a))) did.push({ walls: 'raised ice walls', push: 'pushed the hailstorm', snowgre: 'summoned a Snowgre' }[a]);
     for (const q of list(mv.removeTiles)) if (q && Game.removeShroom(m, 1, int(q.col), int(q.row))) did.push(`removed the ${Game.shroomTileAt(m, int(q.col), int(q.row)).type} mushroom at col ${int(q.col)}, row ${int(q.row)}`);
     const extra = Math.max(0, Math.min(3, int(mv.extraDeployments) || 0));
     for (let k = 0; k < extra; k++) Game.buyDeploy(m, 1);
@@ -1529,6 +1661,9 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (towerVisible(foe()) && Game.towerAt(m, foe(), t.col, t.row)) { openTowerSheet(foe()); return; }
     const elf = Game.elfSpot(m);
     if (elf && t.col === elf.col && (t.row === Game.ROWS / 2 - 1 || t.row === Game.ROWS / 2) && !Game.occupied(m, me, t.col, t.row)) { openMapSheet(); return; }
+    const freeTile = !Game.occupied(m, me, t.col, t.row);
+    if (Game.altarRound(m) && selected === null && freeTile && Math.abs(t.col - (Game.COLS - 1) / 2) < 1 && Math.abs(t.row - (Game.ROWS - 1) / 2) < 1) { openAltarSheet(); return; }
+    if (Game.hailRound(m) && selected === null && freeTile && Game.hailTiles(m).some(h => h.col === t.col && h.row === t.row)) { openMapSheet(); return; }
     if ((shroomShown(m, t.col, t.row) || myRemovalNow(t.col, t.row)) && selected === null && !Game.occupied(m, me, t.col, t.row) && !m.armies[foe()].some(s => { const p = Game.seenAt(m, s); return p.col === t.col && p.row === t.row && s.round < m.round; })) { openMapSheet(t); return; }
     const own = m.armies[me].find(s => s.col === t.col && s.row === t.row);
     if (own) {
@@ -1615,6 +1750,31 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   function bindShroom(col, row, reopen) {
     if ($('shroom-rm')) $('shroom-rm').addEventListener('click', () => { if (editable() && Game.removeShroom(m, me, col, row)) { changed(); reopen(); } });
     if ($('shroom-undo')) $('shroom-undo').addEventListener('click', () => { if (editable() && Game.undoRemoveShroom(m, me, col, row)) { changed(); reopen(); } });
+  }
+  // the altar of ice: three purchases, cheapest first, each once per altar round
+  function openAltarSheet() {
+    if (!Game.altarRound(m)) return;
+    // where the band stands now (pushes from earlier rounds; an opponent's push this round stays hidden), toward the opponent = positive
+    const off = Game.stormShift(m, m.round) * (me === 0 ? 1 : -1) + (Game.altarBought(m, me, 'push') ? Game.ICE.push : 0);
+    const nSnow = (m.altar || []).filter(b => b.side === me && b.type === 'snowgre' && b.round < m.round).length;
+    const strength = Math.round(Game.ICE.snowFirst * Math.pow(2, nSnow) * 100);
+    const extra = { walls: '', push: `The storm band is ${off === 0 ? 'in no man’s land' : `${Math.abs(off)} rows toward ${off > 0 ? esc(foeName()) : 'you'}`}.`, snowgre: `Your next Snowgre: ${strength}% as strong as an Ether Golem.${nSnow ? ` You have ${nSnow}.` : ''}` };
+    $('sheet').innerHTML = `
+      <div class="bar"><h3 id="sheet-h">Altar of ice</h3><button class="btn small" id="close">Close</button></div>
+      <p class="role" style="margin:0">The altar rises every even round. Each offering can be bought once per altar round, and your opponent doesn’t see what you bought until the fight.</p>
+      ${Game.ALTAR.map(a => {
+        const bought = Game.altarBought(m, me, a.id), cost = Game.altarCost(m, me, a.id);
+        return `<div class="confirm" style="border-color:var(--line)">
+          <b>${esc(a.name)} · ${cost} gold</b>
+          <span class="hint">${esc(a.text)} ${extra[a.id]}</span>
+          ${bought ? `<div class="bar"><span class="hint" style="color:var(--you)">Bought this round.</span><button class="btn small" data-unaltar="${a.id}" ${editable() ? '' : 'disabled'}>Take it back · +${cost}</button></div>`
+            : `<button class="btn primary" data-altar="${a.id}" ${editable() && m.gold[me] >= cost ? '' : 'disabled'}>${m.gold[me] >= cost ? `Buy · ${cost} gold` : `Need ${cost} gold`}</button>`}
+        </div>`;
+      }).join('')}`;
+    $('sheet-back').hidden = false;
+    $('close').addEventListener('click', closeSheet);
+    $('sheet').querySelectorAll('[data-altar]').forEach(b => b.addEventListener('click', () => { if (editable() && Game.buyAltar(m, me, b.dataset.altar)) { changed(); openAltarSheet(); } }));
+    $('sheet').querySelectorAll('[data-unaltar]').forEach(b => b.addEventListener('click', () => { if (editable() && Game.undoAltar(m, me, b.dataset.unaltar)) { changed(); openAltarSheet(); } }));
   }
   // tile (optional): the square that was tapped, for its mushroom tile
   function openMapSheet(tile) {
@@ -1955,6 +2115,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       }
       if (s.bribe && s.bribe[0] === m.round) s.bribe[0] = 0; // a bribe bought this round too
       if (s.map && s.map.removed) s.map.removed = s.map.removed.filter(x => !(x.side === 0 && x.round === m.round)); // and mushroom tiles removed this round
+      if (s.altar) s.altar = s.altar.filter(x => !(x.side === 0 && x.round === m.round)); // and altar purchases
       if (s.unlocks && s.unlocks[0]) for (const ui in s.unlocks[0]) if (s.unlocks[0][ui] === m.round) delete s.unlocks[0][ui]; // so do this round's unlocks
       if (m.round === 1 && s.packages) { s.packages = [[], s.packages[1]]; s.pack = [null, s.pack ? s.pack[1] : null]; } // and the host's package
     }
@@ -2029,6 +2190,9 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     // the guest's elf bribe: an earlier one stays, one sent for this round is taken (gold was checked on their side)
     if (!m.bribe) m.bribe = [0, 0];
     if (!(m.bribe[1] > 0 && m.bribe[1] < m.round)) m.bribe[1] = Game.elfSpot(m) && (d.bribe | 0) === m.round ? m.round : 0;
+    // the guest's altar purchases this round (gold was checked on their side; Snowgre spots are worked out here)
+    if (m.altar) m.altar = m.altar.filter(x => !(x.side === 1 && x.round === m.round));
+    if (Array.isArray(d.altar)) for (const type of d.altar.slice(0, 3)) Game.addAltar(m, 1, String(type));
     // the guest's mushroom tile removals this round (gold was checked on their side)
     if (m.map && Game.mapOf(m) && Game.mapOf(m).shrooms) {
       m.map.removed = (m.map.removed || []).filter(x => !(x.side === 1 && x.round === m.round));
@@ -2152,7 +2316,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
 
   function sendSide() {
     if (mode !== 'guest' || !m || phase !== 'deploy') return;
-    send({ t: 'side', round: m.round, army: m.armies[1], gold: m.gold[1], extra: m.extraDeploys[1], nextId: m.nextId[1], tech: (m.tech && m.tech[1]) || {}, tower: (m.towers && m.towers[1]) || null, pack: m.pack ? m.pack[1] : null, unlocks: (m.unlocks && m.unlocks[1]) || {}, bribe: (m.bribe && m.bribe[1]) || 0, shrooms: ((m.map && m.map.removed) || []).filter(x => x.side === 1 && x.round === m.round).map(x => ({ col: x.col, row: x.row })), ready: ready[1] || timeUp });
+    send({ t: 'side', round: m.round, army: m.armies[1], gold: m.gold[1], extra: m.extraDeploys[1], nextId: m.nextId[1], tech: (m.tech && m.tech[1]) || {}, tower: (m.towers && m.towers[1]) || null, pack: m.pack ? m.pack[1] : null, unlocks: (m.unlocks && m.unlocks[1]) || {}, bribe: (m.bribe && m.bribe[1]) || 0, altar: (m.altar || []).filter(x => x.side === 1 && x.round === m.round).map(x => x.type), shrooms: ((m.map && m.map.removed) || []).filter(x => x.side === 1 && x.round === m.round).map(x => ({ col: x.col, row: x.row })), ready: ready[1] || timeUp });
   }
 
   function guestRecv(d) {
@@ -2178,6 +2342,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
           if (!m.bribe) m.bribe = [0, 0];
           for (const k of ['armies', 'gold', 'extraDeploys', 'nextId', 'tech', 'towers', 'unlocks', 'pack', 'chars', 'buff', 'bribe']) incoming[k][1] = (m[k] || [null, null])[1];
           if (incoming.map && m.map) incoming.map.removed = (incoming.map.removed || []).filter(x => !(x.side === 1 && x.round === incoming.round)).concat((m.map.removed || []).filter(x => x.side === 1 && x.round === incoming.round));
+          incoming.altar = (incoming.altar || []).filter(x => !(x.side === 1 && x.round === incoming.round)).concat((m.altar || []).filter(x => x.side === 1 && x.round === incoming.round));
           m = incoming; ready[0] = theirReady;
           deadline = d.remaining > 0 ? now() + d.remaining - 300 : 0;
           timeUp = false;
