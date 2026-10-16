@@ -99,11 +99,12 @@ const Game = (() => {
   const charOf = (m, side) => (m && m.chars && m.chars[side]) || null;
   const charInfo = (id) => CHARACTERS.find(c => c.id === id) || null;
   // ---------- maps ----------
-  // Each match is fought on one map, picked at random when the match is created. A map can change the
+  // Each match is fought on one map, picked by the host when the match is created (or at random). A map can change the
   // rules of every fight. Elf tower: a neutral tower standing on the centre line of no man's land, the same
   // distance from both zones, in a random column that stays for the whole match. It can't be attacked, and
   // its shots alternate between the two sides.
   const MAPS = [
+    { id: 'standard', name: 'Standard', text: 'No special rules.' },
     { id: 'forest', name: 'Forest Clearing', text: 'Stealth units deal 20% more damage. Healing and regeneration are 1.5× as strong. A neutral elf tower in no man’s land shoots at both sides in turn; tap it to bribe the elves for 50 gold, and from then on it heals your units instead.', stealthDmg: 20, healMul: 1.5, elfTower: true },
     { id: 'cavern', name: 'Mushroom Cavern', text: 'Glowing mushroom tiles stay on the same tiles all match, mirrored on both halves. Purple: a squad that starts the fight there gets +10% damage, +10% health and +5% attack speed. Yellow: a unit that starts on it or walks over it moves 30% faster for the rest of the fight. Green: a unit that starts on it or walks over it is poisoned and slowed. Yellow and green work once per unit, for both sides. Either player can remove a mushroom tile for 50 gold.', shrooms: true, pointMirror: true },
     { id: 'ice', name: 'Frozen Peak', text: 'Odd rounds from round 3: a hailstorm drops 10 hail tiles in the storm band (no man’s land at first); units standing in hail take 5 damage per second. Even rounds: the altar of ice rises in the middle of the board. Tap it to buy ice walls for your tower, push the storm band toward your opponent, or summon a Snowgre.', ice: true },
@@ -208,9 +209,10 @@ const Game = (() => {
     return true;
   }
   const ELF_COLS = [2, 9]; // the elf tower's column is picked from these (never the flank edges)
-  function rollMap(seed) {
+  function rollMap(seed, mapId) {
     const r = rng(seed + 31337);
-    const mp = MAPS[Math.floor(r() * MAPS.length)];
+    const roll = MAPS[Math.floor(r() * MAPS.length)];
+    const mp = MAPS.find(x => x.id === mapId) || roll; // the roll still happens, so the rest of the map rolls the same way
     const out = { id: mp.id };
     if (mp.elfTower) out.elfCol = ELF_COLS[0] + Math.floor(r() * (ELF_COLS[1] - ELF_COLS[0] + 1));
     if (mp.shrooms) {
@@ -392,7 +394,7 @@ const Game = (() => {
     }
   }
 
-  function createMatch(units, matrix, seed) {
+  function createMatch(units, matrix, seed, mapId) {
     const r = rng((seed >>> 0) + 777);
     const m = {
       units, matrix, seed: seed >>> 0,
@@ -407,7 +409,7 @@ const Game = (() => {
       unlocks: [{}, {}], // units unlocked per player: unlocks[side][unitIdx] = round it was unlocked
       packages: [dealPackages(units, r), dealPackages(units, r)], // each player's 3 starting package options, each with a different random character
       pack: [null, null], // which one each player picked
-      map: rollMap(seed >>> 0), // { id, elfCol }: the map this match is fought on
+      map: rollMap(seed >>> 0, mapId), // { id, elfCol }: the map this match is fought on (mapId picks it; otherwise random)
       bribe: [0, 0], // round each player bribed the elf tower in (0 = not bribed)
       towerSkill: [0, 0], // round each player bought their tower's skill in (0 = not bought)
     };

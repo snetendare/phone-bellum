@@ -254,6 +254,18 @@ a { color: var(--you); }
   }
   let drag = null, dragEndAt = 0; // dragging one of your squads to another tile
   let timerOn = true;       // vs AI: deploy countdown on or off
+  let mapPick = '';         // the map the host picked for the next match ('' = random)
+  const MAP_SHORT = { standard: 'Standard', forest: 'Forest', cavern: 'Cavern', ice: 'Peak' };
+  const mapSeg = () => `<div class="bar">
+        <span class="hint">Map</span>
+        <div class="seg" role="group" aria-label="Map" style="width:100%">
+          ${[''].concat(Game.MAPS.map(mp => mp.id)).map(id => `<button data-map="${id}" style="flex:1;padding:7px 2px" aria-pressed="${mapPick === id}"${id ? ` title="${esc(Game.MAPS.find(mp => mp.id === id).name)}"` : ''}>${id ? esc(MAP_SHORT[id] || Game.MAPS.find(mp => mp.id === id).name) : 'Random'}</button>`).join('')}
+        </div>
+      </div>`;
+  const wireMapSeg = () => $('panel').querySelectorAll('[data-map]').forEach(b => b.addEventListener('click', () => {
+    mapPick = b.dataset.map;
+    $('panel').querySelectorAll('[data-map]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+  }));
   let deadline = 0;         // local time the deploy phase ends (0 = no countdown running)
   let pausedLeft = 0;       // host: countdown time left while the opponent is away
   let heldMs = 0;           // the deploy countdown, held back until the players have picked their towers (round 3)
@@ -1122,7 +1134,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
         <li>Start by picking one of three packages: two units unlocked for free with free squads worth ${Game.PACKAGE.value}, plus ${Game.START_GOLD} gold. Each package comes with a random character (never two the same) whose ability lasts the whole match: ${Game.CHARACTERS.map(c => `${esc(c.name)}: ${esc(c.ability)}`).join(' ')}</li>
         <li>Your tower stands in the back of your zone. If it falls in a fight, your army is crippled for a few seconds. Until round ${Game.TOWER_PICK_ROUND} it is a small outpost; at the start of round ${Game.TOWER_PICK_ROUND}, before the clock runs, you pick your tower for the rest of the match: ${Game.TOWER_TYPES.map(x => `${esc(x.name)}: ${esc(x.text)}`).join(' ')} Each has one skill (${Game.TOWER_SKILL.cost} gold, tap your tower to buy it): ${Game.TOWER_TYPES.map(x => `${esc(x.skill.name)}: ${esc(x.skill.text)}`).join(' ')} Tap the enemy tower to see their character.</li>
         <li>Place squads in the bottom six rows. They stay for the whole match. From round ${Game.FLANK.round}, the edge columns on the enemy's half of the board open up for flanking. The red edge columns on your half are theirs, never yours; a squad placed there waits ${Game.FLANK.delay} s before it moves or attacks, in its first fight only.</li>
-        <li>Every match is fought on a random map that changes the rules: ${Game.MAPS.map(mp => `${esc(mp.name)}: ${esc(mp.text)}`).join(' ')}</li>
+        <li>Every match is fought on a map that changes the rules. The host picks it before the packages (or leaves it random): ${Game.MAPS.map(mp => `${esc(mp.name)}: ${esc(mp.text)}`).join(' ')}</li>
         <li>Columns are lanes: squads march straight ahead and fight what they meet, so an empty lane lets a squad walk around the side.</li>
         <li>You have ${DEPLOY_SECONDS} seconds to deploy every round, then the armies fight on their own.</li>
         <li>The loser takes damage from every enemy squad still standing.</li>
@@ -1150,6 +1162,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
         <span class="hint">Playing with ${customSet ? `your ${units.length} units from Counter Lab` : `the ${units.length} built-in units`}.${reportDb ? ' Your matches are saved here so you can ask Claude to review them.' : ''}</span>
         <span class="btnrow"><button class="btn small" id="load-units">Load units</button><a class="btn small" id="lab-link" href="lab.html" style="text-decoration:none;color:inherit;display:inline-block">Counter Lab</a></span>
       </div>
+      ${mapSeg()}
       <div class="bar">
         <span class="hint">Deploy timer vs AI</span>
         <div class="seg" role="group" aria-label="Deploy timer vs AI">
@@ -1178,6 +1191,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
       Game.CONFIG.levelCostPerTier = +b.dataset.c;
       $('panel').querySelectorAll('[data-c]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
     }));
+    wireMapSeg();
     $('panel').querySelectorAll('[data-tm]').forEach(b => b.addEventListener('click', () => {
       timerOn = b.dataset.tm === '1';
       $('panel').querySelectorAll('[data-tm]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
@@ -1307,7 +1321,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
     if (!sampleFn) { startAiMatch(); return; }
     leaveNet();
     mode = 'claude'; me = 0;
-    m = Game.createMatch(units, M, (now() ^ (Math.random() * 1e9)) >>> 0);
+    m = Game.createMatch(units, M, (now() ^ (Math.random() * 1e9)) >>> 0, mapPick);
     nextReady = [false, false]; rematch = [false, false];
     claude.off = false; claude.history = [];
     startReport();
@@ -1542,7 +1556,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   function startAiMatch() {
     leaveNet();
     mode = 'ai'; me = 0;
-    m = Game.createMatch(units, M, (now() ^ (Math.random() * 1e9)) >>> 0);
+    m = Game.createMatch(units, M, (now() ^ (Math.random() * 1e9)) >>> 0, mapPick);
     nextReady = [false, false]; rematch = [false, false];
     startReport();
     beginAiRound();
@@ -2193,6 +2207,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
         </span>
         <button class="btn" id="cancel">Cancel</button>
       </div>
+      ${mapSeg()}
       <span class="hint">You both play with the units on this device: ${customSet ? `your ${units.length} Counter Lab units` : `the ${units.length} built-in units`}.</span>`;
     if ($('share')) $('share').addEventListener('click', () => { navigator.share({ title: 'Phone Bellum', text: `Fight me in Phone Bellum! Code ${net.code}`, url: link }).catch(() => {}); });
     $('copy').addEventListener('click', () => {
@@ -2202,12 +2217,13 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     });
     $('cancel').addEventListener('click', () => { clearHost(); showStart(); });
     $('start').addEventListener('click', hostStartMatch);
+    wireMapSeg();
   }
   function selectLink() { const r = document.createRange(); r.selectNodeContents($('link')); const s = getSelection(); s.removeAllRanges(); s.addRange(r); }
 
   function hostStartMatch() {
     if (!net.connected) return;
-    m = Game.createMatch(units, M, (now() ^ (Math.random() * 1e9)) >>> 0);
+    m = Game.createMatch(units, M, (now() ^ (Math.random() * 1e9)) >>> 0, mapPick);
     lastSummary = null; nextReady = [false, false]; rematch = [false, false];
     startReport();
     hostBeginRound();
