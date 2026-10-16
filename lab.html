@@ -792,8 +792,9 @@ const Engine = (() => {
     // healing and regeneration strength (a map can make them stronger)
     const healMul = g.healMul > 0 ? g.healMul : 1;
     // neutral structures (a map's elf tower): they belong to neither side, can't be hit, and shoot at
-    // units of both sides in turn. Each is { u, x, y }.
-    const neutrals = (opts.neutrals || []).map(n => ({ ...n, cd: 1 / Math.max(0.01, n.u.aps), turn: 0 }));
+    // units of both sides in turn. Each is { u, x, y, friends: [bool, bool] }. A side it is friends with
+    // (bribed) is never shot; it gets small splash heals instead (u.healHit, u.healAps, u.healSplash).
+    const neutrals = (opts.neutrals || []).map(n => ({ ...n, friends: n.friends || [false, false], cd: 1 / Math.max(0.01, n.u.aps), turn: 0, healCd: n.u.healAps > 0 ? 1 / n.u.healAps : 0, healTurn: 0 }));
     let projectiles = [];
     let t = 0, shots = [], over = false, tick = 0;
     const dist = (a, b) => hyp(a.x - b.x, a.y - b.y);
@@ -1204,10 +1205,37 @@ const Engine = (() => {
       // neutral towers: each shot goes at the nearest unit in range of the side whose turn it is,
       // or of the other side if that one has nobody in range, so both sides are shot at equally
       for (const n of neutrals) {
+        // heals for the sides it is friends with: the nearest wounded unit in range, and its allies around it
+        if (n.u.healAps > 0 && (n.friends[0] || n.friends[1])) {
+          n.healCd -= dt;
+          if (n.healCd <= 0) {
+            let tgt = null;
+            for (let k = 0; k < 2 && !tgt; k++) {
+              const sd = (n.healTurn + k) % 2;
+              if (!n.friends[sd]) continue;
+              let bd = n.u.range + 0.01;
+              for (const f of sides[sd]) {
+                if (!f.alive || f.u.structure || f.hp >= f.u.hp) continue;
+                const d = hyp(f.x - n.x, f.y - n.y);
+                if (d <= bd) { bd = d; tgt = f; }
+              }
+            }
+            if (!tgt) n.healCd = Math.max(n.healCd, -dt);
+            else {
+              n.healTurn = 1 - tgt.side;
+              n.healCd = Math.max(n.healCd, -dt) + 1 / n.u.healAps;
+              const amt = n.u.healHit * healMul;
+              for (const f of sides[tgt.side]) if (f.alive && !f.u.structure && hyp(f.x - tgt.x, f.y - tgt.y) <= n.u.healSplash) f.hp = Math.min(f.u.hp, f.hp + amt);
+              if (opts.record) shots.push([n.x, n.y, tgt.x, tgt.y, 2, n.u.healSplash, 0, 1]);
+            }
+          }
+        }
+        if (n.friends[0] && n.friends[1]) continue; // friends with both: it shoots nobody
         n.cd -= dt;
         if (n.cd > 0) continue;
         let tgt = null;
         for (let k = 0; k < 2 && !tgt; k++) {
+          if (n.friends[(n.turn + k) % 2]) continue;
           let bd = n.u.range + 0.01;
           for (const f of sides[(n.turn + k) % 2]) {
             if (!f.alive || f.hidden || f.u.structure) continue;

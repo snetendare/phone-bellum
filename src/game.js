@@ -47,9 +47,30 @@ const Game = (() => {
   // distance from both zones, in a random column that stays for the whole match. It can't be attacked, and
   // its shots alternate between the two sides.
   const MAPS = [
-    { id: 'forest', name: 'Forest Clearing', text: 'Stealth units deal 20% more damage. Healing and regeneration are 1.5× as strong. A neutral elf tower in no man’s land shoots at both sides in turn.', stealthDmg: 20, healMul: 1.5, elfTower: true },
+    { id: 'forest', name: 'Forest Clearing', text: 'Stealth units deal 20% more damage. Healing and regeneration are 1.5× as strong. A neutral elf tower in no man’s land shoots at both sides in turn; tap it to bribe the elves for 50 gold, and from then on it heals your units instead.', stealthDmg: 20, healMul: 1.5, elfTower: true },
   ];
-  const ELF_TOWER = { name: 'Elf Tower', cost: 0, bodies: 1, hp: 1, hit: 20, aps: 0.5, range: 12, speed: 0, splash: 0, structure: true };
+  // healHit/healAps/healSplash: the small splash heal it throws on the units of a player who bribed it
+  const ELF_TOWER = { name: 'Elf Tower', cost: 0, bodies: 1, hp: 1, hit: 20, aps: 0.5, range: 12, speed: 0, splash: 0, structure: true, healHit: 15, healAps: 0.4, healSplash: 2.5 };
+  // Bribing the elves: once per match, for BRIBE_COST gold. From the next fight on, the elf tower never shoots
+  // that player's units again and heals them instead. A bribe stays hidden from the opponent until the fight,
+  // and can be taken back (full refund) in the round it was bought.
+  const BRIBE_COST = 50;
+  const bribed = (m, side) => !!(m && m.bribe && m.bribe[side] > 0);
+  const bribeVisible = (m, side) => bribed(m, side) && m.bribe[side] < m.round;
+  const canBribe = (m, side) => !!elfSpot(m) && !bribed(m, side) && m.gold[side] >= BRIBE_COST;
+  function bribe(m, side) {
+    if (!canBribe(m, side)) return false;
+    if (!m.bribe) m.bribe = [0, 0];
+    m.gold[side] -= BRIBE_COST;
+    m.bribe[side] = m.round;
+    return true;
+  }
+  function undoBribe(m, side) {
+    if (!m.bribe || m.bribe[side] !== m.round) return false;
+    m.bribe[side] = 0;
+    m.gold[side] += BRIBE_COST;
+    return true;
+  }
   const ELF_COLS = [2, 9]; // the elf tower's column is picked from these (never the flank edges)
   function rollMap(seed) {
     const r = rng(seed + 31337);
@@ -187,6 +208,7 @@ const Game = (() => {
       packages: [dealPackages(units, r), dealPackages(units, r)], // each player's 3 starting package options, each with a different random character
       pack: [null, null], // which one each player picked
       map: rollMap(seed >>> 0), // { id, elfCol }: the map this match is fought on
+      bribe: [0, 0], // round each player bribed the elf tower in (0 = not bribed)
     };
   }
 
@@ -412,7 +434,7 @@ const Game = (() => {
     ensurePack(m, 0); ensurePack(m, 1);
     const mp = mapOf(m), elf = elfSpot(m);
     const g = mp && mp.healMul ? { ...SETTINGS, healMul: mp.healMul } : SETTINGS;
-    return E.createBattle(bodiesFor(m, 0), bodiesFor(m, 1), g, { record: true, neutrals: elf ? [{ u: E.withTraits(ELF_TOWER), x: elf.x, y: elf.y }] : [] });
+    return E.createBattle(bodiesFor(m, 0), bodiesFor(m, 1), g, { record: true, neutrals: elf ? [{ u: E.withTraits(ELF_TOWER), x: elf.x, y: elf.y, friends: [bribed(m, 0), bribed(m, 1)] }] : [] });
   }
 
   // Damage a side deals = points of its squads, scaled by how much of each squad is still alive
@@ -556,6 +578,8 @@ const Game = (() => {
       }
     }
     const minCost = Math.min(...m.units.map(unitCostOf));
+    // the elf tower: from round 2, sometimes bribe it while a squad is still affordable after
+    if (m.round >= 2 && canBribe(m, side) && m.gold[side] - reserve - BRIBE_COST >= minCost && r() < 0.5) bribe(m, side);
     // skills: for unit types it has 2 or more squads of, sometimes buy a skill if a squad is still affordable after
     if (AI.skills) {
       const types = Object.keys(own).map(Number).filter(ui => own[ui] >= 2).sort((a, b) => own[b] - own[a]);
@@ -637,7 +661,7 @@ const Game = (() => {
     skillDef, skillCost, isInnate, hasSkill, skillVisible, unitFor, canBuySkill, buySkill, undoSkill, sellValue, sell,
     TOWER, TOWER_MID, towerColOk, towerAt, needsTower, placeTower, ensureTower,
     FLANK, flankRows, flankOpen, isFlank, reserved, canPlaceAt, enemyHolds, inNoMans, hasSkillType,
-    MAPS, ELF_TOWER, mapOf, elfSpot, rollMap,
+    MAPS, ELF_TOWER, mapOf, elfSpot, rollMap, BRIBE_COST, bribed, bribeVisible, canBribe, bribe, undoBribe,
     CHARACTERS, CHAR, charOf, charInfo, isTier1, rollBuffTiles, onBuffTile, TOWER_SPOT,
     zoneRows, inZone, tileToWorld, createMatch, place, unplace, bodiesFor, startBattle, resolve, aiDeploy, occupied,
   };
