@@ -373,16 +373,18 @@
       "hp": 140,
       "hit": 210,
       "aps": 0.25,
-      "range": 33,
+      "range": 29,
       "speed": 2,
       "splash": 0,
       "shape": "cross",
       "color": "#F7D154",
       "skills": [
         "rapid",
-        "spawn"
+        "spawn",
+        "range"
       ],
       "skillsOn": [
+        false,
         false,
         false
       ],
@@ -390,16 +392,19 @@
         {
           "params": {
             "range": 0,
-            "aps": 20
-          }
+            "aps": 15
+          },
+          "cost": 150
         },
         {
           "params": {
             "waves": 3
           }
-        }
+        },
+        null
       ],
       "skillsInnate": [
+        false,
         false,
         false
       ]
