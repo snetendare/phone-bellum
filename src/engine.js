@@ -1,6 +1,6 @@
 // ===== Battle engine (shared by headless tests and the page) =====
 const Engine = (() => {
-  const TRAIT_DEFAULTS = { burst: 1, pellets: 1, spinUp: 0, pierce: 0, projSpeed: 0, minRange: 0, charge: 1, knockback: 0, windUp: 0, flame: 0, trample: 0, deathBlast: 0 };
+  const TRAIT_DEFAULTS = { burst: 1, pellets: 1, spinUp: 0, spinHit: 0, pierce: 0, projSpeed: 0, minRange: 0, charge: 1, knockback: 0, windUp: 0, flame: 0, trample: 0, deathBlast: 0 };
   const BURST_GAP = 0.15;      // seconds between shots in a burst
   const SHOTGUN_COS = Math.sqrt(3) / 2; // pellets spread 30 degrees to each side of the target (cos 30)
   // Only + - * / and sqrt from here on: those give identical results in every browser,
@@ -14,6 +14,7 @@ const Engine = (() => {
     return sum;
   }
   const SPIN_CAP = 3;          // spin-up tops out at 3x attack speed
+  // damage spin-up (spinHit) ramps hit size the same way, also up to SPIN_CAP
   const CHARGE_RUN = 5;        // metres a unit must run before its next attack counts as a charge
   const TRAMPLE_RUN = 8;       // after a charged hit, a trampler keeps running this far past its target
   const TRAMPLE_WIDTH = 1.5;   // bodies within this distance of a trampler's path get run over
@@ -62,6 +63,7 @@ const Engine = (() => {
     forward: { label: 'Forward planting', params: [] },
     split:   { label: 'Split beam', params: [['beams', 'Targets at once', 4, 1], ['range', 'Range (−%)', 30, 5], ['hit', 'Hit per target (−%)', 0, 5]] },
     deathSpawn: { label: 'Spawn on death', params: [['unit', 'Spawns (unit name)', 'Goblin Swarm', null], ['count', 'Bodies per death', 2, 1], ['strength', 'Strength of each spawn (% health and damage; 50 = half)', 100, 10]] },
+    shield:  { label: 'Shield', params: [['hits', 'Hits blocked per body', 3, 1]] },
   };
   const skillParam = (d, k) => {
     const v = d.params && d.params[k];
@@ -92,6 +94,7 @@ const Engine = (() => {
       case 'forward': return 'Squads of this unit can also be placed in no man’s land.';
       case 'split': return `Attacks ${n('beams')} different enemies at once${+P('hit') > 0 ? `, −${n('hit')}% hit each` : ''}. −${n('range')}% range.`;
       case 'deathSpawn': return `When a body dies, ${n('count')} ${String(P('unit'))} ${+P('count') === 1 ? 'body takes' : 'bodies take'} its place${+P('strength') !== 100 ? `, at ${n('strength')}% health and damage` : ''}. A spawn of the unit itself starts from the dead body's own stats. Spawns don’t spawn again.`;
+      case 'shield': return `Each body fully blocks the first ${n('hits')} ${+P('hits') === 1 ? 'hit' : 'hits'} it takes in a fight, however big. Poison already on it still ticks.`;
     }
     return '';
   }
@@ -144,6 +147,7 @@ const Engine = (() => {
           }
           break;
         }
+        case 'shield': u.shield = (u.shield || 0) + Math.max(0, Math.round(P('hits'))); break;
         case 'split':
           u.beams = Math.max(u.beams || 1, Math.round(P('beams')));
           u.range = Math.max(0.5, u.range * (1 - Math.min(90, P('range')) / 100));
@@ -239,6 +243,7 @@ const Engine = (() => {
       moved: 0, firing: -1, burstLeft: 0, burstTimer: 0, burstDir: [0, 1], windTarget: null, windT: 0, setUp: false,
       hidden: !!u.stealth, poison: null, shrinkM: 0, shrinkT: 0, slowT: 0, slowMove: 0, slowAtk: 0,
       spawnT: u.spawn ? u.spawn.every : 0, kids: null,
+      shield: u.shield || 0, // hits left that the Shield skill blocks completely
     };
   }
 
@@ -337,6 +342,8 @@ const Engine = (() => {
     function hurt(owner, v, hit, fromX, fromY) {
       const st = stats[owner.side];
       if (cripple[owner.side] > 0) hit = hit * (1 - towerDown.attack / 100);
+      // Shield: the whole hit is blocked, however big, and it brings no poison
+      if (v.shield > 0) { v.shield--; st.blocked += hit; return; }
       let dmg = damageAfterDefense(hit, v, g);
       // damage the target's armor turned away earns it a little experience (g.armorXp per point, default 0.5)
       const armor = (v.u.defense === 'armor' ? v.u.defVal : 0) + (v.u.bonusArmor || 0);
@@ -475,7 +482,7 @@ const Engine = (() => {
           if (opts.record) shots.push([b.x, b.y, a.x, a.y, b.side, 0, 0, 1]);
         }
       }
-      const hit = b.u.hit * (charged ? b.u.charge : 1);
+      const hit = b.u.hit * (charged ? b.u.charge : 1) * (b.u.spinHit > 0 ? Math.min(SPIN_CAP, 1 + b.u.spinHit / 100 * Math.max(0, b.firing)) : 1);
       // trample: a charged hit doesn't stop the unit; it runs on through its target and over every body in its path
       if (charged && b.u.trample > 0 && targets.length && !targets.flame) {
         const tgt = targets[0], dx = tgt.x - b.x, dy = tgt.y - b.y, d = hyp(dx, dy);
@@ -693,7 +700,7 @@ const Engine = (() => {
         }
         // spin-up builds while the unit keeps hitting one target: it stays on that target while it can,
         // and the ramp starts over when it has to switch
-        if (b.u.spinUp > 0) {
+        if (b.u.spinUp > 0 || b.u.spinHit > 0) {
           if (b.spinTarget && b.spinTarget.alive && valid.includes(b.spinTarget)) primary = b.spinTarget;
           else { b.spinTarget = primary; b.firing = 0; }
         }

@@ -714,6 +714,7 @@
       "burst": 1,
       "pellets": 1,
       "spinUp": 50,
+      "spinHit": 50,
       "pierce": 0,
       "projSpeed": 0,
       "minRange": 0,

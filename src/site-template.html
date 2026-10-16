@@ -981,6 +981,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
       if (u.flame > 0) t.push(`flamethrower: every attack hits all enemies in range within ${u.flame}° to each side of its target`);
       else if (u.pellets > 1) t.push(`shotgun ${u.pellets}`);
       if (u.spinUp > 0) t.push(`spin-up ${u.spinUp}%/s on one target, up to 3x attack speed, starts over when it switches target`);
+      if (u.spinHit > 0) t.push(`damage spin-up ${u.spinHit}%/s on one target, up to 3x hit size, starts over when it switches target`);
       if (u.pierce > 0) t.push(`pierce ${u.pierce}`);
       if (u.projSpeed > 0) t.push(`projectile ${u.projSpeed} m/s`);
       if (u.minRange > 0) t.push(`min range ${u.minRange} m`);
@@ -1410,6 +1411,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (u.flame > 0) tr.push(`Flame cone ${u.flame}°, reaches ${Math.round(u.range * (Game.SETTINGS.flameReach || 1) * 10) / 10} m`);
     else if (u.pellets > 1) tr.push(`Shotgun ${u.pellets}`);
     if (u.spinUp > 0) tr.push(`Spin-up ${u.spinUp}%/s`);
+    if (u.spinHit > 0) tr.push(`Damage spin-up ${u.spinHit}%/s`);
     if (u.pierce > 0) tr.push(`Pierce ${u.pierce}`);
     if (u.projSpeed > 0) tr.push(`Bolts ${u.projSpeed} m/s`);
     if (u.minRange > 0) tr.push(`Min range ${u.minRange} m`);
