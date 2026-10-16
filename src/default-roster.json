@@ -131,6 +131,26 @@
       "name": "Forward planting",
       "cost": 100,
       "params": {}
+    },
+    {
+      "id": "gallop",
+      "type": "swift",
+      "name": "Gallop",
+      "cost": 200,
+      "params": {
+        "speed": 25,
+        "hit": 0
+      }
+    },
+    {
+      "id": "deathBurst",
+      "type": "blast",
+      "name": "Death burst",
+      "cost": 200,
+      "params": {
+        "radius": 7,
+        "pct": 100
+      }
     }
   ],
   "units": [
@@ -981,6 +1001,62 @@
           },
           "cost": 150
         }
+      ]
+    },
+    {
+      "burst": 1,
+      "pellets": 1,
+      "spinUp": 0,
+      "pierce": 0,
+      "projSpeed": 0,
+      "minRange": 0,
+      "charge": 1,
+      "knockback": 0,
+      "windUp": 0,
+      "flame": 0,
+      "defense": "none",
+      "defVal": 0,
+      "level": 0,
+      "unlock": 50,
+      "name": "Just a horse",
+      "cost": 200,
+      "bodies": 1,
+      "hp": 700,
+      "hit": 200,
+      "aps": 1,
+      "range": 1,
+      "speed": 6,
+      "splash": 0,
+      "shape": "horse",
+      "color": "#C8A27A",
+      "ram": 1,
+      "noFlank": 1,
+      "carrier": 1,
+      "skills": [
+        "gallop",
+        "armorHp",
+        "deathBurst"
+      ],
+      "skillsOn": [
+        false,
+        false,
+        false
+      ],
+      "skillMods": [
+        null,
+        {
+          "params": {
+            "armor": 4,
+            "hp": 20
+          },
+          "cost": 150
+        },
+        null
+      ],
+      "skillsInnate": [
+        false,
+        false,
+        false
       ]
     }
   ]

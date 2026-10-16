@@ -256,7 +256,7 @@ const Game = (() => {
   // a tile the other player already holds with a squad (or tower) you can see
   // Where the other player sees a squad: a squad moved this round still shows on its old tile until the fight
   const seenAt = (m, sq) => sq.from && sq.movedRound === m.round ? sq.from : sq;
-  const enemyHolds = (m, side, col, row) => !!m && (m.armies[1 - side].some(s => { const p = seenAt(m, s); return p.col === col && p.row === row && s.round < m.round; }) ||
+  const enemyHolds = (m, side, col, row) => !!m && (m.armies[1 - side].some(s => { const p = seenAt(m, s); return !hiddenFromFoe(m, s) && p.col === col && p.row === row && s.round < m.round; }) ||
     (m.round > 1 && m.towers && m.towers[1 - side] && m.towers[1 - side].col === col && m.towers[1 - side].row === row));
   // the edge tiles of your zone that are the enemy's flank are reserved for them for the whole match
   const reserved = (side, col, row) => isFlank(1 - side, col, row);
@@ -265,7 +265,28 @@ const Game = (() => {
   const hasSkillType = (m, side, ui, type) => !!m && ui != null && !!m.units[ui] && E.SLOTS.some(k => hasSkill(m, side, ui, k) && skillDef(m, ui, k).type === type);
   // ui (optional): the unit being placed, for unit-specific tiles
   const canPlaceAt = (m, side, col, row, ui) => col >= 0 && col < COLS && !reserved(side, col, row) &&
+    !(ui != null && m && m.units[ui] && m.units[ui].noFlank && isFlank(side, col, row)) &&
     (inZone(side, row) || (flankOpen(m) && isFlank(side, col, row)) || (inNoMans(row) && hasSkillType(m, side, ui, 'forward'))) && !enemyHolds(m, side, col, row);
+  // ---------- carriers (Just a horse) ----------
+  // A squad of a carrier unit can hold one squad of any other unit inside. The rider is an ordinary squad in the
+  // army (it levels, sells and counts like any other) with `in` = the carrier's squad id, on the carrier's tile.
+  // The opponent never sees it on the board; in a fight it stays inside until the carrier dies (see Engine).
+  const isRider = (sq) => !!sq && sq.in != null;
+  // what the opponent can't see on the board: riders, and a squad that stepped out of a carrier this round (it is
+  // still inside as far as they know)
+  const hiddenFromFoe = (m, s) => isRider(s) || !!(s.from && s.movedRound === m.round && s.from.in != null);
+  const isCarrier = (m, ui) => !!(m && m.units[ui] && m.units[ui].carrier);
+  const riderOf = (m, side, sq) => sq ? m.armies[side].find(s => s.in === sq.id) || null : null;
+  const carrierOf = (m, side, sq) => isRider(sq) ? m.armies[side].find(s => s.id === sq.in) || null : null;
+  // the squad standing on a tile (a carrier, never its rider)
+  const squadAt = (m, side, col, row) => m.armies[side].find(s => !isRider(s) && s.col === col && s.row === row) || null;
+  // the carrier on a tile that has room for a squad of unit ui
+  function boardable(m, side, col, row, ui) {
+    const c = squadAt(m, side, col, row);
+    return c && isCarrier(m, c.unit) && !isCarrier(m, ui) && !riderOf(m, side, c) ? c : null;
+  }
+  // riders follow their carrier's tile
+  const syncRiders = (m, side) => { for (const s of m.armies[side]) if (isRider(s)) { const c = carrierOf(m, side, s); if (c) { s.col = c.col; s.row = c.row; } else delete s.in; } };
   const tileToWorld = (col, row) => ({ x: (col - (COLS - 1) / 2) * TILE, y: ((ROWS - 1) / 2 - row) * TILE });
 
   function rng(seed) { // mulberry32
@@ -446,6 +467,7 @@ const Game = (() => {
     const i = m.armies[side].findIndex(s => s.id === sqId && s.round < m.round);
     if (i < 0) return 0;
     const [sq] = m.armies[side].splice(i, 1);
+    syncRiders(m, side); // a sold carrier's rider steps out onto the tile
     const v = sellValue(m, sq);
     m.gold[side] += v;
     return v;
@@ -475,16 +497,21 @@ const Game = (() => {
   function moveSquad(m, side, sqId, col, row) {
     const sq = m.armies[side].find(s => s.id === sqId);
     if (!sq || (sq.col === col && sq.row === row) || !canMove(m, side, sq)) return false;
-    if (!canPlaceAt(m, side, col, row, sq.unit) || occupied(m, side, col, row)) return false;
+    // a squad can move onto a free tile, or into a carrier with room (a rider can also step out, or change carriers)
+    const into = boardable(m, side, col, row, sq.unit);
+    if (into && into.id === sq.in) return false;
+    if (!canPlaceAt(m, side, col, row, sq.unit) || (occupied(m, side, col, row) && !into)) return false;
     if (sq.round !== m.round && movedId(m, side) == null) {
       if (!m.moved) m.moved = [null, null];
       m.gold[side] -= CONFIG.moveCost;
       m.moved[side] = sq.id;
-      sq.from = { col: sq.col, row: sq.row };
+      sq.from = { col: sq.col, row: sq.row, ...(isRider(sq) ? { in: sq.in } : {}) };
       sq.movedRound = m.round;
     }
     sq.col = col; sq.row = row;
-    if (sq.from && sq.movedRound === m.round && sq.from.col === col && sq.from.row === row) undoMove(m, side);
+    if (into) sq.in = into.id; else delete sq.in;
+    syncRiders(m, side);
+    if (sq.from && sq.movedRound === m.round && sq.from.col === col && sq.from.row === row && sq.from.in === sq.in) undoMove(m, side);
     return true;
   }
   // put this round's moved squad back on its old tile and refund the move
@@ -492,9 +519,13 @@ const Game = (() => {
     const id = movedId(m, side);
     const sq = id != null && m.armies[side].find(s => s.id === id);
     if (!sq || !sq.from) return false;
-    if ((sq.col !== sq.from.col || sq.row !== sq.from.row) && occupied(m, side, sq.from.col, sq.from.row)) return false;
+    const back = sq.from.in != null ? m.armies[side].find(s => s.id === sq.from.in) : null;
+    if (sq.from.in != null ? !(back && back.col === sq.from.col && back.row === sq.from.row && (sq.in === back.id || !riderOf(m, side, back)))
+      : (sq.col !== sq.from.col || sq.row !== sq.from.row) && occupied(m, side, sq.from.col, sq.from.row)) return false;
     sq.col = sq.from.col; sq.row = sq.from.row;
+    if (back) sq.in = back.id; else delete sq.in;
     delete sq.from; delete sq.movedRound;
+    syncRiders(m, side);
     m.moved[side] = null;
     m.gold[side] += CONFIG.moveCost;
     return true;
@@ -522,27 +553,35 @@ const Game = (() => {
     if (!canPlaceAt(m, side, col, row, unitIdx)) return null;
     if (needsTower(m, side)) return null; // the tower goes down first
     if (!isUnlocked(m, side, unitIdx)) return null;
-    if (occupied(m, side, col, row)) return null;
+    const into = boardable(m, side, col, row, unitIdx); // a carrier with room: the new squad rides inside
+    if (occupied(m, side, col, row) && !into) return null;
+    const ride = into ? { in: into.id } : {};
     if (freeLeft(m, side).includes(unitIdx)) { // a package squad: no gold, no deployment
-      const sq = { id: m.nextId[side]++, unit: unitIdx, col, row, round: m.round, xp: 0, level: 0, cost: 0, free: true };
+      const sq = { id: m.nextId[side]++, unit: unitIdx, col, row, round: m.round, xp: 0, level: 0, cost: 0, free: true, ...ride };
       m.armies[side].push(sq);
       return sq;
     }
     const cost = unitCostOf(m.units[unitIdx]);
     if (m.gold[side] < cost) return null;
     if (deploysLeft(m, side) <= 0) return null;
-    const sq = { id: m.nextId[side]++, unit: unitIdx, col, row, round: m.round, xp: 0, level: 0, cost };
+    const sq = { id: m.nextId[side]++, unit: unitIdx, col, row, round: m.round, xp: 0, level: 0, cost, ...ride };
     m.armies[side].push(sq);
     m.gold[side] -= cost;
     return sq;
   }
 
-  // Only squads bought this round can be taken back
+  // Only squads bought this round can be taken back (by tile: the squad standing there, not a rider inside it).
+  // A carrier taken back leaves its rider standing on the tile.
   function unplace(m, side, col, row) {
-    const i = m.armies[side].findIndex(s => s.col === col && s.row === row && s.round === m.round);
+    const sq = squadAt(m, side, col, row);
+    return !!sq && unplaceSquad(m, side, sq.id);
+  }
+  function unplaceSquad(m, side, id) {
+    const i = m.armies[side].findIndex(s => s.id === id && s.round === m.round);
     if (i < 0) return false;
     const [sq] = m.armies[side].splice(i, 1);
     m.gold[side] += sq.cost;
+    syncRiders(m, side);
     return true;
   }
 
@@ -567,6 +606,12 @@ const Game = (() => {
       if (isFlank(side, sq.col, sq.row) && (sq.round === m.round || sq.movedRound === m.round)) for (const x of b) x.delay = FLANK.delay * (ch === 'wilhelm' ? CHAR.wilhelmDelay : 1); // only in its first fight
       idx += b.length;
       out.push(...b);
+    }
+    // riders sit inside their carrier's first body until it dies
+    for (const sq of m.armies[side]) {
+      if (!isRider(sq)) continue;
+      const c = out.find(x => x.squad === sq.in);
+      for (const x of out) if (x.squad === sq.id) { if (c) { x.boarded = true; x.alive = false; x.carrier = c; x.x = c.x; x.y = c.y; x.delay = 0; } }
     }
     const t = m.towers && m.towers[side];
     if (t) {
@@ -852,6 +897,7 @@ const Game = (() => {
     PACKAGE, allPackages, packOf, needsPack, freeLeft, choosePack, ensurePack,
     unlockCost, isUnlocked, unlockVisible, unlock, undoUnlock,
     skillDef, skillCost, isInnate, hasSkill, skillVisible, unitFor, canBuySkill, buySkill, undoSkill, sellValue, sell,
+    isRider, hiddenFromFoe, isCarrier, riderOf, carrierOf, squadAt, boardable, unplaceSquad,
     TOWER, TOWER_TYPES, OUTPOST, TOWER_PICK_ROUND, towerType, towerChoices, needsTowerPick, setTowerType, settleTowerPicks, TOWER_MID, towerColOk, towerAt, needsTower, placeTower, ensureTower,
     FLANK, flankRows, flankOpen, isFlank, reserved, canPlaceAt, enemyHolds, inNoMans, hasSkillType,
     ICE, ALTAR, GOLEM, isIce, hailRound, altarRound, stormShift, stormRows, hailTiles, altarCost, altarBought, addAltar, buyAltar, undoAltar, snowgres, snowgreUnit,

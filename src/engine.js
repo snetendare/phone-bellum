@@ -1,6 +1,6 @@
 // ===== Battle engine (shared by headless tests and the page) =====
 const Engine = (() => {
-  const TRAIT_DEFAULTS = { burst: 1, pellets: 1, spinUp: 0, spinHit: 0, pierce: 0, projSpeed: 0, minRange: 0, charge: 1, knockback: 0, windUp: 0, flame: 0, trample: 0, deathBlast: 0 };
+  const TRAIT_DEFAULTS = { burst: 1, pellets: 1, spinUp: 0, spinHit: 0, pierce: 0, projSpeed: 0, minRange: 0, charge: 1, knockback: 0, windUp: 0, flame: 0, trample: 0, deathBlast: 0, ram: 0, noFlank: 0, carrier: 0 };
   const BURST_GAP = 0.15;      // seconds between shots in a burst
   const SHOTGUN_COS = Math.sqrt(3) / 2; // pellets spread 30 degrees to each side of the target (cos 30)
   // Only + - * / and sqrt from here on: those give identical results in every browser,
@@ -18,6 +18,11 @@ const Engine = (() => {
   const CHARGE_RUN = 5;        // metres a unit must run before its next attack counts as a charge
   const TRAMPLE_RUN = 8;       // after a charged hit, a trampler keeps running this far past its target
   const TRAMPLE_WIDTH = 1.5;   // bodies within this distance of a trampler's path get run over
+  // ram: the unit never attacks; it heads straight for the enemy tower (the nearest enemy once the tower is down),
+  // and on reaching it deals its hit to it once and is destroyed. carrier: a squad of another unit can ride inside
+  // (see createBattle: bodies with `carrier` set stay out of the fight until that body dies). noFlank: can't be
+  // deployed on flank tiles (the game checks it)
+  const RAM_REACH = 2;         // metres from its target at which a ram hits
   const BLAST_RADIUS = 4;      // a body with deathBlast explodes when it dies, hitting enemies within this distance
   const PIERCE_DEPTH = 10;     // metres a piercing shot travels past its target
   const PIERCE_WIDTH = 1;      // half-width of the pierce corridor (m)
@@ -64,6 +69,7 @@ const Engine = (() => {
     split:   { label: 'Split beam', params: [['beams', 'Targets at once', 4, 1], ['range', 'Range (−%)', 30, 5], ['hit', 'Hit per target (−%)', 0, 5]] },
     deathSpawn: { label: 'Spawn on death', params: [['unit', 'Spawns (unit name)', 'Goblin Swarm', null], ['count', 'Bodies per death', 2, 1], ['strength', 'Strength of each spawn (% health and damage; 50 = half)', 100, 10]] },
     shield:  { label: 'Shield', params: [['hits', 'Hits blocked per body', 3, 1]] },
+    blast:   { label: 'Death burst', params: [['radius', 'Radius (m)', 7, 0.5], ['pct', 'Damage (% of hit)', 100, 10]] },
   };
   const skillParam = (d, k) => {
     const v = d.params && d.params[k];
@@ -84,7 +90,7 @@ const Engine = (() => {
       case 'armorHp': return `+${n('armor')} armor and +${n('hp')}% health.`;
       case 'spawn': return `Every ${n('every')} s, spawns ${n('count')} ${String(P('unit'))} ${+P('count') === 1 ? 'body' : 'bodies'}, up to ${n('max')} alive at once${+P('waves') > 0 ? `, at most ${n('waves')} ${+P('waves') === 1 ? 'wave' : 'waves'} per fight` : ''}.`;
       case 'rapid': return `+${n('aps')}% attack speed, −${n('range')}% range.`;
-      case 'swift': return `+${n('speed')}% move speed and +${n('hit')}% hit size.`;
+      case 'swift': return +P('hit') ? `+${n('speed')}% move speed and +${n('hit')}% hit size.` : `+${n('speed')}% move speed.`;
       case 'heavy': return `Projectiles fly ${n('slow')}% slower (${n('instant')} m/s if it normally hits instantly), +${n('hit')}% hit size.`;
       case 'healer': return `Each attack heals a random wounded ally for ${n('pct')}% of its hit.`;
       case 'range': return `+${n('m')} m range.`;
@@ -94,6 +100,7 @@ const Engine = (() => {
       case 'forward': return 'Squads of this unit can also be placed in no man’s land.';
       case 'split': return `Attacks ${n('beams')} different enemies at once${+P('hit') > 0 ? `, −${n('hit')}% hit each` : ''}. −${n('range')}% range.`;
       case 'deathSpawn': return `When a body dies, ${n('count')} ${String(P('unit'))} ${+P('count') === 1 ? 'body takes' : 'bodies take'} its place${+P('strength') !== 100 ? `, at ${n('strength')}% health and damage` : ''}. A spawn of the unit itself starts from the dead body's own stats. Spawns don’t spawn again.`;
+      case 'blast': return `When a body dies it explodes, dealing ${+P('pct') === 100 ? 'the damage of its hit' : `${n('pct')}% of its hit`} (for a ram, what it deals to the tower) to every enemy within ${n('radius')} m.`;
       case 'shield': return `Each body fully blocks the first ${n('hits')} ${+P('hits') === 1 ? 'hit' : 'hits'} it takes in a fight, however big. Poison already on it still ticks.`;
     }
     return '';
@@ -148,6 +155,7 @@ const Engine = (() => {
           break;
         }
         case 'shield': u.shield = (u.shield || 0) + Math.max(0, Math.round(P('hits'))); break;
+        case 'blast': u.blastR = Math.max(u.blastR || 0, Math.max(0, P('radius'))); u.blastPct = (u.blastPct || 0) + Math.max(0, P('pct')); break;
         case 'split':
           u.beams = Math.max(u.beams || 1, Math.round(P('beams')));
           u.range = Math.max(0.5, u.range * (1 - Math.min(90, P('range')) / 100));
@@ -295,6 +303,22 @@ const Engine = (() => {
         const dmg = v.u.hp * v.u.deathBlast / 100;
         if (opts.record) shots.push([v.x, v.y, v.x, v.y, v.side, BLAST_RADIUS, 1, 0, 0]);
         for (const f of sides[1 - v.side]) if (f.alive && hyp(f.x - v.x, f.y - v.y) <= BLAST_RADIUS) hurt(v, f, dmg, v.x, v.y);
+      }
+      // Death burst: its hit to every enemy within blastR (a ram's target already took the ram itself)
+      if (v.u.blastR > 0) {
+        const dmg = v.u.hit * v.u.blastPct / 100;
+        if (opts.record) shots.push([v.x, v.y, v.x, v.y, v.side, v.u.blastR, 1, 0, 0]);
+        for (const f of sides[1 - v.side]) if (f.alive && f !== v.rammed && hyp(f.x - v.x, f.y - v.y) <= v.u.blastR) hurt(v, f, dmg, v.x, v.y);
+      }
+      // a carrier is gone: whoever rode inside jumps out where it fell
+      if (v.u.carrier) {
+        let k = 0;
+        for (const r of sides[v.side]) {
+          if (r.carrier !== v || !r.boarded) continue;
+          const [ox, oy] = SPAWN_SPOTS[k++ % SPAWN_SPOTS.length], fwd = v.side === 0 ? 1 : -1;
+          r.boarded = false; r.alive = true; r.carrier = null;
+          r.x = v.x + ox * g.spacing * 0.5; r.y = v.y + oy * fwd * g.spacing * 0.5;
+        }
       }
       // Spawn on death: new bodies take its place (they join at the end of this tick).
       // A spawn of the unit itself copies the dead body's stats (level, skills, buffs). Spawns never carry deathSpawn.
@@ -543,6 +567,24 @@ const Engine = (() => {
       }
     }
 
+    // a ram's turn: run at the enemy tower (or, once it is down, the nearest enemy); on reaching it, hit it once and fall
+    function ram(b, foes) {
+      let tgt = null, td = Infinity;
+      for (const f of foes) if (f.alive && f.u.structure) { const d = dist(f, b); if (d < td) { td = d; tgt = f; } }
+      if (!tgt) for (const f of foes) if (f.alive && !f.hidden) { const d = dist(f, b); if (d < td) { td = d; tgt = f; } }
+      if (!tgt) return;
+      if (td > RAM_REACH) {
+        const mv = Math.min(td - RAM_REACH * 0.5, b.u.speed * (b.slowT > 0 ? 1 - b.slowMove / 100 : 1) * (cripple[b.side] > 0 ? 1 - towerDown.move / 100 : 1) * dt);
+        b.hx = (tgt.x - b.x) / td; b.hy = (tgt.y - b.y) / td;
+        b.x += b.hx * mv; b.y += b.hy * mv; b.moved += mv;
+        if (dist(tgt, b) > RAM_REACH) return;
+      }
+      if (opts.record) shots.push([b.x, b.y, tgt.x, tgt.y, b.side, 0, 1, 0, 0]);
+      b.rammed = tgt;
+      hurt(b, tgt, b.u.hit, b.x, b.y);
+      if (b.alive) { b.hp = 0; b.alive = false; b.diedTick = tick; fell(b); }
+    }
+
     function step() {
       if (over) return false;
       if (t >= g.timeCap || !aliveCount(A) || !aliveCount(B)) { over = true; return false; }
@@ -576,6 +618,7 @@ const Engine = (() => {
           if (b.trampleLeft <= 1e-9) { b.trampleLeft = 0; b.trampled = null; }
           continue;
         }
+        if (b.u.ram) { ram(b, foes); continue; }
         let near = null, nd = Infinity;
         for (const f of foes) {
           if (!f.alive || f.hidden) continue;
@@ -685,7 +728,7 @@ const Engine = (() => {
       // attacks. A body killed earlier in this same tick still gets its attack, so neither side
       // wins a trade just by being processed first (side 0 used to win one-shot duels like Sniper vs Sniper)
       for (const b of all) {
-        if ((!b.alive && b.diedTick !== tick) || b.delay > 0) continue;
+        if ((!b.alive && b.diedTick !== tick) || b.delay > 0 || b.u.ram || b.boarded) continue;
         b.cd -= dt * (b.slowT > 0 ? 1 - b.slowAtk / 100 : 1); // slowed units reload slower
         if (b.firing >= 0) b.firing += dt;
         // follow-up shots of a running burst fly along the direction locked at the start
@@ -849,7 +892,8 @@ const Engine = (() => {
     }
 
     function result() {
-      const remHp = sides.map(arr => arr.reduce((s, b) => s + (b.alive && !b.u.structure ? b.hp : 0), 0));
+      const inside = (b) => b.boarded && b.carrier && b.carrier.alive; // still riding in a carrier that made it
+      const remHp = sides.map(arr => arr.reduce((s, b) => s + ((b.alive || inside(b)) && !b.u.structure ? b.hp : 0), 0));
       const frac = [remHp[0] / stats[0].totalHp, remHp[1] / stats[1].totalHp];
       const aliveA = aliveCount(A), aliveB = aliveCount(B);
       let winner = -1, timeout = false;
@@ -861,7 +905,7 @@ const Engine = (() => {
       for (const b of all) {
         const k = b.side + ':' + b.squad;
         const s = squads[k] || (squads[k] = { side: b.side, squad: b.squad, total: 0, alive: 0, xp: 0, dealt: 0 });
-        s.total++; if (b.alive) s.alive++;
+        s.total++; if (b.alive || inside(b)) s.alive++;
         s.xp += b.xp; s.dealt += b.dealt || 0;
       }
       return {
@@ -893,6 +937,6 @@ const Engine = (() => {
     return m;
   }
 
-  return { TOWER_DOWN, SKILL_SLOTS, SLOTS, SKILL_TYPES, skillParam, describeSkill, applySkills, innateUnit, fairBudget, battle, makeArmy, matrix, createBattle, buildSquad, rawStrength, squadsFor, withTraits, leveled, TRAIT_DEFAULTS, SPIN_CAP, CHARGE_RUN, TRAMPLE_RUN, BLAST_RADIUS, LEVEL_BONUS, MAX_LEVEL };
+  return { TOWER_DOWN, SKILL_SLOTS, SLOTS, SKILL_TYPES, skillParam, describeSkill, applySkills, innateUnit, fairBudget, battle, makeArmy, matrix, createBattle, buildSquad, rawStrength, squadsFor, withTraits, leveled, TRAIT_DEFAULTS, SPIN_CAP, CHARGE_RUN, TRAMPLE_RUN, BLAST_RADIUS, RAM_REACH, LEVEL_BONUS, MAX_LEVEL };
 })();
 if (typeof module !== 'undefined') module.exports = Engine;
