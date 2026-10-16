@@ -1045,6 +1045,7 @@
       "ram": 1,
       "noFlank": 1,
       "carrier": 1,
+      "noPack": 1,
       "skills": [
         "gallop",
         "armorHp",

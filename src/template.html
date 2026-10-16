@@ -360,6 +360,10 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
     ['flame', 'Flame cone (°)', 5, 'Sprays fire this many degrees to each side, hitting every enemy inside the cone at once, out to the flame reach (Battle settings). Pellets, splash, pierce and projectile speed are ignored. 0 = off.'],
     ['windUp', 'Wind-up (s)', 0.1, 'Sets up this long when an enemy first comes in range, then fires normally. Has to set up again after moving.'],
   ];
+  // on/off rules for how the game offers the unit (not part of the fight)
+  const FLAGS = [
+    ['noPack', 'Never in starting packages', 'The game never offers this unit in a round 1 starting package. It can still be unlocked and bought as usual.'],
+  ];
   const LEVERS = [
     ['cost', 'Cost (gold)', 10, 'Price of one squad. A standard squad is 100.'],
     ['unlock', 'Unlock cost (gold)', 10, 'Paid once per match before the unit can be fielded. 0 = unlocked from the start.'],
@@ -500,6 +504,12 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
                 <input type="number" id="${k}-${u.id}" data-k="${k}" min="0" step="${step}">
                 <span class="hint">${hint}</span></div>`).join('')}
           </div>
+          <h3 class="sub">Game rules</h3>
+          <div class="levers">
+            ${FLAGS.map(([k, label, hint]) => `
+              <div class="field"><label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="${k}-${u.id}" data-k="${k}" data-flag="1" style="width:auto"> ${label}</label>
+                <span class="hint">${hint}</span></div>`).join('')}
+          </div>
           <h3 class="sub">Skills</h3>
           <div class="skill-slots"></div>
           <div class="derived"></div>
@@ -518,11 +528,12 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
           </div>
         </div>`;
       d.querySelectorAll('[data-k]').forEach(inp => {
-        inp.value = u[inp.dataset.k];
-        const ev = inp.tagName === 'SELECT' ? 'change' : 'input';
+        if (inp.dataset.flag) inp.checked = !!u[inp.dataset.k]; else inp.value = u[inp.dataset.k];
+        const ev = inp.tagName === 'SELECT' || inp.dataset.flag ? 'change' : 'input';
         inp.addEventListener(ev, () => {
           const k = inp.dataset.k;
-          if (k === 'name' || k === 'defense' || k === 'shape' || k === 'color') u[k] = inp.value;
+          if (inp.dataset.flag) u[k] = inp.checked ? 1 : 0;
+          else if (k === 'name' || k === 'defense' || k === 'shape' || k === 'color') u[k] = inp.value;
           else {
             let v = parseFloat(inp.value);
             if (!isFinite(v)) return;
@@ -588,6 +599,7 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
       if (u.deathBlast > 0) tr.push(`death blast ${fmt(u.deathBlast, 0)}%`);
       if (u.windUp > 0) tr.push(`wind-up ${fmt(u.windUp, 1)} s`);
       if (u.level > 0) tr.push(`${u.level + 1}× stats`);
+      if (u.noPack) tr.push('not in packages');
       Engine.SLOTS.forEach(k => { const sk = slotDef(u, k); if (sk) tr.push(`${sk.name}${isCustom(u, k) ? '*' : ''}${u.skillsInnate[k] ? ' (built in)' : u.skillsOn[k] ? ' (on)' : ''}`); });
       d.querySelector('.sum-line').textContent =
         `${u.bodies} × ${fmt(u.hp)} hp · ${fmt(u.hit)} dmg × ${fmt(u.aps, 2)}/s · ${fmt(u.range)} m${u.splash ? ` · splash ${u.splash}` : ''}${def}${tr.length ? ' · ' + tr.join(' · ') : ''}`;

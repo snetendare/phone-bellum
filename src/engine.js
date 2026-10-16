@@ -1,6 +1,6 @@
 // ===== Battle engine (shared by headless tests and the page) =====
 const Engine = (() => {
-  const TRAIT_DEFAULTS = { burst: 1, pellets: 1, spinUp: 0, spinHit: 0, pierce: 0, projSpeed: 0, minRange: 0, charge: 1, knockback: 0, windUp: 0, flame: 0, trample: 0, deathBlast: 0, ram: 0, noFlank: 0, carrier: 0 };
+  const TRAIT_DEFAULTS = { burst: 1, pellets: 1, spinUp: 0, spinHit: 0, pierce: 0, projSpeed: 0, minRange: 0, charge: 1, knockback: 0, windUp: 0, flame: 0, trample: 0, deathBlast: 0, ram: 0, noFlank: 0, carrier: 0, noPack: 0 };
   const BURST_GAP = 0.15;      // seconds between shots in a burst
   const SHOTGUN_COS = Math.sqrt(3) / 2; // pellets spread 30 degrees to each side of the target (cos 30)
   // Only + - * / and sqrt from here on: those give identical results in every browser,
@@ -21,7 +21,7 @@ const Engine = (() => {
   // ram: the unit never attacks; it heads straight for the enemy tower (the nearest enemy once the tower is down),
   // and on reaching it deals its hit to it once and is destroyed. carrier: a squad of another unit can ride inside
   // (see createBattle: bodies with `carrier` set stay out of the fight until that body dies). noFlank: can't be
-  // deployed on flank tiles (the game checks it)
+  // deployed on flank tiles (the game checks it). noPack: never offered in a starting package (the game checks it)
   const RAM_REACH = 2;         // metres from its target at which a ram hits
   const BLAST_RADIUS = 4;      // a body with deathBlast explodes when it dies, hitting enemies within this distance
   const PIERCE_DEPTH = 10;     // metres a piercing shot travels past its target

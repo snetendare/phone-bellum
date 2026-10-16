@@ -326,10 +326,10 @@ const Game = (() => {
 
   // ---------- starting packages ----------
   // Before round 1 each player picks one of 3 packages (their own, not mirrored): two tier 1-2 unit types,
-  // both unlocked for free, plus free squads of them worth exactly PACKAGE.value gold.
+  // both unlocked for free, plus free squads of them worth exactly PACKAGE.value gold. Units with noPack are never in one.
   const PACKAGE = { value: 300, maxPrice: 200, options: 3 };
   function allPackages(units) {
-    const out = [], ok = units.map((u, i) => unitCostOf(u) <= PACKAGE.maxPrice ? i : -1).filter(i => i >= 0);
+    const out = [], ok = units.map((u, i) => unitCostOf(u) <= PACKAGE.maxPrice && !u.noPack ? i : -1).filter(i => i >= 0);
     for (const a of ok) for (const b of ok) {
       if (a === b) continue;
       const ca = unitCostOf(units[a]), cb = unitCostOf(units[b]);
