@@ -1242,6 +1242,20 @@ const Game = (() => {
   // and the opponent's sits straight across the board from it (on the Mushroom Cavern, mirrored as each player sees it: see towerSpot). It has a short, light attack. If it falls, that player's army is
   // crippled for a few seconds (see Engine.TOWER_DOWN). It is rebuilt for every round.
   const TOWER = { name: 'Tower', cost: 0, bodies: 1, hp: 650, hit: 30, aps: 1.2, range: 8, speed: 0, splash: 0, structure: true, shape: 'square', color: '#C9B79C' };
+  // Tower types: each player picks one in round 1 (before the first fight); it stays for the whole match.
+  const TOWER_TYPES = [
+    { id: 'keep', name: 'Keep', text: 'The standard tower: steady, light shots at short range.', unit: TOWER },
+    { id: 'sniper', name: 'Sniper tower', text: 'Shoots across most of the board, slowly, for double damage.', unit: { ...TOWER, name: 'Sniper Tower', hit: 60, aps: 0.4, range: 30, color: '#B9C7D6' } },
+    { id: 'bastion', name: 'Bastion', text: 'Much tougher, with a shorter, slower attack that splashes the units around its target.', unit: { ...TOWER, name: 'Bastion', hp: 1000, aps: 0.8, range: 5, splash: 2, color: '#B79C8A' } },
+  ];
+  const towerType = (m, side) => { const t = m && m.towers && m.towers[side]; return TOWER_TYPES.find(x => x.id === (t && t.type)) || TOWER_TYPES[0]; };
+  // the type can be changed during round 1 only
+  function setTowerType(m, side, id) {
+    const t = m.towers && m.towers[side];
+    if (m.round !== 1 || !t || !TOWER_TYPES.some(x => x.id === id)) return false;
+    if (id === 'keep') delete t.type; else t.type = id;
+    return true;
+  }
   const TOWER_MID = [4, 7]; // columns the tower can't stand in
   const TOWER_SPOT = [{ col: 8, row: ROWS - 2 }, { col: 8, row: 1 }];
 
@@ -1692,7 +1706,7 @@ const Game = (() => {
     if (!m.towers) m.towers = [null, null];
     if (m.round !== 1 || !inZone(side, row) || !towerColOk(col) || reserved(side, col, row)) return false;
     if (m.armies[side].some(s => s.col === col && s.row === row)) return false;
-    m.towers[side] = { col, row };
+    m.towers[side] = { col, row, ...(m.towers[side] && m.towers[side].type ? { type: m.towers[side].type } : {}) };
     return true;
   }
   // a match without a tower (saved before towers were fixed) gets the fixed one
@@ -1754,7 +1768,7 @@ const Game = (() => {
     }
     const t = m.towers && m.towers[side];
     if (t) {
-      const w = tileToWorld(t.col, t.row), tb = E.buildSquad(TOWER, side, w.x, w.y, -2, TILE, idx);
+      const w = tileToWorld(t.col, t.row), tb = E.buildSquad(towerType(m, side).unit, side, w.x, w.y, -2, TILE, idx);
       if (altarBought(m, side, 'walls')) for (const x of tb) x.walls = [ICE.wallHits, ICE.wallHits, ICE.wallHits, ICE.wallHits];
       idx += tb.length; out.push(...tb);
     }
@@ -1921,6 +1935,7 @@ const Game = (() => {
       const col = r() < 0.5 ? 1 + Math.floor(r() * 2) : 9 + Math.floor(r() * 2);
       if (!placeTower(m, side, col, rows[3 + Math.floor(r() * 2)])) ensureTower(m, side);
     }
+    if (m.round === 1 && m.towers && m.towers[side]) setTowerType(m, side, TOWER_TYPES[Math.floor(rng(m.seed + side * 7477)() * TOWER_TYPES.length)].id); // own stream: the rest of the AI rolls stay as they were
     const opp = 1 - side;
     const oppArmy = m.armies[opp].filter(s => s.round < m.round);
     for (const ui of freeLeft(m, side)) { const spot = aiSpot(m, side, ui, oppArmy, r); if (spot) place(m, side, ui, spot.col, spot.row); }
@@ -2034,7 +2049,7 @@ const Game = (() => {
     PACKAGE, allPackages, packOf, needsPack, freeLeft, choosePack, ensurePack,
     unlockCost, isUnlocked, unlockVisible, unlock, undoUnlock,
     skillDef, skillCost, isInnate, hasSkill, skillVisible, unitFor, canBuySkill, buySkill, undoSkill, sellValue, sell,
-    TOWER, TOWER_MID, towerColOk, towerAt, needsTower, placeTower, ensureTower,
+    TOWER, TOWER_TYPES, towerType, setTowerType, TOWER_MID, towerColOk, towerAt, needsTower, placeTower, ensureTower,
     FLANK, flankRows, flankOpen, isFlank, reserved, canPlaceAt, enemyHolds, inNoMans, hasSkillType,
     ICE, ALTAR, GOLEM, isIce, hailRound, altarRound, stormShift, stormRows, hailTiles, altarCost, altarBought, addAltar, buyAltar, undoAltar, snowgres, snowgreUnit,
     MAPS, ELF_TOWER, SHROOM, SHROOM_SPLIT, shroomAt, shroomTileAt, shroomRemoval, SHROOM_REMOVE, removeShroom, undoRemoveShroom, mapOf, elfSpot, rollMap, BRIBE_COST, bribed, bribeVisible, canBribe, bribe, undoBribe,
@@ -2581,10 +2596,10 @@ if (typeof module !== 'undefined') module.exports = Game;
   }
 
   // a little keep with battlements, in the team colour
-  function drawKeep(x, y, s, side, hpr) {
+  function drawKeep(x, y, s, side, hpr, fill) {
     const c = teamCol(side);
     ctx.globalAlpha = 0.35 + 0.65 * (hpr == null ? 1 : hpr);
-    ctx.fillStyle = Game.TOWER.color; ctx.strokeStyle = c; ctx.lineWidth = Math.max(1.5, s * 0.08);
+    ctx.fillStyle = fill || Game.TOWER.color; ctx.strokeStyle = c; ctx.lineWidth = Math.max(1.5, s * 0.08);
     const w = s * 0.62, h = s * 0.62, x0 = x - w / 2, y0 = y - h / 2 + s * 0.06, m = w / 5;
     ctx.beginPath();
     ctx.moveTo(x0, y0 + h); ctx.lineTo(x0, y0);
@@ -2596,10 +2611,12 @@ if (typeof module !== 'undefined') module.exports = Game;
   const towerVisible = (side) => !!(m && m.towers && m.towers[side]);
   // the opponent's character (and Zoe's buff tiles) stay hidden until the first fight starts
   const charVisible = (side) => !!m && (side === me || m.round > 1 || phase !== 'deploy');
+  // the opponent's tower type stays hidden until the first fight too
+  const towerTypeVisible = (side) => charVisible(side);
   const charLine = (id) => { const c = Game.charInfo(id); return c ? `<b>${esc(c.name)}</b> · ${esc(c.ability)}` : ''; };
   function drawTowerTile(side) {
     const tw = m.towers[side], t = tilePx();
-    drawKeep((scol(tw.col) + 0.5) * t, (srow(tw.row) + 0.5) * t, t, side);
+    drawKeep((scol(tw.col) + 0.5) * t, (srow(tw.row) + 0.5) * t, t, side, null, towerTypeVisible(side) ? Game.towerType(m, side).unit.color : null);
   }
   // the neutral elf tower: a slim pale spire with a leaf-green roof. range = show its reach as a faint ring
   function drawElfTower(v, range) {
@@ -2723,7 +2740,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
     for (const b of bt.bodies) {
       if (!b.alive || !b.u.structure) continue;
       const hpr = b.hp / b.u.hp, t = tilePx();
-      drawKeep(PX(b.x), PY(b.y), t, b.side, hpr);
+      drawKeep(PX(b.x), PY(b.y), t, b.side, hpr, b.u.color);
       ctx.strokeStyle = teamCol(b.side); ctx.lineWidth = 2;
       ctx.beginPath(); ctx.arc(PX(b.x), PY(b.y), t * 0.5, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * hpr); ctx.stroke();
       if (b.walls) drawWalls(b.x, b.y, b.walls);
@@ -2901,6 +2918,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
       if (moveMode) hint = moving == null ? `Tap one of your squads from an earlier round to move it (${Game.CONFIG.moveCost} gold, once per round).` : `Tap a free tile to move ${esc(units[m.armies[me].find(s => s.id === moving).unit].name)} there, or drag it.`;
       const freeL = Game.freeLeft(m, me);
       if (freeL.length && !placingTower() && selected === null) hint = `Place your free package squads: ${[...new Set(freeL)].map(ui => `${freeL.filter(x => x === ui).length}× ${esc(units[ui].name)}`).join(', ')}. They cost no gold and no deployments.`;
+      if (m.round === 1 && selected === null && !moveMode) hint += ` Tap your tower to pick its type for the match (${Game.TOWER_TYPES.map(x => esc(x.name)).join(', ')}); you have the ${esc(Game.towerType(m, me).name.toLowerCase())}.`;
       if (choosingPack()) hint = `Pick your starting package and character. Both units are unlocked for you and you get their squads for free, plus ${m.gold[me]} gold to spend. The character’s ability lasts the whole match. Your opponent picks from their own packages.${(() => { const mp = Game.mapOf(m); return mp ? ` Map: <b>${esc(mp.name)}</b>. ${esc(mp.text)}` : ''; })()}`;
       if (placingTower()) hint = 'Next, place your tower: tap a gold tile on the left or right side of your zone. If it falls in a fight, your army is crippled for a few seconds.';
     }
@@ -3033,7 +3051,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
       <ul>
         <li>Buy squads with gold each round. A standard squad costs ${Game.SQUAD_COST}. Income grows by ${Game.CONFIG.incomeStep} every round.</li>
         <li>Start by picking one of three packages: two units unlocked for free with free squads worth ${Game.PACKAGE.value}, plus ${Game.START_GOLD} gold. Each package comes with a random character (never two the same) whose ability lasts the whole match: ${Game.CHARACTERS.map(c => `${esc(c.name)}: ${esc(c.ability)}`).join(' ')}</li>
-        <li>Your tower stands in the back of your zone. If it falls in a fight, your army is crippled for a few seconds. Tap the enemy tower to see their character.</li>
+        <li>Your tower stands in the back of your zone. If it falls in a fight, your army is crippled for a few seconds. In round 1, tap your tower to pick its type for the match: ${Game.TOWER_TYPES.map(x => `${esc(x.name)}: ${esc(x.text)}`).join(' ')} Tap the enemy tower to see their character.</li>
         <li>Place squads in the bottom six rows. They stay for the whole match. From round ${Game.FLANK.round}, the edge columns on the enemy's half of the board open up for flanking. The red edge columns on your half are theirs, never yours; a squad placed there waits ${Game.FLANK.delay} s before it moves or attacks, in its first fight only.</li>
         <li>Every match is fought on a random map that changes the rules: ${Game.MAPS.map(mp => `${esc(mp.name)}: ${esc(mp.text)}`).join(' ')}</li>
         <li>Columns are lanes: squads march straight ahead and fight what they meet, so an empty lane lets a squad walk around the side.</li>
@@ -3373,9 +3391,10 @@ ${theirs.length ? theirs.join('\n') : '- none yet'}
 ${theirSkills.length ? 'Their skills: ' + theirSkills.join(', ') : ''}
 
 TOWERS
-- Each player has one tower (${Game.TOWER.hp} hp, hit ${Game.TOWER.hit} x ${Game.TOWER.aps}/s, range ${Game.TOWER.range} m). It never moves, is rebuilt every round and doesn't count for winning a round. If a tower falls during a fight, its owner's whole army deals ${Engine.TOWER_DOWN.attack}% less damage, moves ${Engine.TOWER_DOWN.move}% slower and takes ${Engine.TOWER_DOWN.taken}% more damage for ${Engine.TOWER_DOWN.secs} s. Sending a squad down an empty lane to break their tower can turn a fight; guard the lane to yours.
-- Your tower: col ${m.towers[1].col}, row ${m.towers[1].row} (fixed; squads can't share its tile).
-- Their tower: col ${m.towers[0].col}, row ${m.towers[0].row}.
+- Each player has one tower. It never moves, is rebuilt every round and doesn't count for winning a round. If a tower falls during a fight, its owner's whole army deals ${Engine.TOWER_DOWN.attack}% less damage, moves ${Engine.TOWER_DOWN.move}% slower and takes ${Engine.TOWER_DOWN.taken}% more damage for ${Engine.TOWER_DOWN.secs} s. Sending a squad down an empty lane to break their tower can turn a fight; guard the lane to yours.
+- Tower types (each player picks one in round 1; it stays all match): ${Game.TOWER_TYPES.map(x => `"${x.id}" ${x.name}: ${x.unit.hp} hp, hit ${x.unit.hit} x ${x.unit.aps}/s, range ${x.unit.range} m${x.unit.splash ? `, ${x.unit.splash} m splash` : ''}`).join('; ')}.${m.round === 1 ? ' ROUND 1: pick yours with "towerType" in your reply.' : ''}
+- Your tower: ${Game.towerType(m, 1).name}, col ${m.towers[1].col}, row ${m.towers[1].row} (fixed; squads can't share its tile).
+- Their tower: ${m.round > 1 ? Game.towerType(m, 0).name + ', ' : 'type hidden until the fight, '}col ${m.towers[0].col}, row ${m.towers[0].row}.
 
 MAP
 ${(() => { const mp = Game.mapOf(m), e = Game.elfSpot(m); return mp ? `- ${mp.name}: ${mp.text}${e ? ` The elf tower stands in column ${e.col}, on the line between rows ${Game.ROWS / 2 - 1} and ${Game.ROWS / 2}; it hits for ${Game.ELF_TOWER.hit}, ${Game.ELF_TOWER.aps} times a second, range ${Game.ELF_TOWER.range} m, and can't be attacked. Bribing the elves costs ${Game.BRIBE_COST} gold once per match ("bribe": true): from then on it never shoots your units and instead heals your wounded units near it for ${Game.ELF_TOWER.healHit} (x${mp.healMul || 1} on this map, ${Game.ELF_TOWER.healSplash} m splash) every ${Math.round(10 / Game.ELF_TOWER.healAps) / 10} s. You ${Game.bribed(m, 1) ? 'have' : "haven't"} bribed; they ${Game.bribeVisible(m, 0) ? 'have' : "haven't, as far as you know"}.` : ''}${mp.ice ? ` Storm band rows now: ${Game.stormRows(m).join(', ')}.${Game.hailRound(m) ? ` Hail tiles this round: ${Game.hailTiles(m).map(h => `col ${h.col}, row ${h.row}`).join('; ')}.` : ''}${Game.altarRound(m) ? ` The altar of ice is up this round. "altar" can list any of: "walls" (${Game.altarCost(m, 1, 'walls')} gold: your tower's 4 walls each block the first ${Game.ICE.wallHits} hits from their side, this fight only), "push" (${Game.altarCost(m, 1, 'push')} gold: storm band moves ${Game.ICE.push} rows toward the opponent from the next hailstorm on), "snowgre" (${Game.altarCost(m, 1, 'snowgre')} gold: a permanent hail-immune Ether Golem at ${Math.round(Game.ICE.snowFirst * Math.pow(2, Game.snowgres(m, 1).length) * 100)}% strength, standing in your half of no man's land each fight).` : ''} Your Snowgres: ${Game.snowgres(m, 1).length}.` : ''}${mp.shrooms ? ` Removing a mushroom tile costs ${Game.SHROOM_REMOVE} gold ("removeTiles":[{"col":3,"row":6}]); it is gone from the next fight on. Mushroom tiles still there: ${(m.map.tiles || []).filter(x => Game.shroomAt(m, x.col, x.row)).map(x => `${x.type} at col ${x.col}, row ${x.row}`).join('; ')}.` : ''}` : '- No special map.'; })()}
@@ -3385,7 +3404,7 @@ CHARACTERS (each package comes with one; its ability lasts the whole match)
 - Theirs: ${m.round > 1 && Game.charOf(m, 0) ? `${Game.charInfo(Game.charOf(m, 0)).name}: ${Game.charInfo(Game.charOf(m, 0)).ability}` : 'hidden until the first fight'}
 
 Reply with only a JSON object in this shape:
-{${Game.needsPack(m, 1) ? '"package":0,' : ''}"unlock":["unit name"],"sell":[squad ids],"levelUp":[squad ids, list one twice to level it twice],"skills":[{"unit":"unit name","slot":1}],"extraDeployments":0,${Game.elfSpot(m) ? '"bribe":false,' : ''}${(Game.mapOf(m) || {}).shrooms ? '"removeTiles":[],' : ''}${Game.altarRound(m) ? '"altar":[],' : ''}"move":{"id":squad id,"col":5,"row":3} or null,"place":[{"unit":"unit name","col":5,"row":3}],"say":"one short playful line to your opponent, at most 15 words, shown after the fight"}
+{${Game.needsPack(m, 1) ? '"package":0,' : ''}${m.round === 1 ? '"towerType":"keep",' : ''}"unlock":["unit name"],"sell":[squad ids],"levelUp":[squad ids, list one twice to level it twice],"skills":[{"unit":"unit name","slot":1}],"extraDeployments":0,${Game.elfSpot(m) ? '"bribe":false,' : ''}${(Game.mapOf(m) || {}).shrooms ? '"removeTiles":[],' : ''}${Game.altarRound(m) ? '"altar":[],' : ''}"move":{"id":squad id,"col":5,"row":3} or null,"place":[{"unit":"unit name","col":5,"row":3}],"say":"one short playful line to your opponent, at most 15 words, shown after the fight"}
 For "say": make it about what is happening in this match, and never repeat a line.${claude.history.length ? ' Lines you already used:\n' + claude.history.slice(-6).map(x => '- ' + x).join('\n') : ''}
 Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills, ${Game.elfSpot(m) ? 'bribe, ' : ''}${(Game.mapOf(m) || {}).shrooms ? 'removeTiles, ' : ''}${Game.altarRound(m) ? 'altar, ' : ''}extraDeployments, move, place. Anything you can't afford or that breaks a rule is skipped, so keep the total cost within your gold (${m.gold[1]} plus any sales). Use exact unit names. Unspent gold isn't lost, but squads on the board win rounds.`;
   }
@@ -3403,6 +3422,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       const tw = mv.tower && typeof mv.tower === 'object' ? mv.tower : null;
       if (!(tw && Game.placeTower(m, 1, int(tw.col), int(tw.row)))) Game.ensureTower(m, 1);
     }
+    if (m.round === 1 && mv.towerType) Game.setTowerType(m, 1, String(mv.towerType));
     for (const id of list(mv.sell)) {
       const sq = m.armies[1].find(s => s.id === int(id));
       if (sq && Game.sell(m, 1, sq.id)) did.push(`sold ${units[sq.unit].name}`);
@@ -3682,16 +3702,26 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   }
 
   function openTowerSheet(side) {
-    const T = Game.TOWER, D = Engine.TOWER_DOWN;
+    const D = Engine.TOWER_DOWN, shown = towerTypeVisible(side), tt = Game.towerType(m, side), T = tt.unit;
+    const pick = side === me && phase === 'deploy' && m.round === 1;
     $('sheet').innerHTML = `
-      <div class="bar"><h3 id="sheet-h">${side === me ? 'Your tower' : `${esc(foeName())}'s tower`}</h3><button class="btn small" id="close">Close</button></div>
+      <div class="bar"><h3 id="sheet-h">${side === me ? 'Your tower' : `${esc(foeName())}'s tower`}${shown ? ` · ${esc(tt.name)}` : ''}</h3><button class="btn small" id="close">Close</button></div>
       <p style="margin:0">${(() => { const id = Game.charOf(m, side); return !charVisible(side) ? 'Character: hidden until the first fight.' : id ? `Character: ${charLine(id)}` : 'Character: not picked yet.'; })()}</p>
-      <p class="role" style="margin:0">The tower stands in the back of the zone and shoots anything that comes close. It is rebuilt for every round.</p>
+      <p class="role" style="margin:0">The tower stands in the back of the zone and shoots anything that comes close. It is rebuilt for every round.${shown ? ` ${esc(tt.text)}` : ' Its type stays hidden until the first fight.'}</p>
       <p style="margin:0"><span style="color:var(--foe)">If it falls:</span> that army deals ${D.attack}% less damage, moves ${D.move}% slower and takes ${D.taken}% more damage for ${D.secs} s.</p>
-      <div class="stats"><div><span>Health</span><b class="num">${T.hp}</b></div><div><span>Hit</span><b class="num">${T.hit}</b></div><div><span>Attacks/s</span><b class="num">${T.aps}</b></div><div><span>Range</span><b class="num">${T.range} m</b></div></div>`;
+      ${shown ? towerStats(T) : ''}
+      ${pick ? `<h4 style="margin:0;font-size:12px;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted)">Tower type · pick before the first fight</h4>
+      ${Game.TOWER_TYPES.map(x => `<div class="confirm" style="border-color:${x.id === tt.id ? 'var(--you)' : 'var(--line)'}">
+          <b>${esc(x.name)}</b>
+          <span class="hint">${esc(x.text)}</span>
+          ${towerStats(x.unit)}
+          ${x.id === tt.id ? '<span class="hint" style="color:var(--you)">Your tower this match.</span>' : `<button class="btn primary" data-ttype="${x.id}" ${editable() ? '' : 'disabled'}>Build the ${esc(x.name.toLowerCase())}</button>`}
+        </div>`).join('')}` : ''}`;
     $('sheet-back').hidden = false;
     $('close').addEventListener('click', closeSheet);
+    $('sheet').querySelectorAll('[data-ttype]').forEach(b => b.addEventListener('click', () => { if (editable() && Game.setTowerType(m, me, b.dataset.ttype)) { changed(); openTowerSheet(me); } }));
   }
+  const towerStats = (T) => `<div class="stats"><div><span>Health</span><b class="num">${T.hp}</b></div><div><span>Hit</span><b class="num">${T.hit}</b></div><div><span>Attacks/s</span><b class="num">${T.aps}</b></div><div><span>Range</span><b class="num">${T.range} m</b></div>${T.splash ? `<div><span>Splash</span><b class="num">${T.splash} m</b></div>` : ''}</div>`;
   // the mushroom tile on a square and a button to remove it (or keep it, if you removed it this round)
   function shroomBlock(col, row) {
     if (phase !== 'deploy' || !m) return '';
@@ -4156,7 +4186,8 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
         m.map.removed.push({ col: q.col, row: q.row, side: 1, round: m.round });
       }
     }
-    // towers are fixed, so the guest's tower isn't taken from the guest
+    // towers are fixed, so the guest's tower spot isn't taken from the guest; its type is, in round 1
+    if (m.round === 1 && d.tower && typeof d.tower === 'object') Game.setTowerType(m, 1, String(d.tower.type || 'keep'));
   }
 
   function checkNext() {
