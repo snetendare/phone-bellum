@@ -117,6 +117,8 @@ a { color: var(--you); }
     'Crossbow Volley': 'Fires 4-bolt bursts down one line. Lined-up targets take every bolt.',
     'Ballista': 'Slow piercing bolts from long range. Can’t hit anything close.',
     'Boar Riders': 'Fast chargers whose first hit doubles and knocks small bodies back.',
+    'Rogue': 'A pair of fast duelists whose first strike after a run lands four times as hard. Can be placed in no man’s land.',
+    'Spiders': 'A fast pack of biters. Each spider that falls can split into two smaller spiderlings.',
     'Just a horse': 'Just a horse. Gallops past everything to ram the enemy tower, and might have something hiding inside: place a squad on its tile and it rides along unseen until the horse falls.',
   };
   // ---------- role symbols: what a unit is, what it beats, one extra trait, and its range ----------
@@ -132,6 +134,7 @@ a { color: var(--you); }
     'Steel Wizard': ['giant', 'both'], 'Earth Wizard': ['giant', 'both'],
     'War Mammoth': ['giant', null, 'charger'], 'Necromancer': ['giant', null, 'summoner'],
     'Just a horse': ['single', null, 'raider'],
+    'Rogue': ['group', 'giants'], 'Spiders': ['swarm', 'giants'],
   };
   const IS_TXT = { swarm: 'Swarm', group: 'Small group', single: 'Single', giant: 'Giant' };
   const BEATS_TXT = { crowds: 'beats crowds', giants: 'beats giants', both: 'beats crowds and giants' };

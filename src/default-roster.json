@@ -124,9 +124,9 @@
       "id": "spiderlings",
       "type": "deathSpawn",
       "name": "Spiderlings",
-      "cost": 0,
+      "cost": 200,
       "params": {
-        "unit": "Spider",
+        "unit": "Spiders",
         "count": 2,
         "strength": 50
       }
@@ -1070,6 +1070,101 @@
         false,
         false,
         false
+      ]
+    },
+    {
+      "burst": 1,
+      "pellets": 1,
+      "spinUp": 0,
+      "pierce": 0,
+      "projSpeed": 30,
+      "minRange": 0,
+      "charge": 4,
+      "knockback": 0,
+      "windUp": 0,
+      "flame": 0,
+      "trample": 0,
+      "deathBlast": 0,
+      "defense": "none",
+      "defVal": 0,
+      "level": 0,
+      "unlock": 100,
+      "name": "Rogue",
+      "cost": 300,
+      "bodies": 2,
+      "hp": 310,
+      "hit": 80,
+      "aps": 1.1,
+      "range": 4,
+      "speed": 6,
+      "splash": 0,
+      "shape": "triangle",
+      "color": "#460000",
+      "skills": [
+        "forward",
+        "skmv5oxj501"
+      ],
+      "skillsOn": [
+        false,
+        false
+      ],
+      "skillsInnate": [
+        true,
+        false
+      ],
+      "skillMods": [
+        null,
+        {
+          "params": {
+            "cap": 200
+          },
+          "cost": 159
+        }
+      ]
+    },
+    {
+      "burst": 1,
+      "pellets": 1,
+      "spinUp": 0,
+      "pierce": 0,
+      "projSpeed": 0,
+      "minRange": 0,
+      "charge": 1,
+      "knockback": 0,
+      "windUp": 0,
+      "flame": 0,
+      "trample": 0,
+      "deathBlast": 0,
+      "defense": "none",
+      "defVal": 0,
+      "level": 0,
+      "unlock": 50,
+      "name": "Spiders",
+      "cost": 200,
+      "bodies": 5,
+      "hp": 185,
+      "hit": 20,
+      "aps": 0.8,
+      "range": 2,
+      "speed": 6,
+      "splash": 0,
+      "shape": "spider",
+      "color": "#000000",
+      "skills": [
+        "spiderlings",
+        "poison"
+      ],
+      "skillsOn": [
+        false,
+        false
+      ],
+      "skillsInnate": [
+        false,
+        false
+      ],
+      "skillMods": [
+        null,
+        null
       ]
     }
   ]
