@@ -72,6 +72,7 @@ const Engine = (() => {
     deathSpawn: { label: 'Spawn on death', params: [['unit', 'Spawns (unit name)', 'Goblin Swarm', null], ['count', 'Bodies per death', 2, 1], ['strength', 'Strength of each spawn (% health and damage; 50 = half)', 100, 10]] },
     shield:  { label: 'Shield', params: [['hits', 'Hits blocked per body', 3, 1]] },
     blast:   { label: 'Death burst', params: [['radius', 'Radius (m)', 7, 0.5], ['pct', 'Damage (% of hit)', 100, 10]] },
+    turret:  { label: 'Extra turret', params: [['turrets', 'Attacks at once (each with its own target and reload)', 2, 1]] },
   };
   const skillParam = (d, k) => {
     const v = d.params && d.params[k];
@@ -103,6 +104,7 @@ const Engine = (() => {
       case 'split': return `Attacks ${n('beams')} different enemies at once${+P('hit') > 0 ? `, −${n('hit')}% hit each` : ''}. −${n('range')}% range.`;
       case 'deathSpawn': return `When a body dies, ${n('count')} ${String(P('unit'))} ${+P('count') === 1 ? 'body takes' : 'bodies take'} its place${+P('strength') !== 100 ? `, at ${n('strength')}% health and damage` : ''}. A spawn of the unit itself starts from the dead body's own stats. Spawns don’t spawn again.`;
       case 'blast': return `When a body dies it explodes, dealing ${+P('pct') === 100 ? 'the damage of its hit' : `${n('pct')}% of its hit`} (for a ram, what it deals to the tower) to every enemy within ${n('radius')} m.`;
+      case 'turret': return `Each body attacks ${n('turrets')} different enemies at once, each attack with its own target and its own reload, as if it carried ${n('turrets')} copies of its weapon. They never aim at the same enemy, so with only one enemy in reach just one fires.`;
       case 'shield': return `Each body fully blocks the first ${n('hits')} ${+P('hits') === 1 ? 'hit' : 'hits'} it takes in a fight, however big. Poison already on it still ticks.`;
     }
     return '';
@@ -156,6 +158,7 @@ const Engine = (() => {
           }
           break;
         }
+        case 'turret': u.turrets = Math.max(u.turrets || 1, Math.min(6, Math.round(P('turrets')))); break;
         case 'shield': u.shield = (u.shield || 0) + Math.max(0, Math.round(P('hits'))); break;
         case 'blast': u.blastR = Math.max(u.blastR || 0, Math.max(0, P('radius'))); u.blastPct = (u.blastPct || 0) + Math.max(0, P('pct')); break;
         case 'split':
@@ -571,6 +574,29 @@ const Engine = (() => {
       }
     }
 
+    // Extra turret skill: each body carries more copies of its weapon (turret 0 is its own attack, see the attack
+    // loop). Every turret has its own reload (b.tcd[k]) and target (b.aims[k]), and none aims at another one's target.
+    function turretTaken(b, k) {
+      if (!b.aims) b.aims = [];
+      const out = [];
+      for (let j = 0; j < b.u.turrets; j++) if (j !== k && b.aims[j] && b.aims[j].alive) out.push(b.aims[j]);
+      return out;
+    }
+    function extraTurrets(b) {
+      if (!b.tcd) b.tcd = [];
+      let valid = null;
+      for (let k = 1; k < b.u.turrets; k++) {
+        b.tcd[k] = (b.tcd[k] || 0) - dt * (b.slowT > 0 ? 1 - b.slowAtk / 100 : 1);
+        if (b.tcd[k] > 0) continue;
+        if (!valid) valid = validTargets(b);
+        const taken = turretTaken(b, k), tgt = valid.find(f => !taken.includes(f));
+        if (!tgt) { b.tcd[k] = Math.max(b.tcd[k], -dt); b.aims[k] = null; continue; }
+        b.aims[k] = tgt;
+        b.tcd[k] = Math.max(b.tcd[k], -dt) + 1 / Math.max(0.01, b.u.aps);
+        fire(b, aim(b, tgt, valid), false);
+      }
+    }
+
     // a ram's turn: run at the enemy tower (or, once it is down, the nearest enemy); on reaching it, hit it once and fall
     function ram(b, foes) {
       let tgt = null, td = Infinity;
@@ -754,6 +780,7 @@ const Engine = (() => {
         if ((!b.alive && b.diedTick !== tick) || b.delay > 0 || b.u.ram || b.boarded) continue;
         b.cd -= dt * (b.slowT > 0 ? 1 - b.slowAtk / 100 : 1); // slowed units reload slower
         if (b.firing >= 0) b.firing += dt;
+        if (b.u.turrets > 1 && !(b.u.windUp > 0 && !b.setUp)) extraTurrets(b);
         // follow-up shots of a running burst fly along the direction locked at the start
         // and hit the first enemy on that line; if the line is empty the shot misses
         if (b.burstLeft > 0) {
@@ -811,6 +838,12 @@ const Engine = (() => {
         if (b.u.spinUp > 0 || b.u.spinHit > 0) {
           if (b.spinTarget && b.spinTarget.alive && valid.includes(b.spinTarget)) primary = b.spinTarget;
           else { b.spinTarget = primary; b.firing = 0; }
+        }
+        // with extra turrets, the main attack doesn't aim at an enemy another turret is on; with no one else, it waits
+        if (b.u.turrets > 1) {
+          const taken = turretTaken(b, 0);
+          if (taken.includes(primary)) { const alt = valid.find(f => !taken.includes(f)); if (!alt) continue; primary = alt; }
+          b.aims[0] = primary;
         }
         if (b.firing < 0) b.firing = 0;
         const spin = b.u.spinUp > 0 ? Math.min(SPIN_CAP, 1 + b.u.spinUp / 100 * b.firing) : 1;

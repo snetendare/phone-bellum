@@ -164,6 +164,15 @@
         "radius": 7,
         "pct": 100
       }
+    },
+    {
+      "id": "dualFlame",
+      "type": "turret",
+      "name": "Dual Flame",
+      "cost": 200,
+      "params": {
+        "turrets": 2
+      }
     }
   ],
   "units": [
@@ -301,7 +310,7 @@
       "pellets": 1,
       "spinUp": 0,
       "pierce": 0,
-      "projSpeed": 0,
+      "projSpeed": 35,
       "minRange": 0,
       "charge": 1,
       "knockback": 0,
@@ -324,17 +333,21 @@
       "color": "#fb0022",
       "skills": [
         "range",
-        "armorHp"
+        "armorHp",
+        "dualFlame"
       ],
       "skillsOn": [
+        false,
         false,
         false
       ],
       "skillMods": [
         null,
+        null,
         null
       ],
       "skillsInnate": [
+        false,
         false,
         false
       ]
@@ -485,7 +498,7 @@
       "pellets": 2,
       "spinUp": 0,
       "pierce": 0,
-      "projSpeed": 0,
+      "projSpeed": 35,
       "minRange": 0,
       "charge": 1,
       "knockback": 0,
@@ -551,17 +564,27 @@
       "color": "#24590d",
       "skills": [
         "regen",
-        "range"
+        "range",
+        "heavy"
       ],
       "skillsOn": [
+        false,
         false,
         false
       ],
       "skillMods": [
         null,
-        null
+        null,
+        {
+          "params": {
+            "hit": 20,
+            "slow": 30
+          },
+          "cost": 150
+        }
       ],
       "skillsInnate": [
+        false,
         false,
         false
       ]
@@ -1153,19 +1176,26 @@
       "color": "#000000",
       "skills": [
         "spiderlings",
-        "poison"
+        "poison",
+        "stealth"
       ],
       "skillsOn": [
+        false,
         false,
         false
       ],
       "skillsInnate": [
         false,
+        false,
         false
       ],
       "skillMods": [
         null,
-        null
+        null,
+        {
+          "params": {},
+          "cost": 200
+        }
       ]
     }
   ]
