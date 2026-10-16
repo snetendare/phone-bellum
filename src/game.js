@@ -105,7 +105,7 @@ const Game = (() => {
   // with whoever has bribed the elves the most times (see the bribe-off below); with nobody ahead, it shoots both sides in turn.
   const MAPS = [
     { id: 'standard', name: 'Standard', text: 'No special rules.', plain: true }, // only when picked, never random
-    { id: 'forest', name: 'Forest Clearing', text: 'Ents and Earth Wizards have 15% more health. Healing and regeneration are 1.5× as strong. A neutral elf tower in no man’s land sides with whoever has bribed the elves the most times: it heals their units and shoots the other player’s. With bribes level, it shoots both. Bribe as often as you like: 50 gold, and 50 more for each extra bribe in the same round. Totals stay secret; the flag on the tower shows who is ahead. After round 5 the elves hit and heal twice as hard. Once 10 bribes have been paid in all, each player can buy one elf tower of their own for 400 gold.', boostHp: 15, boostUnits: ['Ent', 'Earth Wizard'], healMul: 1.5, elfTower: true },
+    { id: 'forest', name: 'Forest Clearing', text: 'Ents and Earth Wizards have 15% more health. Healing and regeneration are 1.5× as strong. A neutral elf tower in no man’s land sides with whoever has bribed the elves the most times: it heals their units and shoots the other player’s. With bribes level, it shoots both. Bribe as often as you like: 50 gold, and 50 more for each extra bribe in the same round. Totals stay secret; the flag on the tower shows who is ahead. After round 5 the elves hit and heal twice as hard. From the round after 10 bribes have been paid in all, each player who has bribed can buy one elf tower of their own for 400 gold.', boostHp: 15, boostUnits: ['Ent', 'Earth Wizard'], healMul: 1.5, elfTower: true },
     { id: 'cavern', name: 'Mushroom Cavern', text: 'All units have 25% less range (units with 5 m range or less keep theirs). Stealth units deal 20% more damage. Glowing mushroom tiles stay on the same tiles all match, mirrored on both halves. Purple: a squad that starts the fight there gets +10% damage, +10% health and +5% attack speed. Yellow: a unit that starts on it or walks over it moves 30% faster for the rest of the fight. Green: a unit that starts on it or walks over it is poisoned and slowed. Yellow and green work once per unit, for both sides. Either player can remove a mushroom tile for 50 gold.', stealthDmg: 20, rangeCut: 25, rangeKeep: 5, shrooms: true, pointMirror: true },
     { id: 'ice', name: 'Frozen Peak', text: 'Odd rounds from round 3: a hailstorm drops 10 hail tiles in the storm band (no man’s land at first); units standing in hail take 5 damage per second. Even rounds: the altar of ice rises in the middle of the board. Tap it to buy ice walls for your tower, push the storm band toward your opponent, or summon a Snowgre.', ice: true },
   ];
@@ -230,13 +230,15 @@ const Game = (() => {
   const elfUnit = (m) => E.withTraits(elfPowered(m) ? { ...ELF_TOWER, hit: ELF_TOWER.hit * ELF_POWER.mul, healHit: ELF_TOWER.healHit * ELF_POWER.mul, strong: true } : ELF_TOWER);
   // A player's own elf tower: once ELF_OWN.unlock bribes have been paid in all (both players, earlier rounds only, so
   // this round's hidden bribes give nothing away), each player may buy one for ELF_OWN.cost gold and place it on a free
-  // tile of their zone. It stays all match, can't be attacked, shoots only the opponent's units and heals its owner's.
+  // tile of their zone, as long as they have bribed the elves at least once themselves. It stays all match, can't be attacked, shoots only the opponent's units and heals its owner's.
   // Like a bribe, it stays hidden from the opponent until the fight and can be taken back in the round it was bought.
   const ELF_OWN = { cost: 400, unlock: 10 };
   const elfOwnOf = (m, side) => (m && m.elfOwn && m.elfOwn[side]) || null;
   const elfOwnAt = (m, side, col, row) => { const e = elfOwnOf(m, side); return !!e && e.col === col && e.row === row; };
   const elfOwnUnlocked = (m) => !!elfSpot(m) && bribeCount(m, 0, true) + bribeCount(m, 1, true) >= ELF_OWN.unlock;
-  const canBuyElfOwn = (m, side) => elfOwnUnlocked(m) && !elfOwnOf(m, side) && m.gold[side] >= ELF_OWN.cost;
+  // offered to a player only if they have bribed the elves themselves (in an earlier round too)
+  const elfOwnOffered = (m, side) => elfOwnUnlocked(m) && bribeCount(m, side, true) > 0;
+  const canBuyElfOwn = (m, side) => elfOwnOffered(m, side) && !elfOwnOf(m, side) && m.gold[side] >= ELF_OWN.cost;
   const elfOwnSpotOk = (m, side, col, row) => col >= 0 && col < COLS && inZone(side, row) && !reserved(side, col, row) && !occupied(m, side, col, row);
   function buyElfOwn(m, side, col, row) {
     if (!canBuyElfOwn(m, side) || !elfOwnSpotOk(m, side, col, row)) return false;
@@ -1010,7 +1012,7 @@ const Game = (() => {
     TOWER, TOWER_TYPES, OUTPOST, TOWER_PICK_ROUND, towerType, towerChoices, needsTowerPick, setTowerType, settleTowerPicks, TOWER_SKILL, towerSkillOf, towerSkillVisible, towerPicked, canBuyTowerSkill, buyTowerSkill, undoTowerSkill, TOWER_MID, towerColOk, towerAt, needsTower, placeTower, ensureTower,
     FLANK, flankRows, flankOpen, isFlank, reserved, canPlaceAt, enemyHolds, inNoMans, hasSkillType,
     ICE, ALTAR, GOLEM, isIce, hailRound, altarRound, stormShift, stormRows, hailTiles, altarCost, altarBought, addAltar, buyAltar, undoAltar, snowgres, snowgreUnit,
-    MAPS, ELF_TOWER, SHROOM, SHROOM_SPLIT, shroomAt, shroomTileAt, shroomRemoval, SHROOM_REMOVE, removeShroom, undoRemoveShroom, mapOf, elfSpot, rollMap, BRIBE_COST, bribeList, bribeGold, bribeCount, bribeNow, bribeCost, ELF_POWER, elfPowered, elfUnit, ELF_OWN, elfOwnOf, elfOwnAt, elfOwnUnlocked, canBuyElfOwn, elfOwnSpotOk, buyElfOwn, undoElfOwn, bribeLeader, canBribe, bribe, undoBribe,
+    MAPS, ELF_TOWER, SHROOM, SHROOM_SPLIT, shroomAt, shroomTileAt, shroomRemoval, SHROOM_REMOVE, removeShroom, undoRemoveShroom, mapOf, elfSpot, rollMap, BRIBE_COST, bribeList, bribeGold, bribeCount, bribeNow, bribeCost, ELF_POWER, elfPowered, elfUnit, ELF_OWN, elfOwnOf, elfOwnAt, elfOwnUnlocked, elfOwnOffered, canBuyElfOwn, elfOwnSpotOk, buyElfOwn, undoElfOwn, bribeLeader, canBribe, bribe, undoBribe,
     CHARACTERS, CHAR, charOf, charInfo, isTier1, rollBuffTiles, onBuffTile, TOWER_SPOT, towerSpot,
     zoneRows, inZone, tileToWorld, createMatch, place, unplace, bodiesFor, startBattle, resolve, aiDeploy, occupied,
   };
