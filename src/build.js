@@ -6,7 +6,7 @@ const shapes = src('shapes.js'), eng = src('engine.js');
 // Counter Lab
 const r = JSON.parse(src('r5.json'));
 const SK = JSON.parse(src('skills-default.json'));
-const withSkills = (u) => ({ ...u, skills: SK.assign[u.name] || [null, null], skillsOn: [false, false] });
+const withSkills = (u) => ({ ...u, skills: SK.assign[u.name] || [null, null, null], skillsOn: [false, false, false] });
 const sample = JSON.parse(src('default-roster.json')); // the default roster for Counter Lab
 const ex = JSON.parse(src('r9.json')).units.slice(7).map(u => ({ ...u, cost: Math.round(u.cost * 100) }));
 ex.push({ name: 'Ogre Smasher', cost: 100, bodies: 1, hp: 1100, hit: 260, aps: 0.5, range: 3, speed: 7, splash: 2.5, defense: 'none', defVal: 0, windUp: 1.0, knockback: 4 });

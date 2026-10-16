@@ -300,7 +300,7 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
         <button class="btn small" id="skill-add">Add skill</button>
       </div>
     </div>
-    <p class="muted" style="font-size:14px">Each unit has two skill slots. In the game, players buy a skill once and it applies to all their squads of that unit. Several units can share a skill. To tune a skill for one unit only, open Adjust in that unit’s skill slot: whatever you change there applies to that unit alone, and everything else still follows the skill here. Set which skills a unit has in its card under Units, and tick On in tests to include a skill in the counter table, the combos and the price check.</p>
+    <p class="muted" style="font-size:14px">Each unit has three skill slots. In the game, players buy a skill once and it applies to all their squads of that unit. Several units can share a skill. To tune a skill for one unit only, open Adjust in that unit’s skill slot: whatever you change there applies to that unit alone, and everything else still follows the skill here. Set which skills a unit has in its card under Units, and tick On in tests to include a skill in the counter table, the combos and the price check.</p>
     <div class="msg" id="skill-msg" aria-live="polite"></div>
     <div class="skills" id="skills"></div>
   </section>
@@ -521,6 +521,8 @@ const Engine = (() => {
   }
 
   // ---------- skills ----------
+  const SKILL_SLOTS = 3; // skill slots per unit
+  const SLOTS = Array.from({ length: SKILL_SLOTS }, (_, k) => k);
   // Each skill type and its settings (key, label, default, step). Shared by Counter Lab and the game.
   const SKILL_TYPES = {
     regen:   { label: 'Regeneration', params: [['pct', 'Health regained per second (% of max)', 2, 0.5], ['hp', 'Health (+%)', 20, 5]] },
@@ -623,7 +625,7 @@ const Engine = (() => {
   // The unit with its built-in skills (slots marked in skillsInnate), resolved from a skill library
   function innateUnit(unit, lib, roster) {
     if (!unit || !Array.isArray(unit.skillsInnate) || !Array.isArray(unit.skills)) return unit;
-    const defs = [0, 1].filter(k => unit.skillsInnate[k] && unit.skills[k]).map(k => {
+    const defs = SLOTS.filter(k => unit.skillsInnate[k] && unit.skills[k]).map(k => {
       const base = (lib || []).find(s => s && s.id === unit.skills[k]);
       if (!base) return null;
       const mod = Array.isArray(unit.skillMods) && unit.skillMods[k] && typeof unit.skillMods[k] === 'object' ? unit.skillMods[k] : null;
@@ -1248,14 +1250,14 @@ const Engine = (() => {
     return m;
   }
 
-  return { TOWER_DOWN, SKILL_TYPES, skillParam, describeSkill, applySkills, innateUnit, fairBudget, battle, makeArmy, matrix, createBattle, buildSquad, rawStrength, squadsFor, withTraits, leveled, TRAIT_DEFAULTS, SPIN_CAP, CHARGE_RUN, TRAMPLE_RUN, BLAST_RADIUS, LEVEL_BONUS, MAX_LEVEL };
+  return { TOWER_DOWN, SKILL_SLOTS, SLOTS, SKILL_TYPES, skillParam, describeSkill, applySkills, innateUnit, fairBudget, battle, makeArmy, matrix, createBattle, buildSquad, rawStrength, squadsFor, withTraits, leveled, TRAIT_DEFAULTS, SPIN_CAP, CHARGE_RUN, TRAMPLE_RUN, BLAST_RADIUS, LEVEL_BONUS, MAX_LEVEL };
 })();
 if (typeof module !== 'undefined') module.exports = Engine;
 
 
 (() => {
   const SAMPLE = {"goldCosts":true,"settings":{"sight":12,"budget":100,"distance":40,"spacing":3.5,"minDmgPct":15,"timeCap":60,"dt":0.05,"flameReach":1.2},"skills":[{"id":"regen","type":"regen","name":"Regeneration","cost":100,"params":{}},{"id":"poison","type":"poison","name":"Poison shot","cost":100,"params":{"pct":150}},{"id":"stealth","type":"stealth","name":"Stealth","cost":100,"params":{}},{"id":"armorHp","type":"armorHp","name":"Armor and health","cost":200,"params":{}},{"id":"spawn","type":"spawn","name":"Spawn goblins","cost":200,"params":{"every":7}},{"id":"rapid","type":"rapid","name":"Rapid fire","cost":100,"params":{}},{"id":"swift","type":"swift","name":"Swift strikes","cost":100,"params":{}},{"id":"heavy","type":"heavy","name":"Heavy shot","cost":100,"params":{}},{"id":"healer","type":"healer","name":"Healing touch","cost":200,"params":{}},{"id":"range","type":"range","name":"Long reach","cost":200,"params":{}},{"id":"shrink","type":"shrink","name":"Shortsight","cost":100,"params":{}},{"id":"skmv5oxj501","type":"ward","name":"Ward","cost":100,"params":{}},{"id":"skmv5oxpgk2","type":"slow","name":"Slow","cost":100,"params":{}},{"id":"raiseDead","type":"spawn","name":"Raise dead","cost":0,"params":{"unit":"Skeleton Archers","count":3,"every":2,"max":12}},{"id":"split","type":"split","name":"Split beam","cost":100,"params":{}},{"id":"forward","type":"forward","name":"Forward planting","cost":100,"params":{}}],"units":[{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Goblin Swarm","cost":100,"bodies":12,"hp":26,"hit":17,"aps":1.2,"range":2,"speed":8,"splash":0,"shape":"triangle","color":"#9BD35A","skills":["swift","shrink"],"skillsOn":[false,false],"skillMods":[null,null],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Skeleton Archers","cost":100,"bodies":8,"hp":32,"hit":14,"aps":0.75,"range":19,"speed":2.1,"splash":0,"shape":"triangle","color":"#E9E3CF","skills":["range","rapid"],"skillsOn":[false,false],"skillMods":[null,null],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Ember Imps","cost":100,"bodies":4,"hp":110,"hit":20,"aps":0.8,"range":10,"speed":4,"splash":3,"shape":"pentagon","color":"#FFA94D","skills":["swift","heavy"],"skillsOn":[false,false],"skillMods":[null,null],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Fire Mage","cost":100,"bodies":1,"hp":155,"hit":33,"aps":0.75,"range":20,"speed":3,"splash":4,"shape":"hexagon","color":"#fb0022","skills":["range","armorHp"],"skillsOn":[false,false],"skillMods":[null,null],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":1,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Sniper","cost":100,"bodies":1,"hp":140,"hit":210,"aps":0.25,"range":33,"speed":2,"splash":0,"shape":"cross","color":"#F7D154","skills":["rapid","spawn"],"skillsOn":[false,false],"skillMods":[{"params":{"range":0,"aps":20}},{"params":{"waves":3}}],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"armor","defVal":6,"level":0,"unlock":50,"name":"Brute","cost":200,"bodies":1,"hp":1100,"hit":98,"aps":1.1,"range":2,"speed":5,"splash":0,"shape":"square","color":"#8D99AE","skills":["armorHp","swift"],"skillsOn":[false,false],"skillMods":[null,null],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":20,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":40,"level":0,"unlock":50,"name":"Wisps","cost":100,"bodies":2,"hp":80,"hit":75,"aps":0.8,"range":19,"speed":4,"splash":0,"shape":"ring","color":"#ff90ff","skills":["stealth","skmv5oxj501"],"skillsOn":[false,false],"skillMods":[null,{"params":{},"cost":200}],"skillsInnate":[false,false]},{"burst":6,"pellets":2,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0.2,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Leaf Wizard","cost":200,"bodies":1,"hp":240,"hit":21,"aps":0.45,"range":27,"speed":5,"splash":0,"shape":"hexagon","color":"#00d200","skills":["rapid","range"],"skillsOn":[false,false],"skillMods":[null,null],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":5,"projSpeed":35,"minRange":0,"charge":1,"knockback":0,"windUp":0.5,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Earth Wizard","cost":200,"bodies":1,"hp":650,"hit":440,"aps":0.2,"range":24,"speed":3,"splash":2,"shape":"circle","color":"#24590d","skills":["regen","range"],"skillsOn":[false,false],"skillMods":[null,null],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":30,"defense":"none","defVal":0,"level":0,"unlock":100,"name":"Flame Wizard","cost":300,"bodies":1,"hp":2000,"hit":12,"aps":4,"range":15,"speed":2,"splash":0,"shape":"bar","color":"#b95018","skills":["armorHp","range"],"skillsOn":[false,false],"skillMods":[null,null],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":100,"name":"Steel Wizard","cost":300,"bodies":1,"hp":1900,"hit":150,"aps":0.9,"range":15,"speed":2,"splash":2,"shape":"bar","color":"#57535a","skills":["range","heavy"],"skillsOn":[false,false],"skillMods":[null,{"params":{"slow":20,"hit":20}}],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":40,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":100,"name":"Slime Wizard","cost":300,"bodies":1,"hp":700,"hit":480,"aps":0.2,"range":22,"speed":2,"splash":6,"shape":"ring","color":"#81f038","skills":["skmv5oxpgk2","range"],"skillsOn":[false,false],"skillMods":[null,null],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"armor","defVal":15,"level":0,"unlock":150,"splash":3,"skillsOn":[false,false],"skillsInnate":[false,false],"skillMods":[null,null],"name":"Ether Golem","cost":500,"bodies":1,"hp":3450,"hit":69,"aps":0.6,"range":5,"speed":2.5,"shape":"square","color":"#51005c","skills":["regen","armorHp"]},{"burst":1,"pellets":1,"spinUp":50,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":150,"splash":0,"skillsOn":[false,false],"skillsInnate":[false,false],"skillMods":[null,null],"name":"Sun Priest","cost":500,"bodies":1,"hp":2800,"hit":38,"aps":2,"range":18,"speed":3,"shape":"star","color":"#FFD23F","skills":["split","shrink"]},{"burst":3,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":22,"minRange":12,"charge":1,"knockback":0,"windUp":2,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":150,"splash":6,"skillsOn":[false,false],"skillsInnate":[false,false],"skillMods":[null,null],"name":"Meteor Caller","cost":500,"bodies":1,"hp":400,"hit":114,"aps":0.3,"range":50,"speed":2,"shape":"diamond","color":"#FF6B35","skills":["range","skmv5oxpgk2"]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":3,"knockback":4,"windUp":0,"flame":0,"defense":"armor","defVal":6,"level":0,"unlock":150,"splash":3,"skillsOn":[false,false],"skillsInnate":[false,false],"skillMods":[null,null],"name":"War Mammoth","cost":500,"bodies":1,"hp":2300,"hit":169,"aps":0.5,"range":3,"speed":9,"shape":"pentagon","color":"#A0785A","skills":["swift","armorHp"],"trample":50},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":150,"splash":0,"skillsOn":[false,false],"skillsInnate":[true,false],"skillMods":[null,null],"name":"Necromancer","cost":500,"bodies":1,"hp":2300,"hit":56,"aps":1,"range":20,"speed":2.2,"shape":"hexagon","color":"#9D4EDD","skills":["raiseDead","healer"]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":90,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Ent","cost":100,"bodies":2,"hp":400,"hit":25,"aps":1.1,"range":4,"speed":2,"splash":0,"shape":"square","color":"#0d3000","skills":["armorHp","forward"],"skillsOn":[false,false],"skillsInnate":[false,false],"skillMods":[{"params":{"armor":4,"hp":20}},null],"deathBlast":30},{"burst":1,"pellets":1,"spinUp":0.1,"pierce":0,"projSpeed":30,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"name":"Slimeshots","cost":200,"unlock":100,"bodies":10,"hp":95,"hit":7,"aps":0.8,"range":21,"speed":6,"splash":3,"shape":"diamond","color":"#20d300","skills":["range","heavy"],"skillsOn":[false,false],"skillsInnate":[false,false],"skillMods":[null,{"params":{"hit":25,"slow":0,"instant":0},"cost":150}]}]};
-  const EXAMPLES = [{"name":"Crossbow Volley","cost":100,"bodies":2,"hp":300,"hit":52,"aps":0.35,"range":30,"speed":4,"splash":0,"defense":"none","defVal":0,"burst":4,"skills":["rapid","heavy"],"skillsOn":[false,false]},{"name":"Ballista","cost":100,"bodies":1,"hp":750,"hit":220,"aps":0.6,"range":40,"speed":3,"splash":0,"defense":"none","defVal":0,"pierce":3,"minRange":6,"projSpeed":45,"skills":["heavy","range"],"skillsOn":[false,false]},{"name":"Spinning Golem","cost":100,"bodies":1,"hp":1300,"hit":22,"aps":1.2,"range":12,"speed":4,"splash":0,"defense":"none","defVal":0,"spinUp":25,"skills":["armorHp","regen"],"skillsOn":[false,false]},{"name":"Boar Riders","cost":100,"bodies":3,"hp":310,"hit":30,"aps":0.8,"range":2,"speed":11,"splash":0,"defense":"none","defVal":0,"charge":2.5,"knockback":3,"skills":["armorHp","swift"],"skillsOn":[false,false]},{"name":"Blunderbuss Crew","cost":100,"bodies":2,"hp":380,"hit":18,"aps":0.6,"range":12,"speed":5,"splash":0,"defense":"none","defVal":0,"pellets":6,"skills":["swift","poison"],"skillsOn":[false,false]},{"name":"Ogre Smasher","cost":100,"bodies":1,"hp":1100,"hit":260,"aps":0.5,"range":3,"speed":7,"splash":2.5,"defense":"none","defVal":0,"windUp":1,"knockback":4,"skills":["spawn","armorHp"],"skillsOn":[false,false]}];
+  const EXAMPLES = [{"name":"Crossbow Volley","cost":100,"bodies":2,"hp":300,"hit":52,"aps":0.35,"range":30,"speed":4,"splash":0,"defense":"none","defVal":0,"burst":4,"skills":["rapid","heavy"],"skillsOn":[false,false,false]},{"name":"Ballista","cost":100,"bodies":1,"hp":750,"hit":220,"aps":0.6,"range":40,"speed":3,"splash":0,"defense":"none","defVal":0,"pierce":3,"minRange":6,"projSpeed":45,"skills":["heavy","range"],"skillsOn":[false,false,false]},{"name":"Spinning Golem","cost":100,"bodies":1,"hp":1300,"hit":22,"aps":1.2,"range":12,"speed":4,"splash":0,"defense":"none","defVal":0,"spinUp":25,"skills":["armorHp","regen"],"skillsOn":[false,false,false]},{"name":"Boar Riders","cost":100,"bodies":3,"hp":310,"hit":30,"aps":0.8,"range":2,"speed":11,"splash":0,"defense":"none","defVal":0,"charge":2.5,"knockback":3,"skills":["armorHp","swift"],"skillsOn":[false,false,false]},{"name":"Blunderbuss Crew","cost":100,"bodies":2,"hp":380,"hit":18,"aps":0.6,"range":12,"speed":5,"splash":0,"defense":"none","defVal":0,"pellets":6,"skills":["swift","poison"],"skillsOn":[false,false,false]},{"name":"Ogre Smasher","cost":100,"bodies":1,"hp":1100,"hit":260,"aps":0.5,"range":3,"speed":7,"splash":2.5,"defense":"none","defVal":0,"windUp":1,"knockback":4,"skills":["spawn","armorHp"],"skillsOn":[false,false,false]}];
   const KEY = 'counterlab.v1';
   const TRAITS = [
     ['burst', 'Burst shots', 1, 'Shots fired 0.15 s apart along one line; each hits the first body in its path. 1 = normal.'],
@@ -1320,10 +1322,10 @@ if (typeof module !== 'undefined') module.exports = Engine;
     const ids = new Set(skills.map(sk => sk.id));
     const units = withIds(p.units.map(u => ({
       defense: 'none', defVal: 0, unlock: 0, ...u,
-      skills: [0, 1].map(k => (Array.isArray(u.skills) && ids.has(u.skills[k])) ? u.skills[k] : null),
-      skillsOn: [0, 1].map(k => !!(Array.isArray(u.skillsOn) && u.skillsOn[k])),
-      skillsInnate: [0, 1].map(k => !!(Array.isArray(u.skillsInnate) && u.skillsInnate[k])),
-      skillMods: [0, 1].map(k => cleanMod(Array.isArray(u.skillMods) ? u.skillMods[k] : null)),
+      skills: Engine.SLOTS.map(k => (Array.isArray(u.skills) && ids.has(u.skills[k])) ? u.skills[k] : null),
+      skillsOn: Engine.SLOTS.map(k => !!(Array.isArray(u.skillsOn) && u.skillsOn[k])),
+      skillsInnate: Engine.SLOTS.map(k => !!(Array.isArray(u.skillsInnate) && u.skillsInnate[k])),
+      skillMods: Engine.SLOTS.map(k => cleanMod(Array.isArray(u.skillMods) ? u.skillMods[k] : null)),
     })));
     return { settings: { sight: 12, flameReach: 1.2, ...SAMPLE.settings, ...p.settings }, skills, units };
   }
@@ -1347,7 +1349,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
   const isCustom = (u, k) => !!(u.skillMods && u.skillMods[k]);
   // The unit as tests see it: with the skills ticked On in tests
   function prep(u) {
-    const defs = [0, 1].filter(k => u.skills && u.skills[k] && ((u.skillsOn && u.skillsOn[k]) || (u.skillsInnate && u.skillsInnate[k]))).map(k => slotDef(u, k)).filter(Boolean);
+    const defs = Engine.SLOTS.filter(k => u.skills && u.skills[k] && ((u.skillsOn && u.skillsOn[k]) || (u.skillsInnate && u.skillsInnate[k]))).map(k => slotDef(u, k)).filter(Boolean);
     return defs.length ? Engine.applySkills(u, defs, state.units) : u;
   }
   function valid(p) {
@@ -1498,7 +1500,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
       if (u.deathBlast > 0) tr.push(`death blast ${fmt(u.deathBlast, 0)}%`);
       if (u.windUp > 0) tr.push(`wind-up ${fmt(u.windUp, 1)} s`);
       if (u.level > 0) tr.push(`${u.level + 1}× stats`);
-      [0, 1].forEach(k => { const sk = slotDef(u, k); if (sk) tr.push(`${sk.name}${isCustom(u, k) ? '*' : ''}${u.skillsInnate[k] ? ' (built in)' : u.skillsOn[k] ? ' (on)' : ''}`); });
+      Engine.SLOTS.forEach(k => { const sk = slotDef(u, k); if (sk) tr.push(`${sk.name}${isCustom(u, k) ? '*' : ''}${u.skillsInnate[k] ? ' (built in)' : u.skillsOn[k] ? ' (on)' : ''}`); });
       d.querySelector('.sum-line').textContent =
         `${u.bodies} × ${fmt(u.hp)} hp · ${fmt(u.hit)} dmg × ${fmt(u.aps, 2)}/s · ${fmt(u.range)} m${u.splash ? ` · splash ${u.splash}` : ''}${def}${tr.length ? ' · ' + tr.join(' · ') : ''}`;
       d.querySelector('.bar i').style.width = (r.strength / max * 100).toFixed(1) + '%';
@@ -1515,10 +1517,10 @@ if (typeof module !== 'undefined') module.exports = Engine;
   }
   // ---------- skill slots on a unit ----------
   function renderSlots(u, d) {
-    if (!u.skillMods) u.skillMods = [null, null];
+    if (!u.skillMods) u.skillMods = Engine.SLOTS.map(() => null);
     const box = d.querySelector('.skill-slots');
     const open = new Set([...box.querySelectorAll('details.slot-custom[open]')].map(x => x.dataset.k));
-    box.innerHTML = [0, 1].map(k => {
+    box.innerHTML = Engine.SLOTS.map(k => {
       const def = slotDef(u, k);
       const T = def && Engine.SKILL_TYPES[def.type];
       return `
@@ -1671,7 +1673,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
   }
   function removeSkill(sk) {
     state.skills = state.skills.filter(x => x !== sk);
-    state.units.forEach(u => [0, 1].forEach(k => { if (u.skills[k] === sk.id) { u.skills[k] = null; u.skillsOn[k] = false; } }));
+    state.units.forEach(u => Engine.SLOTS.forEach(k => { if (u.skills[k] === sk.id) { u.skills[k] = null; u.skillsOn[k] = false; } }));
     save(); renderSkills(); refreshSlots(); renderUnitSummaries(); scheduleRun();
     $('skill-msg').textContent = `Deleted ${sk.name}.`;
   }
@@ -1768,7 +1770,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
   }
 
   $('add').addEventListener('click', () => {
-    const u = { ...Shapes.assign([...state.units, Engine.withTraits({ name: 'New unit', cost: 100, unlock: 0, bodies: 4, hp: 200, hit: 20, aps: 1, range: 10, speed: 6, splash: 0 })]).pop(), id: uid++, skills: [null, null], skillsOn: [false, false], skillsInnate: [false, false], skillMods: [null, null] };
+    const u = { ...Shapes.assign([...state.units, Engine.withTraits({ name: 'New unit', cost: 100, unlock: 0, bodies: 4, hp: 200, hit: 20, aps: 1, range: 10, speed: 6, splash: 0 })]).pop(), id: uid++, skills: Engine.SLOTS.map(() => null), skillsOn: Engine.SLOTS.map(() => false), skillsInnate: Engine.SLOTS.map(() => false), skillMods: Engine.SLOTS.map(() => null) };
     state.units.push(u);
     save(); renderUnits(); scheduleRun();
     const d = unitsEl.querySelector(`details[data-id="${u.id}"]`);
@@ -1781,7 +1783,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
     const merged = Shapes.assign([...state.units, ...clone(add)]); // new examples get shapes not already in use
     const ids = new Set(state.skills.map(sk => sk.id));
     state.units.push(...merged.slice(state.units.length).map(u => ({ ...Engine.withTraits(u), id: uid++,
-      skills: [0, 1].map(k => (u.skills && ids.has(u.skills[k])) ? u.skills[k] : null), skillsOn: [false, false], skillsInnate: [false, false], skillMods: [null, null] })));
+      skills: Engine.SLOTS.map(k => (u.skills && ids.has(u.skills[k])) ? u.skills[k] : null), skillsOn: Engine.SLOTS.map(() => false), skillsInnate: Engine.SLOTS.map(() => false), skillMods: Engine.SLOTS.map(() => null) })));
     save(); renderUnits(); scheduleRun();
     $('ex-msg').textContent = `Added ${add.map(e => e.name).join(', ')}.`;
   });

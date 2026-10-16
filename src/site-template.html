@@ -201,9 +201,9 @@ a { color: var(--you); }
   function useSet(set, custom) {
     const skills = Array.isArray(set.skills) ? set.skills.filter(sk => sk && typeof sk.id === 'string' && Engine.SKILL_TYPES[sk.type])
       .map(sk => ({ ...sk, name: String(sk.name || Engine.SKILL_TYPES[sk.type].label).replace(/[<>&"]/g, '').slice(0, 40) })) : [];
-    // each unit's two skill slots, resolved to skill definitions
+    // each unit's skill slots, resolved to skill definitions
     units = Shapes.assign(set.units).map(u => ({ ...Engine.withTraits(u), name: String(u.name).replace(/[<>&"]/g, '').trim().slice(0, 40) || 'Unit', level: 0, bodies: Math.max(1, Math.round(u.bodies)),
-      skillDefs: [0, 1].map(k => {
+      skillDefs: Engine.SLOTS.map(k => {
         const base = Array.isArray(u.skills) && skills.find(sk => sk.id === u.skills[k]);
         if (!base) return null;
         const mod = Array.isArray(u.skillMods) && u.skillMods[k] && typeof u.skillMods[k] === 'object' ? u.skillMods[k] : null; // the unit's own adjustments
@@ -643,7 +643,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
             ${roleRow(i)}
             ${locked(i) ? `<span class="lock">${LOCK_SVG} Locked · ${Game.unlockCost(m, i, me)}g</span>` : ''}
             ${freeN(i) ? `<span class="c" style="color:var(--win, #6FD08C)">Free ×${freeN(i)}</span>` : ''}
-            <span class="c">${price(i)} · ${u.bodies} ${u.bodies === 1 ? 'body' : 'bodies'}${[0, 1].filter(k => Game.hasSkill(m, me, i, k)).length ? ` · ${[0, 1].filter(k => Game.hasSkill(m, me, i, k)).length}★` : ''}</span>
+            <span class="c">${price(i)} · ${u.bodies} ${u.bodies === 1 ? 'body' : 'bodies'}${Engine.SLOTS.filter(k => Game.hasSkill(m, me, i, k)).length ? ` · ${Engine.SLOTS.filter(k => Game.hasSkill(m, me, i, k)).length}★` : ''}</span>
           </button>
           <button class="info" data-info="${i}" aria-label="About ${esc(u.name)}">i</button>
         </div>`).join('')}</div>`}
@@ -741,7 +741,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
         <li>3 deployments in round 1, then 2 per round. Extra ones cost ${Game.CONFIG.extraDeployCost} gold.</li>
         <li>Squads earn experience. A gold + means you can upgrade it: level 2 doubles health and attack, level 3 triples them.</li>
         <li>Some units start unlocked. The rest cost gold once to unlock for the match; tap a locked card to unlock it.</li>
-        <li>Each unit has two skills. Buy one and all your squads of that unit get it.</li>
+        <li>Each unit has three skills. Buy one and all your squads of that unit get it.</li>
         <li>Tap a squad from an earlier round to sell it for half its price.</li>
       </ul>
     </div>`);
@@ -885,7 +885,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
   const unlocksOf = (match, side) => units.map((u, i) => Game.unlockCost(match, i) > 0 && Game.isUnlocked(match, side, i) ? u.name : null).filter(Boolean);
   function skillsOf(match, side) {
     const out = [];
-    units.forEach((u, i) => [0, 1].forEach(k => { if (Game.hasSkill(match, side, i, k) && !Game.isInnate(match, i, k)) out.push(`${(u.skillDefs[k] || {}).name} (${u.name})`); }));
+    units.forEach((u, i) => Engine.SLOTS.forEach(k => { if (Game.hasSkill(match, side, i, k) && !Game.isInnate(match, i, k)) out.push(`${(u.skillDefs[k] || {}).name} (${u.name})`); }));
     return out;
   }
   function recordRound(pre, sum) {
@@ -1000,7 +1000,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
     });
     const theirs = m.armies[0].filter(s => s.round < m.round).map(s => { const p = Game.seenAt(m, s); return `- ${units[s.unit].name} at col ${p.col}, row ${p.row}, level ${s.level + 1}`; });
     const theirSkills = [];
-    units.forEach((u, i) => [0, 1].forEach(k => { if (Game.skillVisible(m, 0, i, k)) theirSkills.push(`${(u.skillDefs[k] || {}).name} on ${u.name}`); }));
+    units.forEach((u, i) => Engine.SLOTS.forEach(k => { if (Game.skillVisible(m, 0, i, k)) theirSkills.push(`${(u.skillDefs[k] || {}).name} on ${u.name}`); }));
     const hist = m.history.slice(-4).map(h => `- round ${h.round}: ${h.timeout ? 'time ran out' : h.winner === 1 ? 'you won' : h.winner === 0 ? 'you lost' : 'draw'}; you took ${h.dmg[1]} damage, they took ${h.dmg[0]}`);
     // how each unit type did in the last fight
     const last = m.history[m.history.length - 1];
@@ -1111,7 +1111,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       for (const x of skills) {
         if (!x || x.done) continue;
         const ui = unitIdx(x.unit), k = int(x.slot) - 1;
-        if (ui >= 0 && (k === 0 || k === 1) && Game.buySkill(m, 1, ui, k)) { x.done = true; did.push(`bought ${units[ui].skillDefs[k].name} for ${units[ui].name}`); }
+        if (ui >= 0 && k >= 0 && k < Engine.SKILL_SLOTS && Game.buySkill(m, 1, ui, k)) { x.done = true; did.push(`bought ${units[ui].skillDefs[k].name} for ${units[ui].name}`); }
       }
     };
     for (const name of list(mv.unlock)) { const ui = unitIdx(name); if (ui >= 0 && Game.unlock(m, 1, ui)) did.push(`unlocked ${units[ui].name}`); }
@@ -1342,7 +1342,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     const defs = units[i].skillDefs || [];
     if (!defs.some(Boolean) || !m) return '';
     const mine = side === undefined || side === me;
-    const rows = [0, 1].filter(k => defs[k]).map(k => {
+    const rows = Engine.SLOTS.filter(k => defs[k]).map(k => {
       const d = defs[k], cost = Game.skillCost(m, i, k);
       let act = '';
       if (Game.isInnate(m, i, k)) {
@@ -1722,7 +1722,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     const tech = {};
     if (d.tech && typeof d.tech === 'object') for (const ui in d.tech) {
       const i = +ui, t = d.tech[ui];
-      if (Number.isInteger(i) && i >= 0 && i < n && Array.isArray(t)) tech[i] = [0, 1].map(k => Math.max(0, Math.min(m.round, t[k] | 0)));
+      if (Number.isInteger(i) && i >= 0 && i < n && Array.isArray(t)) tech[i] = Engine.SLOTS.map(k => Math.max(0, Math.min(m.round, t[k] | 0)));
     }
     if (!m.tech) m.tech = [{}, {}];
     m.tech[1] = tech;

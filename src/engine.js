@@ -42,6 +42,8 @@ const Engine = (() => {
   }
 
   // ---------- skills ----------
+  const SKILL_SLOTS = 3; // skill slots per unit
+  const SLOTS = Array.from({ length: SKILL_SLOTS }, (_, k) => k);
   // Each skill type and its settings (key, label, default, step). Shared by Counter Lab and the game.
   const SKILL_TYPES = {
     regen:   { label: 'Regeneration', params: [['pct', 'Health regained per second (% of max)', 2, 0.5], ['hp', 'Health (+%)', 20, 5]] },
@@ -144,7 +146,7 @@ const Engine = (() => {
   // The unit with its built-in skills (slots marked in skillsInnate), resolved from a skill library
   function innateUnit(unit, lib, roster) {
     if (!unit || !Array.isArray(unit.skillsInnate) || !Array.isArray(unit.skills)) return unit;
-    const defs = [0, 1].filter(k => unit.skillsInnate[k] && unit.skills[k]).map(k => {
+    const defs = SLOTS.filter(k => unit.skillsInnate[k] && unit.skills[k]).map(k => {
       const base = (lib || []).find(s => s && s.id === unit.skills[k]);
       if (!base) return null;
       const mod = Array.isArray(unit.skillMods) && unit.skillMods[k] && typeof unit.skillMods[k] === 'object' ? unit.skillMods[k] : null;
@@ -769,6 +771,6 @@ const Engine = (() => {
     return m;
   }
 
-  return { TOWER_DOWN, SKILL_TYPES, skillParam, describeSkill, applySkills, innateUnit, fairBudget, battle, makeArmy, matrix, createBattle, buildSquad, rawStrength, squadsFor, withTraits, leveled, TRAIT_DEFAULTS, SPIN_CAP, CHARGE_RUN, TRAMPLE_RUN, BLAST_RADIUS, LEVEL_BONUS, MAX_LEVEL };
+  return { TOWER_DOWN, SKILL_SLOTS, SLOTS, SKILL_TYPES, skillParam, describeSkill, applySkills, innateUnit, fairBudget, battle, makeArmy, matrix, createBattle, buildSquad, rawStrength, squadsFor, withTraits, leveled, TRAIT_DEFAULTS, SPIN_CAP, CHARGE_RUN, TRAMPLE_RUN, BLAST_RADIUS, LEVEL_BONUS, MAX_LEVEL };
 })();
 if (typeof module !== 'undefined') module.exports = Engine;

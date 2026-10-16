@@ -356,6 +356,8 @@ const Engine = (() => {
   }
 
   // ---------- skills ----------
+  const SKILL_SLOTS = 3; // skill slots per unit
+  const SLOTS = Array.from({ length: SKILL_SLOTS }, (_, k) => k);
   // Each skill type and its settings (key, label, default, step). Shared by Counter Lab and the game.
   const SKILL_TYPES = {
     regen:   { label: 'Regeneration', params: [['pct', 'Health regained per second (% of max)', 2, 0.5], ['hp', 'Health (+%)', 20, 5]] },
@@ -458,7 +460,7 @@ const Engine = (() => {
   // The unit with its built-in skills (slots marked in skillsInnate), resolved from a skill library
   function innateUnit(unit, lib, roster) {
     if (!unit || !Array.isArray(unit.skillsInnate) || !Array.isArray(unit.skills)) return unit;
-    const defs = [0, 1].filter(k => unit.skillsInnate[k] && unit.skills[k]).map(k => {
+    const defs = SLOTS.filter(k => unit.skillsInnate[k] && unit.skills[k]).map(k => {
       const base = (lib || []).find(s => s && s.id === unit.skills[k]);
       if (!base) return null;
       const mod = Array.isArray(unit.skillMods) && unit.skillMods[k] && typeof unit.skillMods[k] === 'object' ? unit.skillMods[k] : null;
@@ -1083,7 +1085,7 @@ const Engine = (() => {
     return m;
   }
 
-  return { TOWER_DOWN, SKILL_TYPES, skillParam, describeSkill, applySkills, innateUnit, fairBudget, battle, makeArmy, matrix, createBattle, buildSquad, rawStrength, squadsFor, withTraits, leveled, TRAIT_DEFAULTS, SPIN_CAP, CHARGE_RUN, TRAMPLE_RUN, BLAST_RADIUS, LEVEL_BONUS, MAX_LEVEL };
+  return { TOWER_DOWN, SKILL_SLOTS, SLOTS, SKILL_TYPES, skillParam, describeSkill, applySkills, innateUnit, fairBudget, battle, makeArmy, matrix, createBattle, buildSquad, rawStrength, squadsFor, withTraits, leveled, TRAIT_DEFAULTS, SPIN_CAP, CHARGE_RUN, TRAMPLE_RUN, BLAST_RADIUS, LEVEL_BONUS, MAX_LEVEL };
 })();
 if (typeof module !== 'undefined') module.exports = Engine;
 
@@ -1159,7 +1161,7 @@ const Game = (() => {
   const reserved = (side, col, row) => isFlank(1 - side, col, row);
   // no man's land: the rows between the two zones. A unit with the Forward planting skill may be placed there.
   const inNoMans = (row) => row >= ZONE && row < ROWS - ZONE;
-  const hasSkillType = (m, side, ui, type) => !!m && ui != null && !!m.units[ui] && [0, 1].some(k => hasSkill(m, side, ui, k) && skillDef(m, ui, k).type === type);
+  const hasSkillType = (m, side, ui, type) => !!m && ui != null && !!m.units[ui] && E.SLOTS.some(k => hasSkill(m, side, ui, k) && skillDef(m, ui, k).type === type);
   // ui (optional): the unit being placed, for unit-specific tiles
   const canPlaceAt = (m, side, col, row, ui) => col >= 0 && col < COLS && !reserved(side, col, row) &&
     (inZone(side, row) || (flankOpen(m) && isFlank(side, col, row)) || (inNoMans(row) && hasSkillType(m, side, ui, 'forward'))) && !enemyHolds(m, side, col, row);
@@ -1261,7 +1263,7 @@ const Game = (() => {
   }
 
   // ---------- skills (bought per unit type, for all squads of that type) ----------
-  // m.units[i].skillDefs = [def or null, def or null], resolved from the unit's two skill slots
+  // m.units[i].skillDefs = [def or null, ...], one per skill slot (Engine.SKILL_SLOTS)
   const skillDef = (m, ui, k) => (m.units[ui].skillDefs || [])[k] || null;
   const skillCost = (m, ui, k) => { const d = skillDef(m, ui, k); return d ? Math.max(0, Math.round(+d.cost || 0)) : 0; };
   // a built-in skill (skillsInnate on the unit) is always on, free and visible
@@ -1271,7 +1273,7 @@ const Game = (() => {
   const skillVisible = (m, side, ui, k) => isInnate(m, ui, k) || (hasSkill(m, side, ui, k) && m.tech[side][ui][k] < m.round);
   function unitFor(m, side, ui) {
     const base = m.units[ui];
-    const defs = [0, 1].filter(k => hasSkill(m, side, ui, k)).map(k => skillDef(m, ui, k));
+    const defs = E.SLOTS.filter(k => hasSkill(m, side, ui, k)).map(k => skillDef(m, ui, k));
     let u = defs.length ? E.applySkills(base, defs, m.units) : base;
     if (charOf(m, side) === 'cage') { // Frickolas Cage: +10% health for every unit, spawned ones too
       const k = 1 + CHAR.cageHp / 100;
@@ -1317,7 +1319,7 @@ const Game = (() => {
     if (!canBuySkill(m, side, ui, k)) return false;
     m.gold[side] -= skillCost(m, ui, k);
     if (!m.tech) m.tech = [{}, {}];
-    const t = m.tech[side][ui] || (m.tech[side][ui] = [0, 0]);
+    const t = m.tech[side][ui] || (m.tech[side][ui] = E.SLOTS.map(() => 0));
     t[k] = m.round;
     return true;
   }
@@ -1622,7 +1624,7 @@ const Game = (() => {
     // skills: for unit types it has 2 or more squads of, sometimes buy a skill if a squad is still affordable after
     if (AI.skills) {
       const types = Object.keys(own).map(Number).filter(ui => own[ui] >= 2).sort((a, b) => own[b] - own[a]);
-      for (const ui of types) for (const k of [0, 1]) {
+      for (const ui of types) for (const k of E.SLOTS) {
         if (!skillDef(m, ui, k) || hasSkill(m, side, ui, k)) continue;
         if (m.gold[side] - reserve - skillCost(m, ui, k) < minCost) continue;
         if (r() < 0.5) buySkill(m, side, ui, k);
@@ -1817,9 +1819,9 @@ if (typeof module !== 'undefined') module.exports = Game;
   function useSet(set, custom) {
     const skills = Array.isArray(set.skills) ? set.skills.filter(sk => sk && typeof sk.id === 'string' && Engine.SKILL_TYPES[sk.type])
       .map(sk => ({ ...sk, name: String(sk.name || Engine.SKILL_TYPES[sk.type].label).replace(/[<>&"]/g, '').slice(0, 40) })) : [];
-    // each unit's two skill slots, resolved to skill definitions
+    // each unit's skill slots, resolved to skill definitions
     units = Shapes.assign(set.units).map(u => ({ ...Engine.withTraits(u), name: String(u.name).replace(/[<>&"]/g, '').trim().slice(0, 40) || 'Unit', level: 0, bodies: Math.max(1, Math.round(u.bodies)),
-      skillDefs: [0, 1].map(k => {
+      skillDefs: Engine.SLOTS.map(k => {
         const base = Array.isArray(u.skills) && skills.find(sk => sk.id === u.skills[k]);
         if (!base) return null;
         const mod = Array.isArray(u.skillMods) && u.skillMods[k] && typeof u.skillMods[k] === 'object' ? u.skillMods[k] : null; // the unit's own adjustments
@@ -2259,7 +2261,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
             ${roleRow(i)}
             ${locked(i) ? `<span class="lock">${LOCK_SVG} Locked · ${Game.unlockCost(m, i, me)}g</span>` : ''}
             ${freeN(i) ? `<span class="c" style="color:var(--win, #6FD08C)">Free ×${freeN(i)}</span>` : ''}
-            <span class="c">${price(i)} · ${u.bodies} ${u.bodies === 1 ? 'body' : 'bodies'}${[0, 1].filter(k => Game.hasSkill(m, me, i, k)).length ? ` · ${[0, 1].filter(k => Game.hasSkill(m, me, i, k)).length}★` : ''}</span>
+            <span class="c">${price(i)} · ${u.bodies} ${u.bodies === 1 ? 'body' : 'bodies'}${Engine.SLOTS.filter(k => Game.hasSkill(m, me, i, k)).length ? ` · ${Engine.SLOTS.filter(k => Game.hasSkill(m, me, i, k)).length}★` : ''}</span>
           </button>
           <button class="info" data-info="${i}" aria-label="About ${esc(u.name)}">i</button>
         </div>`).join('')}</div>`}
@@ -2357,7 +2359,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
         <li>3 deployments in round 1, then 2 per round. Extra ones cost ${Game.CONFIG.extraDeployCost} gold.</li>
         <li>Squads earn experience. A gold + means you can upgrade it: level 2 doubles health and attack, level 3 triples them.</li>
         <li>Some units start unlocked. The rest cost gold once to unlock for the match; tap a locked card to unlock it.</li>
-        <li>Each unit has two skills. Buy one and all your squads of that unit get it.</li>
+        <li>Each unit has three skills. Buy one and all your squads of that unit get it.</li>
         <li>Tap a squad from an earlier round to sell it for half its price.</li>
       </ul>
     </div>`);
@@ -2501,7 +2503,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
   const unlocksOf = (match, side) => units.map((u, i) => Game.unlockCost(match, i) > 0 && Game.isUnlocked(match, side, i) ? u.name : null).filter(Boolean);
   function skillsOf(match, side) {
     const out = [];
-    units.forEach((u, i) => [0, 1].forEach(k => { if (Game.hasSkill(match, side, i, k) && !Game.isInnate(match, i, k)) out.push(`${(u.skillDefs[k] || {}).name} (${u.name})`); }));
+    units.forEach((u, i) => Engine.SLOTS.forEach(k => { if (Game.hasSkill(match, side, i, k) && !Game.isInnate(match, i, k)) out.push(`${(u.skillDefs[k] || {}).name} (${u.name})`); }));
     return out;
   }
   function recordRound(pre, sum) {
@@ -2616,7 +2618,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
     });
     const theirs = m.armies[0].filter(s => s.round < m.round).map(s => { const p = Game.seenAt(m, s); return `- ${units[s.unit].name} at col ${p.col}, row ${p.row}, level ${s.level + 1}`; });
     const theirSkills = [];
-    units.forEach((u, i) => [0, 1].forEach(k => { if (Game.skillVisible(m, 0, i, k)) theirSkills.push(`${(u.skillDefs[k] || {}).name} on ${u.name}`); }));
+    units.forEach((u, i) => Engine.SLOTS.forEach(k => { if (Game.skillVisible(m, 0, i, k)) theirSkills.push(`${(u.skillDefs[k] || {}).name} on ${u.name}`); }));
     const hist = m.history.slice(-4).map(h => `- round ${h.round}: ${h.timeout ? 'time ran out' : h.winner === 1 ? 'you won' : h.winner === 0 ? 'you lost' : 'draw'}; you took ${h.dmg[1]} damage, they took ${h.dmg[0]}`);
     // how each unit type did in the last fight
     const last = m.history[m.history.length - 1];
@@ -2727,7 +2729,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       for (const x of skills) {
         if (!x || x.done) continue;
         const ui = unitIdx(x.unit), k = int(x.slot) - 1;
-        if (ui >= 0 && (k === 0 || k === 1) && Game.buySkill(m, 1, ui, k)) { x.done = true; did.push(`bought ${units[ui].skillDefs[k].name} for ${units[ui].name}`); }
+        if (ui >= 0 && k >= 0 && k < Engine.SKILL_SLOTS && Game.buySkill(m, 1, ui, k)) { x.done = true; did.push(`bought ${units[ui].skillDefs[k].name} for ${units[ui].name}`); }
       }
     };
     for (const name of list(mv.unlock)) { const ui = unitIdx(name); if (ui >= 0 && Game.unlock(m, 1, ui)) did.push(`unlocked ${units[ui].name}`); }
@@ -2958,7 +2960,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     const defs = units[i].skillDefs || [];
     if (!defs.some(Boolean) || !m) return '';
     const mine = side === undefined || side === me;
-    const rows = [0, 1].filter(k => defs[k]).map(k => {
+    const rows = Engine.SLOTS.filter(k => defs[k]).map(k => {
       const d = defs[k], cost = Game.skillCost(m, i, k);
       let act = '';
       if (Game.isInnate(m, i, k)) {
@@ -3338,7 +3340,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     const tech = {};
     if (d.tech && typeof d.tech === 'object') for (const ui in d.tech) {
       const i = +ui, t = d.tech[ui];
-      if (Number.isInteger(i) && i >= 0 && i < n && Array.isArray(t)) tech[i] = [0, 1].map(k => Math.max(0, Math.min(m.round, t[k] | 0)));
+      if (Number.isInteger(i) && i >= 0 && i < n && Array.isArray(t)) tech[i] = Engine.SLOTS.map(k => Math.max(0, Math.min(m.round, t[k] | 0)));
     }
     if (!m.tech) m.tech = [{}, {}];
     m.tech[1] = tech;

@@ -289,7 +289,7 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
         <button class="btn small" id="skill-add">Add skill</button>
       </div>
     </div>
-    <p class="muted" style="font-size:14px">Each unit has two skill slots. In the game, players buy a skill once and it applies to all their squads of that unit. Several units can share a skill. To tune a skill for one unit only, open Adjust in that unit’s skill slot: whatever you change there applies to that unit alone, and everything else still follows the skill here. Set which skills a unit has in its card under Units, and tick On in tests to include a skill in the counter table, the combos and the price check.</p>
+    <p class="muted" style="font-size:14px">Each unit has three skill slots. In the game, players buy a skill once and it applies to all their squads of that unit. Several units can share a skill. To tune a skill for one unit only, open Adjust in that unit’s skill slot: whatever you change there applies to that unit alone, and everything else still follows the skill here. Set which skills a unit has in its card under Units, and tick On in tests to include a skill in the counter table, the combos and the price check.</p>
     <div class="msg" id="skill-msg" aria-live="polite"></div>
     <div class="skills" id="skills"></div>
   </section>
@@ -408,10 +408,10 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
     const ids = new Set(skills.map(sk => sk.id));
     const units = withIds(p.units.map(u => ({
       defense: 'none', defVal: 0, unlock: 0, ...u,
-      skills: [0, 1].map(k => (Array.isArray(u.skills) && ids.has(u.skills[k])) ? u.skills[k] : null),
-      skillsOn: [0, 1].map(k => !!(Array.isArray(u.skillsOn) && u.skillsOn[k])),
-      skillsInnate: [0, 1].map(k => !!(Array.isArray(u.skillsInnate) && u.skillsInnate[k])),
-      skillMods: [0, 1].map(k => cleanMod(Array.isArray(u.skillMods) ? u.skillMods[k] : null)),
+      skills: Engine.SLOTS.map(k => (Array.isArray(u.skills) && ids.has(u.skills[k])) ? u.skills[k] : null),
+      skillsOn: Engine.SLOTS.map(k => !!(Array.isArray(u.skillsOn) && u.skillsOn[k])),
+      skillsInnate: Engine.SLOTS.map(k => !!(Array.isArray(u.skillsInnate) && u.skillsInnate[k])),
+      skillMods: Engine.SLOTS.map(k => cleanMod(Array.isArray(u.skillMods) ? u.skillMods[k] : null)),
     })));
     return { settings: { sight: 12, flameReach: 1.2, ...SAMPLE.settings, ...p.settings }, skills, units };
   }
@@ -435,7 +435,7 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
   const isCustom = (u, k) => !!(u.skillMods && u.skillMods[k]);
   // The unit as tests see it: with the skills ticked On in tests
   function prep(u) {
-    const defs = [0, 1].filter(k => u.skills && u.skills[k] && ((u.skillsOn && u.skillsOn[k]) || (u.skillsInnate && u.skillsInnate[k]))).map(k => slotDef(u, k)).filter(Boolean);
+    const defs = Engine.SLOTS.filter(k => u.skills && u.skills[k] && ((u.skillsOn && u.skillsOn[k]) || (u.skillsInnate && u.skillsInnate[k]))).map(k => slotDef(u, k)).filter(Boolean);
     return defs.length ? Engine.applySkills(u, defs, state.units) : u;
   }
   function valid(p) {
@@ -586,7 +586,7 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
       if (u.deathBlast > 0) tr.push(`death blast ${fmt(u.deathBlast, 0)}%`);
       if (u.windUp > 0) tr.push(`wind-up ${fmt(u.windUp, 1)} s`);
       if (u.level > 0) tr.push(`${u.level + 1}× stats`);
-      [0, 1].forEach(k => { const sk = slotDef(u, k); if (sk) tr.push(`${sk.name}${isCustom(u, k) ? '*' : ''}${u.skillsInnate[k] ? ' (built in)' : u.skillsOn[k] ? ' (on)' : ''}`); });
+      Engine.SLOTS.forEach(k => { const sk = slotDef(u, k); if (sk) tr.push(`${sk.name}${isCustom(u, k) ? '*' : ''}${u.skillsInnate[k] ? ' (built in)' : u.skillsOn[k] ? ' (on)' : ''}`); });
       d.querySelector('.sum-line').textContent =
         `${u.bodies} × ${fmt(u.hp)} hp · ${fmt(u.hit)} dmg × ${fmt(u.aps, 2)}/s · ${fmt(u.range)} m${u.splash ? ` · splash ${u.splash}` : ''}${def}${tr.length ? ' · ' + tr.join(' · ') : ''}`;
       d.querySelector('.bar i').style.width = (r.strength / max * 100).toFixed(1) + '%';
@@ -603,10 +603,10 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
   }
   // ---------- skill slots on a unit ----------
   function renderSlots(u, d) {
-    if (!u.skillMods) u.skillMods = [null, null];
+    if (!u.skillMods) u.skillMods = Engine.SLOTS.map(() => null);
     const box = d.querySelector('.skill-slots');
     const open = new Set([...box.querySelectorAll('details.slot-custom[open]')].map(x => x.dataset.k));
-    box.innerHTML = [0, 1].map(k => {
+    box.innerHTML = Engine.SLOTS.map(k => {
       const def = slotDef(u, k);
       const T = def && Engine.SKILL_TYPES[def.type];
       return `
@@ -759,7 +759,7 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
   }
   function removeSkill(sk) {
     state.skills = state.skills.filter(x => x !== sk);
-    state.units.forEach(u => [0, 1].forEach(k => { if (u.skills[k] === sk.id) { u.skills[k] = null; u.skillsOn[k] = false; } }));
+    state.units.forEach(u => Engine.SLOTS.forEach(k => { if (u.skills[k] === sk.id) { u.skills[k] = null; u.skillsOn[k] = false; } }));
     save(); renderSkills(); refreshSlots(); renderUnitSummaries(); scheduleRun();
     $('skill-msg').textContent = `Deleted ${sk.name}.`;
   }
@@ -856,7 +856,7 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
   }
 
   $('add').addEventListener('click', () => {
-    const u = { ...Shapes.assign([...state.units, Engine.withTraits({ name: 'New unit', cost: 100, unlock: 0, bodies: 4, hp: 200, hit: 20, aps: 1, range: 10, speed: 6, splash: 0 })]).pop(), id: uid++, skills: [null, null], skillsOn: [false, false], skillsInnate: [false, false], skillMods: [null, null] };
+    const u = { ...Shapes.assign([...state.units, Engine.withTraits({ name: 'New unit', cost: 100, unlock: 0, bodies: 4, hp: 200, hit: 20, aps: 1, range: 10, speed: 6, splash: 0 })]).pop(), id: uid++, skills: Engine.SLOTS.map(() => null), skillsOn: Engine.SLOTS.map(() => false), skillsInnate: Engine.SLOTS.map(() => false), skillMods: Engine.SLOTS.map(() => null) };
     state.units.push(u);
     save(); renderUnits(); scheduleRun();
     const d = unitsEl.querySelector(`details[data-id="${u.id}"]`);
@@ -869,7 +869,7 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
     const merged = Shapes.assign([...state.units, ...clone(add)]); // new examples get shapes not already in use
     const ids = new Set(state.skills.map(sk => sk.id));
     state.units.push(...merged.slice(state.units.length).map(u => ({ ...Engine.withTraits(u), id: uid++,
-      skills: [0, 1].map(k => (u.skills && ids.has(u.skills[k])) ? u.skills[k] : null), skillsOn: [false, false], skillsInnate: [false, false], skillMods: [null, null] })));
+      skills: Engine.SLOTS.map(k => (u.skills && ids.has(u.skills[k])) ? u.skills[k] : null), skillsOn: Engine.SLOTS.map(() => false), skillsInnate: Engine.SLOTS.map(() => false), skillMods: Engine.SLOTS.map(() => null) })));
     save(); renderUnits(); scheduleRun();
     $('ex-msg').textContent = `Added ${add.map(e => e.name).join(', ')}.`;
   });

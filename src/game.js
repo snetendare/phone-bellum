@@ -68,7 +68,7 @@ const Game = (() => {
   const reserved = (side, col, row) => isFlank(1 - side, col, row);
   // no man's land: the rows between the two zones. A unit with the Forward planting skill may be placed there.
   const inNoMans = (row) => row >= ZONE && row < ROWS - ZONE;
-  const hasSkillType = (m, side, ui, type) => !!m && ui != null && !!m.units[ui] && [0, 1].some(k => hasSkill(m, side, ui, k) && skillDef(m, ui, k).type === type);
+  const hasSkillType = (m, side, ui, type) => !!m && ui != null && !!m.units[ui] && E.SLOTS.some(k => hasSkill(m, side, ui, k) && skillDef(m, ui, k).type === type);
   // ui (optional): the unit being placed, for unit-specific tiles
   const canPlaceAt = (m, side, col, row, ui) => col >= 0 && col < COLS && !reserved(side, col, row) &&
     (inZone(side, row) || (flankOpen(m) && isFlank(side, col, row)) || (inNoMans(row) && hasSkillType(m, side, ui, 'forward'))) && !enemyHolds(m, side, col, row);
@@ -170,7 +170,7 @@ const Game = (() => {
   }
 
   // ---------- skills (bought per unit type, for all squads of that type) ----------
-  // m.units[i].skillDefs = [def or null, def or null], resolved from the unit's two skill slots
+  // m.units[i].skillDefs = [def or null, ...], one per skill slot (Engine.SKILL_SLOTS)
   const skillDef = (m, ui, k) => (m.units[ui].skillDefs || [])[k] || null;
   const skillCost = (m, ui, k) => { const d = skillDef(m, ui, k); return d ? Math.max(0, Math.round(+d.cost || 0)) : 0; };
   // a built-in skill (skillsInnate on the unit) is always on, free and visible
@@ -180,7 +180,7 @@ const Game = (() => {
   const skillVisible = (m, side, ui, k) => isInnate(m, ui, k) || (hasSkill(m, side, ui, k) && m.tech[side][ui][k] < m.round);
   function unitFor(m, side, ui) {
     const base = m.units[ui];
-    const defs = [0, 1].filter(k => hasSkill(m, side, ui, k)).map(k => skillDef(m, ui, k));
+    const defs = E.SLOTS.filter(k => hasSkill(m, side, ui, k)).map(k => skillDef(m, ui, k));
     let u = defs.length ? E.applySkills(base, defs, m.units) : base;
     if (charOf(m, side) === 'cage') { // Frickolas Cage: +10% health for every unit, spawned ones too
       const k = 1 + CHAR.cageHp / 100;
@@ -226,7 +226,7 @@ const Game = (() => {
     if (!canBuySkill(m, side, ui, k)) return false;
     m.gold[side] -= skillCost(m, ui, k);
     if (!m.tech) m.tech = [{}, {}];
-    const t = m.tech[side][ui] || (m.tech[side][ui] = [0, 0]);
+    const t = m.tech[side][ui] || (m.tech[side][ui] = E.SLOTS.map(() => 0));
     t[k] = m.round;
     return true;
   }
@@ -531,7 +531,7 @@ const Game = (() => {
     // skills: for unit types it has 2 or more squads of, sometimes buy a skill if a squad is still affordable after
     if (AI.skills) {
       const types = Object.keys(own).map(Number).filter(ui => own[ui] >= 2).sort((a, b) => own[b] - own[a]);
-      for (const ui of types) for (const k of [0, 1]) {
+      for (const ui of types) for (const k of E.SLOTS) {
         if (!skillDef(m, ui, k) || hasSkill(m, side, ui, k)) continue;
         if (m.gold[side] - reserve - skillCost(m, ui, k) < minCost) continue;
         if (r() < 0.5) buySkill(m, side, ui, k);
