@@ -105,7 +105,7 @@ const Game = (() => {
   // its shots alternate between the two sides.
   const MAPS = [
     { id: 'standard', name: 'Standard', text: 'No special rules.', plain: true }, // only when picked, never random
-    { id: 'forest', name: 'Forest Clearing', text: 'Ents and Earth Wizards deal 20% more damage. Healing and regeneration are 1.5× as strong. A neutral elf tower in no man’s land shoots at both sides in turn; tap it to bribe the elves for 50 gold, and from then on it heals your units instead.', boostDmg: 20, boostUnits: ['Ent', 'Earth Wizard'], healMul: 1.5, elfTower: true },
+    { id: 'forest', name: 'Forest Clearing', text: 'Ents and Earth Wizards have 15% more health. Healing and regeneration are 1.5× as strong. A neutral elf tower in no man’s land shoots at both sides in turn; tap it to bribe the elves for 50 gold, and from then on it heals your units instead.', boostHp: 15, boostUnits: ['Ent', 'Earth Wizard'], healMul: 1.5, elfTower: true },
     { id: 'cavern', name: 'Mushroom Cavern', text: 'Stealth units deal 20% more damage. Glowing mushroom tiles stay on the same tiles all match, mirrored on both halves. Purple: a squad that starts the fight there gets +10% damage, +10% health and +5% attack speed. Yellow: a unit that starts on it or walks over it moves 30% faster for the rest of the fight. Green: a unit that starts on it or walks over it is poisoned and slowed. Yellow and green work once per unit, for both sides. Either player can remove a mushroom tile for 50 gold.', stealthDmg: 20, shrooms: true, pointMirror: true },
     { id: 'ice', name: 'Frozen Peak', text: 'Odd rounds from round 3: a hailstorm drops 10 hail tiles in the storm band (no man’s land at first); units standing in hail take 5 damage per second. Even rounds: the altar of ice rises in the middle of the board. Tap it to buy ice walls for your tower, push the storm band toward your opponent, or summon a Snowgre.', ice: true },
   ];
@@ -631,7 +631,7 @@ const Game = (() => {
       let u = unitFor(m, side, sq.unit);
       const mp = mapOf(m);
       if (mp && mp.stealthDmg && u.stealth) u = { ...u, hit: u.hit * (1 + mp.stealthDmg / 100) }; // the map favours stealth units
-      if (mp && mp.boostDmg && (mp.boostUnits || []).includes(m.units[sq.unit].name)) u = { ...u, hit: u.hit * (1 + mp.boostDmg / 100) }; // ...or these units by name
+      if (mp && mp.boostHp && (mp.boostUnits || []).includes(m.units[sq.unit].name)) u = { ...u, hp: u.hp * (1 + mp.boostHp / 100) }; // ...or these units by name
       const purple = (shroomAt(m, sq.col, sq.row) || {}).type === 'purple'; // a purple mushroom tile: half a Zoe buff
       if (purple) u = { ...u, hit: u.hit * (1 + SHROOM.purpleDmg / 100), hp: u.hp * (1 + SHROOM.purpleHp / 100), aps: u.aps * (1 + SHROOM.purpleAps / 100) };
       if (ch === 'wilhelm' && forward) u = { ...u, bonusArmor: (u.bonusArmor || 0) + CHAR.wilhelmArmor };
