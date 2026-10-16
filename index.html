@@ -159,6 +159,17 @@ a { color: var(--you); }
 .roleline { margin: 0; display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--muted); }
 .roleline .roles .rng { margin-left: 0; }
 .confirm { display: grid; gap: 8px; border: 1px solid var(--gold); border-radius: 6px; padding: 10px; }
+/* main menu: short rules, with a tap-to-read-more section per bigger concept */
+.learn { width: 100%; display: grid; gap: 6px; text-align: left; }
+.learn details { border: 1px solid var(--line); border-radius: 6px; background: rgba(21, 33, 37, 0.7); }
+.learn summary { list-style: none; cursor: pointer; display: grid; grid-template-columns: 1fr auto; gap: 1px 10px; padding: 8px 10px; }
+.learn summary::-webkit-details-marker { display: none; }
+.learn summary b { font-family: var(--font-display); font-weight: 600; font-size: 14px; color: var(--ink); }
+.learn summary span { grid-column: 1; font-size: 12px; line-height: 1.35; color: var(--muted); }
+.learn summary::after { content: "Read more ▾"; grid-row: 1; grid-column: 2; font-family: var(--font-data); font-size: 11px; color: var(--gold); align-self: center; }
+.learn details[open] summary::after { content: "Less ▴"; }
+.learn details ul { padding: 0 10px 10px; }
+.learn details ul b { color: var(--ink); font-weight: 600; }
 /* map picker: a small picture of each map */
 .maps { width: 100%; display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
 .maps button { border: 1px solid var(--line); border-radius: 4px; background: transparent; padding: 4px; display: grid; gap: 4px; justify-items: center; font-family: var(--font-data); font-size: 12px; min-width: 0; }
@@ -3443,21 +3454,34 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
       <span class="eyebrow">A small auto-battler</span>
       <h2>Phone Bellum</h2>
       <ul>
-        <li>Buy squads with gold each round. A standard squad costs ${Game.SQUAD_COST}. Income grows by ${Game.CONFIG.incomeStep} every round.</li>
-        <li>Start by picking one of three packages: two units unlocked for free with free squads worth ${Game.PACKAGE.value}, plus ${Game.START_GOLD} gold. Each package comes with a random character (never two the same) whose ability lasts the whole match: ${Game.CHARACTERS.map(c => `${esc(c.name)}: ${esc(c.ability)}`).join(' ')}</li>
-        <li>Your tower stands in the back of your zone. If it falls in a fight, your army is crippled for a few seconds. Until round ${Game.TOWER_PICK_ROUND} it is a small outpost; at the start of round ${Game.TOWER_PICK_ROUND}, before the clock runs, you pick your tower for the rest of the match: ${Game.TOWER_TYPES.map(x => `${esc(x.name)}: ${esc(x.text)}`).join(' ')} Each has one skill (${Game.TOWER_SKILL.cost} gold, tap your tower to buy it): ${Game.TOWER_TYPES.map(x => `${esc(x.skill.name)}: ${esc(x.skill.text)}`).join(' ')} Tap the enemy tower to see their character.</li>
-        <li>Place squads in the bottom six rows. They stay for the whole match. From round ${Game.FLANK.round}, the edge columns on the enemy's half of the board open up for flanking. The red edge columns on your half are theirs, never yours; a squad placed there waits ${Game.FLANK.delay} s before it moves or attacks, in its first fight only.</li>
-        <li>Every match is fought on a map that changes the rules. The host picks it before the packages, or leaves it random (never Standard, and never the same map twice in a row): ${Game.MAPS.map(mp => `${esc(mp.name)}: ${esc(mp.text)}`).join(' ')}</li>
-        <li>Columns are lanes: squads march straight ahead and fight what they meet, curving toward any enemy within a few tiles, so an empty lane far from the enemy lets a squad walk around the side.</li>
-        <li>You have ${DEPLOY_SECONDS} seconds to deploy every round, then the armies fight on their own.</li>
-        <li>The loser takes damage from every enemy squad still standing.</li>
-        <li>You see the enemy’s earlier squads while you deploy, so build counters.</li>
-        <li>3 deployments in round 1, then 2 per round. Extra ones cost ${Game.CONFIG.extraDeployCost} gold.</li>
-        <li>Squads earn experience. A gold + means you can upgrade it: level 2 doubles health and attack, level 3 triples them.</li>
-        <li>Some units start unlocked. The rest cost gold once to unlock for the match; tap a locked card to unlock it.</li>
-        <li>Each unit has three skills. Buy one and all your squads of that unit get it.</li>
-        <li>Tap a squad from an earlier round to sell it for half its price.</li>
+        <li>Each round you buy squads with gold and place them in your bottom six rows. Then the armies fight on their own.</li>
+        <li>Squads stay all match, and you see the enemy’s earlier ones while you deploy. Build counters.</li>
+        <li>The loser of a fight takes damage from every enemy squad still standing. Run out of health and you lose.</li>
+        <li>A squad costs ${Game.SQUAD_COST}, income grows by ${Game.CONFIG.incomeStep} a round, and you have ${DEPLOY_SECONDS} s and 2 deployments a round (3 in round 1).</li>
       </ul>
+      <div class="learn">
+        ${[
+          ['Starting package', 'Round 1: pick one of three, each with free squads and a character.', `
+            <li>Each package unlocks two units for free and gives you free squads of them worth ${Game.PACKAGE.value}, plus ${Game.START_GOLD} gold to spend.</li>
+            <li>Each comes with a random character (never two the same) whose ability lasts the whole match. Tap the enemy tower after the first fight to see theirs.</li>
+            ${Game.CHARACTERS.map(c => `<li><b>${esc(c.name)}</b>: ${esc(c.ability)}</li>`).join('')}`],
+          ['Towers', `If yours falls, your army is crippled for a few seconds. Pick your real one in round ${Game.TOWER_PICK_ROUND}.`, `
+            <li>Your tower stands in the back of your zone. Until round ${Game.TOWER_PICK_ROUND} it is a small outpost; then, before the clock runs, you pick one for the rest of the match.</li>
+            ${Game.TOWER_TYPES.map(x => `<li><b>${esc(x.name)}</b>: ${esc(x.text)} Skill: <i>${esc(x.skill.name)}</i> (${Game.TOWER_SKILL.cost} gold, tap your tower). ${esc(x.skill.text)}</li>`).join('')}`],
+          ['Maps', 'Every map changes the rules of the fight.', `
+            <li>The host picks the map before the packages, or leaves it random (never Standard, and never the same map twice in a row).</li>
+            ${Game.MAPS.map(mp => `<li><b>${esc(mp.name)}</b>: ${esc(mp.text)}</li>`).join('')}`],
+          ['Lanes and flanks', `Columns are lanes. From round ${Game.FLANK.round} you can deploy on the enemy’s edges.`, `
+            <li>Squads march straight ahead and fight what they meet, curving toward any enemy within a few tiles, so an empty lane lets a squad walk around the side.</li>
+            <li>From round ${Game.FLANK.round}, the blue edge columns on the enemy’s half open up for you. The red ones on your half are theirs, never yours.</li>
+            <li>A squad placed on a flank waits ${Game.FLANK.delay} s before it moves or attacks, in its first fight only.</li>`],
+          ['Growing your army', 'Level up squads, unlock units, buy skills, sell what you don’t need.', `
+            <li>Squads earn experience. A gold + means you can upgrade one: level 2 doubles health and attack, level 3 triples them.</li>
+            <li>Some units start unlocked. The rest cost gold once to unlock for the match; tap a locked card.</li>
+            <li>Each unit has three skills. Buy one and all your squads of that unit get it.</li>
+            <li>Extra deployments cost ${Game.CONFIG.extraDeployCost} gold. Tap a squad from an earlier round to sell it for half its price.</li>`],
+        ].map(([h, gist, body]) => `<details><summary><b>${h}</b><span>${gist}</span></summary><ul>${body}</ul></details>`).join('')}
+      </div>
     </div>`);
     $('panel').innerHTML = `
       ${resume ? `<button class="btn primary" id="resume">Resume match ${esc(resume.code)}</button>` : ''}
