@@ -5,7 +5,7 @@ const old = JSON.parse(fs.readFileSync('src/demo-units.json', 'utf8')); const ol
 old.units.forEach((u, i) => oldAvg[u.name] = old.matrix[i].reduce((a, b) => a + b, 0) / (old.units.length - 1));
 const r = JSON.parse(fs.readFileSync('src/default-roster.json', 'utf8'));
 const units = r.units.map(({ skillsOn, ...u }) => ({ ...u, cost: u.cost / 100 }));
-const g = { budget: E.fairBudget(units.map(u => u.cost), 2), distance: 42, spacing: 3.5, minDmgPct: 15, timeCap: 60, dt: 0.05, sight: 12, flameReach: 1.2 };
+const g = { budget: E.fairBudget(units.map(u => u.cost), 2), distance: 42, spacing: 3.5, minDmgPct: 15, timeCap: 60, dt: 0.05, sight: 15, minSight: 18, drift: 15, flameReach: 1.2 };
 const bu = units.map(u => E.innateUnit(u, r.skills, units));
 const n = units.length, M = units.map(() => Array(n).fill(0));
 for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) { const s = +E.battle(bu[i], bu[j], g).score.toFixed(3); M[i][j] = s; M[j][i] = -s; }

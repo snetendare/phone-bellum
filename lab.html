@@ -218,7 +218,7 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
       <div class="field"><label for="s-spacing">Body spacing (m)</label><input id="s-spacing" type="number" min="0.5" step="0.5" data-s="spacing"><span class="hint">How tightly squads stand. Tighter means more splash hits.</span></div>
       <div class="field"><label for="s-floor">Armor floor (%)</label><input id="s-floor" type="number" min="0" max="100" step="1" data-s="minDmgPct"><span class="hint">Share of a hit that always gets through armor.</span></div>
       <div class="field"><label for="s-cap">Time limit (s)</label><input id="s-cap" type="number" min="5" step="5" data-s="timeCap"><span class="hint">After this, the side with more health left wins.</span></div>
-      <div class="field"><label for="s-sight">Sight (m)</label><input id="s-sight" type="number" min="0" step="1" data-s="sight"><span class="hint">Units march straight ahead until an enemy is this far beyond their range, then turn to it. 200 = chase the nearest enemy anywhere.</span></div>
+      <div class="field"><label for="s-sight">Sight (m)</label><input id="s-sight" type="number" min="0" step="1" data-s="sight"><span class="hint">Units march straight ahead until an enemy is this far beyond their range (at least 18 m, curving toward it from 15 m further out), then turn to it. 200 = chase the nearest enemy anywhere.</span></div>
       <div class="field"><label for="s-flamereach">Flame reach (×)</label><input id="s-flamereach" type="number" min="1" step="0.05" data-s="flameReach"><span class="hint">How far flame cones reach, as a multiple of the unit's range. The unit still stops at its range, so it keeps burning the enemies behind the first one.</span></div>
     </div>
   </section>
@@ -328,7 +328,7 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
   <section class="panel" aria-labelledby="rules-h">
     <div class="panel-head"><h2 id="rules-h">How a fight works</h2></div>
     <div class="rules">
-      <div class="rule"><h3>Targeting and movement</h3><p>Every body marches straight ahead until an enemy comes within its range plus the sight distance, then turns toward the nearest enemy and stops once it is in range. Once no enemy is ahead, it turns toward the nearest one. Wide formations lose focus: bodies on the edges walk past a narrow enemy before turning in. Melee units have a range of about 2 m.</p></div>
+      <div class="rule"><h3>Targeting and movement</h3><p>Every body marches straight ahead until an enemy comes within its range plus the sight distance (at least 18 m) in any direction, then turns toward the nearest enemy and stops once it is in range. Within 15 m beyond that it already leans toward the nearest enemy, so it curves in instead of turning sharply. Once no enemy is ahead, it turns toward the nearest one. Melee units have a range of about 2 m.</p></div>
       <div class="rule"><h3>Overkill</h3><p>Damage beyond a body's remaining health is wasted. Big hits on small bodies lose most of their damage.</p></div>
       <div class="rule"><h3>Splash</h3><p>Every enemy within the splash radius of the target takes the full hit. Packed squads take many hits from one attack.</p></div>
       <div class="rule"><h3>Armor</h3><p>Subtracts a flat amount from every hit, down to the armor floor. It shuts down small, fast hits and barely dents big ones.</p></div>
@@ -513,11 +513,13 @@ const Engine = (() => {
   const PIERCE_DEPTH = 10;     // metres a piercing shot travels past its target
   const PIERCE_WIDTH = 1;      // half-width of the pierce corridor (m)
   const APPROACH = 0.5;         // metres a moving unit steps inside its max range
-  const PROJ_HIT_RADIUS = 1;
+  const PROJ_HIT_RADIUS = 1;   // a projectile hits a body within this distance of where it lands
   // A side whose tower falls is crippled for a while: it deals less damage, walks slower and takes more damage
   const TOWER_DOWN = { secs: 9, attack: 90, move: 70, taken: 50 };
   const TURN = 6;              // how fast a walking body swings to a new heading (share of the turn per second)
-  const SIGHT = 12;            // metres beyond its own range at which a unit notices an enemy and turns toward it   // a projectile hits a body within this distance of where it lands
+  const SIGHT = 15;            // metres beyond its own range at which a unit notices an enemy and turns toward it
+  const MIN_SIGHT = 18;        // ...but never less than this many metres from the unit (3 tiles), however short its range
+  const DRIFT = 15;            // metres beyond that at which a marching unit starts to lean toward the nearest enemy
 
   const LEVEL_BONUS = 1;       // each upgrade adds +100% of starting health and hit (2x, then 3x)
   const MAX_LEVEL = 2;         // two upgrades on top of the base unit
@@ -780,6 +782,8 @@ const Engine = (() => {
     ];
     const dt = g.dt;
     const sight = g.sight == null ? SIGHT : g.sight;
+    const minSight = g.minSight == null ? MIN_SIGHT : g.minSight;
+    const drift = g.drift == null ? DRIFT : g.drift;
     const cripple = [0, 0];      // seconds left of the tower-down penalty for each side
     const towerDown = g.towerDown || TOWER_DOWN;
     // a body died: a fallen tower cripples its side; a body with deathBlast explodes (deathBlast % of its max health)
@@ -1128,14 +1132,15 @@ const Engine = (() => {
         if (near && nd > (g.stopPct > 0 && g.stopPct < 1 && b.engaged ? stopAt(rg) : rg)) {
           const step = b.u.speed * (b.slowT > 0 ? 1 - b.slowMove / 100 : 1) * (cripple[b.side] > 0 ? 1 - towerDown.move / 100 : 1) * dt;
           let mv;
-          // March straight ahead until an enemy comes within sight (range + SIGHT), or no enemy is left
-          // ahead, then lock on: from then on the body goes for its own nearest enemy for the rest of the
-          // fight. Each body decides for itself, so a squad can split up when its bodies spot different
+          // March straight ahead until an enemy comes within sight (range + SIGHT, at least MIN_SIGHT, in any
+          // direction), or no enemy is left ahead, then lock on: from then on the body goes for its own nearest
+          // enemy for the rest of the fight. Each body decides for itself, so a squad can split up when its bodies spot different
           // enemies. A squad meets what stands in its own lane, an empty lane lets it walk around the side,
           // and nobody flips back and forth between marching and chasing.
           const fwd = b.side === 0 ? 1 : -1;
+          const aware = Math.max(rg + sight, minSight);
           if (!b.engaged) {
-            let spotted = nd <= rg + sight;
+            let spotted = nd <= aware;
             if (!spotted) { // nothing left ahead to march toward: go for the nearest
               spotted = true;
               for (const f of foes) if (f.alive && !f.hidden && (f.y - b.y) * fwd > 0) { spotted = false; break; }
@@ -1145,6 +1150,12 @@ const Engine = (() => {
           // where it wants to go: straight ahead, or at the nearest enemy
           let wx = 0, wy = fwd;
           if (b.engaged) { wx = (near.x - b.x) / nd; wy = (near.y - b.y) / nd; }
+          else if (drift > 0 && nd < aware + drift && (near.y - b.y) * fwd > 0) {
+            // within DRIFT of its sight: lean toward the nearest enemy ahead, harder the closer it gets, so it
+            // curves in on a diagonal instead of marching level with the enemy and then turning sharply
+            const w = (aware + drift - nd) / drift;
+            wx = (near.x - b.x) / nd * w; wy = fwd * (1 - w) + (near.y - b.y) / nd * w;
+          }
           // turn smoothly instead of snapping: the heading swings toward the wanted direction
           if (b.hx === undefined) { b.hx = 0; b.hy = fwd; }
           const k = Math.min(1, TURN * dt);
@@ -1513,7 +1524,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
       skillsInnate: Engine.SLOTS.map(k => !!(Array.isArray(u.skillsInnate) && u.skillsInnate[k])),
       skillMods: Engine.SLOTS.map(k => cleanMod(Array.isArray(u.skillMods) ? u.skillMods[k] : null)),
     })));
-    return { settings: { sight: 12, flameReach: 1.2, ...SAMPLE.settings, ...p.settings }, skills, units };
+    return { settings: { sight: 15, flameReach: 1.2, ...SAMPLE.settings, ...p.settings }, skills, units };
   }
   function validSkill(sk) { return sk && typeof sk.id === 'string' && typeof sk.name === 'string' && Engine.SKILL_TYPES[sk.type]; }
   const skillById = (id) => state.skills.find(sk => sk.id === id) || null;

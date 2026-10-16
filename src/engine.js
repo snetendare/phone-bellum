@@ -27,11 +27,13 @@ const Engine = (() => {
   const PIERCE_DEPTH = 10;     // metres a piercing shot travels past its target
   const PIERCE_WIDTH = 1;      // half-width of the pierce corridor (m)
   const APPROACH = 0.5;         // metres a moving unit steps inside its max range
-  const PROJ_HIT_RADIUS = 1;
+  const PROJ_HIT_RADIUS = 1;   // a projectile hits a body within this distance of where it lands
   // A side whose tower falls is crippled for a while: it deals less damage, walks slower and takes more damage
   const TOWER_DOWN = { secs: 9, attack: 90, move: 70, taken: 50 };
   const TURN = 6;              // how fast a walking body swings to a new heading (share of the turn per second)
-  const SIGHT = 12;            // metres beyond its own range at which a unit notices an enemy and turns toward it   // a projectile hits a body within this distance of where it lands
+  const SIGHT = 15;            // metres beyond its own range at which a unit notices an enemy and turns toward it
+  const MIN_SIGHT = 18;        // ...but never less than this many metres from the unit (3 tiles), however short its range
+  const DRIFT = 15;            // metres beyond that at which a marching unit starts to lean toward the nearest enemy
 
   const LEVEL_BONUS = 1;       // each upgrade adds +100% of starting health and hit (2x, then 3x)
   const MAX_LEVEL = 2;         // two upgrades on top of the base unit
@@ -294,6 +296,8 @@ const Engine = (() => {
     ];
     const dt = g.dt;
     const sight = g.sight == null ? SIGHT : g.sight;
+    const minSight = g.minSight == null ? MIN_SIGHT : g.minSight;
+    const drift = g.drift == null ? DRIFT : g.drift;
     const cripple = [0, 0];      // seconds left of the tower-down penalty for each side
     const towerDown = g.towerDown || TOWER_DOWN;
     // a body died: a fallen tower cripples its side; a body with deathBlast explodes (deathBlast % of its max health)
@@ -642,14 +646,15 @@ const Engine = (() => {
         if (near && nd > (g.stopPct > 0 && g.stopPct < 1 && b.engaged ? stopAt(rg) : rg)) {
           const step = b.u.speed * (b.slowT > 0 ? 1 - b.slowMove / 100 : 1) * (cripple[b.side] > 0 ? 1 - towerDown.move / 100 : 1) * dt;
           let mv;
-          // March straight ahead until an enemy comes within sight (range + SIGHT), or no enemy is left
-          // ahead, then lock on: from then on the body goes for its own nearest enemy for the rest of the
-          // fight. Each body decides for itself, so a squad can split up when its bodies spot different
+          // March straight ahead until an enemy comes within sight (range + SIGHT, at least MIN_SIGHT, in any
+          // direction), or no enemy is left ahead, then lock on: from then on the body goes for its own nearest
+          // enemy for the rest of the fight. Each body decides for itself, so a squad can split up when its bodies spot different
           // enemies. A squad meets what stands in its own lane, an empty lane lets it walk around the side,
           // and nobody flips back and forth between marching and chasing.
           const fwd = b.side === 0 ? 1 : -1;
+          const aware = Math.max(rg + sight, minSight);
           if (!b.engaged) {
-            let spotted = nd <= rg + sight;
+            let spotted = nd <= aware;
             if (!spotted) { // nothing left ahead to march toward: go for the nearest
               spotted = true;
               for (const f of foes) if (f.alive && !f.hidden && (f.y - b.y) * fwd > 0) { spotted = false; break; }
@@ -659,6 +664,12 @@ const Engine = (() => {
           // where it wants to go: straight ahead, or at the nearest enemy
           let wx = 0, wy = fwd;
           if (b.engaged) { wx = (near.x - b.x) / nd; wy = (near.y - b.y) / nd; }
+          else if (drift > 0 && nd < aware + drift && (near.y - b.y) * fwd > 0) {
+            // within DRIFT of its sight: lean toward the nearest enemy ahead, harder the closer it gets, so it
+            // curves in on a diagonal instead of marching level with the enemy and then turning sharply
+            const w = (aware + drift - nd) / drift;
+            wx = (near.x - b.x) / nd * w; wy = fwd * (1 - w) + (near.y - b.y) / nd * w;
+          }
           // turn smoothly instead of snapping: the heading swings toward the wanted direction
           if (b.hx === undefined) { b.hx = 0; b.hy = fwd; }
           const k = Math.min(1, TURN * dt);
