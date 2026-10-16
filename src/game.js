@@ -34,11 +34,11 @@ const Game = (() => {
   // Each starting package comes with a character, who gives that player a passive ability for the whole match.
   const CHARACTERS = [
     { id: 'cage', name: 'Frickolas Cage', ability: 'All your units have 10% more health.' },
-    { id: 'zoe', name: 'Zoe', ability: 'Every round, 2 random tiles in your zone become buff tiles. A squad that starts the fight on one deals 20% more damage until it first moves.' },
+    { id: 'zoe', name: 'Zoe', ability: 'Every round, 2 random tiles in your zone become buff tiles. A squad that starts the fight on one gets +20% damage, +20% health and +10% attack speed for the whole fight.' },
     { id: 'emile', name: 'Emile', ability: 'Tier 1 units are free to unlock.' },
     { id: 'wilhelm', name: 'Wilhelm', ability: 'Your squads on flank tiles and in no man’s land get +4 armor, and flank squads start twice as fast.' },
   ];
-  const CHAR = { cageHp: 10, zoeTiles: 2, zoeDmg: 20, wilhelmArmor: 4, wilhelmDelay: 0.5 };
+  const CHAR = { cageHp: 10, zoeTiles: 2, zoeDmg: 20, zoeHp: 20, zoeAps: 10, wilhelmArmor: 4, wilhelmDelay: 0.5 };
   const charOf = (m, side) => (m && m.chars && m.chars[side]) || null;
   const charInfo = (id) => CHARACTERS.find(c => c.id === id) || null;
   const towerColOk = (col) => col >= 0 && col < COLS && (col < TOWER_MID[0] || col > TOWER_MID[1]);
@@ -356,9 +356,10 @@ const Game = (() => {
       const ch = charOf(m, side), forward = isFlank(side, sq.col, sq.row) || inNoMans(sq.row);
       let u = unitFor(m, side, sq.unit);
       if (ch === 'wilhelm' && forward) u = { ...u, bonusArmor: (u.bonusArmor || 0) + CHAR.wilhelmArmor };
+      // Zoe: a squad that starts the fight on a buff tile keeps the bonus for the whole fight
+      if (onBuffTile(m, side, sq.col, sq.row)) u = { ...u, hit: u.hit * (1 + CHAR.zoeDmg / 100), hp: u.hp * (1 + CHAR.zoeHp / 100), aps: u.aps * (1 + CHAR.zoeAps / 100) };
       const b = E.buildSquad(u, side, w.x, w.y, sq.id, TILE, idx, sq.level);
       if (isFlank(side, sq.col, sq.row) && (sq.round === m.round || sq.movedRound === m.round)) for (const x of b) x.delay = FLANK.delay * (ch === 'wilhelm' ? CHAR.wilhelmDelay : 1); // only in its first fight
-      if (onBuffTile(m, side, sq.col, sq.row)) for (const x of b) x.startBuff = CHAR.zoeDmg / 100; // Zoe: until it first moves
       idx += b.length;
       out.push(...b);
     }
