@@ -11,7 +11,7 @@ const Game = (() => {
   const XP_STEPS = [5, 12, 24];
   const xpNeeded = (unit, level) => unit.bodies * unit.hp * XP_STEPS[level];
   // deployments: how many new squads a side may place per round; extra ones can be bought for the round
-  const CONFIG = { incomeStep: 100, levelCostPerTier: 50, firstRoundDeploys: 3, deploysPerRound: 2, extraDeployCost: 50, deployCap: true, moveCost: 50 };
+  const CONFIG = { incomeStep: 100, levelCostPerTier: 50, firstRoundDeploys: 3, deploysPerRound: 2, extraDeployCost: 50, maxExtraDeploys: 1, deployCap: true, moveCost: 50 }; // maxExtraDeploys: per round
   // Gold both players get at the start of a round: 250 going into round 2, then 100 more each round (like Mechabellum)
   const incomeFor = (round) => INCOME + CONFIG.incomeStep * Math.max(0, round - 2);
   const deploysAllowed = (m, side) => CONFIG.deployCap
@@ -141,7 +141,7 @@ const Game = (() => {
   // what the altar sells, cheapest first
   const ALTAR = [
     { id: 'walls', name: 'Ice walls', text: `Ice walls rise around your tower for this round’s fight. Each of the 4 walls blocks the first 10 hits coming from its side.` },
-    { id: 'push', name: 'Push the hailstorm', text: `Moves the storm band 2 rows toward your opponent for the rest of the match, starting with the next hailstorm. Your opponent can push it back.` },
+    { id: 'push', name: 'Push the hailstorm', text: `Moves the storm band 2 rows toward your opponent for the rest of the match, starting with the next hailstorm. Buy it as many times as you like. Your opponent can push it back.`, repeat: true },
     { id: 'snowgre', name: 'Summon a Snowgre', text: 'A white golem made of snow joins your army for the rest of the match. It stands in your half of no man’s land at the start of every fight and doesn’t mind hail. The first is 25% as strong as an Ether Golem, and each one after is twice as strong as the last.' },
   ];
   // the Ether Golem a Snowgre is modelled on (taken from the roster when it has one)
@@ -168,12 +168,18 @@ const Game = (() => {
     return out;
   }
   const altarBase = (m, side, type) => type === 'snowgre' ? ICE.costs.snowgre + ICE.snowStep * altarBuys(m).filter(b => b.side === side && b.type === 'snowgre' && b.round < m.round).length : ICE.costs[type];
-  // an offering's price for a player: what they paid if they bought it this round, else what it costs them now
+  const altarRepeat = (type) => !!(ALTAR.find(a => a.id === type) || {}).repeat; // the push can be bought any number of times a round
+  const altarCount = (m, side, type) => altarBuys(m).filter(b => b.side === side && b.type === type && b.round === m.round).length;
+  // an offering's price for a player: what they paid if they bought it this round, else (or for one more push) what it costs them now
   const altarCost = (m, side, type) => {
     const c = altarBase(m, side, type);
     if (c == null) return c;
-    return (altarBought(m, side, type) ? isMapFree(m, side, { kind: 'altar', type }) : mapFreeLeft(m, side)) ? 0 : c;
+    return (altarBought(m, side, type) && !altarRepeat(type) ? isMapFree(m, side, { kind: 'altar', type }) : mapFreeLeft(m, side)) ? 0 : c;
   };
+  // what taking back this round's last one of an offering gives back (Blixten's free one gives nothing)
+  const altarRefund = (m, side, type) => { const n = altarCount(m, side, type); return !n || (n === 1 && isMapFree(m, side, { kind: 'altar', type })) ? 0 : altarBase(m, side, type); };
+  // whether one more push would still move the band: it stops at the edge of the opponent's zone
+  const pushRoom = (m, side) => { const off = stormShift(m, m.round + 1); return side === 0 ? off < ZONE : off > -ZONE; };
   const altarBought = (m, side, type) => altarBuys(m).some(b => b.side === side && b.type === type && b.round === m.round);
   // a Snowgre's spot: a random tile in its owner's half of no man's land, picked when it is summoned
   function snowSpot(m, side, k) {
@@ -183,7 +189,8 @@ const Game = (() => {
   }
   // add a purchase without paying (paying is buyAltar's job; the host also uses this for the guest's purchases)
   function addAltar(m, side, type) {
-    if (!altarRound(m) || !ALTAR.some(a => a.id === type) || altarBought(m, side, type)) return false;
+    if (!altarRound(m) || !ALTAR.some(a => a.id === type) || (altarBought(m, side, type) && !altarRepeat(type))) return false;
+    if (type === 'push' && !pushRoom(m, side)) return false;
     if (!m.altar) m.altar = [];
     const b = { side, round: m.round, type };
     if (type === 'snowgre') { const k = altarBuys(m).filter(x => x.side === side && x.type === 'snowgre').length; Object.assign(b, snowSpot(m, side, k)); }
@@ -200,9 +207,9 @@ const Game = (() => {
   }
   // take back a purchase made this round, for a full refund
   function undoAltar(m, side, type) {
-    const i = altarBuys(m).findIndex(b => b.side === side && b.type === type && b.round === m.round);
+    const i = altarBuys(m).map(b => b.side === side && b.type === type && b.round === m.round).lastIndexOf(true);
     if (i < 0) return false;
-    const cost = altarCost(m, side, type), wasFree = isMapFree(m, side, { kind: 'altar', type });
+    const cost = altarRefund(m, side, type), wasFree = altarCount(m, side, type) === 1 && isMapFree(m, side, { kind: 'altar', type });
     m.altar.splice(i, 1);
     m.gold[side] += cost;
     if (wasFree) passMapFree(m, side);
@@ -614,8 +621,9 @@ const Game = (() => {
     return v;
   }
 
+  const canBuyDeploy = (m, side) => CONFIG.deployCap && m.extraDeploys[side] < CONFIG.maxExtraDeploys && m.gold[side] >= CONFIG.extraDeployCost;
   function buyDeploy(m, side) {
-    if (!CONFIG.deployCap || m.gold[side] < CONFIG.extraDeployCost) return false;
+    if (!canBuyDeploy(m, side)) return false;
     m.gold[side] -= CONFIG.extraDeployCost;
     m.extraDeploys[side]++;
     return true;
@@ -1071,14 +1079,14 @@ const Game = (() => {
     MAX_ROUND_DMG, seenAt, movedId, canMove, moveSquad, undoMove,
     COLS, ROWS, TILE, ZONE, START_HP, START_GOLD, INCOME, incomeFor, LOSER_BONUS, SQUAD_COST, SQUAD_POINTS, SETTINGS, XP_STEPS, xpNeeded, unitCostOf,
     levelCost, isReady, levelUp, undoLevel, aiLevel, AI, CONFIG,
-    deploysAllowed, deploysLeft, deployedThisRound, buyDeploy, refundDeploy,
+    deploysAllowed, deploysLeft, deployedThisRound, canBuyDeploy, buyDeploy, refundDeploy,
     PACKAGE, allPackages, packOf, needsPack, freeLeft, choosePack, ensurePack,
     unlockCost, tierOf, startLevel, shopCost, mapFreeOf, mapFreeLeft, isUnlocked, unlockVisible, unlock, undoUnlock,
     skillDef, skillCost, isInnate, hasSkill, skillVisible, unitFor, canBuySkill, buySkill, undoSkill, sellValue, sell,
     isRider, hiddenFromFoe, isCarrier, riderOf, carrierOf, squadAt, boardable, unplaceSquad,
     TOWER, TOWER_TYPES, OUTPOST, TOWER_PICK_ROUND, towerType, towerChoices, needsTowerPick, setTowerType, settleTowerPicks, TOWER_SKILL, towerSkillOf, towerSkillVisible, towerPicked, canBuyTowerSkill, buyTowerSkill, undoTowerSkill, TOWER_MID, towerColOk, towerAt, needsTower, placeTower, ensureTower,
     FLANK, flankRows, flankOpen, isFlank, reserved, canPlaceAt, enemyHolds, inNoMans, hasSkillType,
-    ICE, ALTAR, GOLEM, isIce, hailRound, altarRound, stormShift, stormRows, hailTiles, altarCost, altarBought, addAltar, buyAltar, undoAltar, snowgres, snowgreUnit,
+    ICE, ALTAR, GOLEM, isIce, hailRound, altarRound, stormShift, stormRows, hailTiles, altarCost, altarRefund, altarCount, pushRoom, altarBought, addAltar, buyAltar, undoAltar, snowgres, snowgreUnit,
     MAPS, ELF_TOWER, SHROOM, SHROOM_SPLIT, shroomAt, shroomTileAt, shroomRemoval, SHROOM_REMOVE, shroomCost, removeShroom, undoRemoveShroom, mapOf, elfSpot, rollMap, BRIBE_COST, bribeList, bribeGold, bribeCount, bribeNow, bribeCost, bribeRefund, ELF_POWER, elfPowered, elfUnit, ELF_OWN, elfOwnCost, elfOwnOf, elfOwnAt, elfOwnUnlocked, elfOwnOffered, canBuyElfOwn, elfOwnSpotOk, buyElfOwn, undoElfOwn, bribeLeader, canBribe, bribe, undoBribe,
     CHARACTERS, CHAR, charOf, charInfo, isTier1, rollBuffTiles, onBuffTile, TOWER_SPOT, towerSpot,
     zoneRows, inZone, tileToWorld, createMatch, place, unplace, bodiesFor, startBattle, resolve, aiDeploy, occupied,

@@ -1413,7 +1413,7 @@ const Game = (() => {
   const XP_STEPS = [5, 12, 24];
   const xpNeeded = (unit, level) => unit.bodies * unit.hp * XP_STEPS[level];
   // deployments: how many new squads a side may place per round; extra ones can be bought for the round
-  const CONFIG = { incomeStep: 100, levelCostPerTier: 50, firstRoundDeploys: 3, deploysPerRound: 2, extraDeployCost: 50, deployCap: true, moveCost: 50 };
+  const CONFIG = { incomeStep: 100, levelCostPerTier: 50, firstRoundDeploys: 3, deploysPerRound: 2, extraDeployCost: 50, maxExtraDeploys: 1, deployCap: true, moveCost: 50 }; // maxExtraDeploys: per round
   // Gold both players get at the start of a round: 250 going into round 2, then 100 more each round (like Mechabellum)
   const incomeFor = (round) => INCOME + CONFIG.incomeStep * Math.max(0, round - 2);
   const deploysAllowed = (m, side) => CONFIG.deployCap
@@ -1543,7 +1543,7 @@ const Game = (() => {
   // what the altar sells, cheapest first
   const ALTAR = [
     { id: 'walls', name: 'Ice walls', text: `Ice walls rise around your tower for this round’s fight. Each of the 4 walls blocks the first 10 hits coming from its side.` },
-    { id: 'push', name: 'Push the hailstorm', text: `Moves the storm band 2 rows toward your opponent for the rest of the match, starting with the next hailstorm. Your opponent can push it back.` },
+    { id: 'push', name: 'Push the hailstorm', text: `Moves the storm band 2 rows toward your opponent for the rest of the match, starting with the next hailstorm. Buy it as many times as you like. Your opponent can push it back.`, repeat: true },
     { id: 'snowgre', name: 'Summon a Snowgre', text: 'A white golem made of snow joins your army for the rest of the match. It stands in your half of no man’s land at the start of every fight and doesn’t mind hail. The first is 25% as strong as an Ether Golem, and each one after is twice as strong as the last.' },
   ];
   // the Ether Golem a Snowgre is modelled on (taken from the roster when it has one)
@@ -1570,12 +1570,18 @@ const Game = (() => {
     return out;
   }
   const altarBase = (m, side, type) => type === 'snowgre' ? ICE.costs.snowgre + ICE.snowStep * altarBuys(m).filter(b => b.side === side && b.type === 'snowgre' && b.round < m.round).length : ICE.costs[type];
-  // an offering's price for a player: what they paid if they bought it this round, else what it costs them now
+  const altarRepeat = (type) => !!(ALTAR.find(a => a.id === type) || {}).repeat; // the push can be bought any number of times a round
+  const altarCount = (m, side, type) => altarBuys(m).filter(b => b.side === side && b.type === type && b.round === m.round).length;
+  // an offering's price for a player: what they paid if they bought it this round, else (or for one more push) what it costs them now
   const altarCost = (m, side, type) => {
     const c = altarBase(m, side, type);
     if (c == null) return c;
-    return (altarBought(m, side, type) ? isMapFree(m, side, { kind: 'altar', type }) : mapFreeLeft(m, side)) ? 0 : c;
+    return (altarBought(m, side, type) && !altarRepeat(type) ? isMapFree(m, side, { kind: 'altar', type }) : mapFreeLeft(m, side)) ? 0 : c;
   };
+  // what taking back this round's last one of an offering gives back (Blixten's free one gives nothing)
+  const altarRefund = (m, side, type) => { const n = altarCount(m, side, type); return !n || (n === 1 && isMapFree(m, side, { kind: 'altar', type })) ? 0 : altarBase(m, side, type); };
+  // whether one more push would still move the band: it stops at the edge of the opponent's zone
+  const pushRoom = (m, side) => { const off = stormShift(m, m.round + 1); return side === 0 ? off < ZONE : off > -ZONE; };
   const altarBought = (m, side, type) => altarBuys(m).some(b => b.side === side && b.type === type && b.round === m.round);
   // a Snowgre's spot: a random tile in its owner's half of no man's land, picked when it is summoned
   function snowSpot(m, side, k) {
@@ -1585,7 +1591,8 @@ const Game = (() => {
   }
   // add a purchase without paying (paying is buyAltar's job; the host also uses this for the guest's purchases)
   function addAltar(m, side, type) {
-    if (!altarRound(m) || !ALTAR.some(a => a.id === type) || altarBought(m, side, type)) return false;
+    if (!altarRound(m) || !ALTAR.some(a => a.id === type) || (altarBought(m, side, type) && !altarRepeat(type))) return false;
+    if (type === 'push' && !pushRoom(m, side)) return false;
     if (!m.altar) m.altar = [];
     const b = { side, round: m.round, type };
     if (type === 'snowgre') { const k = altarBuys(m).filter(x => x.side === side && x.type === 'snowgre').length; Object.assign(b, snowSpot(m, side, k)); }
@@ -1602,9 +1609,9 @@ const Game = (() => {
   }
   // take back a purchase made this round, for a full refund
   function undoAltar(m, side, type) {
-    const i = altarBuys(m).findIndex(b => b.side === side && b.type === type && b.round === m.round);
+    const i = altarBuys(m).map(b => b.side === side && b.type === type && b.round === m.round).lastIndexOf(true);
     if (i < 0) return false;
-    const cost = altarCost(m, side, type), wasFree = isMapFree(m, side, { kind: 'altar', type });
+    const cost = altarRefund(m, side, type), wasFree = altarCount(m, side, type) === 1 && isMapFree(m, side, { kind: 'altar', type });
     m.altar.splice(i, 1);
     m.gold[side] += cost;
     if (wasFree) passMapFree(m, side);
@@ -2016,8 +2023,9 @@ const Game = (() => {
     return v;
   }
 
+  const canBuyDeploy = (m, side) => CONFIG.deployCap && m.extraDeploys[side] < CONFIG.maxExtraDeploys && m.gold[side] >= CONFIG.extraDeployCost;
   function buyDeploy(m, side) {
-    if (!CONFIG.deployCap || m.gold[side] < CONFIG.extraDeployCost) return false;
+    if (!canBuyDeploy(m, side)) return false;
     m.gold[side] -= CONFIG.extraDeployCost;
     m.extraDeploys[side]++;
     return true;
@@ -2473,14 +2481,14 @@ const Game = (() => {
     MAX_ROUND_DMG, seenAt, movedId, canMove, moveSquad, undoMove,
     COLS, ROWS, TILE, ZONE, START_HP, START_GOLD, INCOME, incomeFor, LOSER_BONUS, SQUAD_COST, SQUAD_POINTS, SETTINGS, XP_STEPS, xpNeeded, unitCostOf,
     levelCost, isReady, levelUp, undoLevel, aiLevel, AI, CONFIG,
-    deploysAllowed, deploysLeft, deployedThisRound, buyDeploy, refundDeploy,
+    deploysAllowed, deploysLeft, deployedThisRound, canBuyDeploy, buyDeploy, refundDeploy,
     PACKAGE, allPackages, packOf, needsPack, freeLeft, choosePack, ensurePack,
     unlockCost, tierOf, startLevel, shopCost, mapFreeOf, mapFreeLeft, isUnlocked, unlockVisible, unlock, undoUnlock,
     skillDef, skillCost, isInnate, hasSkill, skillVisible, unitFor, canBuySkill, buySkill, undoSkill, sellValue, sell,
     isRider, hiddenFromFoe, isCarrier, riderOf, carrierOf, squadAt, boardable, unplaceSquad,
     TOWER, TOWER_TYPES, OUTPOST, TOWER_PICK_ROUND, towerType, towerChoices, needsTowerPick, setTowerType, settleTowerPicks, TOWER_SKILL, towerSkillOf, towerSkillVisible, towerPicked, canBuyTowerSkill, buyTowerSkill, undoTowerSkill, TOWER_MID, towerColOk, towerAt, needsTower, placeTower, ensureTower,
     FLANK, flankRows, flankOpen, isFlank, reserved, canPlaceAt, enemyHolds, inNoMans, hasSkillType,
-    ICE, ALTAR, GOLEM, isIce, hailRound, altarRound, stormShift, stormRows, hailTiles, altarCost, altarBought, addAltar, buyAltar, undoAltar, snowgres, snowgreUnit,
+    ICE, ALTAR, GOLEM, isIce, hailRound, altarRound, stormShift, stormRows, hailTiles, altarCost, altarRefund, altarCount, pushRoom, altarBought, addAltar, buyAltar, undoAltar, snowgres, snowgreUnit,
     MAPS, ELF_TOWER, SHROOM, SHROOM_SPLIT, shroomAt, shroomTileAt, shroomRemoval, SHROOM_REMOVE, shroomCost, removeShroom, undoRemoveShroom, mapOf, elfSpot, rollMap, BRIBE_COST, bribeList, bribeGold, bribeCount, bribeNow, bribeCost, bribeRefund, ELF_POWER, elfPowered, elfUnit, ELF_OWN, elfOwnCost, elfOwnOf, elfOwnAt, elfOwnUnlocked, elfOwnOffered, canBuyElfOwn, elfOwnSpotOk, buyElfOwn, undoElfOwn, bribeLeader, canBribe, bribe, undoBribe,
     CHARACTERS, CHAR, charOf, charInfo, isTier1, rollBuffTiles, onBuffTile, TOWER_SPOT, towerSpot,
     zoneRows, inZone, tileToWorld, createMatch, place, unplace, bodiesFor, startBattle, resolve, aiDeploy, occupied,
@@ -3067,14 +3075,24 @@ if (typeof module !== 'undefined') module.exports = Game;
       g.beginPath(); g.moveTo(-0.32, 0.22); g.lineTo(-0.34, -0.2); g.lineTo(-0.16, 0.0); g.lineTo(0, -0.28); g.lineTo(0.16, 0.0); g.lineTo(0.34, -0.2); g.lineTo(0.32, 0.22); g.closePath(); g.fill();
       g.fillRect(-0.32, 0.27, 0.64, 0.08); } },
   };
-  // edge: an outline colour (a team colour on the elf tower flags), drawn thicker
-  function drawArms(g, id, x, y, w, edge) {
+  function drawArms(g, id, x, y, w) {
     const a = ARMS[id]; if (!a) return;
     const shield = () => { g.beginPath(); g.moveTo(-0.5, -0.55); g.lineTo(0.5, -0.55); g.lineTo(0.5, 0.05); g.quadraticCurveTo(0.5, 0.45, 0, 0.65); g.quadraticCurveTo(-0.5, 0.45, -0.5, 0.05); g.closePath(); };
     g.save(); g.translate(x, y); g.scale(w, w);
     shield(); g.fillStyle = a.field; g.fill();
     g.save(); g.clip(); g.fillStyle = a.charge; g.strokeStyle = a.charge; a.draw(g); g.restore();
-    shield(); g.lineWidth = edge ? Math.max(0.16, 2 / w) : Math.max(0.09, 1 / w); g.strokeStyle = edge || '#15151B'; g.stroke();
+    shield(); g.lineWidth = Math.max(0.09, 1 / w); g.strokeStyle = '#15151B'; g.stroke();
+    g.restore();
+  }
+  // a coat of arms on a little swallowtailed flag flying right from (x, y) on a pole, w wide, edged in edge (a team colour)
+  function drawArmsFlag(g, id, x, y, w, edge) {
+    const a = ARMS[id]; if (!a) return;
+    const h = w * 0.68;
+    const flag = () => { g.beginPath(); g.moveTo(0, 0); g.quadraticCurveTo(w * 0.5, -h * 0.14, w, 0); g.lineTo(w * 0.8, h * 0.5); g.lineTo(w, h); g.quadraticCurveTo(w * 0.5, h * 0.86, 0, h); g.closePath(); };
+    g.save(); g.translate(x, y);
+    flag(); g.fillStyle = a.field; g.fill();
+    g.save(); g.clip(); g.translate(w * 0.4, h * 0.52); g.scale(h * 0.95, h * 0.95); g.fillStyle = a.charge; g.strokeStyle = a.charge; a.draw(g); g.restore();
+    flag(); g.lineWidth = Math.max(1, w * 0.09); g.lineJoin = 'round'; g.strokeStyle = edge; g.stroke();
     g.restore();
   }
   // a coat of arms as an image, for the character lines in the panels
@@ -3174,7 +3192,7 @@ if (typeof module !== 'undefined') module.exports = Game;
   // a player's coat of arms where this screen may show it (null while their character is hidden)
   const armsShown = (v, side) => charVisible(side) ? Game.charOf(v, side) : null;
   // one elf spire at (x, y), size s, its flag in flagCol. strong (after round 5): a golden glow and a gilded roof.
-  // arms: a character's coat of arms, flown as a shield edged in flagCol instead of the plain pennant
+  // arms: a character's coat of arms, flown on a flag edged in flagCol instead of the plain pennant
   function drawSpire(x, y, s, flagCol, strong, arms) {
     if (strong) {
       const gl = ctx.createRadialGradient(x, y - s * 0.1, 0, x, y - s * 0.1, s * 0.75);
@@ -3193,7 +3211,7 @@ if (typeof module !== 'undefined') module.exports = Game;
     const py = top - s * 0.3;
     ctx.strokeStyle = '#3F5A35'; ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(x, py); ctx.lineTo(x, py - s * 0.28); ctx.stroke();
-    if (arms) { drawArms(ctx, arms, x + s * 0.18, py - s * 0.2, Math.max(9, s * 0.28), flagCol); return; }
+    if (arms) { drawArmsFlag(ctx, arms, x, py - s * 0.28, Math.max(10, s * 0.3), flagCol); return; }
     ctx.fillStyle = flagCol;
     ctx.beginPath(); ctx.moveTo(x, py - s * 0.28); ctx.lineTo(x + s * 0.2, py - s * 0.23); ctx.lineTo(x, py - s * 0.18); ctx.closePath(); ctx.fill();
   }
@@ -3553,7 +3571,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
       hint = selected !== null
         ? (canBuy(selected) ? `Tap a tile in your zone${Game.flankOpen(m) ? ' or a flank tile in theirs' : ''} to place ${esc(units[selected].name)}.` : left <= 0 ? 'No deployments left this round.' : `Not enough gold for ${esc(units[selected].name)}.`)
         : (fresh ? 'Drag a squad you placed this round to move it, or tap it to take it back.' : 'Pick a unit, then tap a tile in the bottom six rows.');
-      if (left <= 0 && selected === null) hint = `No deployments left. Buy one more for ${Game.CONFIG.extraDeployCost} gold, or spend gold on upgrades.`;
+      if (left <= 0 && selected === null) hint = Game.canBuyDeploy(m, me) || m.extraDeploys[me] < Game.CONFIG.maxExtraDeploys ? `No deployments left. Buy one more for ${Game.CONFIG.extraDeployCost} gold (once per round), or spend gold on upgrades.` : 'No deployments left this round. Spend gold on upgrades.';
       if (readyN && selected === null) hint = `${readyN} squad${readyN === 1 ? ' is' : 's are'} ready to level up. Tap ${readyN === 1 ? 'it' : 'one'} to upgrade.`;
       if (Game.charOf(m, me) === 'zoe' && selected === null && (m.buff && m.buff[me] || []).length) hint += ` Starred tiles are your buff tiles this round: +${Game.CHAR.zoeDmg}% damage, +${Game.CHAR.zoeHp}% health and +${Game.CHAR.zoeAps}% attack speed for a squad that starts the fight there.`;
       if (Game.altarRound(m) && selected === null && !fresh) hint = 'The altar of ice has risen in the middle of the board. Tap it to buy ice walls, push the hailstorm or summon a Snowgre.';
@@ -3571,7 +3589,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
       if (placingTower()) hint = 'Next, place your tower: tap a gold tile on the left or right side of your zone. If it falls in a fight, your army is crippled for a few seconds.';
     }
     const extraBtns = `<span style="display:flex;gap:6px;flex-wrap:wrap">
-        <button class="btn small" id="buy-deploy" ${can && g >= Game.CONFIG.extraDeployCost ? '' : 'disabled'}>+1 deployment · ${Game.CONFIG.extraDeployCost}</button>
+        <button class="btn small" id="buy-deploy" ${can && Game.canBuyDeploy(m, me) ? '' : 'disabled'}>+1 deployment · ${Game.CONFIG.extraDeployCost}</button>
         ${can && m.extraDeploys[me] > 0 && left > 0 ? `<button class="btn small" id="refund-deploy">Refund unused</button>` : ''}
         ${Game.movedId(m, me) != null
           ? `<button class="btn small" id="undo-move" ${can ? '' : 'disabled'}>Undo move · +${Game.CONFIG.moveCost}</button>`
@@ -3713,7 +3731,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
             <li>Squads earn experience. A gold + means you can upgrade one: level 2 doubles health and attack, level 3 triples them.</li>
             <li>Some units start unlocked. The rest cost gold once to unlock for the match; tap a locked card.</li>
             <li>Each unit has three skills. Buy one and all your squads of that unit get it.</li>
-            <li>Extra deployments cost ${Game.CONFIG.extraDeployCost} gold. Tap a squad from an earlier round to sell it for half its worth: its price plus the upgrades it has.</li>`],
+            <li>You can buy one extra deployment per round for ${Game.CONFIG.extraDeployCost} gold. Tap a squad from an earlier round to sell it for half its worth: its price plus the upgrades it has.</li>`],
         ].map(([h, gist, body]) => `<details><summary><b>${h}</b><span>${gist}</span></summary><ul>${body}</ul></details>`).join('')}
       </div>
     </div>`);
@@ -4015,7 +4033,7 @@ RULES
 - The fight is automatic. Every body marches straight ahead in its own column until an enemy comes within its range + ${Game.SETTINGS.sight} m in any direction (at least ${Game.SETTINGS.minSight} m), then turns toward the nearest enemy and attacks once in range. Within ${Game.SETTINGS.drift} m beyond that it already starts curving toward the nearest enemy. Once no enemy is ahead of it, it turns toward the nearest one. So columns are lanes: a squad fights what stands in or near its lane, a squad in an empty lane far from the enemy walks past and hits the enemy from the side or behind, and long-range units in the back only get attacked once the front is gone. Short-range units in front shield long-range units behind. Spreading out limits splash damage.
 - The round's loser loses health: for each surviving enemy squad, 2 x (its price / 100), scaled by the share of its bodies alive. If time runs out, both sides take damage. A round costs the loser at most ${Game.MAX_ROUND_DMG} health. Health starts at ${Game.START_HP} and the match ends at 0.
 - Gold: both players get ${Game.incomeFor(2)} going into round 2, and ${Game.CONFIG.incomeStep} more every round after that (next round: +${Game.incomeFor(m.round + 1)}). The round's loser gets +${Game.LOSER_BONUS} extra. Unspent gold carries over.
-- This round you may place ${Game.deploysAllowed(m, 1)} new squad(s). Each extra deployment costs ${Game.CONFIG.extraDeployCost} gold.
+- This round you may place ${Game.deploysAllowed(m, 1)} new squad(s). You may buy ONE extra deployment per round for ${Game.CONFIG.extraDeployCost} gold.
 - Squads earn XP by dealing and taking damage. A squad marked READY TO LEVEL UP can be upgraded for its unit's level-up cost: level 2 doubles health and hit, level 3 triples them. Leveling up chaff (many cheap bodies) gives the enemy lots of XP when they die.
 ${Game.needsPack(m, 1) ? `- STARTING PACKAGE (round 1, choose first): add "package": N to your reply. Each one unlocks its two units for free and gives you its squads for free (no gold, no deployment); you place them with "place" like any squad, and any you leave out are placed for you. Your options:
 ${m.packages[1].map((p, k) => `  ${k}: ${p.squads.map(ui => units[ui].name).join(' + ')}${p.char ? ` with character ${Game.charInfo(p.char).name} (${Game.charInfo(p.char).ability})` : ''} (counter-table average of its units: ${p.units.map(ui => `${units[ui].name} ${Math.round(M[ui].reduce((a, b) => a + b, 0) / Math.max(1, units.length - 1) * 100)}`).join(', ')})`).join('\n')}
@@ -4055,7 +4073,7 @@ TOWERS
 - Their tower: ${m.round !== Game.TOWER_PICK_ROUND ? Game.towerType(m, 0).name + (Game.towerSkillVisible(m, 0) ? ` with "${Game.towerType(m, 0).skill.name}"` : '') + ', ' : 'type hidden until the fight, '}col ${m.towers[0].col}, row ${m.towers[0].row}.
 
 MAP
-${(() => { const mp = Game.mapOf(m), e = Game.elfSpot(m); return mp ? `- ${mp.name}: ${mp.text}${e ? ` The elf tower stands in column ${e.col}, on the line between rows ${Game.ROWS / 2 - 1} and ${Game.ROWS / 2}; it hits for ${Game.ELF_TOWER.hit}, ${Game.ELF_TOWER.aps} times a second, range ${Game.ELF_TOWER.range} m, and can't be attacked. Bribe-off: you can bribe any number of times per round ("bribe": number of bribes); the first bribe in a round costs ${Game.BRIBE_COST} gold and each further one that round ${Game.BRIBE_COST} more (${Game.BRIBE_COST}, ${2 * Game.BRIBE_COST}, ${3 * Game.BRIBE_COST}, ...). In every fight the tower sides with whoever has bribed it the most times (count, not gold) over the whole match: it never shoots their units, heals their wounded units near it for ${Game.ELF_TOWER.healHit} (x${mp.healMul || 1} on this map, ${Game.ELF_TOWER.healSplash} m splash) every ${Math.round(10 / Game.ELF_TOWER.healAps) / 10} s, and shoots only the other player's units. With totals level it shoots both sides. Totals are secret; you only see who was ahead after the last fight. ${Game.elfPowered(m) ? `From round ${Game.ELF_POWER.fromRound} on the elves hit and heal twice as hard (now ${Game.elfUnit(m).hit} damage, ${Game.elfUnit(m).healHit} heal).` : `After round ${Game.ELF_POWER.fromRound - 1} the elves hit and heal twice as hard.`} You have bribed ${Game.bribeCount(m, 1)} times (${Game.bribeGold(m, 1)} gold). ${Game.elfOwnOf(m, 1) ? `Your own elf tower stands at col ${Game.elfOwnOf(m, 1).col}, row ${Game.elfOwnOf(m, 1).row}.` : Game.elfOwnOffered(m, 1) ? `The elves now sell you one elf tower of your own for ${Game.elfOwnCost(m, 1)} gold ("elfTower":{"col":5,"row":2}, a free tile of your zone): permanent, can't be attacked, shoots only the opponent's units and heals yours.` : `Once ${Game.ELF_OWN.unlock} bribes have been paid in all (both players), each player who has bribed at least once (in an earlier round) can buy one elf tower of their own for ${Game.elfOwnCost(m, 1)} gold, from the next round on.${Game.elfOwnUnlocked(m) ? ' That point has been reached, but you have never bribed, so the elves sell you none until you do.' : ''}`} ${(() => { const l = Game.bribeLeader(m, true); return l < 0 ? 'After the last fight the bribe-off was level.' : l === 1 ? 'After the last fight you were ahead.' : 'After the last fight your opponent was ahead.'; })()}` : ''}${mp.ice ? ` Storm band rows now: ${Game.stormRows(m).join(', ')}.${Game.hailRound(m) ? ` Hail tiles this round: ${Game.hailTiles(m).map(h => `col ${h.col}, row ${h.row}`).join('; ')}.` : ''}${Game.altarRound(m) ? ` The altar of ice is up this round. "altar" can list any of: "walls" (${Game.altarCost(m, 1, 'walls')} gold: your tower's 4 walls each block the first ${Game.ICE.wallHits} hits from their side, this fight only), "push" (${Game.altarCost(m, 1, 'push')} gold: storm band moves ${Game.ICE.push} rows toward the opponent from the next hailstorm on), "snowgre" (${Game.altarCost(m, 1, 'snowgre')} gold: a permanent hail-immune Ether Golem at ${Math.round(Game.ICE.snowFirst * Math.pow(2, Game.snowgres(m, 1).length) * 100)}% strength, standing in your half of no man's land each fight).` : ''} Your Snowgres: ${Game.snowgres(m, 1).length}.` : ''}${mp.shrooms ? ` Removing a mushroom tile costs ${Game.shroomCost(m, 1)} gold ("removeTiles":[{"col":3,"row":6}]); it is gone from the next fight on. Mushroom tiles still there: ${(m.map.tiles || []).filter(x => Game.shroomAt(m, x.col, x.row)).map(x => `${x.type} at col ${x.col}, row ${x.row}`).join('; ')}.` : ''}` : '- No special map.'; })()}
+${(() => { const mp = Game.mapOf(m), e = Game.elfSpot(m); return mp ? `- ${mp.name}: ${mp.text}${e ? ` The elf tower stands in column ${e.col}, on the line between rows ${Game.ROWS / 2 - 1} and ${Game.ROWS / 2}; it hits for ${Game.ELF_TOWER.hit}, ${Game.ELF_TOWER.aps} times a second, range ${Game.ELF_TOWER.range} m, and can't be attacked. Bribe-off: you can bribe any number of times per round ("bribe": number of bribes); the first bribe in a round costs ${Game.BRIBE_COST} gold and each further one that round ${Game.BRIBE_COST} more (${Game.BRIBE_COST}, ${2 * Game.BRIBE_COST}, ${3 * Game.BRIBE_COST}, ...). In every fight the tower sides with whoever has bribed it the most times (count, not gold) over the whole match: it never shoots their units, heals their wounded units near it for ${Game.ELF_TOWER.healHit} (x${mp.healMul || 1} on this map, ${Game.ELF_TOWER.healSplash} m splash) every ${Math.round(10 / Game.ELF_TOWER.healAps) / 10} s, and shoots only the other player's units. With totals level it shoots both sides. Totals are secret; you only see who was ahead after the last fight. ${Game.elfPowered(m) ? `From round ${Game.ELF_POWER.fromRound} on the elves hit and heal twice as hard (now ${Game.elfUnit(m).hit} damage, ${Game.elfUnit(m).healHit} heal).` : `After round ${Game.ELF_POWER.fromRound - 1} the elves hit and heal twice as hard.`} You have bribed ${Game.bribeCount(m, 1)} times (${Game.bribeGold(m, 1)} gold). ${Game.elfOwnOf(m, 1) ? `Your own elf tower stands at col ${Game.elfOwnOf(m, 1).col}, row ${Game.elfOwnOf(m, 1).row}.` : Game.elfOwnOffered(m, 1) ? `The elves now sell you one elf tower of your own for ${Game.elfOwnCost(m, 1)} gold ("elfTower":{"col":5,"row":2}, a free tile of your zone): permanent, can't be attacked, shoots only the opponent's units and heals yours.` : `Once ${Game.ELF_OWN.unlock} bribes have been paid in all (both players), each player who has bribed at least once (in an earlier round) can buy one elf tower of their own for ${Game.elfOwnCost(m, 1)} gold, from the next round on.${Game.elfOwnUnlocked(m) ? ' That point has been reached, but you have never bribed, so the elves sell you none until you do.' : ''}`} ${(() => { const l = Game.bribeLeader(m, true); return l < 0 ? 'After the last fight the bribe-off was level.' : l === 1 ? 'After the last fight you were ahead.' : 'After the last fight your opponent was ahead.'; })()}` : ''}${mp.ice ? ` Storm band rows now: ${Game.stormRows(m).join(', ')}.${Game.hailRound(m) ? ` Hail tiles this round: ${Game.hailTiles(m).map(h => `col ${h.col}, row ${h.row}`).join('; ')}.` : ''}${Game.altarRound(m) ? ` The altar of ice is up this round. "altar" can list any of: "walls" (${Game.altarCost(m, 1, 'walls')} gold: your tower's 4 walls each block the first ${Game.ICE.wallHits} hits from their side, this fight only), "push" (${Game.altarCost(m, 1, 'push')} gold: storm band moves ${Game.ICE.push} rows toward the opponent from the next hailstorm on; list it more than once to push further), "snowgre" (${Game.altarCost(m, 1, 'snowgre')} gold: a permanent hail-immune Ether Golem at ${Math.round(Game.ICE.snowFirst * Math.pow(2, Game.snowgres(m, 1).length) * 100)}% strength, standing in your half of no man's land each fight).` : ''} Your Snowgres: ${Game.snowgres(m, 1).length}.` : ''}${mp.shrooms ? ` Removing a mushroom tile costs ${Game.shroomCost(m, 1)} gold ("removeTiles":[{"col":3,"row":6}]); it is gone from the next fight on. Mushroom tiles still there: ${(m.map.tiles || []).filter(x => Game.shroomAt(m, x.col, x.row)).map(x => `${x.type} at col ${x.col}, row ${x.row}`).join('; ')}.` : ''}` : '- No special map.'; })()}
 
 CHARACTERS (each package comes with one; its ability lasts the whole match)
 - Yours: ${Game.charOf(m, 1) ? `${Game.charInfo(Game.charOf(m, 1)).name}: ${Game.charInfo(Game.charOf(m, 1)).ability}` : 'the one that comes with the package you pick'}${Game.charOf(m, 1) === 'zoe' ? ` Your buff tiles this round: ${(m.buff[1] || []).map(t => `col ${t.col}, row ${t.row}`).join('; ')}. A squad that starts the fight on one keeps the bonus all fight, even after it moves.` : ''}
@@ -4108,7 +4126,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (mv.elfTower && typeof mv.elfTower === 'object' && Game.buyElfOwn(m, 1, int(mv.elfTower.col), int(mv.elfTower.row))) did.push(`placed an elf tower at col ${int(mv.elfTower.col)}, row ${int(mv.elfTower.row)}`);
     for (const a of list(mv.altar)) if (Game.buyAltar(m, 1, String(a))) did.push({ walls: 'raised ice walls', push: 'pushed the hailstorm', snowgre: 'summoned a Snowgre' }[a]);
     for (const q of list(mv.removeTiles)) if (q && Game.removeShroom(m, 1, int(q.col), int(q.row))) did.push(`removed the ${Game.shroomTileAt(m, int(q.col), int(q.row)).type} mushroom at col ${int(q.col)}, row ${int(q.row)}`);
-    const extra = Math.max(0, Math.min(3, int(mv.extraDeployments) || 0));
+    const extra = Math.max(0, Math.min(Game.CONFIG.maxExtraDeploys, int(mv.extraDeployments) || 0));
     for (let k = 0; k < extra; k++) Game.buyDeploy(m, 1);
     if (mv.move && typeof mv.move === 'object') {
       const sq = m.armies[1].find(s => s.id === int(mv.move.id) && s.round < m.round);
@@ -4429,24 +4447,25 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if ($('shroom-rm')) $('shroom-rm').addEventListener('click', () => { if (editable() && Game.removeShroom(m, me, col, row)) { changed(); reopen(); } });
     if ($('shroom-undo')) $('shroom-undo').addEventListener('click', () => { if (editable() && Game.undoRemoveShroom(m, me, col, row)) { changed(); reopen(); } });
   }
-  // the altar of ice: three purchases, cheapest first, each once per altar round
+  // the altar of ice: three purchases, cheapest first; walls and a Snowgre once per altar round, the push as often as you like
   function openAltarSheet() {
     if (phase !== 'deploy' || !Game.altarRound(m)) return; // the altar is only open while deploying
     // where the band stands now (pushes from earlier rounds; an opponent's push this round stays hidden), toward the opponent = positive
-    const off = Game.stormShift(m, m.round) * (me === 0 ? 1 : -1) + (Game.altarBought(m, me, 'push') ? Game.ICE.push : 0);
+    const off = Game.stormShift(m, m.round) * (me === 0 ? 1 : -1) + Game.altarCount(m, me, 'push') * Game.ICE.push;
     const nSnow = (m.altar || []).filter(b => b.side === me && b.type === 'snowgre' && b.round < m.round).length;
     const strength = Math.round(Game.ICE.snowFirst * Math.pow(2, nSnow) * 100);
     const extra = { walls: '', push: `The storm band is ${off === 0 ? 'in no man’s land' : `${Math.abs(off)} rows toward ${off > 0 ? esc(foeName()) : 'you'}`}.`, snowgre: `Your next Snowgre: ${strength}% as strong as an Ether Golem.${nSnow ? ` You have ${nSnow}.` : ''}` };
     $('sheet').innerHTML = `
       <div class="bar"><h3 id="sheet-h">Altar of ice</h3><button class="btn small" id="close">Close</button></div>
-      <p class="role" style="margin:0">The altar rises every even round. Each offering can be bought once per altar round, and your opponent doesn’t see what you bought until the fight.</p>
+      <p class="role" style="margin:0">The altar rises every even round. Ice walls and a Snowgre can be bought once per altar round, the push as often as you like, and your opponent doesn’t see what you bought until the fight.</p>
       ${Game.ALTAR.map(a => {
-        const bought = Game.altarBought(m, me, a.id), cost = Game.altarCost(m, me, a.id);
+        const n = Game.altarCount(m, me, a.id), cost = Game.altarCost(m, me, a.id), room = a.id !== 'push' || Game.pushRoom(m, me);
+        const buy = `<button class="btn primary" data-altar="${a.id}" ${editable() && m.gold[me] >= cost && room ? '' : 'disabled'}>${!room ? 'The storm is at the edge' : m.gold[me] >= cost ? `Buy${n ? ' another' : ''} · ${cost} gold` : `Need ${cost} gold`}</button>`;
         return `<div class="confirm" style="border-color:var(--line)">
           <b>${esc(a.name)} · ${cost} gold</b>
           <span class="hint">${esc(a.text)} ${extra[a.id]}</span>
-          ${bought ? `<div class="bar"><span class="hint" style="color:var(--you)">Bought this round.</span><button class="btn small" data-unaltar="${a.id}" ${editable() ? '' : 'disabled'}>Take it back · +${cost}</button></div>`
-            : `<button class="btn primary" data-altar="${a.id}" ${editable() && m.gold[me] >= cost ? '' : 'disabled'}>${m.gold[me] >= cost ? `Buy · ${cost} gold` : `Need ${cost} gold`}</button>`}
+          ${n ? `<div class="bar"><span class="hint" style="color:var(--you)">Bought this round${n > 1 ? ` ×${n}` : ''}.</span><button class="btn small" data-unaltar="${a.id}" ${editable() ? '' : 'disabled'}>Take ${n > 1 ? 'one' : 'it'} back · +${Game.altarRefund(m, me, a.id)}</button></div>` : ''}
+          ${!n || a.repeat ? buy : ''}
         </div>`;
       }).join('')}`;
     $('sheet-back').hidden = false;
@@ -4923,7 +4942,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     m.moved[1] = null;
     for (const q of m.armies[1]) if (q.movedRound === m.round) { if (m.moved[1] == null) m.moved[1] = q.id; else { delete q.from; delete q.movedRound; } }
     m.gold[1] = Math.max(0, +d.gold || 0);
-    m.extraDeploys[1] = Math.max(0, d.extra | 0);
+    m.extraDeploys[1] = Math.max(0, Math.min(Game.CONFIG.maxExtraDeploys, d.extra | 0));
     m.nextId[1] = Math.max(m.nextId[1], d.nextId | 0);
     ready[1] = !!d.ready;
     // the guest's package: picked once in round 1; package squads beyond what it holds are dropped
@@ -4953,7 +4972,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     }
     // the guest's altar purchases this round (gold was checked on their side; Snowgre spots are worked out here)
     if (m.altar) m.altar = m.altar.filter(x => !(x.side === 1 && x.round === m.round));
-    if (Array.isArray(d.altar)) for (const type of d.altar.slice(0, 3)) Game.addAltar(m, 1, String(type));
+    if (Array.isArray(d.altar)) for (const type of d.altar.slice(0, 20)) Game.addAltar(m, 1, String(type));
     // the guest's mushroom tile removals this round (gold was checked on their side)
     if (m.map && Game.mapOf(m) && Game.mapOf(m).shrooms) {
       m.map.removed = (m.map.removed || []).filter(x => !(x.side === 1 && x.round === m.round));
