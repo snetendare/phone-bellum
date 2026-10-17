@@ -39,6 +39,8 @@ const Game = (() => {
       skill: { name: 'Eagle eye', text: 'The sniper tower and all your Sniper squads get +3 m range and +10% attack speed.' } },
     { id: 'bastion', name: 'Bastion', text: 'Much tougher, with a shorter, slower attack that splashes the units around its target.', unit: { ...TOWER, name: 'Bastion', kind: 'bastion', hp: 1000, aps: 0.8, range: 5, splash: 2, color: '#B79C8A' },
       skill: { name: 'Home ground', text: 'In fights, your units get +2 armor and +10% health while they stand in your own zone. They lose it in no man’s land and get it back if they return.' } },
+    { id: 'mage', name: 'Mage tower', text: 'A small sun-priest beam: it locks onto one enemy and hits harder and faster the longer it stays on it. Slow against swarms, but melts big units after a few seconds.', unit: { ...TOWER, name: 'Mage Tower', kind: 'mage', hit: 14, aps: 1.5, range: 12, spinUp: 50, spinHit: 50, color: '#A493DE' },
+      generals: true }, // no once-per-match skill: a mage general can be called every round instead (MAGE_GENERALS)
   ];
   // a picked type, or the Outpost until the pick is made (a match saved without a pick past it gets the Keep)
   const towerType = (m, side) => {
@@ -68,7 +70,7 @@ const Game = (() => {
   const towerSkillOf = (m, side) => !!(m && m.towerSkill && m.towerSkill[side] > 0);
   const towerSkillVisible = (m, side) => towerSkillOf(m, side) && m.towerSkill[side] < m.round;
   const towerPicked = (m, side) => !!(m && m.round >= TOWER_PICK_ROUND && m.towers && m.towers[side] && m.towers[side].type);
-  const canBuyTowerSkill = (m, side) => towerPicked(m, side) && !towerSkillOf(m, side) && m.gold[side] >= TOWER_SKILL.cost;
+  const canBuyTowerSkill = (m, side) => towerPicked(m, side) && !!towerType(m, side).skill && !towerSkillOf(m, side) && m.gold[side] >= TOWER_SKILL.cost;
   function buyTowerSkill(m, side) {
     if (!canBuyTowerSkill(m, side)) return false;
     if (!m.towerSkill) m.towerSkill = [0, 0];
@@ -81,6 +83,45 @@ const Game = (() => {
     m.towerSkill[side] = 0;
     m.gold[side] += TOWER_SKILL.cost;
     return true;
+  }
+  // Mage tower: each round its owner may call one mage general, who swaps the tower's attack for that round's fight
+  // only. m.mageGen[side] = { round, id }; it counts only in the round it was bought. Hidden from the opponent until the fight.
+  const MAGE_GENERALS = [
+    { id: 'meteor', name: 'Meteor mage general', cost: 100, text: 'The tower calls down meteors like a Meteor Caller, with its range and minimum range, but at 25% of its damage and half its fire rate.' },
+    { id: 'lightning', name: 'Lightning mage general', cost: 50, text: 'Lightning at the tower’s normal range: 100 damage to the first enemy, then it jumps up to 5 times to the nearest enemy not hit yet within 6 m, for 60 each.' },
+    { id: 'water', name: 'Water mage general', cost: 50, text: 'The tower stops attacking and heals instead: 100 health to your most wounded unit within 40 m, 0.8 times a second.' },
+  ];
+  const MAGE = { meteorHit: 25, meteorAps: 50, boltHit: 100, boltAps: 0.8, jumps: 5, jumpHit: 60, jumpReach: 6, waterHeal: 100, waterAps: 0.8, waterRange: 40 };
+  const METEOR = { hit: 114, aps: 0.3, range: 50, minRange: 12, burst: 3, splash: 6, windUp: 2, projSpeed: 22 }; // used when the roster has no Meteor Caller
+  const mageGenInfo = (id) => MAGE_GENERALS.find(x => x.id === id) || null;
+  const mageGenOf = (m, side) => { const g = m && m.mageGen && m.mageGen[side]; return g && g.round === m.round && towerType(m, side).id === 'mage' ? g.id : null; };
+  const mageGenCost = (id) => (mageGenInfo(id) || {}).cost || 0;
+  // what calling id costs right now: a general already called this round is swapped out and paid back
+  const canBuyMageGen = (m, side, id) => !!mageGenInfo(id) && towerPicked(m, side) && towerType(m, side).id === 'mage' && mageGenOf(m, side) !== id && m.gold[side] + mageGenCost(mageGenOf(m, side)) >= mageGenCost(id);
+  function buyMageGen(m, side, id) {
+    if (!canBuyMageGen(m, side, id)) return false;
+    undoMageGen(m, side);
+    if (!m.mageGen) m.mageGen = [null, null];
+    m.gold[side] -= mageGenCost(id);
+    m.mageGen[side] = { round: m.round, id };
+    return true;
+  }
+  function undoMageGen(m, side) {
+    const id = mageGenOf(m, side); if (!id) return false;
+    m.gold[side] += mageGenCost(id);
+    m.mageGen[side] = null;
+    return true;
+  }
+  // the tower's unit for this round's fight, with a mage general's attack if one was called
+  function mageTowerUnit(m, side, base) {
+    const id = mageGenOf(m, side), plain = { ...base, spinUp: 0, spinHit: 0 };
+    if (id === 'meteor') {
+      const mc = (m.units || []).find(x => x && x.name === 'Meteor Caller') || METEOR;
+      return { ...plain, hit: mc.hit * MAGE.meteorHit / 100, aps: mc.aps * MAGE.meteorAps / 100, range: mc.range, minRange: mc.minRange || 0, burst: mc.burst || 1, splash: mc.splash || 0, windUp: mc.windUp || 0, projSpeed: mc.projSpeed || 0, general: id };
+    }
+    if (id === 'lightning') return { ...plain, hit: MAGE.boltHit, aps: MAGE.boltAps, chain: { jumps: MAGE.jumps, hit: MAGE.jumpHit, reach: MAGE.jumpReach }, general: id };
+    if (id === 'water') return { ...plain, hit: 0, mend: MAGE.waterHeal, aps: MAGE.waterAps, range: MAGE.waterRange, general: id };
+    return base;
   }
   // the skill in force for a fight: the tower's type and whether it was bought
   const towerSkillOn = (m, side, id) => towerSkillOf(m, side) && towerType(m, side).id === id;
@@ -526,6 +567,7 @@ const Game = (() => {
       bribe: [[], []], // the round of each bribe each player paid the elves (see the bribe-off)
       elfOwn: [null, null], // each player's own elf tower: { col, row, round bought }
       towerSkill: [0, 0], // round each player bought their tower's skill in (0 = not bought)
+      mageGen: [null, null], // the mage general each player called this round: { round, id } (Mage tower)
       mapFree: [{}, {}], // Blixten's free map purchase per round (see mapFreeOf)
     };
     m.towers = [towerSpot(m, 0), towerSpot(m, 1)];
@@ -790,7 +832,7 @@ const Game = (() => {
     }
     const t = m.towers && m.towers[side];
     if (t) {
-      let tu = towerType(m, side).unit;
+      let tu = mageTowerUnit(m, side, towerType(m, side).unit);
       if (eagle) tu = { ...tu, range: tu.range + TOWER_SKILL.eagleRange, aps: tu.aps * (1 + TOWER_SKILL.eagleAps / 100) };
       const w = tileToWorld(t.col, t.row), tb = E.buildSquad(tu, side, w.x, w.y, -2, TILE, idx);
       if (altarBought(m, side, 'walls')) for (const x of tb) x.walls = [ICE.wallHits, ICE.wallHits, ICE.wallHits, ICE.wallHits];
@@ -1007,6 +1049,10 @@ const Game = (() => {
     }
     if (needsTowerPick(m, side)) { const ch = towerChoices(m, side); setTowerType(m, side, ch[Math.floor(rng(m.seed + side * 7477)() * ch.length)].id); } // own stream: the rest of the AI rolls stay as they were
     if (canBuyTowerSkill(m, side) && rng(m.seed + m.round * 331 + side * 17)() < 0.5) buyTowerSkill(m, side); // own stream, as above
+    if (towerPicked(m, side) && towerType(m, side).id === 'mage') { // a mage general most rounds, if it leaves gold for a squad
+      const q = rng(m.seed + m.round * 577 + side * 29), g = MAGE_GENERALS[Math.floor(q() * MAGE_GENERALS.length)];
+      if (q() < 0.6 && m.gold[side] - g.cost >= SQUAD_COST) buyMageGen(m, side, g.id);
+    }
     const opp = 1 - side;
     const oppArmy = m.armies[opp].filter(s => s.round < m.round);
     for (const ui of freeLeft(m, side)) { const spot = aiSpot(m, side, ui, oppArmy, r); if (spot) place(m, side, ui, spot.col, spot.row); }
@@ -1130,7 +1176,7 @@ const Game = (() => {
     unlockCost, tierOf, startLevel, shopCost, mapFreeOf, mapFreeLeft, isUnlocked, unlockVisible, unlock, undoUnlock,
     skillDef, skillCost, isInnate, hasSkill, skillVisible, unitFor, canBuySkill, buySkill, undoSkill, sellValue, sell,
     isRider, hiddenFromFoe, isCarrier, riderOf, carrierOf, squadAt, boardable, unplaceSquad,
-    TOWER, TOWER_TYPES, OUTPOST, TOWER_PICK_ROUND, towerType, towerChoices, needsTowerPick, setTowerType, settleTowerPicks, TOWER_SKILL, towerSkillOf, towerSkillVisible, towerPicked, canBuyTowerSkill, buyTowerSkill, undoTowerSkill, TOWER_MID, towerColOk, towerAt, needsTower, placeTower, ensureTower,
+    TOWER, TOWER_TYPES, OUTPOST, TOWER_PICK_ROUND, towerType, towerChoices, needsTowerPick, setTowerType, settleTowerPicks, TOWER_SKILL, towerSkillOf, towerSkillVisible, towerPicked, canBuyTowerSkill, buyTowerSkill, undoTowerSkill, MAGE_GENERALS, MAGE, mageGenInfo, mageGenOf, mageGenCost, canBuyMageGen, buyMageGen, undoMageGen, mageTowerUnit, TOWER_MID, towerColOk, towerAt, needsTower, placeTower, ensureTower,
     FLANK, flankRows, flankOpen, isFlank, reserved, canPlaceAt, enemyHolds, inNoMans, hasSkillType,
     ICE, ALTAR, GOLEM, isIce, hailRound, altarRound, stormShift, stormRows, hailTiles, altarCost, altarRefund, altarCount, pushRoom, altarBought, addAltar, buyAltar, undoAltar, snowgres, snowgreUnit,
     MAPS, ELF_TOWER, SHROOM, SHROOM_SPLIT, shroomAt, shroomTileAt, shroomRemoval, SHROOM_REMOVE, shroomCost, removeShroom, undoRemoveShroom, mapOf, elfSpot, rollMap, BRIBE_COST, bribeList, bribeGold, bribeCount, bribeNow, bribeCost, bribeRefund, ELF_POWER, elfPowered, elfUnit, ELF_OWN, elfOwnCost, elfOwnOf, elfOwnAt, elfOwnUnlocked, elfOwnOffered, canBuyElfOwn, elfOwnSpotOk, buyElfOwn, undoElfOwn, bribeLeader, canBribe, bribe, undoBribe,

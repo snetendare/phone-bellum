@@ -552,6 +552,9 @@ const Engine = (() => {
   // (see createBattle: bodies with `carrier` set stay out of the fight until that body dies). noFlank: can't be
   // deployed on flank tiles (the game checks it). noPack: never offered in a starting package (the game checks it)
   const RAM_REACH = 2;         // metres from its target at which a ram hits
+  // chain = { jumps, hit, reach }: after each hit the attack jumps on to the nearest enemy body not hit yet within
+  // reach metres of the last one, up to jumps times, dealing chain.hit each time (lightning).
+  // mend: the body never attacks; each attack heals the most wounded ally in range (not structures) by this much
   // pctHit: every hit also deals this share of the target's max health (not to structures); that part ignores armor (ward still caps the hit)
   const BLAST_RADIUS = 4;      // a body with deathBlast explodes when it dies, hitting enemies within this distance
   const PIERCE_DEPTH = 10;     // metres a piercing shot travels past its target
@@ -1106,7 +1109,26 @@ const Engine = (() => {
         } else {
           impact(b, tgt.x, tgt.y, tgt, hit, dirX, dirY, b.x, b.y);
         }
-        if (opts.record && !targets.flame) shots.push([b.x, b.y, tgt.x, tgt.y, b.side, b.u.splash, charged ? 1 : 0, 0, 0, b.u.spinUp > 0 ? b.spin : 1]);
+        if (opts.record && !targets.flame) shots.push([b.x, b.y, tgt.x, tgt.y, b.side, b.u.splash, charged ? 1 : 0, 0, 0, b.u.spinUp > 0 ? b.spin : 1, b.u.chain ? 1 : 0]);
+      }
+      // chain lightning: from the target on to the nearest enemy not hit yet, up to chain.jumps times
+      if (b.u.chain && targets.length && !targets.flame && !(b.u.projSpeed > 0)) {
+        const done = [targets[0]], k = b.u.hit > 0 ? hit / b.u.hit : 1;
+        let last = targets[0], lx = last.x, ly = last.y;
+        for (let j = 0; j < b.u.chain.jumps; j++) {
+          let nx = null, nd = b.u.chain.reach + 0.01;
+          for (const f of sides[1 - b.side]) {
+            if (!f.alive || f.hidden || done.includes(f)) continue;
+            const d = hyp(f.x - lx, f.y - ly);
+            if (d <= nd) { nd = d; nx = f; }
+          }
+          if (!nx) break;
+          if (opts.record) shots.push([lx, ly, nx.x, nx.y, b.side, 0, 0, 0, 0, 1, 1]);
+          done.push(nx);
+          const fx = lx, fy = ly;
+          last = nx; lx = nx.x; ly = nx.y;
+          hurt(b, nx, b.u.chain.hit * k, fx, fy);
+        }
       }
       // a flame is drawn once, as a wedge from the unit out to its range
       if (opts.record && targets.flame) {
@@ -1321,6 +1343,19 @@ const Engine = (() => {
         if ((!b.alive && b.diedTick !== tick) || b.delay > 0 || b.u.ram || b.boarded) continue;
         b.cd -= dt * (b.slowT > 0 ? 1 - b.slowAtk / 100 : 1); // slowed units reload slower
         if (b.firing >= 0) b.firing += dt;
+        if (b.u.mend > 0) { // a healer that never attacks: the most wounded ally in range gets b.u.mend
+          if (!b.alive || b.cd > 0) continue;
+          let tgt = null, most = 1e-9;
+          for (const a of sides[b.side]) {
+            if (!a.alive || a.u.structure || a.hp >= a.u.hp || dist(a, b) > R(b) + 0.01) continue;
+            if (a.u.hp - a.hp > most) { most = a.u.hp - a.hp; tgt = a; }
+          }
+          if (!tgt) { b.cd = Math.max(b.cd, -dt); continue; }
+          b.cd = Math.max(b.cd, -dt) + 1 / Math.max(0.01, b.u.aps);
+          tgt.hp = Math.min(tgt.u.hp, tgt.hp + b.u.mend * healMul);
+          if (opts.record) shots.push([b.x, b.y, tgt.x, tgt.y, b.side, 0, 0, 1]);
+          continue;
+        }
         if (b.u.turrets > 1 && !(b.u.windUp > 0 && !b.setUp)) extraTurrets(b);
         // follow-up shots of a running burst fly along the direction locked at the start
         // and hit the first enemy on that line; if the line is empty the shot misses
