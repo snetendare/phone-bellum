@@ -841,6 +841,12 @@ const Engine = (() => {
     const towerDown = g.towerDown || TOWER_DOWN;
     // a body died: a fallen tower cripples its side; a body with deathBlast explodes (deathBlast % of its max health)
     const fell = (v) => {
+      // a tower with teleport (Teleport mage general): instead of falling it jumps to u.teleport { x, y } with 1 health, once, and its side isn't crippled
+      if (v.u.structure && v.u.teleport && !v.teleported) {
+        v.teleported = true; v.alive = true; v.hp = 1; v.diedTick = undefined; v.poison = null;
+        v.x = v.u.teleport.x; v.y = v.u.teleport.y;
+        return;
+      }
       if (v.u.structure) cripple[v.side] = towerDown.secs;
       if (v.u.deathBlast > 0) {
         const dmg = v.u.hp * v.u.deathBlast / 100;
@@ -1309,12 +1315,23 @@ const Engine = (() => {
         if (b.poison && b.poison.length) {
           for (const p of b.poison) {
             if (!b.alive) break;
-            if (p.src) direct(p.src, b, p.dps * Math.min(dt, p.t));
+            if (b.u.slime) b.hp = Math.min(b.u.hp, b.hp + p.dps * Math.min(dt, p.t)); // slime units drink poison: it heals them
+            else if (p.src) direct(p.src, b, p.dps * Math.min(dt, p.t));
             else neutralDamage(b, p.dps * Math.min(dt, p.t)); // poison from a map tile: nobody's damage
             p.t -= dt;
           }
           b.poison = b.poison.filter(p => p.t > 0);
           if (!b.alive) continue;
+        }
+        // Moat (bastion): every 1/aps s, its hit to every enemy within its reach, like a ring of fire around the tower
+        if (b.u.moat) {
+          b.moatCd = (b.moatCd == null ? 0 : b.moatCd) - dt;
+          if (b.moatCd <= 0) {
+            b.moatCd += 1 / b.u.moat.aps;
+            let any = false;
+            for (const f of sides[1 - b.side]) if (f.alive && hyp(f.x - b.x, f.y - b.y) <= b.u.moat.range) { any = true; hurt(b, f, b.u.moat.hit, b.x, b.y); }
+            if (any && opts.record) shots.push([b.x, b.y, b.x + b.u.moat.range, b.y, b.side, 0, 0, 0, 180]);
+          }
         }
         if (b.u.regen > 0 && b.hp < b.u.hp) b.hp = Math.min(b.u.hp, b.hp + b.u.hp * b.u.regen / 100 * healMul * dt);
         if (b.shrinkT > 0) { b.shrinkT -= dt; if (b.shrinkT <= 0) { b.shrinkT = 0; b.shrinkM = 0; } }
