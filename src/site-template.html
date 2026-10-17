@@ -691,7 +691,48 @@ a { color: var(--you); }
 
   // a little keep with battlements, in the team colour. kind: 'keep', 'outpost' (a smaller keep), 'sniper' (tall
   // and skinny, a yellow stripe) or 'bastion' (wide and squat, a shield on the front). g: another canvas to draw on
-  function drawKeep(x, y, s, side, hpr, kind, g) {
+  // Each character's coat of arms: a field colour and a bold charge, drawn on a small shield.
+  // Shield coordinates: 1 wide, from -0.55 (top) to 0.65 (the point), centred on (0, 0).
+  const ARMS = {
+    cage: { field: '#A8323C', charge: '#F2C94C', draw(g) { // a heart: more health
+      g.beginPath(); g.moveTo(0, 0.38); g.bezierCurveTo(-0.5, 0.02, -0.32, -0.36, 0, -0.14); g.bezierCurveTo(0.32, -0.36, 0.5, 0.02, 0, 0.38); g.fill(); } },
+    zoe: { field: '#6B43A6', charge: '#F2C94C', draw(g) { // a star: the buff tiles
+      g.beginPath(); for (let k = 0; k < 10; k++) { const a = -Math.PI / 2 + k * Math.PI / 5, rr = k % 2 ? 0.15 : 0.36; g.lineTo(rr * Math.cos(a), 0.04 + rr * Math.sin(a)); } g.closePath(); g.fill(); } },
+    emile: { field: '#2F7D4A', charge: '#EDEFF2', draw(g) { // a key: free unlocks
+      g.lineWidth = 0.1; g.beginPath(); g.arc(0, -0.2, 0.13, 0, Math.PI * 2); g.stroke();
+      g.fillRect(-0.05, -0.08, 0.1, 0.5); g.fillRect(0.05, 0.2, 0.13, 0.08); g.fillRect(0.05, 0.33, 0.1, 0.08); } },
+    wilhelm: { field: '#2E5C8A', charge: '#EDEFF2', draw(g) { // a saltire: attacks from the flanks
+      g.lineWidth = 0.16; g.lineCap = 'butt'; g.beginPath(); g.moveTo(-0.5, -0.55); g.lineTo(0.42, 0.5); g.moveTo(0.5, -0.55); g.lineTo(-0.42, 0.5); g.stroke(); } },
+    blixten: { field: '#E2B23A', charge: '#1E1E24', draw(g) { // a lightning bolt
+      g.beginPath(); g.moveTo(0.12, -0.46); g.lineTo(-0.24, 0.06); g.lineTo(-0.02, 0.06); g.lineTo(-0.14, 0.5); g.lineTo(0.26, -0.06); g.lineTo(0.04, -0.06); g.closePath(); g.fill(); } },
+    noah: { field: '#1F7272', charge: '#EDEFF2', draw(g) { // two chevrons: squads that start at level 2
+      g.lineWidth = 0.12; g.lineJoin = 'miter'; g.beginPath(); for (const dy of [-0.12, 0.16]) { g.moveTo(-0.3, dy + 0.14); g.lineTo(0, dy - 0.14); g.lineTo(0.3, dy + 0.14); } g.stroke(); } },
+    phil: { field: '#2A2A36', charge: '#F2C94C', draw(g) { // a crown: the top tier
+      g.beginPath(); g.moveTo(-0.32, 0.22); g.lineTo(-0.34, -0.2); g.lineTo(-0.16, 0.0); g.lineTo(0, -0.28); g.lineTo(0.16, 0.0); g.lineTo(0.34, -0.2); g.lineTo(0.32, 0.22); g.closePath(); g.fill();
+      g.fillRect(-0.32, 0.27, 0.64, 0.08); } },
+  };
+  function drawArms(g, id, x, y, w) {
+    const a = ARMS[id]; if (!a) return;
+    const shield = () => { g.beginPath(); g.moveTo(-0.5, -0.55); g.lineTo(0.5, -0.55); g.lineTo(0.5, 0.05); g.quadraticCurveTo(0.5, 0.45, 0, 0.65); g.quadraticCurveTo(-0.5, 0.45, -0.5, 0.05); g.closePath(); };
+    g.save(); g.translate(x, y); g.scale(w, w);
+    shield(); g.fillStyle = a.field; g.fill();
+    g.save(); g.clip(); g.fillStyle = a.charge; g.strokeStyle = a.charge; a.draw(g); g.restore();
+    shield(); g.lineWidth = Math.max(0.09, 1 / w); g.strokeStyle = '#15151B'; g.stroke();
+    g.restore();
+  }
+  // a coat of arms as an image, for the character lines in the panels
+  const armsImgs = {};
+  function armsImg(id) {
+    if (!ARMS[id]) return '';
+    if (armsImgs[id] == null) {
+      const oc = document.createElement('canvas'); oc.width = 40; oc.height = 48;
+      const g = oc.getContext('2d'); drawArms(g, id, 20, 22.5, 34);
+      armsImgs[id] = oc.toDataURL();
+    }
+    return `<img src="${armsImgs[id]}" alt="" width="14" height="17" style="vertical-align:-3px;margin-right:4px">`;
+  }
+  // arms: the owner's character id, drawn on a small shield on the tower's corner
+  function drawKeep(x, y, s, side, hpr, kind, g, arms) {
     const ctx = g || cv.getContext('2d');
     const c = teamCol(side), tt = [Game.OUTPOST, ...Game.TOWER_TYPES].find(k => k.id === kind) || Game.TOWER_TYPES[0];
     ctx.globalAlpha = 0.35 + 0.65 * (hpr == null ? 1 : hpr);
@@ -713,6 +754,7 @@ a { color: var(--you); }
       ctx.closePath(); ctx.fill();
       ctx.fillStyle = tt.unit.color; ctx.fillRect(x - sw * 0.07, sy + sh * 0.12, sw * 0.14, sh * 0.62); ctx.fillRect(sx + sw * 0.2, sy + sh * 0.3, sw * 0.6, sh * 0.13);
     } else { ctx.fillStyle = c; ctx.fillRect(x - m * 0.5, y0 + h - m * 1.6, m, m * 1.6); }
+    if (arms) drawArms(ctx, arms, x + Math.min(w / 2, s * 0.28), y + s * 0.18, Math.max(8, s * 0.38));
     ctx.globalAlpha = 1;
   }
   // A small picture of a map for the map picker: the board at the start of a match, with both towers (and the
@@ -747,10 +789,10 @@ a { color: var(--you); }
   // the opponent's tower pick stays hidden until the fight of the pick round
   const towerTypeVisible = (side) => !!m && (side === me || m.round !== Game.TOWER_PICK_ROUND || phase !== 'deploy');
   const choosingTower = () => phase === 'deploy' && m && !Game.needsPack(m, me) && Game.needsTowerPick(m, me);
-  const charLine = (id) => { const c = Game.charInfo(id); return c ? `<b>${esc(c.name)}</b> · ${esc(c.ability)}` : ''; };
+  const charLine = (id) => { const c = Game.charInfo(id); return c ? `${armsImg(id)}<b>${esc(c.name)}</b> · ${esc(c.ability)}` : ''; };
   function drawTowerTile(side) {
     const tw = m.towers[side], t = tilePx();
-    drawKeep((scol(tw.col) + 0.5) * t, (srow(tw.row) + 0.5) * t, t, side, null, towerTypeVisible(side) ? Game.towerType(m, side).id : 'outpost');
+    drawKeep((scol(tw.col) + 0.5) * t, (srow(tw.row) + 0.5) * t, t, side, null, towerTypeVisible(side) ? Game.towerType(m, side).id : 'outpost', null, charVisible(side) ? Game.charOf(m, side) : null);
   }
   // the neutral elf tower: a slim pale spire with a leaf-green roof. range = show its reach as a faint ring.
   // Players' own elf towers are drawn too (an opponent's new one only from the fight on).
@@ -801,7 +843,7 @@ a { color: var(--you); }
   const bribeLeadShown = (v) => Game.bribeLeader(v, phase === 'deploy');
   // tiers by squad price: 100 = tier 1, 200 = tier 2, 400 = tier 3, 600 = tier 4 (any other prices rank in between)
   const TIER_COLORS = ['#9AA5A8', '#6FD08C', '#5BA8F5', '#C58BF2', '#F2B84B'];
-  const tierOf = (i) => { const prices = [...new Set(units.map(u => Game.unitCostOf(u)))].sort((a, b) => a - b); return prices.indexOf(Game.unitCostOf(units[i])) + 1; };
+  const tierOf = (i) => Game.tierOf(units, i);
   const TIER_NAMES = ['Basic', 'Strong', 'Elite', 'Legendary', 'Mythic'];
 const tierName = (t) => TIER_NAMES[Math.min(TIER_NAMES.length-1, t-1)];
 const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
@@ -911,7 +953,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
     for (const b of bt.bodies) {
       if (!b.alive || !b.u.structure) continue;
       const hpr = b.hp / b.u.hp, t = tilePx();
-      drawKeep(PX(b.x), PY(b.y), t, b.side, hpr, b.u.kind);
+      drawKeep(PX(b.x), PY(b.y), t, b.side, hpr, b.u.kind, null, Game.charOf(battlePre || m, b.side));
       ctx.strokeStyle = teamCol(b.side); ctx.lineWidth = 2;
       ctx.beginPath(); ctx.arc(PX(b.x), PY(b.y), t * 0.5, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * hpr); ctx.stroke();
       if (b.walls) drawWalls(b.x, b.y, b.walls);
@@ -1076,7 +1118,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
           key: String(k),
           art: p.units.map(ui => `<span style="color:${units[ui].color};display:inline-flex">${Shapes.svg(units[ui].shape, 30)}</span>`).join(''),
           name: p.units.map(ui => `${n[ui]}× ${esc(units[ui].name)}`).join('<br>'),
-          who: c ? esc(c.name) : '',
+          who: c ? armsImg(c.id) + esc(c.name) : '',
           det: `${c ? `<span style="color:var(--gold)">${charLine(p.char)}</span><br>` : ''}${p.units.map(ui => `<b>${esc(units[ui].name)}</b>${ROLES[units[ui].name] && !customSet ? ` · ${esc(ROLES[units[ui].name])}` : ` · ${Game.unitCostOf(units[ui])} gold`}`).join('<br>')}`,
         };
       }),
@@ -1139,7 +1181,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
     const fresh = m.armies[me].filter(s => s.round === m.round).length;
     const readyN = m.armies[me].filter(s => Game.isReady(m, s)).length;
     const left = Game.deploysLeft(m, me), allowed = Game.deploysAllowed(m, me);
-    const price = (i) => Game.unitCostOf(units[i]);
+    const price = (i) => Game.shopCost(m, me, i);
     const can = editable();
     const locked = (i) => !Game.isUnlocked(m, me, i);
     const freeN = (i) => Game.freeLeft(m, me).filter(x => x === i).length;
@@ -1192,7 +1234,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
         if (!tiers.includes(shopTier)) shopTier = tiers[0];
         return `<div class="tiers" role="tablist" aria-label="Unit tiers, higher is stronger" style="--n:${tiers.length}">${tiers.map(t => {
           const idx = units.map((u, i) => i).filter(i => tierOf(i) === t), open = idx.filter(i => !locked(i)).length, free = idx.some(i => freeN(i) > 0);
-          return `<button role="tab" data-tier="${t}" aria-selected="${t === shopTier}" aria-label="Tier ${t}, ${tierName(t)}, ${Game.unitCostOf(units[idx[0]])} gold, ${open} of ${idx.length} unlocked${free ? ', has free squads' : ''}" style="--tier:${tierColor(t)}">Tier ${t}<em>${tierName(t)}</em><small>${Game.unitCostOf(units[idx[0]])}g · ${open}/${idx.length}</small></button>`;
+          return `<button role="tab" data-tier="${t}" aria-selected="${t === shopTier}" aria-label="Tier ${t}, ${tierName(t)}, ${price(idx[0])} gold, ${open} of ${idx.length} unlocked${free ? ', has free squads' : ''}" style="--tier:${tierColor(t)}">Tier ${t}<em>${tierName(t)}</em><small>${price(idx[0])}g · ${open}/${idx.length}</small></button>`;
         }).join('')}</div>`;
       })()}
       ${(choosingPack() || choosingTower()) && can ? '' : `<div class="shop" id="shop">${units.map((u, i) => tierOf(i) !== shopTier ? '' : `
@@ -1295,7 +1337,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
           ['Starting package', 'Round 1: pick one of three, each with free squads and a character.', `
             <li>Each package unlocks two units for free and gives you free squads of them worth ${Game.PACKAGE.value}, plus ${Game.START_GOLD} gold to spend.</li>
             <li>Each comes with a random character (never two the same) whose ability lasts the whole match. Tap the enemy tower after the first fight to see theirs.</li>
-            ${Game.CHARACTERS.map(c => `<li><b>${esc(c.name)}</b>: ${esc(c.ability)}</li>`).join('')}`],
+            ${Game.CHARACTERS.map(c => `<li>${armsImg(c.id)}<b>${esc(c.name)}</b>: ${esc(c.ability)}</li>`).join('')}`],
           ['Towers', `If yours falls, your army is crippled for a few seconds. Pick your real one in round ${Game.TOWER_PICK_ROUND}.`, `
             <li>Your tower stands in the back of your zone. Until round ${Game.TOWER_PICK_ROUND} it is a small outpost; then, before the clock runs, you pick one for the rest of the match.</li>
             ${Game.TOWER_TYPES.map(x => `<li><b>${esc(x.name)}</b>: ${esc(x.text)} Skill: <i>${esc(x.skill.name)}</i> (${Game.TOWER_SKILL.cost} gold, tap your tower). ${esc(x.skill.text)}</li>`).join('')}`],
@@ -1565,7 +1607,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
       if (u.noFlank) t.push('can\'t be placed on flank tiles');
       const sk = (u.skillDefs || []).map((d, k) => d ? `skill ${k + 1} "${d.name}" (${Game.isInnate(m, i, k) ? 'BUILT IN: always on for both players, free' : `${Game.skillCost(m, i, k)} gold${Game.hasSkill(m, 1, i, k) ? ', YOU OWN IT' : ''}`}): ${Engine.describeSkill(d)}` : null).filter(Boolean);
       const lock = Game.isUnlocked(m, 1, i) ? (Game.unlockCost(m, i, 1) ? ' [unlocked]' : '') : ` [LOCKED: unlock once for ${Game.unlockCost(m, i, 1)} gold before you can place it]`;
-      return `- ${u.name}${lock}: price ${Game.unitCostOf(u)}, ${u.bodies} ${u.bodies === 1 ? 'body' : 'bodies'} x ${n1(u.hp, 0)} hp each, hit ${n1(u.hit)} x ${n1(u.aps, 2)}/s, range ${u.range} m, speed ${u.speed} m/s${t.length ? ', ' + t.join(', ') : ''}. Level-up cost ${Game.levelCost(u)}.${sk.length ? '\n    ' + sk.join('\n    ') : ''}`;
+      return `- ${u.name}${lock}: price ${Game.shopCost(m, 1, i)}${Game.startLevel(m, 1) ? ` (squads start at level ${Game.startLevel(m, 1) + 1})` : ''}, ${u.bodies} ${u.bodies === 1 ? 'body' : 'bodies'} x ${n1(u.hp, 0)} hp each, hit ${n1(u.hit)} x ${n1(u.aps, 2)}/s, range ${u.range} m, speed ${u.speed} m/s${t.length ? ', ' + t.join(', ') : ''}. Level-up cost ${Game.levelCost(u)}.${sk.length ? '\n    ' + sk.join('\n    ') : ''}`;
     };
     const tag = (u) => u.name;
     const matrix = units.map((u, i) => `${tag(u)}: ` + units.map((v, j) => i === j ? null : `${tag(v)} ${M[i][j] > 0 ? '+' : ''}${Math.round(M[i][j] * 100)}`).filter(Boolean).join(', ')).join('\n');
@@ -1652,7 +1694,7 @@ TOWERS
 - Their tower: ${m.round !== Game.TOWER_PICK_ROUND ? Game.towerType(m, 0).name + (Game.towerSkillVisible(m, 0) ? ` with "${Game.towerType(m, 0).skill.name}"` : '') + ', ' : 'type hidden until the fight, '}col ${m.towers[0].col}, row ${m.towers[0].row}.
 
 MAP
-${(() => { const mp = Game.mapOf(m), e = Game.elfSpot(m); return mp ? `- ${mp.name}: ${mp.text}${e ? ` The elf tower stands in column ${e.col}, on the line between rows ${Game.ROWS / 2 - 1} and ${Game.ROWS / 2}; it hits for ${Game.ELF_TOWER.hit}, ${Game.ELF_TOWER.aps} times a second, range ${Game.ELF_TOWER.range} m, and can't be attacked. Bribe-off: you can bribe any number of times per round ("bribe": number of bribes); the first bribe in a round costs ${Game.BRIBE_COST} gold and each further one that round ${Game.BRIBE_COST} more (${Game.BRIBE_COST}, ${2 * Game.BRIBE_COST}, ${3 * Game.BRIBE_COST}, ...). In every fight the tower sides with whoever has bribed it the most times (count, not gold) over the whole match: it never shoots their units, heals their wounded units near it for ${Game.ELF_TOWER.healHit} (x${mp.healMul || 1} on this map, ${Game.ELF_TOWER.healSplash} m splash) every ${Math.round(10 / Game.ELF_TOWER.healAps) / 10} s, and shoots only the other player's units. With totals level it shoots both sides. Totals are secret; you only see who was ahead after the last fight. ${Game.elfPowered(m) ? `From round ${Game.ELF_POWER.fromRound} on the elves hit and heal twice as hard (now ${Game.elfUnit(m).hit} damage, ${Game.elfUnit(m).healHit} heal).` : `After round ${Game.ELF_POWER.fromRound - 1} the elves hit and heal twice as hard.`} You have bribed ${Game.bribeCount(m, 1)} times (${Game.bribeGold(m, 1)} gold). ${Game.elfOwnOf(m, 1) ? `Your own elf tower stands at col ${Game.elfOwnOf(m, 1).col}, row ${Game.elfOwnOf(m, 1).row}.` : Game.elfOwnOffered(m, 1) ? `The elves now sell you one elf tower of your own for ${Game.ELF_OWN.cost} gold ("elfTower":{"col":5,"row":2}, a free tile of your zone): permanent, can't be attacked, shoots only the opponent's units and heals yours.` : `Once ${Game.ELF_OWN.unlock} bribes have been paid in all (both players), each player who has bribed at least once (in an earlier round) can buy one elf tower of their own for ${Game.ELF_OWN.cost} gold, from the next round on.${Game.elfOwnUnlocked(m) ? ' That point has been reached, but you have never bribed, so the elves sell you none until you do.' : ''}`} ${(() => { const l = Game.bribeLeader(m, true); return l < 0 ? 'After the last fight the bribe-off was level.' : l === 1 ? 'After the last fight you were ahead.' : 'After the last fight your opponent was ahead.'; })()}` : ''}${mp.ice ? ` Storm band rows now: ${Game.stormRows(m).join(', ')}.${Game.hailRound(m) ? ` Hail tiles this round: ${Game.hailTiles(m).map(h => `col ${h.col}, row ${h.row}`).join('; ')}.` : ''}${Game.altarRound(m) ? ` The altar of ice is up this round. "altar" can list any of: "walls" (${Game.altarCost(m, 1, 'walls')} gold: your tower's 4 walls each block the first ${Game.ICE.wallHits} hits from their side, this fight only), "push" (${Game.altarCost(m, 1, 'push')} gold: storm band moves ${Game.ICE.push} rows toward the opponent from the next hailstorm on), "snowgre" (${Game.altarCost(m, 1, 'snowgre')} gold: a permanent hail-immune Ether Golem at ${Math.round(Game.ICE.snowFirst * Math.pow(2, Game.snowgres(m, 1).length) * 100)}% strength, standing in your half of no man's land each fight).` : ''} Your Snowgres: ${Game.snowgres(m, 1).length}.` : ''}${mp.shrooms ? ` Removing a mushroom tile costs ${Game.SHROOM_REMOVE} gold ("removeTiles":[{"col":3,"row":6}]); it is gone from the next fight on. Mushroom tiles still there: ${(m.map.tiles || []).filter(x => Game.shroomAt(m, x.col, x.row)).map(x => `${x.type} at col ${x.col}, row ${x.row}`).join('; ')}.` : ''}` : '- No special map.'; })()}
+${(() => { const mp = Game.mapOf(m), e = Game.elfSpot(m); return mp ? `- ${mp.name}: ${mp.text}${e ? ` The elf tower stands in column ${e.col}, on the line between rows ${Game.ROWS / 2 - 1} and ${Game.ROWS / 2}; it hits for ${Game.ELF_TOWER.hit}, ${Game.ELF_TOWER.aps} times a second, range ${Game.ELF_TOWER.range} m, and can't be attacked. Bribe-off: you can bribe any number of times per round ("bribe": number of bribes); the first bribe in a round costs ${Game.BRIBE_COST} gold and each further one that round ${Game.BRIBE_COST} more (${Game.BRIBE_COST}, ${2 * Game.BRIBE_COST}, ${3 * Game.BRIBE_COST}, ...). In every fight the tower sides with whoever has bribed it the most times (count, not gold) over the whole match: it never shoots their units, heals their wounded units near it for ${Game.ELF_TOWER.healHit} (x${mp.healMul || 1} on this map, ${Game.ELF_TOWER.healSplash} m splash) every ${Math.round(10 / Game.ELF_TOWER.healAps) / 10} s, and shoots only the other player's units. With totals level it shoots both sides. Totals are secret; you only see who was ahead after the last fight. ${Game.elfPowered(m) ? `From round ${Game.ELF_POWER.fromRound} on the elves hit and heal twice as hard (now ${Game.elfUnit(m).hit} damage, ${Game.elfUnit(m).healHit} heal).` : `After round ${Game.ELF_POWER.fromRound - 1} the elves hit and heal twice as hard.`} You have bribed ${Game.bribeCount(m, 1)} times (${Game.bribeGold(m, 1)} gold). ${Game.elfOwnOf(m, 1) ? `Your own elf tower stands at col ${Game.elfOwnOf(m, 1).col}, row ${Game.elfOwnOf(m, 1).row}.` : Game.elfOwnOffered(m, 1) ? `The elves now sell you one elf tower of your own for ${Game.elfOwnCost(m, 1)} gold ("elfTower":{"col":5,"row":2}, a free tile of your zone): permanent, can't be attacked, shoots only the opponent's units and heals yours.` : `Once ${Game.ELF_OWN.unlock} bribes have been paid in all (both players), each player who has bribed at least once (in an earlier round) can buy one elf tower of their own for ${Game.elfOwnCost(m, 1)} gold, from the next round on.${Game.elfOwnUnlocked(m) ? ' That point has been reached, but you have never bribed, so the elves sell you none until you do.' : ''}`} ${(() => { const l = Game.bribeLeader(m, true); return l < 0 ? 'After the last fight the bribe-off was level.' : l === 1 ? 'After the last fight you were ahead.' : 'After the last fight your opponent was ahead.'; })()}` : ''}${mp.ice ? ` Storm band rows now: ${Game.stormRows(m).join(', ')}.${Game.hailRound(m) ? ` Hail tiles this round: ${Game.hailTiles(m).map(h => `col ${h.col}, row ${h.row}`).join('; ')}.` : ''}${Game.altarRound(m) ? ` The altar of ice is up this round. "altar" can list any of: "walls" (${Game.altarCost(m, 1, 'walls')} gold: your tower's 4 walls each block the first ${Game.ICE.wallHits} hits from their side, this fight only), "push" (${Game.altarCost(m, 1, 'push')} gold: storm band moves ${Game.ICE.push} rows toward the opponent from the next hailstorm on), "snowgre" (${Game.altarCost(m, 1, 'snowgre')} gold: a permanent hail-immune Ether Golem at ${Math.round(Game.ICE.snowFirst * Math.pow(2, Game.snowgres(m, 1).length) * 100)}% strength, standing in your half of no man's land each fight).` : ''} Your Snowgres: ${Game.snowgres(m, 1).length}.` : ''}${mp.shrooms ? ` Removing a mushroom tile costs ${Game.shroomCost(m, 1)} gold ("removeTiles":[{"col":3,"row":6}]); it is gone from the next fight on. Mushroom tiles still there: ${(m.map.tiles || []).filter(x => Game.shroomAt(m, x.col, x.row)).map(x => `${x.type} at col ${x.col}, row ${x.row}`).join('; ')}.` : ''}` : '- No special map.'; })()}
 
 CHARACTERS (each package comes with one; its ability lasts the whole match)
 - Yours: ${Game.charOf(m, 1) ? `${Game.charInfo(Game.charOf(m, 1)).name}: ${Game.charInfo(Game.charOf(m, 1)).ability}` : 'the one that comes with the package you pick'}${Game.charOf(m, 1) === 'zoe' ? ` Your buff tiles this round: ${(m.buff[1] || []).map(t => `col ${t.col}, row ${t.row}`).join('; ')}. A squad that starts the fight on one keeps the bonus all fight, even after it moves.` : ''}
@@ -1713,7 +1755,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     }
     for (const pl of list(mv.place)) {
       const ui = unitIdx(pl && pl.unit);
-      if (ui >= 0 && !Game.isUnlocked(m, 1, ui) && m.gold[1] >= Game.unlockCost(m, ui, 1) + Game.unitCostOf(units[ui]) && Game.unlock(m, 1, ui)) did.push(`unlocked ${units[ui].name}`);
+      if (ui >= 0 && !Game.isUnlocked(m, 1, ui) && m.gold[1] >= Game.unlockCost(m, ui, 1) + Game.shopCost(m, 1, ui) && Game.unlock(m, 1, ui)) did.push(`unlocked ${units[ui].name}`);
       if (ui >= 0) Game.place(m, 1, ui, int(pl.col), int(pl.row));
     }
     trySkills(); // skills for units placed just now
@@ -1917,7 +1959,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     // a unit selected in the shop goes inside your horse (or other carrier) with room
     if (own && selected !== null && editable() && Game.boardable(m, me, t.col, t.row, selected)) {
       if (Game.place(m, me, selected, t.col, t.row)) {
-        if (!Game.freeLeft(m, me).includes(selected) && (m.gold[me] < Game.unitCostOf(units[selected]) || Game.deploysLeft(m, me) <= 0)) selected = null;
+        if (!Game.freeLeft(m, me).includes(selected) && (m.gold[me] < Game.shopCost(m, me, selected) || Game.deploysLeft(m, me) <= 0)) selected = null;
         changed();
       }
       return;
@@ -1932,7 +1974,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (enemy) { openSheet(enemy.unit, enemy, foe()); return; }
     if (selected !== null && editable() && Game.canPlaceAt(m, me, t.col, t.row, selected)) {
       if (Game.place(m, me, selected, t.col, t.row)) {
-        if (!Game.freeLeft(m, me).includes(selected) && (m.gold[me] < Game.unitCostOf(units[selected]) || Game.deploysLeft(m, me) <= 0)) selected = null;
+        if (!Game.freeLeft(m, me).includes(selected) && (m.gold[me] < Game.shopCost(m, me, selected) || Game.deploysLeft(m, me) <= 0)) selected = null;
         changed();
       }
     }
@@ -2018,9 +2060,9 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (phase !== 'deploy' || !m) return '';
     const tl = Game.shroomTileAt(m, col, row); if (!tl) return '';
     const name = `<b style="color:${SHROOM_COL[tl.type]}">${tl.type}</b> mushroom tile`;
-    if (myRemovalNow(col, row)) return `<div class="bar"><span class="hint">You’re removing the ${name} on this square. It’s gone from the next fight on.</span><button class="btn small" id="shroom-undo" ${editable() ? '' : 'disabled'}>Keep it · +${Game.SHROOM_REMOVE}</button></div>`;
+    if (myRemovalNow(col, row)) return `<div class="bar"><span class="hint">You’re removing the ${name} on this square. It’s gone from the next fight on.</span><button class="btn small" id="shroom-undo" ${editable() ? '' : 'disabled'}>Keep it · +${Game.shroomCost(m, me)}</button></div>`;
     if (!shroomShown(m, col, row)) return '';
-    return `<div class="bar"><span class="hint">A ${name} is on this square.</span><button class="btn small" id="shroom-rm" ${editable() && m.gold[me] >= Game.SHROOM_REMOVE ? '' : 'disabled'}>Remove it · ${Game.SHROOM_REMOVE} gold</button></div>`;
+    return `<div class="bar"><span class="hint">A ${name} is on this square.</span><button class="btn small" id="shroom-rm" ${editable() && m.gold[me] >= Game.shroomCost(m, me) ? '' : 'disabled'}>Remove it · ${Game.shroomCost(m, me)} gold</button></div>`;
   }
   function bindShroom(col, row, reopen) {
     if ($('shroom-rm')) $('shroom-rm').addEventListener('click', () => { if (editable() && Game.removeShroom(m, me, col, row)) { changed(); reopen(); } });
@@ -2073,11 +2115,11 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       ${(() => {
         const own = Game.elfOwnOf(m, me);
         if (own) return own.round === m.round && phase === 'deploy'
-          ? `<div class="bar"><span class="hint" style="color:var(--you)">You placed your elf tower this round.</span><button class="btn small" id="unelf" ${editable() ? '' : 'disabled'}>Take it back · +${Game.ELF_OWN.cost}</button></div>`
+          ? `<div class="bar"><span class="hint" style="color:var(--you)">You placed your elf tower this round.</span><button class="btn small" id="unelf" ${editable() ? '' : 'disabled'}>Take it back · +${Game.elfOwnCost(m, me)}</button></div>`
           : '<p style="margin:0;color:var(--you)">Your elf tower stands in your zone.</p>';
         if (!Game.elfOwnUnlocked(m)) return '<p class="hint" style="margin:0">The elves aren’t offering towers yet.</p>';
         if (!Game.elfOwnOffered(m, me)) return '<p class="hint" style="margin:0">The elves are offering towers, but only to players who have bribed them. Bribe them once and the offer is yours from the next round.</p>';
-        return `<button class="btn primary" id="buyelf" ${editable() && Game.canBuyElfOwn(m, me) ? '' : 'disabled'}>${m.gold[me] >= Game.ELF_OWN.cost ? `Buy an elf tower · ${Game.ELF_OWN.cost} gold` : `Need ${Game.ELF_OWN.cost} gold`}</button>`;
+        return `<button class="btn primary" id="buyelf" ${editable() && Game.canBuyElfOwn(m, me) ? '' : 'disabled'}>${m.gold[me] >= Game.elfOwnCost(m, me) ? `Buy an elf tower · ${Game.elfOwnCost(m, me)} gold` : `Need ${Game.elfOwnCost(m, me)} gold`}</button>`;
       })()}` : ''}`;
     $('sheet-back').hidden = false;
     $('close').addEventListener('click', closeSheet);

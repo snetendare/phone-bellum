@@ -94,10 +94,15 @@ const Game = (() => {
     { id: 'zoe', name: 'Zoe', ability: 'Every round, 2 random tiles in your zone become buff tiles. A squad that starts the fight on one gets +20% damage, +20% health and +10% attack speed for the whole fight.' },
     { id: 'emile', name: 'Emile', ability: 'Tier 1 units are free to unlock.' },
     { id: 'wilhelm', name: 'Wilhelm', ability: 'Your squads on flank tiles and in no man’s land get +4 armor, and flank squads start twice as fast.' },
+    { id: 'blixten', name: 'Blixten', ability: 'Map purchases (the altar of ice, your own elf tower, removing mushroom tiles) cost you 50 gold less.' },
+    { id: 'noah', name: 'Noah', ability: 'Squads you buy in the shop start at level 2. Each costs its price plus one upgrade.' },
+    { id: 'phil', name: 'Phil', ability: 'Tier 4 units are 100 gold cheaper to unlock.' },
   ];
-  const CHAR = { cageHp: 10, zoeTiles: 2, zoeDmg: 20, zoeHp: 20, zoeAps: 10, wilhelmArmor: 4, wilhelmDelay: 0.5 };
+  const CHAR = { cageHp: 10, zoeTiles: 2, zoeDmg: 20, zoeHp: 20, zoeAps: 10, wilhelmArmor: 4, wilhelmDelay: 0.5, blixtenOff: 50, noahLevel: 1, philTier: 4, philOff: 100 };
   const charOf = (m, side) => (m && m.chars && m.chars[side]) || null;
   const charInfo = (id) => CHARACTERS.find(c => c.id === id) || null;
+  // what a map purchase costs a player: Blixten pays CHAR.blixtenOff less (never below 0)
+  const mapPrice = (m, side, cost) => side != null && charOf(m, side) === 'blixten' ? Math.max(0, cost - CHAR.blixtenOff) : cost;
   // ---------- maps ----------
   // Each match is fought on one map, picked by the host when the match is created (or at random). A map can change the
   // rules of every fight. Elf tower: a neutral tower standing on the centre line of no man's land, the same
@@ -142,7 +147,7 @@ const Game = (() => {
     for (let k = 0; k < ICE.hailTiles && spots.length; k++) out.push(spots.splice(Math.floor(r() * spots.length), 1)[0]);
     return out;
   }
-  const altarCost = (m, side, type) => type === 'snowgre' ? ICE.costs.snowgre + ICE.snowStep * altarBuys(m).filter(b => b.side === side && b.type === 'snowgre' && b.round < m.round).length : ICE.costs[type];
+  const altarCost = (m, side, type) => { const c = type === 'snowgre' ? ICE.costs.snowgre + ICE.snowStep * altarBuys(m).filter(b => b.side === side && b.type === 'snowgre' && b.round < m.round).length : ICE.costs[type]; return c == null ? c : mapPrice(m, side, c); };
   const altarBought = (m, side, type) => altarBuys(m).some(b => b.side === side && b.type === type && b.round === m.round);
   // a Snowgre's spot: a random tile in its owner's half of no man's land, picked when it is summoned
   function snowSpot(m, side, k) {
@@ -161,7 +166,7 @@ const Game = (() => {
   }
   function buyAltar(m, side, type) {
     const cost = altarCost(m, side, type);
-    if (!(cost > 0) || m.gold[side] < cost || !addAltar(m, side, type)) return false;
+    if (!(cost >= 0) || m.gold[side] < cost || !addAltar(m, side, type)) return false;
     m.gold[side] -= cost;
     return true;
   }
@@ -238,12 +243,13 @@ const Game = (() => {
   const elfOwnUnlocked = (m) => !!elfSpot(m) && bribeCount(m, 0, true) + bribeCount(m, 1, true) >= ELF_OWN.unlock;
   // offered to a player only if they have bribed the elves themselves (in an earlier round too)
   const elfOwnOffered = (m, side) => elfOwnUnlocked(m) && bribeCount(m, side, true) > 0;
-  const canBuyElfOwn = (m, side) => elfOwnOffered(m, side) && !elfOwnOf(m, side) && m.gold[side] >= ELF_OWN.cost;
+  const elfOwnCost = (m, side) => mapPrice(m, side, ELF_OWN.cost);
+  const canBuyElfOwn = (m, side) => elfOwnOffered(m, side) && !elfOwnOf(m, side) && m.gold[side] >= elfOwnCost(m, side);
   const elfOwnSpotOk = (m, side, col, row) => col >= 0 && col < COLS && inZone(side, row) && !reserved(side, col, row) && !occupied(m, side, col, row);
   function buyElfOwn(m, side, col, row) {
     if (!canBuyElfOwn(m, side) || !elfOwnSpotOk(m, side, col, row)) return false;
     if (!m.elfOwn) m.elfOwn = [null, null];
-    m.gold[side] -= ELF_OWN.cost;
+    m.gold[side] -= elfOwnCost(m, side);
     m.elfOwn[side] = { col, row, round: m.round };
     return true;
   }
@@ -251,7 +257,7 @@ const Game = (() => {
     const e = elfOwnOf(m, side);
     if (!e || e.round !== m.round) return false;
     m.elfOwn[side] = null;
-    m.gold[side] += ELF_OWN.cost;
+    m.gold[side] += elfOwnCost(m, side);
     return true;
   }
   const ELF_COLS = [2, 9]; // the elf tower's column is picked from these (never the flank edges)
@@ -286,12 +292,13 @@ const Game = (() => {
   // Removing a mushroom tile: SHROOM_REMOVE gold, any tile, either player. It is gone from the next fight on.
   // Like a bribe, a removal stays hidden from the opponent until the fight and can be taken back in the same round.
   const SHROOM_REMOVE = 50;
+  const shroomCost = (m, side) => mapPrice(m, side, SHROOM_REMOVE);
   // (both players may pick the same tile in the same round, since neither can see the other's choice; both pay)
   function removeShroom(m, side, col, row) {
-    if (!shroomTileAt(m, col, row) || m.gold[side] < SHROOM_REMOVE) return false;
+    if (!shroomTileAt(m, col, row) || m.gold[side] < shroomCost(m, side)) return false;
     if ((m.map.removed || []).some(x => x.col === col && x.row === row && (x.round < m.round || x.side === side))) return false;
     if (!m.map.removed) m.map.removed = [];
-    m.gold[side] -= SHROOM_REMOVE;
+    m.gold[side] -= shroomCost(m, side);
     m.map.removed.push({ col, row, side, round: m.round });
     return true;
   }
@@ -299,7 +306,7 @@ const Game = (() => {
     const x = (m.map && m.map.removed || []).find(q => q.col === col && q.row === row && q.side === side && q.round === m.round);
     if (!x) return false;
     m.map.removed.splice(m.map.removed.indexOf(x), 1);
-    m.gold[side] += SHROOM_REMOVE;
+    m.gold[side] += shroomCost(m, side);
     return true;
   }
   // Where a player's tower stands. On a pointMirror map the board is mirrored as each player sees it, so the
@@ -489,8 +496,15 @@ const Game = (() => {
   // ---------- unlocks (like Mechabellum: some units start unlocked, the rest cost gold once per match) ----------
   // tier 1 = the cheapest price in the roster
   const isTier1 = (m, ui) => unitCostOf(m.units[ui]) === Math.min(...m.units.map(unitCostOf));
-  // side (optional): that player's price, so Emile's tier 1 unlocks are free
-  const unlockCost = (m, ui, side) => side != null && charOf(m, side) === 'emile' && isTier1(m, ui) ? 0 : Math.max(0, Math.round(+m.units[ui].unlock || 0));
+  // tiers by squad price: the cheapest price in the roster is tier 1, the next one tier 2, and so on
+  const tierOf = (units, ui) => [...new Set(units.map(unitCostOf))].sort((a, b) => a - b).indexOf(unitCostOf(units[ui])) + 1;
+  // side (optional): that player's price, so Emile's tier 1 unlocks are free and Phil's tier 4 ones cheaper
+  const unlockCost = (m, ui, side) => {
+    const base = Math.max(0, Math.round(+m.units[ui].unlock || 0)), ch = side != null ? charOf(m, side) : null;
+    if (ch === 'emile' && isTier1(m, ui)) return 0;
+    if (ch === 'phil' && tierOf(m.units, ui) === CHAR.philTier) return Math.max(0, base - CHAR.philOff);
+    return base;
+  };
   const isUnlocked = (m, side, ui) => unlockCost(m, ui, side) === 0 || !!(m.unlocks && m.unlocks[side] && m.unlocks[side][ui] > 0);
   // an unlock bought this round is hidden from the opponent until the fight
   const unlockVisible = (m, side, ui) => unlockCost(m, ui, side) === 0 || (isUnlocked(m, side, ui) && m.unlocks[side][ui] < m.round);
@@ -627,6 +641,9 @@ const Game = (() => {
     m.towers[side] = towerSpot(m, side);
   }
 
+  // what a squad costs a player in the shop, and the level it starts at: Noah's start CHAR.noahLevel levels up, paying for them
+  const startLevel = (m, side) => charOf(m, side) === 'noah' ? CHAR.noahLevel : 0;
+  const shopCost = (m, side, ui) => unitCostOf(m.units[ui]) + startLevel(m, side) * levelCost(m.units[ui]);
   function place(m, side, unitIdx, col, row) {
     if (!canPlaceAt(m, side, col, row, unitIdx)) return null;
     if (needsTower(m, side)) return null; // the tower goes down first
@@ -639,10 +656,11 @@ const Game = (() => {
       m.armies[side].push(sq);
       return sq;
     }
-    const cost = unitCostOf(m.units[unitIdx]);
+    const cost = shopCost(m, side, unitIdx), level = startLevel(m, side);
     if (m.gold[side] < cost) return null;
     if (deploysLeft(m, side) <= 0) return null;
-    const sq = { id: m.nextId[side]++, unit: unitIdx, col, row, round: m.round, xp: 0, level: 0, cost, ...ride };
+    // a squad that starts leveled up starts with the XP of that level, so the next one is as far off as usual
+    const sq = { id: m.nextId[side]++, unit: unitIdx, col, row, round: m.round, xp: level ? xpNeeded(m.units[unitIdx], level - 1) : 0, level, cost, ...ride };
     m.armies[side].push(sq);
     m.gold[side] -= cost;
     return sq;
@@ -903,14 +921,14 @@ const Game = (() => {
         reserve += levelCost(m.units[sq.unit]);
       }
     }
-    const minCost = Math.min(...m.units.map(unitCostOf));
+    const minCost = Math.min(...m.units.map((u, i) => shopCost(m, side, i)));
     // the elf tower: from round 2, sometimes bribe it while a squad is still affordable after; more often when not ahead
     if (m.round >= 2) for (let k = 0; k < 3; k++) {
       if (!canBribe(m, side) || m.gold[side] - reserve - bribeCost(m, side) < minCost || r() >= (bribeLeader(m, true) === side ? 0.2 : 0.5)) break;
       bribe(m, side);
     }
     // its own elf tower once the elves offer it: a free back-row tile, if a squad is still affordable after
-    if (canBuyElfOwn(m, side) && m.gold[side] - reserve - ELF_OWN.cost >= minCost) {
+    if (canBuyElfOwn(m, side) && m.gold[side] - reserve - elfOwnCost(m, side) >= minCost) {
       const spots = [];
       for (const row of zoneRows(side).slice(3)) for (let col = 1; col < COLS - 1; col++) if (elfOwnSpotOk(m, side, col, row)) spots.push({ col, row });
       if (spots.length) { const sp = spots[Math.floor(r() * spots.length)]; buyElfOwn(m, side, sp.col, sp.row); }
@@ -926,7 +944,7 @@ const Game = (() => {
     // mushroom tiles: sometimes clear a green one out of its own zone
     for (const row of zoneRows(side)) for (let col = 0; col < COLS; col++) {
       const sh = shroomAt(m, col, row);
-      if (sh && sh.type === 'green' && m.gold[side] - reserve - SHROOM_REMOVE >= minCost && r() < 0.4) removeShroom(m, side, col, row);
+      if (sh && sh.type === 'green' && m.gold[side] - reserve - shroomCost(m, side) >= minCost && r() < 0.4) removeShroom(m, side, col, row);
     }
     // skills: for unit types it has 2 or more squads of, sometimes buy a skill if a squad is still affordable after
     if (AI.skills) {
@@ -948,7 +966,7 @@ const Game = (() => {
       let best = -1, bs = -Infinity;
       m.units.forEach((u, i) => {
         const extra = isUnlocked(m, side, i) ? 0 : unlockCost(m, i, side); // a locked unit costs its unlock on top
-        if (unitCostOf(u) + extra > budget) return;
+        if (shopCost(m, side, i) + extra > budget) return;
         let s = 0, tot = 0;
         for (const t in oppCount) { s += oppCount[t] * (m.matrix[i][t] || 0); tot += oppCount[t]; }
         s = tot ? s / tot : 0;
@@ -1006,13 +1024,13 @@ const Game = (() => {
     levelCost, isReady, levelUp, undoLevel, aiLevel, AI, CONFIG,
     deploysAllowed, deploysLeft, deployedThisRound, buyDeploy, refundDeploy,
     PACKAGE, allPackages, packOf, needsPack, freeLeft, choosePack, ensurePack,
-    unlockCost, isUnlocked, unlockVisible, unlock, undoUnlock,
+    unlockCost, tierOf, startLevel, shopCost, mapPrice, isUnlocked, unlockVisible, unlock, undoUnlock,
     skillDef, skillCost, isInnate, hasSkill, skillVisible, unitFor, canBuySkill, buySkill, undoSkill, sellValue, sell,
     isRider, hiddenFromFoe, isCarrier, riderOf, carrierOf, squadAt, boardable, unplaceSquad,
     TOWER, TOWER_TYPES, OUTPOST, TOWER_PICK_ROUND, towerType, towerChoices, needsTowerPick, setTowerType, settleTowerPicks, TOWER_SKILL, towerSkillOf, towerSkillVisible, towerPicked, canBuyTowerSkill, buyTowerSkill, undoTowerSkill, TOWER_MID, towerColOk, towerAt, needsTower, placeTower, ensureTower,
     FLANK, flankRows, flankOpen, isFlank, reserved, canPlaceAt, enemyHolds, inNoMans, hasSkillType,
     ICE, ALTAR, GOLEM, isIce, hailRound, altarRound, stormShift, stormRows, hailTiles, altarCost, altarBought, addAltar, buyAltar, undoAltar, snowgres, snowgreUnit,
-    MAPS, ELF_TOWER, SHROOM, SHROOM_SPLIT, shroomAt, shroomTileAt, shroomRemoval, SHROOM_REMOVE, removeShroom, undoRemoveShroom, mapOf, elfSpot, rollMap, BRIBE_COST, bribeList, bribeGold, bribeCount, bribeNow, bribeCost, ELF_POWER, elfPowered, elfUnit, ELF_OWN, elfOwnOf, elfOwnAt, elfOwnUnlocked, elfOwnOffered, canBuyElfOwn, elfOwnSpotOk, buyElfOwn, undoElfOwn, bribeLeader, canBribe, bribe, undoBribe,
+    MAPS, ELF_TOWER, SHROOM, SHROOM_SPLIT, shroomAt, shroomTileAt, shroomRemoval, SHROOM_REMOVE, shroomCost, removeShroom, undoRemoveShroom, mapOf, elfSpot, rollMap, BRIBE_COST, bribeList, bribeGold, bribeCount, bribeNow, bribeCost, ELF_POWER, elfPowered, elfUnit, ELF_OWN, elfOwnCost, elfOwnOf, elfOwnAt, elfOwnUnlocked, elfOwnOffered, canBuyElfOwn, elfOwnSpotOk, buyElfOwn, undoElfOwn, bribeLeader, canBribe, bribe, undoBribe,
     CHARACTERS, CHAR, charOf, charInfo, isTier1, rollBuffTiles, onBuffTile, TOWER_SPOT, towerSpot,
     zoneRows, inZone, tileToWorld, createMatch, place, unplace, bodiesFor, startBattle, resolve, aiDeploy, occupied,
   };
