@@ -2949,6 +2949,29 @@ if (typeof module !== 'undefined') module.exports = Game;
   }
   let drag = null, dragEndAt = 0; // dragging one of your squads to another tile
   let timerOn = true;       // vs AI: deploy countdown on or off
+
+  // ---------- menu music: loops on the start screen and in the lobby, fades out when a match starts ----------
+  const MUSIC_STORE = 'phonebellum.music.v1';
+  let musicOn = true;
+  try { musicOn = localStorage.getItem(MUSIC_STORE) !== 'off'; } catch (e) {}
+  const music = new Audio('audio/menu-music.mp3');
+  music.loop = true; music.preload = 'auto';
+  let musicFade = 0, musicUnlocked = false;
+  function syncMusic() {
+    const want = musicOn && musicUnlocked && (phase === 'start' || phase === 'lobby');
+    if (want && (music.paused || musicFade)) {
+      clearInterval(musicFade); musicFade = 0; music.volume = 0.6;
+      music.play().catch(() => {});
+    } else if (!want && !music.paused && !musicFade) {
+      musicFade = setInterval(() => {
+        music.volume = Math.max(0, music.volume - 0.06);
+        if (music.volume === 0) { clearInterval(musicFade); musicFade = 0; music.pause(); }
+      }, 50);
+    }
+  }
+  // phones only allow sound after the player touches the page
+  const unlockMusic = () => { musicUnlocked = true; syncMusic(); };
+  ['pointerdown', 'keydown'].forEach(t => document.addEventListener(t, unlockMusic, { once: true, capture: true }));
   let mapPick = '';         // the map the host picked for the next match ('' = random)
   let pickFor = '', pickSel = null, pickPeek = false, pickHtml = ''; // the choose-one-of-3 cards over the board (syncPick)
   const MAP_SHORT = { standard: 'Standard', forest: 'Forest', cavern: 'Cavern', ice: 'Peak' };
@@ -3773,6 +3796,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
   }
 
   function render() {
+    syncMusic();
     cv.style.touchAction = phase === 'deploy' ? 'none' : ''; // so a finger can drag squads without scrolling the page
     if (!m) { drawBoard(); return; }
     if (bt && (phase === 'battle' || phase === 'result' || phase === 'end')) drawBattle();
@@ -3789,7 +3813,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
     $('round').textContent = v ? v.round : 1;
     $('phase').textContent = { start: 'Ready', lobby: 'Lobby', deploy: 'Deploy', battle: 'Battle', result: 'Result', end: 'Match over' }[phase];
     $('foe-name').textContent = foeName();
-    syncPick();
+    syncPick(); syncMusic();
   }
 
   function setNet(text, state) {
@@ -4118,6 +4142,12 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
       ${mapSeg()}
       ${charSeg()}
       <div class="bar">
+        <span class="hint">Menu music</span>
+        <div class="seg" role="group" aria-label="Menu music">
+          <button data-mu="1" aria-pressed="${musicOn}">On</button><button data-mu="0" aria-pressed="${!musicOn}">Off</button>
+        </div>
+      </div>
+      <div class="bar">
         <span class="hint">Deploy timer vs AI</span>
         <div class="seg" role="group" aria-label="Deploy timer vs AI">
           <button data-tm="1" aria-pressed="${timerOn}">On</button><button data-tm="0" aria-pressed="${!timerOn}">Off</button>
@@ -4146,6 +4176,12 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
       $('panel').querySelectorAll('[data-c]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
     }));
     wireMapSeg(); wireCharSeg();
+    $('panel').querySelectorAll('[data-mu]').forEach(b => b.addEventListener('click', () => {
+      musicOn = b.dataset.mu === '1';
+      try { localStorage.setItem(MUSIC_STORE, musicOn ? 'on' : 'off'); } catch (e) {}
+      $('panel').querySelectorAll('[data-mu]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+      unlockMusic();
+    }));
     $('panel').querySelectorAll('[data-tm]').forEach(b => b.addEventListener('click', () => {
       timerOn = b.dataset.tm === '1';
       $('panel').querySelectorAll('[data-tm]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
