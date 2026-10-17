@@ -333,6 +333,7 @@ a { color: var(--you); }
   // Volume goes through Web Audio because iPhones ignore audio.volume.
   const SOUND_STORE = 'phonebellum.sound.v1';
   const SONGS = { // all mastered to the same loudness
+    sisi: { title: 'sisi', file: 'audio/sisi.mp3' },
     jonah: { title: 'Jonah', file: 'audio/jonah.mp3' },
     long: { title: 'Long', file: 'audio/long.mp3' },
     superCoffee: { title: 'Super coffee', file: 'audio/super-coffee.mp3' },
@@ -344,7 +345,7 @@ a { color: var(--you); }
   };
   const ARTIST = 'Snetänd';
   const songName = (id) => `“${SONGS[id].title}” - ${ARTIST}`;
-  const PLAYLISTS = { menu: ['jonah', 'long', 'superCoffee'], deploy: ['bulgaria'], battle: ['habbyourmam'] };
+  const PLAYLISTS = { menu: ['sisi', 'jonah', 'long', 'superCoffee'], deploy: ['bulgaria'], battle: ['habbyourmam'] };
   const MAP_MUSIC = { // maps with their own deployment or battle music, in place of PLAYLISTS.deploy / .battle
     ice: { deploy: ['icyOne'], battle: ['knarkkungn'] },
     cavern: { deploy: ['sirski'] },
@@ -359,10 +360,10 @@ a { color: var(--you); }
   const saveSound = () => { try { localStorage.setItem(SOUND_STORE, JSON.stringify(snd)); } catch (e) {} };
   const musicLevel = () => snd.muted ? 0 : snd.vol / 100;
   let actx = null, musicUnlocked = false;
-  // one player per playlist: starts on a random track, then plays the rest in order and loops;
-  // a paused playlist picks up where it stopped
-  function playlist(tracks) {
-    let track = Math.floor(Math.random() * tracks.length), gain = null, stopT = 0;
+  // one player per playlist: starts on a random track (the menu one on its first), then plays the rest in order
+  // and loops; a paused playlist picks up where it stopped
+  function playlist(tracks, fromStart) {
+    let track = fromStart ? 0 : Math.floor(Math.random() * tracks.length), gain = null, stopT = 0;
     const el = new Audio(SONGS[tracks[track]].file);
     el.preload = 'none';
     const pl = { el, playing: false };
@@ -394,7 +395,7 @@ a { color: var(--you); }
     return pl;
   }
   const menuSongs = () => snd.song ? [snd.song] : PLAYLISTS.menu;
-  const music = { menu: playlist(menuSongs()), deploy: playlist(PLAYLISTS.deploy), battle: playlist(PLAYLISTS.battle) };
+  const music = { menu: playlist(menuSongs(), true), deploy: playlist(PLAYLISTS.deploy), battle: playlist(PLAYLISTS.battle) };
   for (const id in MAP_MUSIC) for (const k in MAP_MUSIC[id]) music[k + '-' + id] = playlist(MAP_MUSIC[id][k]);
   function syncMusic() {
     const on = musicUnlocked && musicLevel() > 0;
