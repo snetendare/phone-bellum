@@ -161,6 +161,7 @@ a { color: var(--you); }
     'Boar Riders': 'Fast chargers whose first hit doubles and knocks small bodies back.',
     'Rogue': 'A pair of fast duelists whose first strike after a run lands four times as hard. Can be placed in no man’s land.',
     'Spiders': 'A fast pack of biters. Each spider that falls can split into two smaller spiderlings.',
+    'Truespear': 'A lone spearman whose every thrust cuts away a fifth of its target’s health. Fells giants, wasted on swarms.',
     'Just a horse': 'Just a horse. Gallops past everything to ram the enemy tower, and might have something hiding inside: place a squad on its tile and it rides along unseen until the horse falls.',
   };
   // ---------- role symbols: what a unit is, what it beats, one extra trait, and its range ----------
@@ -177,6 +178,7 @@ a { color: var(--you); }
     'War Mammoth': ['giant', null, 'charger'], 'Necromancer': ['giant', null, 'summoner'],
     'Just a horse': ['single', null, 'raider'],
     'Rogue': ['group', 'giants'], 'Spiders': ['swarm', 'giants'],
+    'Truespear': ['single', 'giants'],
   };
   const IS_TXT = { swarm: 'Swarm', group: 'Small group', single: 'Single', giant: 'Giant' };
   const BEATS_TXT = { crowds: 'beats crowds', giants: 'beats giants', both: 'beats crowds and giants' };
@@ -342,7 +344,10 @@ a { color: var(--you); }
   const scol = (c) => me === 1 ? Game.COLS - 1 - c : c;   // model column -> screen column (and back)
   const srow = (r) => me === 1 ? Game.ROWS - 1 - r : r;
   const tilePx = () => Game.TILE * S;
-  const radius = (u) => Math.max(0.6, Math.min(2.4, 0.55 + Math.sqrt(u.hp) / 30)) * S;
+  // size from health, but a leveled unit (2x, 3x health) only counts part of its extra health, and swarms
+  // (5+ bodies) even less, so level 2 and 3 squads don't crowd the board
+  const LEVEL_SIZE = [1, 0.8, 0.65], SWARM_SIZE = [1, 0.72, 0.56];
+  const radius = (u) => Math.max(0.6, Math.min(2.4, 0.55 + Math.sqrt(u.hp * ((u.bodies >= 5 ? SWARM_SIZE : LEVEL_SIZE)[u.level | 0] || 1)) / 30)) * S;
   const ELF_COL = '#D8E68C'; // the neutral elf tower and its arrows
   const teamCol = (side) => side === 2 ? ELF_COL : side === me ? css('--you') : css('--foe');
   const upOf = (side) => side === me ? 1 : -1;
@@ -1145,7 +1150,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
         key: x.id,
         art: `<canvas data-ticon="${x.id}" width="96" height="96" style="width:48px;height:48px" aria-hidden="true"></canvas>`,
         name: esc(x.name), who: '', sub: `${x.unit.hp} hp · ${x.unit.range} m`,
-        det: `<b>${esc(x.name)}</b> · ${x.unit.hp} hp · hit ${x.unit.hit} × ${x.unit.aps}/s · ${x.unit.range} m${x.unit.splash ? ` · ${x.unit.splash} m splash` : ''}<br>${esc(x.text)}${x.skill ? `<br><span style="color:var(--gold)">Skill, ${Game.TOWER_SKILL.cost} gold: ${esc(x.skill.name)}.</span> ${esc(x.skill.text)}` : ''}`,
+        det: `<b>${esc(x.name)}</b> · ${x.unit.hp} hp · hit ${x.unit.hit} × ${x.unit.aps}/s · ${x.unit.range} m${x.unit.splash ? ` · ${x.unit.splash} m splash` : ''}<br>${esc(x.text)}${x.skill ? `<br><span style="color:var(--gold)">Skill, bought separately for ${Game.TOWER_SKILL.cost} gold: ${esc(x.skill.name)}.</span> ${esc(x.skill.text)}` : ''}`,
       })),
     };
     return null;
@@ -1190,6 +1195,8 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
   $('pick-peek').addEventListener('click', () => { pickPeek = false; syncPick(); });
 
   // ---------- panel ----------
+  // the picked tower's skill, not bought yet: offered as a button in the deploy panel
+  const tskillOffer = () => !!m && Game.towerPicked(m, me) && !Game.needsTowerPick(m, me) && !Game.towerSkillOf(m, me) && !!Game.towerType(m, me).skill;
   function panelDeploy() {
     if (phase !== 'deploy') return;
     const g = m.gold[me];
@@ -1220,12 +1227,14 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
       const freeL = Game.freeLeft(m, me);
       if (freeL.length && !placingTower() && selected === null) hint = `Place your free package squads: ${[...new Set(freeL)].map(ui => `${freeL.filter(x => x === ui).length}× ${esc(units[ui].name)}`).join(', ')}. They cost no gold and no deployments.`;
       if (choosingPack()) hint = `Choose your starting package and character on the board. Your opponent picks from their own packages.${(() => { const mp = Game.mapOf(m); return mp ? ` Map: <b>${esc(mp.name)}</b>. ${esc(mp.text)}` : ''; })()}`;
+      if (tskillOffer() && m.round === Game.TOWER_PICK_ROUND && selected === null && !fresh) hint = `Your ${esc(Game.towerType(m, me).name)} has a skill: ${esc(Game.towerType(m, me).skill.name)}. ${esc(Game.towerType(m, me).skill.text)} It isn’t on until you buy it (${Game.TOWER_SKILL.cost} gold, once per match).`;
       if (choosingTower()) hint = `Choose your tower on the board. The clock starts once ${solo() ? 'you have' : 'both players have'} picked.`;
       if (placingElf()) hint = 'Tap a free tile in your zone to place your elf tower. Tap anywhere else to cancel.';
       if (placingTower()) hint = 'Next, place your tower: tap a gold tile on the left or right side of your zone. If it falls in a fight, your army is crippled for a few seconds.';
     }
     const extraBtns = `<span style="display:flex;gap:6px;flex-wrap:wrap">
         <button class="btn small" id="buy-deploy" ${can && Game.canBuyDeploy(m, me) ? '' : 'disabled'}>+1 deployment · ${Game.CONFIG.extraDeployCost}</button>
+        ${tskillOffer() ? `<button class="btn small" id="buy-tskill" ${can && Game.canBuyTowerSkill(m, me) ? '' : 'disabled'}>${esc(Game.towerType(m, me).skill.name)} · ${Game.TOWER_SKILL.cost}</button>` : ''}
         ${can && m.extraDeploys[me] > 0 && left > 0 ? `<button class="btn small" id="refund-deploy">Refund unused</button>` : ''}
         ${Game.movedId(m, me) != null
           ? `<button class="btn small" id="undo-move" ${can ? '' : 'disabled'}>Undo move · +${Game.CONFIG.moveCost}</button>`
@@ -1280,6 +1289,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
     if ($('fight')) $('fight').addEventListener('click', runFight);
     if ($('ready')) $('ready').addEventListener('click', toggleReady);
     $('buy-deploy').addEventListener('click', () => { if (editable() && Game.buyDeploy(m, me)) changed(); });
+    if ($('buy-tskill')) $('buy-tskill').addEventListener('click', () => { if (editable() && Game.buyTowerSkill(m, me)) changed(); });
     if ($('refund-deploy')) $('refund-deploy').addEventListener('click', () => { if (editable() && Game.refundDeploy(m, me)) changed(); });
     if ($('move-btn')) $('move-btn').addEventListener('click', () => { if (!editable()) return; moveMode = !moveMode; moving = null; if (moveMode) selected = null; changed(); });
     if ($('undo-move')) $('undo-move').addEventListener('click', () => { if (editable() && Game.undoMove(m, me)) changed(); });
@@ -1615,6 +1625,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
       if (u.charge > 1) t.push(`charge x${u.charge}`);
       if (u.knockback > 0) t.push(`knockback ${u.knockback} m`);
       if (u.trample > 0) t.push(`tramples ${u.trample}%`);
+      if (u.pctHit > 0) t.push(`every hit also deals ${u.pctHit}% of the target's max health (not to towers)`);
       if (u.deathBlast > 0) t.push(`explodes on death for ${u.deathBlast}% of max health within ${Engine.BLAST_RADIUS} m`);
       if (u.windUp > 0) t.push(`wind-up ${u.windUp} s`);
       if (u.ram) t.push(`NEVER ATTACKS: runs straight at the enemy tower (the nearest enemy once it is down) and rams it once for its hit (${n1(u.hit)}), then is destroyed`);
@@ -2235,6 +2246,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (u.charge > 1) tr.push(`Charge ×${u.charge}`);
     if (u.knockback > 0) tr.push(`Knockback ${u.knockback} m`);
     if (u.trample > 0) tr.push(`Tramples (${u.trample}% hit)`);
+    if (u.pctHit > 0) tr.push(`Hits +${u.pctHit}% of target’s health`);
     if (u.deathBlast > 0) tr.push(`Death blast ${u.deathBlast}% health`);
     if (u.windUp > 0) tr.push(`Wind-up ${u.windUp} s`);
     if (u.defense === 'armor') tr.push(`Armor ${u.defVal}`);

@@ -173,6 +173,24 @@
       "params": {
         "turrets": 2
       }
+    },
+    {
+      "id": "lifesteal",
+      "type": "lifesteal",
+      "name": "Lifesteal",
+      "cost": 150,
+      "params": {
+        "pct": 10
+      }
+    },
+    {
+      "id": "dualSpear",
+      "type": "turret",
+      "name": "Dual Spear",
+      "cost": 300,
+      "params": {
+        "turrets": 2
+      }
     }
   ],
   "units": [
@@ -1201,6 +1219,56 @@
           "params": {},
           "cost": 200
         }
+      ]
+    },
+    {
+      "burst": 1,
+      "pellets": 1,
+      "spinUp": 0,
+      "pierce": 0,
+      "projSpeed": 0,
+      "minRange": 0,
+      "charge": 1,
+      "knockback": 0,
+      "windUp": 0,
+      "flame": 0,
+      "trample": 0,
+      "deathBlast": 0,
+      "pctHit": 20,
+      "defense": "none",
+      "defVal": 0,
+      "level": 0,
+      "unlock": 150,
+      "name": "Truespear",
+      "cost": 500,
+      "bodies": 1,
+      "hp": 750,
+      "hit": 60,
+      "aps": 0.6,
+      "range": 5,
+      "speed": 3,
+      "splash": 0,
+      "shape": "spear",
+      "color": "#C9D1D9",
+      "skills": [
+        "lifesteal",
+        "armorHp",
+        "dualSpear"
+      ],
+      "skillsOn": [
+        false,
+        false,
+        false
+      ],
+      "skillMods": [
+        null,
+        null,
+        null
+      ],
+      "skillsInnate": [
+        false,
+        false,
+        false
       ]
     }
   ]
