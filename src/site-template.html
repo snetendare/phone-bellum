@@ -2108,14 +2108,14 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     const defs = units[i].skillDefs || [];
     if (!defs.some(Boolean) || !m) return '';
     const mine = side === undefined || side === me, owner = mine ? me : side;
-    const enzo = Game.charOf(m, owner) === 'enzo' && (mine || charVisible(owner)), ek = Game.enzoSkill(m, owner, sq);
+    const enzo = Game.charOf(m, owner) === 'enzo' && (mine || charVisible(owner)), ek = Game.enzoSkill(m, owner, sq || { unit: i }); // the same for every squad of the unit, all match
     const rows = Engine.SLOTS.filter(k => defs[k]).map(k => {
       const d = defs[k], cost = Game.skillCost(m, i, k);
       let act = '';
       if (Game.isInnate(m, i, k)) {
         act = `<span class="chip" style="color:var(--ink);border:1px solid currentColor;border-radius:99px;padding:1px 8px;font-size:12px">Built in</span>`;
       } else if (enzo) {
-        act = sq && ek === k ? `<span class="chip" style="color:${mine ? 'var(--gold)' : 'var(--foe)'};border:1px solid currentColor;border-radius:99px;padding:1px 8px;font-size:12px">This squad has it</span>` : `<span class="hint">${sq ? 'Not on this squad' : 'Random per squad'}</span>`;
+        act = ek === k ? `<span class="chip" style="color:${mine ? 'var(--gold)' : 'var(--foe)'};border:1px solid currentColor;border-radius:99px;padding:1px 8px;font-size:12px">✓ ${mine ? 'Yours' : 'Theirs'}, free</span>` : `<span class="hint">Not picked</span>`;
       } else if (mine) {
         if (Game.hasSkill(m, me, i, k)) {
           act = `<span class="chip" style="color:var(--gold);border:1px solid currentColor;border-radius:99px;padding:1px 8px;font-size:12px">Owned</span>`;

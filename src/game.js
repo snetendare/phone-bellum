@@ -35,7 +35,7 @@ const Game = (() => {
   const TOWER_TYPES = [
     { id: 'keep', name: 'Keep', text: 'The standard tower: steady, light shots at short range.', unit: { ...TOWER, hp: 700 },
       skill: { name: 'Guards', text: 'Every fight, 4 guards (reskinned Wisps, without Wisp skills) stand by the keep for 5 s, shooting anything that comes close, then march on the enemy.' },
-      skill2: { name: 'Brute guards', cost: 200, needs: true, text: 'Your guards are Brutes instead of Wisps: 4 of them, with every skill you have bought for Brutes. Needs Guards.' } },
+      skill2: { name: 'Brute guards', cost: 500, needs: true, text: 'Your guards are Brutes instead of Wisps: 4 of them, with every skill you have bought for Brutes. Needs Guards.' } },
     { id: 'sniper', name: 'Sniper tower', text: 'Shoots across most of the board, slowly, for double damage.', unit: { ...TOWER, name: 'Sniper Tower', kind: 'sniper', hp: 500, hit: 60, aps: 0.4, range: 30, color: '#B9C7D6' },
       skill: { name: 'Eagle eye', text: 'The sniper tower and all your Sniper squads get +3 m range and +10% attack speed.' } },
     { id: 'bastion', name: 'Bastion', text: 'Much tougher, with a shorter, slower attack that splashes the units around its target.', unit: { ...TOWER, name: 'Bastion', kind: 'bastion', hp: 1000, aps: 0.8, range: 5, splash: 2, color: '#B79C8A' },
@@ -226,9 +226,9 @@ const Game = (() => {
     { id: 'yotyot', name: 'Yot-Yot', ability: 'Every fight, Ember Imps pop up on random free tiles on your side of the board (your zone, no man’s land and, once open, your flank tiles): 1 in round 1, 2 in round 2, and so on. From round 3 they are level 2, from round 6 level 3. They get the skills you bought for Ember Imps.' },
     { id: 'mubarak', name: 'Mubarak - Slime Lord', ability: 'Your slime units (Slime Wizards and Slimeshots) get every skill you buy for any slime unit, not just their own.' },
     { id: 'felix', name: 'Felix', ability: 'From round 3 on, you get 50 more gold every round.' },
-    { id: 'enzo', name: 'Enzo', ability: 'You can’t buy unit skills, but each unit type you field comes with one random skill, for free, the same for all your squads of it.' },
+    { id: 'enzo', name: 'Enzo', ability: 'You can’t buy unit skills, but each unit type comes with one random skill, for free, picked at the start of the match and the same for all your squads of it all match (see it under the unit’s i button). All your units have 10% less health and damage.' },
   ];
-  const CHAR = { cageHp: 10, zoeTiles: 2, zoeDmg: 20, zoeHp: 20, zoeAps: 10, wilhelmArmor: 4, wilhelmDelay: 0.5, noahLevel: 1, noahCut: 10, philTier: 4, philOff: 100, yotUnit: 'Ember Imps', yotLv2: 3, yotLv3: 6, felixRound: 3, felixGold: 50 };
+  const CHAR = { cageHp: 10, zoeTiles: 2, zoeDmg: 20, zoeHp: 20, zoeAps: 10, wilhelmArmor: 4, wilhelmDelay: 0.5, noahLevel: 1, noahCut: 10, enzoCut: 10, philTier: 4, philOff: 100, yotUnit: 'Ember Imps', yotLv2: 3, yotLv3: 6, felixRound: 3, felixGold: 50 };
   const charOf = (m, side) => (m && m.chars && m.chars[side]) || null;
   const charInfo = (id) => CHARACTERS.find(c => c.id === id) || null;
   // Blixten: the first map or tower purchase each round is free. m.mapFree[side][round] = the purchase that got it:
@@ -692,8 +692,8 @@ const Game = (() => {
     if (charOf(m, side) === 'mubarak' && base && SLIME_UNITS.includes(base.name)) defs.push(...slimeSkillDefs(m, side, ui));
     let u = defs.length ? E.applySkills(base, defs, m.units) : base;
     if (base && SLIME_UNITS.includes(base.name)) u = { ...u, slime: true }; // poison heals slime units
-    if (charOf(m, side) === 'noah') { // Noah: 10% less health and damage, spawned ones too
-      const k = 1 - CHAR.noahCut / 100;
+    if (charOf(m, side) === 'noah' || charOf(m, side) === 'enzo') { // Noah and Enzo: 10% less health and damage, spawned ones too
+      const k = 1 - (charOf(m, side) === 'noah' ? CHAR.noahCut : CHAR.enzoCut) / 100;
       u = { ...u, hp: u.hp * k, hit: u.hit * k };
       if (u.spawn) u.spawn = { ...u.spawn, unit: { ...u.spawn.unit, hp: u.spawn.unit.hp * k, hit: u.spawn.unit.hit * k } };
     }
