@@ -1496,15 +1496,35 @@ const Game = (() => {
     { id: 'zoe', name: 'Zoe', ability: 'Every round, 2 random tiles in your zone become buff tiles. A squad that starts the fight on one gets +20% damage, +20% health and +10% attack speed for the whole fight.' },
     { id: 'emile', name: 'Emile', ability: 'Tier 1 units are free to unlock.' },
     { id: 'wilhelm', name: 'Wilhelm', ability: 'Your squads on flank tiles and in no man’s land get +4 armor, and flank squads start twice as fast.' },
-    { id: 'blixten', name: 'Blixten', ability: 'Map purchases (the altar of ice, your own elf tower, removing mushroom tiles) cost you 50 gold less.' },
+    { id: 'blixten', name: 'Blixten', ability: 'Your first map purchase each round is free: a bribe, an offering at the altar of ice, your own elf tower or removing a mushroom tile.' },
     { id: 'noah', name: 'Noah', ability: 'Squads you buy in the shop start at level 2. Each costs its price plus one upgrade.' },
     { id: 'phil', name: 'Phil', ability: 'Tier 4 units are 100 gold cheaper to unlock.' },
   ];
-  const CHAR = { cageHp: 10, zoeTiles: 2, zoeDmg: 20, zoeHp: 20, zoeAps: 10, wilhelmArmor: 4, wilhelmDelay: 0.5, blixtenOff: 50, noahLevel: 1, philTier: 4, philOff: 100 };
+  const CHAR = { cageHp: 10, zoeTiles: 2, zoeDmg: 20, zoeHp: 20, zoeAps: 10, wilhelmArmor: 4, wilhelmDelay: 0.5, noahLevel: 1, philTier: 4, philOff: 100 };
   const charOf = (m, side) => (m && m.chars && m.chars[side]) || null;
   const charInfo = (id) => CHARACTERS.find(c => c.id === id) || null;
-  // what a map purchase costs a player: Blixten pays CHAR.blixtenOff less (never below 0)
-  const mapPrice = (m, side, cost) => side != null && charOf(m, side) === 'blixten' ? Math.max(0, cost - CHAR.blixtenOff) : cost;
+  // Blixten: the first map purchase each round is free. m.mapFree[side][round] = the purchase that got it:
+  // { kind: 'bribe' } (the round's first bribe), { kind: 'altar', type }, { kind: 'shroom', col, row } or { kind: 'elf' }
+  const mapFreeOf = (m, side) => (m && m.mapFree && m.mapFree[side] && m.mapFree[side][m.round]) || null;
+  const mapFreeLeft = (m, side) => side != null && charOf(m, side) === 'blixten' && !mapFreeOf(m, side);
+  const isMapFree = (m, side, rec) => { const f = mapFreeOf(m, side); return !!f && f.kind === rec.kind && f.type === rec.type && f.col === rec.col && f.row === rec.row; };
+  function useMapFree(m, side, rec) {
+    if (!m.mapFree) m.mapFree = [{}, {}];
+    m.mapFree[side][m.round] = rec;
+  }
+  // the free purchase was taken back: the free slot passes to another map purchase of this round, if there is one, refunding it
+  function passMapFree(m, side) {
+    delete m.mapFree[side][m.round];
+    const alt = altarBuys(m).find(b => b.side === side && b.round === m.round);
+    const rm = (m.map && m.map.removed || []).find(x => x.side === side && x.round === m.round);
+    const e = elfOwnOf(m, side);
+    let rec = null, back = 0;
+    if (bribeNow(m, side) > 0) { rec = { kind: 'bribe' }; back = BRIBE_COST; }
+    else if (alt) { rec = { kind: 'altar', type: alt.type }; back = altarBase(m, side, alt.type); }
+    else if (rm) { rec = { kind: 'shroom', col: rm.col, row: rm.row }; back = SHROOM_REMOVE; }
+    else if (e && e.round === m.round) { rec = { kind: 'elf' }; back = ELF_OWN.cost; }
+    if (rec) { useMapFree(m, side, rec); m.gold[side] += back; }
+  }
   // ---------- maps ----------
   // Each match is fought on one map, picked by the host when the match is created (or at random). A map can change the
   // rules of every fight. Elf tower: a neutral tower standing on the centre line of no man's land, the same
@@ -1549,7 +1569,13 @@ const Game = (() => {
     for (let k = 0; k < ICE.hailTiles && spots.length; k++) out.push(spots.splice(Math.floor(r() * spots.length), 1)[0]);
     return out;
   }
-  const altarCost = (m, side, type) => { const c = type === 'snowgre' ? ICE.costs.snowgre + ICE.snowStep * altarBuys(m).filter(b => b.side === side && b.type === 'snowgre' && b.round < m.round).length : ICE.costs[type]; return c == null ? c : mapPrice(m, side, c); };
+  const altarBase = (m, side, type) => type === 'snowgre' ? ICE.costs.snowgre + ICE.snowStep * altarBuys(m).filter(b => b.side === side && b.type === 'snowgre' && b.round < m.round).length : ICE.costs[type];
+  // an offering's price for a player: what they paid if they bought it this round, else what it costs them now
+  const altarCost = (m, side, type) => {
+    const c = altarBase(m, side, type);
+    if (c == null) return c;
+    return (altarBought(m, side, type) ? isMapFree(m, side, { kind: 'altar', type }) : mapFreeLeft(m, side)) ? 0 : c;
+  };
   const altarBought = (m, side, type) => altarBuys(m).some(b => b.side === side && b.type === type && b.round === m.round);
   // a Snowgre's spot: a random tile in its owner's half of no man's land, picked when it is summoned
   function snowSpot(m, side, k) {
@@ -1568,17 +1594,20 @@ const Game = (() => {
   }
   function buyAltar(m, side, type) {
     const cost = altarCost(m, side, type);
+    const free = mapFreeLeft(m, side);
     if (!(cost >= 0) || m.gold[side] < cost || !addAltar(m, side, type)) return false;
     m.gold[side] -= cost;
+    if (free) useMapFree(m, side, { kind: 'altar', type });
     return true;
   }
   // take back a purchase made this round, for a full refund
   function undoAltar(m, side, type) {
     const i = altarBuys(m).findIndex(b => b.side === side && b.type === type && b.round === m.round);
     if (i < 0) return false;
-    const cost = altarCost(m, side, type);
+    const cost = altarCost(m, side, type), wasFree = isMapFree(m, side, { kind: 'altar', type });
     m.altar.splice(i, 1);
     m.gold[side] += cost;
+    if (wasFree) passMapFree(m, side);
     return true;
   }
   // a player's Snowgres, oldest first: { col, row, strength, round }
@@ -1608,27 +1637,33 @@ const Game = (() => {
   const bribeGold = (m, side, pub) => {
     const per = {}; // bribes per round: n of them cost BRIBE_COST * (1 + 2 + ... + n)
     for (const r of bribeList(m, side)) if (!pub || r < m.round) per[r] = (per[r] || 0) + 1;
-    return Object.values(per).reduce((a, n) => a + BRIBE_COST * n * (n + 1) / 2, 0);
+    const free = Object.keys(per).filter(r => ((m.mapFree && m.mapFree[side]) || {})[r]?.kind === 'bribe').length; // Blixten's free first bribes
+    return Object.values(per).reduce((a, n) => a + BRIBE_COST * n * (n + 1) / 2, 0) - BRIBE_COST * free;
   };
   // how many times a player has bribed; pub = only bribes from earlier rounds
   const bribeCount = (m, side, pub) => bribeList(m, side).filter(r => !pub || r < m.round).length;
   const bribeNow = (m, side) => bribeList(m, side).filter(r => r === m.round).length; // bribes paid this round
-  const bribeCost = (m, side) => BRIBE_COST * (bribeNow(m, side) + 1); // what the next bribe this round costs
+  const bribeCost = (m, side) => bribeNow(m, side) === 0 && mapFreeLeft(m, side) ? 0 : BRIBE_COST * (bribeNow(m, side) + 1); // what the next bribe this round costs
+  // what taking back this round's last bribe gives back: the last one bought was the dearest (Blixten's free one gives nothing)
+  const bribeRefund = (m, side) => bribeNow(m, side) === 1 && isMapFree(m, side, { kind: 'bribe' }) ? 0 : BRIBE_COST * bribeNow(m, side);
   // who is ahead in the bribe-off: 0, 1, or -1 when level. pub: counting earlier rounds only (as the flag shows it while deploying)
   const bribeLeader = (m, pub) => { const a = bribeCount(m, 0, pub), b = bribeCount(m, 1, pub); return a > b ? 0 : b > a ? 1 : -1; };
   const canBribe = (m, side) => !!elfSpot(m) && m.gold[side] >= bribeCost(m, side);
   function bribe(m, side) {
     if (!canBribe(m, side)) return false;
     if (!m.bribe) m.bribe = [[], []];
-    m.gold[side] -= bribeCost(m, side);
+    if (bribeNow(m, side) === 0 && mapFreeLeft(m, side)) useMapFree(m, side, { kind: 'bribe' });
+    else m.gold[side] -= bribeCost(m, side);
     m.bribe[side] = bribeList(m, side).concat(m.round);
     return true;
   }
   function undoBribe(m, side) {
     const list = bribeList(m, side), k = list.lastIndexOf(m.round);
     if (k < 0) return false;
-    m.gold[side] += BRIBE_COST * bribeNow(m, side); // the last one bought was the dearest
+    const wasFree = bribeNow(m, side) === 1 && isMapFree(m, side, { kind: 'bribe' });
+    m.gold[side] += bribeRefund(m, side);
     m.bribe[side] = list.filter((r, j) => j !== k);
+    if (wasFree) passMapFree(m, side);
     return true;
   }
   // After round 5 the elves hit and heal ELF_POWER.mul times as hard (the map's tower and the players' own)
@@ -1645,21 +1680,26 @@ const Game = (() => {
   const elfOwnUnlocked = (m) => !!elfSpot(m) && bribeCount(m, 0, true) + bribeCount(m, 1, true) >= ELF_OWN.unlock;
   // offered to a player only if they have bribed the elves themselves (in an earlier round too)
   const elfOwnOffered = (m, side) => elfOwnUnlocked(m) && bribeCount(m, side, true) > 0;
-  const elfOwnCost = (m, side) => mapPrice(m, side, ELF_OWN.cost);
+  // what it costs a player: what they paid if they bought it this round, else what it costs them now
+  const elfOwnCost = (m, side) => { const e = elfOwnOf(m, side); return (e && e.round === m.round ? isMapFree(m, side, { kind: 'elf' }) : mapFreeLeft(m, side)) ? 0 : ELF_OWN.cost; };
   const canBuyElfOwn = (m, side) => elfOwnOffered(m, side) && !elfOwnOf(m, side) && m.gold[side] >= elfOwnCost(m, side);
   const elfOwnSpotOk = (m, side, col, row) => col >= 0 && col < COLS && inZone(side, row) && !reserved(side, col, row) && !occupied(m, side, col, row);
   function buyElfOwn(m, side, col, row) {
     if (!canBuyElfOwn(m, side) || !elfOwnSpotOk(m, side, col, row)) return false;
     if (!m.elfOwn) m.elfOwn = [null, null];
+    const free = mapFreeLeft(m, side);
     m.gold[side] -= elfOwnCost(m, side);
     m.elfOwn[side] = { col, row, round: m.round };
+    if (free) useMapFree(m, side, { kind: 'elf' });
     return true;
   }
   function undoElfOwn(m, side) {
     const e = elfOwnOf(m, side);
     if (!e || e.round !== m.round) return false;
+    const cost = elfOwnCost(m, side), wasFree = isMapFree(m, side, { kind: 'elf' });
     m.elfOwn[side] = null;
-    m.gold[side] += elfOwnCost(m, side);
+    m.gold[side] += cost;
+    if (wasFree) passMapFree(m, side);
     return true;
   }
   const ELF_COLS = [2, 9]; // the elf tower's column is picked from these (never the flank edges)
@@ -1694,21 +1734,29 @@ const Game = (() => {
   // Removing a mushroom tile: SHROOM_REMOVE gold, any tile, either player. It is gone from the next fight on.
   // Like a bribe, a removal stays hidden from the opponent until the fight and can be taken back in the same round.
   const SHROOM_REMOVE = 50;
-  const shroomCost = (m, side) => mapPrice(m, side, SHROOM_REMOVE);
+  // what removing a tile costs a player; with col, row of a tile they removed this round: what they paid for it
+  const shroomCost = (m, side, col, row) => {
+    const mine = col != null && (m.map && m.map.removed || []).some(x => x.col === col && x.row === row && x.side === side && x.round === m.round);
+    return (mine ? isMapFree(m, side, { kind: 'shroom', col, row }) : mapFreeLeft(m, side)) ? 0 : SHROOM_REMOVE;
+  };
   // (both players may pick the same tile in the same round, since neither can see the other's choice; both pay)
   function removeShroom(m, side, col, row) {
     if (!shroomTileAt(m, col, row) || m.gold[side] < shroomCost(m, side)) return false;
     if ((m.map.removed || []).some(x => x.col === col && x.row === row && (x.round < m.round || x.side === side))) return false;
     if (!m.map.removed) m.map.removed = [];
+    const free = mapFreeLeft(m, side);
     m.gold[side] -= shroomCost(m, side);
     m.map.removed.push({ col, row, side, round: m.round });
+    if (free) useMapFree(m, side, { kind: 'shroom', col, row });
     return true;
   }
   function undoRemoveShroom(m, side, col, row) {
     const x = (m.map && m.map.removed || []).find(q => q.col === col && q.row === row && q.side === side && q.round === m.round);
     if (!x) return false;
+    const cost = shroomCost(m, side, col, row), wasFree = isMapFree(m, side, { kind: 'shroom', col, row });
     m.map.removed.splice(m.map.removed.indexOf(x), 1);
-    m.gold[side] += shroomCost(m, side);
+    m.gold[side] += cost;
+    if (wasFree) passMapFree(m, side);
     return true;
   }
   // Where a player's tower stands. On a pointMirror map the board is mirrored as each player sees it, so the
@@ -1870,6 +1918,7 @@ const Game = (() => {
       bribe: [[], []], // the round of each bribe each player paid the elves (see the bribe-off)
       elfOwn: [null, null], // each player's own elf tower: { col, row, round bought }
       towerSkill: [0, 0], // round each player bought their tower's skill in (0 = not bought)
+      mapFree: [{}, {}], // Blixten's free map purchase per round (see mapFreeOf)
     };
     m.towers = [towerSpot(m, 0), towerSpot(m, 1)];
     return m;
@@ -1955,8 +2004,8 @@ const Game = (() => {
   }
 
   // ---------- selling ----------
-  // Squads from earlier rounds sell for half the unit's price (squads placed this round are taken back in full)
-  const sellValue = (m, sq) => Math.floor(unitCostOf(m.units[sq.unit]) / 2 / 5) * 5;
+  // Squads from earlier rounds sell for half their worth: the unit's price plus its upgrades (squads placed this round are taken back in full)
+  const sellValue = (m, sq) => Math.floor((unitCostOf(m.units[sq.unit]) + (sq.level || 0) * levelCost(m.units[sq.unit])) / 2 / 5) * 5;
   function sell(m, side, sqId) {
     const i = m.armies[side].findIndex(s => s.id === sqId && s.round < m.round);
     if (i < 0) return 0;
@@ -2426,13 +2475,13 @@ const Game = (() => {
     levelCost, isReady, levelUp, undoLevel, aiLevel, AI, CONFIG,
     deploysAllowed, deploysLeft, deployedThisRound, buyDeploy, refundDeploy,
     PACKAGE, allPackages, packOf, needsPack, freeLeft, choosePack, ensurePack,
-    unlockCost, tierOf, startLevel, shopCost, mapPrice, isUnlocked, unlockVisible, unlock, undoUnlock,
+    unlockCost, tierOf, startLevel, shopCost, mapFreeOf, mapFreeLeft, isUnlocked, unlockVisible, unlock, undoUnlock,
     skillDef, skillCost, isInnate, hasSkill, skillVisible, unitFor, canBuySkill, buySkill, undoSkill, sellValue, sell,
     isRider, hiddenFromFoe, isCarrier, riderOf, carrierOf, squadAt, boardable, unplaceSquad,
     TOWER, TOWER_TYPES, OUTPOST, TOWER_PICK_ROUND, towerType, towerChoices, needsTowerPick, setTowerType, settleTowerPicks, TOWER_SKILL, towerSkillOf, towerSkillVisible, towerPicked, canBuyTowerSkill, buyTowerSkill, undoTowerSkill, TOWER_MID, towerColOk, towerAt, needsTower, placeTower, ensureTower,
     FLANK, flankRows, flankOpen, isFlank, reserved, canPlaceAt, enemyHolds, inNoMans, hasSkillType,
     ICE, ALTAR, GOLEM, isIce, hailRound, altarRound, stormShift, stormRows, hailTiles, altarCost, altarBought, addAltar, buyAltar, undoAltar, snowgres, snowgreUnit,
-    MAPS, ELF_TOWER, SHROOM, SHROOM_SPLIT, shroomAt, shroomTileAt, shroomRemoval, SHROOM_REMOVE, shroomCost, removeShroom, undoRemoveShroom, mapOf, elfSpot, rollMap, BRIBE_COST, bribeList, bribeGold, bribeCount, bribeNow, bribeCost, ELF_POWER, elfPowered, elfUnit, ELF_OWN, elfOwnCost, elfOwnOf, elfOwnAt, elfOwnUnlocked, elfOwnOffered, canBuyElfOwn, elfOwnSpotOk, buyElfOwn, undoElfOwn, bribeLeader, canBribe, bribe, undoBribe,
+    MAPS, ELF_TOWER, SHROOM, SHROOM_SPLIT, shroomAt, shroomTileAt, shroomRemoval, SHROOM_REMOVE, shroomCost, removeShroom, undoRemoveShroom, mapOf, elfSpot, rollMap, BRIBE_COST, bribeList, bribeGold, bribeCount, bribeNow, bribeCost, bribeRefund, ELF_POWER, elfPowered, elfUnit, ELF_OWN, elfOwnCost, elfOwnOf, elfOwnAt, elfOwnUnlocked, elfOwnOffered, canBuyElfOwn, elfOwnSpotOk, buyElfOwn, undoElfOwn, bribeLeader, canBribe, bribe, undoBribe,
     CHARACTERS, CHAR, charOf, charInfo, isTier1, rollBuffTiles, onBuffTile, TOWER_SPOT, towerSpot,
     zoneRows, inZone, tileToWorld, createMatch, place, unplace, bodiesFor, startBattle, resolve, aiDeploy, occupied,
   };
@@ -3018,13 +3067,14 @@ if (typeof module !== 'undefined') module.exports = Game;
       g.beginPath(); g.moveTo(-0.32, 0.22); g.lineTo(-0.34, -0.2); g.lineTo(-0.16, 0.0); g.lineTo(0, -0.28); g.lineTo(0.16, 0.0); g.lineTo(0.34, -0.2); g.lineTo(0.32, 0.22); g.closePath(); g.fill();
       g.fillRect(-0.32, 0.27, 0.64, 0.08); } },
   };
-  function drawArms(g, id, x, y, w) {
+  // edge: an outline colour (a team colour on the elf tower flags), drawn thicker
+  function drawArms(g, id, x, y, w, edge) {
     const a = ARMS[id]; if (!a) return;
     const shield = () => { g.beginPath(); g.moveTo(-0.5, -0.55); g.lineTo(0.5, -0.55); g.lineTo(0.5, 0.05); g.quadraticCurveTo(0.5, 0.45, 0, 0.65); g.quadraticCurveTo(-0.5, 0.45, -0.5, 0.05); g.closePath(); };
     g.save(); g.translate(x, y); g.scale(w, w);
     shield(); g.fillStyle = a.field; g.fill();
     g.save(); g.clip(); g.fillStyle = a.charge; g.strokeStyle = a.charge; a.draw(g); g.restore();
-    shield(); g.lineWidth = Math.max(0.09, 1 / w); g.strokeStyle = '#15151B'; g.stroke();
+    shield(); g.lineWidth = edge ? Math.max(0.16, 2 / w) : Math.max(0.09, 1 / w); g.strokeStyle = edge || '#15151B'; g.stroke();
     g.restore();
   }
   // a coat of arms as an image, for the character lines in the panels
@@ -3111,18 +3161,21 @@ if (typeof module !== 'undefined') module.exports = Game;
       ctx.beginPath(); ctx.arc(x, y, Game.ELF_TOWER.range * S, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
       ctx.globalAlpha = 1;
     }
-    // the flag on the roof: the colour of whoever is ahead in the bribe-off, plain white while it's level
+    // the flag on the roof: the coat of arms of whoever is ahead in the bribe-off, edged in their colour; plain white while it's level
     const lead = bribeLeadShown(v);
-    drawSpire(x, y, tilePx() * 1.25, lead < 0 ? '#F4F1E6' : teamCol(lead), Game.elfPowered(v));
+    drawSpire(x, y, tilePx() * 1.25, lead < 0 ? '#F4F1E6' : teamCol(lead), Game.elfPowered(v), lead < 0 ? null : armsShown(v, lead));
     for (const sd of [me, foe()]) {
       const own = Game.elfOwnOf(v, sd);
       if (!own || !elfOwnShown(v, sd)) continue;
       const w = Game.tileToWorld(own.col, own.row);
-      drawSpire(PX(w.x), PY(w.y), tilePx() * 1.05, teamCol(sd), Game.elfPowered(v));
+      drawSpire(PX(w.x), PY(w.y), tilePx() * 1.05, teamCol(sd), Game.elfPowered(v), armsShown(v, sd));
     }
   }
-  // one elf spire at (x, y), size s, its flag in flagCol. strong (after round 5): a golden glow and a gilded roof
-  function drawSpire(x, y, s, flagCol, strong) {
+  // a player's coat of arms where this screen may show it (null while their character is hidden)
+  const armsShown = (v, side) => charVisible(side) ? Game.charOf(v, side) : null;
+  // one elf spire at (x, y), size s, its flag in flagCol. strong (after round 5): a golden glow and a gilded roof.
+  // arms: a character's coat of arms, flown as a shield edged in flagCol instead of the plain pennant
+  function drawSpire(x, y, s, flagCol, strong, arms) {
     if (strong) {
       const gl = ctx.createRadialGradient(x, y - s * 0.1, 0, x, y - s * 0.1, s * 0.75);
       gl.addColorStop(0, 'rgba(255, 214, 90, 0.5)'); gl.addColorStop(1, 'rgba(255, 214, 90, 0)');
@@ -3140,6 +3193,7 @@ if (typeof module !== 'undefined') module.exports = Game;
     const py = top - s * 0.3;
     ctx.strokeStyle = '#3F5A35'; ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(x, py); ctx.lineTo(x, py - s * 0.28); ctx.stroke();
+    if (arms) { drawArms(ctx, arms, x + s * 0.18, py - s * 0.2, Math.max(9, s * 0.28), flagCol); return; }
     ctx.fillStyle = flagCol;
     ctx.beginPath(); ctx.moveTo(x, py - s * 0.28); ctx.lineTo(x + s * 0.2, py - s * 0.23); ctx.lineTo(x, py - s * 0.18); ctx.closePath(); ctx.fill();
   }
@@ -3659,7 +3713,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
             <li>Squads earn experience. A gold + means you can upgrade one: level 2 doubles health and attack, level 3 triples them.</li>
             <li>Some units start unlocked. The rest cost gold once to unlock for the match; tap a locked card.</li>
             <li>Each unit has three skills. Buy one and all your squads of that unit get it.</li>
-            <li>Extra deployments cost ${Game.CONFIG.extraDeployCost} gold. Tap a squad from an earlier round to sell it for half its price.</li>`],
+            <li>Extra deployments cost ${Game.CONFIG.extraDeployCost} gold. Tap a squad from an earlier round to sell it for half its worth: its price plus the upgrades it has.</li>`],
         ].map(([h, gist, body]) => `<details><summary><b>${h}</b><span>${gist}</span></summary><ul>${body}</ul></details>`).join('')}
       </div>
     </div>`);
@@ -3968,7 +4022,7 @@ ${m.packages[1].map((p, k) => `  ${k}: ${p.squads.map(ui => units[ui].name).join
 ` : Game.freeLeft(m, 1).length ? `- FREE package squads still to place (no gold, no deployment): ${Game.freeLeft(m, 1).map(ui => units[ui].name).join(', ')}.
 ` : ''}- Unlocks: units marked LOCKED must be unlocked once (their unlock price, on top of the squad price) before you can place them; it lasts the whole match. List them under "unlock", or just place them and they're unlocked automatically if you can afford it.${(() => { const t = units.map((u, i) => Game.unlockCost(m, i) > 0 && Game.unlockVisible(m, 0, i) ? u.name : null).filter(Boolean); return t.length ? ' The opponent has unlocked: ' + t.join(', ') + '.' : ''; })()}
 - Skills: each unit has 2. Buying one (its price) gives it to ALL your squads of that unit, now and later. You need at least one squad of that unit on the board (placing one this round counts).
-- You may sell squads from earlier rounds for half their price (their tile becomes free).
+- You may sell squads from earlier rounds for half their worth: the unit's price plus its level-ups (their tile becomes free).
 
 UNITS
 ${units.map(unitLine).join('\n')}
@@ -4367,7 +4421,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (phase !== 'deploy' || !m) return '';
     const tl = Game.shroomTileAt(m, col, row); if (!tl) return '';
     const name = `<b style="color:${SHROOM_COL[tl.type]}">${tl.type}</b> mushroom tile`;
-    if (myRemovalNow(col, row)) return `<div class="bar"><span class="hint">You’re removing the ${name} on this square. It’s gone from the next fight on.</span><button class="btn small" id="shroom-undo" ${editable() ? '' : 'disabled'}>Keep it · +${Game.shroomCost(m, me)}</button></div>`;
+    if (myRemovalNow(col, row)) return `<div class="bar"><span class="hint">You’re removing the ${name} on this square. It’s gone from the next fight on.</span><button class="btn small" id="shroom-undo" ${editable() ? '' : 'disabled'}>Keep it · +${Game.shroomCost(m, me, col, row)}</button></div>`;
     if (!shroomShown(m, col, row)) return '';
     return `<div class="bar"><span class="hint">A ${name} is on this square.</span><button class="btn small" id="shroom-rm" ${editable() && m.gold[me] >= Game.shroomCost(m, me) ? '' : 'disabled'}>Remove it · ${Game.shroomCost(m, me)} gold</button></div>`;
   }
@@ -4417,7 +4471,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       <div class="stats"><div><span>Hit</span><b class="num">${Game.elfUnit(m).hit}</b></div><div><span>Attacks/s</span><b class="num">${T.aps}</b></div><div><span>Range</span><b class="num">${T.range} m</b></div></div>
       <p style="margin:0"><span style="color:var(--gold)">Bribe the elves</span> as often as you like: the first bribe in a round costs ${Game.BRIBE_COST} gold, and each further one that round ${Game.BRIBE_COST} more (${[1, 2, 3].map(k => k * Game.BRIBE_COST).join(', ')}, …). The bribe-off counts bribes, not gold. The tower heals the units of the player ahead (${Game.elfUnit(m).healHit} health, ${Math.round(Game.elfUnit(m).healHit * (mp.healMul || 1))} on this map, to every unit within ${T.healSplash} m, every ${Math.round(10 / T.healAps) / 10} s). How often each player bribed stays secret: the flag on the tower only shows who is ahead (white when level), and this round’s bribes don’t move it until the fight. Bet on how much your opponent is willing to pay.</p>
       <p style="margin:0">${(() => { const l = bribeLeadShown(m); return l < 0 ? 'The bribe-off is level.' : l === me ? '<span style="color:var(--you)">You are ahead in the bribe-off.</span>' : `${esc(foeName())} is ahead in the bribe-off.`; })()} You have bribed the elves ${Game.bribeCount(m, me)} ${Game.bribeCount(m, me) === 1 ? 'time' : 'times'} (${Game.bribeGold(m, me)} gold)${Game.bribeNow(m, me) && phase === 'deploy' ? `, ${Game.bribeNow(m, me)} of them this round` : ''}.</p>
-      <div class="bar"><button class="btn primary" id="bribe" ${editable() && Game.canBribe(m, me) ? '' : 'disabled'}>Bribe the elves · ${Game.bribeCost(m, me)} gold</button>${Game.bribeNow(m, me) && phase === 'deploy' ? `<button class="btn small" id="unbribe" ${editable() ? '' : 'disabled'}>Take one back · +${Game.bribeNow(m, me) * Game.BRIBE_COST}</button>` : ''}</div>
+      <div class="bar"><button class="btn primary" id="bribe" ${editable() && Game.canBribe(m, me) ? '' : 'disabled'}>Bribe the elves · ${Game.bribeCost(m, me)} gold</button>${Game.bribeNow(m, me) && phase === 'deploy' ? `<button class="btn small" id="unbribe" ${editable() ? '' : 'disabled'}>Take one back · +${Game.bribeRefund(m, me)}</button>` : ''}</div>
       <p style="margin:0"><span style="color:var(--gold)">Your own elf tower</span>: once ${Game.ELF_OWN.unlock} bribes have been paid in all (both players, counted at the end of each round), each player who has bribed the elves at least once can buy one elf tower for ${Game.ELF_OWN.cost} gold and place it on a free tile of their zone. It stays all match, can’t be attacked, shoots only your opponent’s units and heals yours. Your opponent doesn’t see it until the fight.</p>
       ${(() => {
         const own = Game.elfOwnOf(m, me);
@@ -4800,6 +4854,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       if (s.bribe) s.bribe[0] = Game.bribeList(s, 0).filter(r => r !== m.round); // bribes paid this round too
       if (s.elfOwn && s.elfOwn[0] && s.elfOwn[0].round === m.round) s.elfOwn[0] = null; // and an elf tower bought this round
       if (s.towerSkill && s.towerSkill[0] === m.round) s.towerSkill[0] = 0; // and a tower skill
+      if (s.mapFree && s.mapFree[0]) delete s.mapFree[0][m.round]; // and which purchase got Blixten's free slot
       if (s.map && s.map.removed) s.map.removed = s.map.removed.filter(x => !(x.side === 0 && x.round === m.round)); // and mushroom tiles removed this round
       if (s.altar) s.altar = s.altar.filter(x => !(x.side === 0 && x.round === m.round)); // and altar purchases
       if (s.unlocks && s.unlocks[0]) for (const ui in s.unlocks[0]) if (s.unlocks[0][ui] === m.round) delete s.unlocks[0][ui]; // so do this round's unlocks
@@ -5051,7 +5106,9 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
           if (!m.towerSkill) m.towerSkill = [0, 0];
           if (!incoming.elfOwn) incoming.elfOwn = [null, null];
           if (!m.elfOwn) m.elfOwn = [null, null];
-          for (const k of ['armies', 'gold', 'extraDeploys', 'nextId', 'tech', 'towers', 'unlocks', 'pack', 'chars', 'buff', 'bribe', 'towerSkill', 'elfOwn']) incoming[k][1] = (m[k] || [null, null])[1];
+          if (!incoming.mapFree) incoming.mapFree = [{}, {}];
+          if (!m.mapFree) m.mapFree = [{}, {}];
+          for (const k of ['armies', 'gold', 'extraDeploys', 'nextId', 'tech', 'towers', 'unlocks', 'pack', 'chars', 'buff', 'bribe', 'towerSkill', 'elfOwn', 'mapFree']) incoming[k][1] = (m[k] || [null, null])[1];
           if (incoming.map && m.map) incoming.map.removed = (incoming.map.removed || []).filter(x => !(x.side === 1 && x.round === incoming.round)).concat((m.map.removed || []).filter(x => x.side === 1 && x.round === incoming.round));
           incoming.altar = (incoming.altar || []).filter(x => !(x.side === 1 && x.round === incoming.round)).concat((m.altar || []).filter(x => x.side === 1 && x.round === incoming.round));
           m = incoming; ready[0] = theirReady;
