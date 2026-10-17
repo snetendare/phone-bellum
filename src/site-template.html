@@ -339,12 +339,16 @@ a { color: var(--you); }
     bulgaria: { title: 'Bulgaria', file: 'audio/bulgaria.mp3' },
     icyOne: { title: 'Icy one', file: 'audio/icy-one.mp3' },
     sirski: { title: 'SIRSKI', file: 'audio/sirski.mp3' },
+    knarkkungn: { title: 'Knarkkungn', file: 'audio/knarkkungn.mp3' },
     habbyourmam: { title: 'Habbyourmam', file: 'audio/habbyourmam.mp3' },
   };
   const ARTIST = 'Snetänd';
   const songName = (id) => `“${SONGS[id].title}” - ${ARTIST}`;
   const PLAYLISTS = { menu: ['jonah', 'long', 'superCoffee'], deploy: ['bulgaria'], battle: ['habbyourmam'] };
-  const MAP_DEPLOY = { ice: ['icyOne'], cavern: ['sirski'] }; // maps with their own deployment music, in place of PLAYLISTS.deploy
+  const MAP_MUSIC = { // maps with their own deployment or battle music, in place of PLAYLISTS.deploy / .battle
+    ice: { deploy: ['icyOne'], battle: ['knarkkungn'] },
+    cavern: { deploy: ['sirski'] },
+  };
   const FADE_IN = 1, FADE_OUT = 1; // seconds
   let snd = { vol: 60, muted: false, song: '' }; // song: the one menu song the player picked ('' = the menu playlist)
   try {
@@ -391,13 +395,14 @@ a { color: var(--you); }
   }
   const menuSongs = () => snd.song ? [snd.song] : PLAYLISTS.menu;
   const music = { menu: playlist(menuSongs()), deploy: playlist(PLAYLISTS.deploy), battle: playlist(PLAYLISTS.battle) };
-  for (const id in MAP_DEPLOY) music['deploy-' + id] = playlist(MAP_DEPLOY[id]);
+  for (const id in MAP_MUSIC) for (const k in MAP_MUSIC[id]) music[k + '-' + id] = playlist(MAP_MUSIC[id][k]);
   function syncMusic() {
     const on = musicUnlocked && musicLevel() > 0;
     music.menu.set(on && (phase === 'start' || phase === 'lobby'));
-    const mapDeploy = m && m.map && MAP_DEPLOY[m.map.id] ? 'deploy-' + m.map.id : 'deploy';
-    for (const k in music) if (k === 'deploy' || k.startsWith('deploy-')) music[k].set(on && phase === 'deploy' && k === mapDeploy);
-    music.battle.set(on && (phase === 'battle' || phase === 'result'));
+    const own = m && m.map && MAP_MUSIC[m.map.id] || {};
+    const pick = (k) => own[k] ? k + '-' + m.map.id : k; // this map's player for that phase, or the general one
+    const cur = phase === 'deploy' ? pick('deploy') : (phase === 'battle' || phase === 'result') ? pick('battle') : '';
+    for (const k in music) if (k !== 'menu') music[k].set(on && k === cur);
   }
   // phones only allow sound after the player touches the page
   // (iPhones only count the end of a touch, so every tap retries until the sound is running)
@@ -427,7 +432,7 @@ a { color: var(--you); }
           <button data-mute="0" aria-pressed="${!snd.muted}">Sound on</button><button data-mute="1" aria-pressed="${snd.muted}">Muted</button>
         </div>
       </div>
-      <p class="hint" style="margin:0">Menu music plays on the main menu and in the lobby. While you deploy, ${PLAYLISTS.deploy.map(songName).join(', ')} plays (${Object.keys(MAP_DEPLOY).map(id => `${MAP_DEPLOY[id].map(songName).join(', ')} on ${esc(Game.MAPS.find(mp => mp.id === id).name)}`).join('; ')}), and during fights ${PLAYLISTS.battle.map(songName).join(', ')}. Your settings are saved on this device.</p>`;
+      <p class="hint" style="margin:0">Menu music plays on the main menu and in the lobby. While you deploy, ${PLAYLISTS.deploy.map(songName).join(', ')} plays, and during fights ${PLAYLISTS.battle.map(songName).join(', ')}. ${Object.keys(MAP_MUSIC).map(id => `${esc(Game.MAPS.find(mp => mp.id === id).name)} has its own: ${Object.values(MAP_MUSIC[id]).flat().map(songName).join(', ')}.`).join(' ')} Your settings are saved on this device.</p>`;
     $('sheet-back').hidden = false;
     $('close').addEventListener('click', closeSheet);
     $('vol').addEventListener('input', (e) => {
