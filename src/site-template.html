@@ -161,7 +161,7 @@ a { color: var(--you); }
     'Boar Riders': 'Fast chargers whose first hit doubles and knocks small bodies back.',
     'Rogue': 'A pair of fast duelists whose first strike after a run lands four times as hard. Can be placed in no man’s land.',
     'Spiders': 'A fast pack of biters. Each spider that falls can split into two smaller spiderlings.',
-    'Truespear': 'A lone spearman whose every thrust cuts away a fifth of its target’s health. Fells giants, wasted on swarms.',
+    'Truespear': 'Hurls spears from long range. Each one cuts away a fifth of its target’s health, armor or not. Fells giants, wasted on swarms.',
     'Just a horse': 'Just a horse. Gallops past everything to ram the enemy tower, and might have something hiding inside: place a squad on its tile and it rides along unseen until the horse falls.',
   };
   // ---------- role symbols: what a unit is, what it beats, one extra trait, and its range ----------
@@ -715,6 +715,8 @@ a { color: var(--you); }
     phil: { field: '#2A2A36', charge: '#F2C94C', draw(g) { // a crown: the top tier
       g.beginPath(); g.moveTo(-0.32, 0.22); g.lineTo(-0.34, -0.2); g.lineTo(-0.16, 0.0); g.lineTo(0, -0.28); g.lineTo(0.16, 0.0); g.lineTo(0.34, -0.2); g.lineTo(0.32, 0.22); g.closePath(); g.fill();
       g.fillRect(-0.32, 0.27, 0.64, 0.08); } },
+    yotyot: { field: '#3A1E16', charge: '#FFA94D', draw(g) { // the Ember Imp: a horned square
+      g.beginPath(); for (const pt of Shapes.IMP) pt.p.forEach(([px, py], i) => i ? g.lineTo(px * 0.3, 0.06 + py * 0.3) : g.moveTo(px * 0.3, 0.06 + py * 0.3)); g.fill(); } },
   };
   function drawArms(g, id, x, y, w) {
     const a = ARMS[id]; if (!a) return;
@@ -1048,6 +1050,17 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
     }
     ctx.globalAlpha = 1;
     for (const p of bt.projectiles()) {
+      if (p.owner.u.shape === 'spear') { // a thrown spear: shaft and head along its flight, in the unit's colour
+        const L = Math.max(12, 3 * S), dx = p.dirX * flip(), dy = -p.dirY * flip(), hx = PX(p.x), hy = PY(p.y), tx = hx - dx * L, ty = hy - dy * L;
+        ctx.strokeStyle = teamCol(p.owner.side); ctx.lineWidth = 3.5; ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(hx, hy); ctx.stroke();
+        ctx.strokeStyle = p.owner.u.color; ctx.lineWidth = 1.5; ctx.stroke();
+        const hl = L * 0.32, hw = L * 0.14;
+        ctx.fillStyle = p.owner.u.color; ctx.strokeStyle = teamCol(p.owner.side); ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(hx + dx * hl * 0.6, hy + dy * hl * 0.6); ctx.lineTo(hx - dx * hl * 0.4 - dy * hw, hy - dy * hl * 0.4 + dx * hw); ctx.lineTo(hx - dx * hl * 0.4 + dy * hw, hy - dy * hl * 0.4 - dx * hw); ctx.closePath(); ctx.fill(); ctx.stroke();
+        ctx.lineCap = 'butt';
+        continue;
+      }
       ctx.fillStyle = teamCol(p.owner.side);
       ctx.fillRect(PX(p.x) - 2.5, PY(p.y) - 2.5, 5, 5);
     }
@@ -1625,7 +1638,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
       if (u.charge > 1) t.push(`charge x${u.charge}`);
       if (u.knockback > 0) t.push(`knockback ${u.knockback} m`);
       if (u.trample > 0) t.push(`tramples ${u.trample}%`);
-      if (u.pctHit > 0) t.push(`every hit also deals ${u.pctHit}% of the target's max health (not to towers)`);
+      if (u.pctHit > 0) t.push(`every hit also deals ${u.pctHit}% of the target's max health, ignoring armor (not to towers)`);
       if (u.deathBlast > 0) t.push(`explodes on death for ${u.deathBlast}% of max health within ${Engine.BLAST_RADIUS} m`);
       if (u.windUp > 0) t.push(`wind-up ${u.windUp} s`);
       if (u.ram) t.push(`NEVER ATTACKS: runs straight at the enemy tower (the nearest enemy once it is down) and rams it once for its hit (${n1(u.hit)}), then is destroyed`);
@@ -2246,7 +2259,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (u.charge > 1) tr.push(`Charge ×${u.charge}`);
     if (u.knockback > 0) tr.push(`Knockback ${u.knockback} m`);
     if (u.trample > 0) tr.push(`Tramples (${u.trample}% hit)`);
-    if (u.pctHit > 0) tr.push(`Hits +${u.pctHit}% of target’s health`);
+    if (u.pctHit > 0) tr.push(`Hits +${u.pctHit}% of target’s health, past armor`);
     if (u.deathBlast > 0) tr.push(`Death blast ${u.deathBlast}% health`);
     if (u.windUp > 0) tr.push(`Wind-up ${u.windUp} s`);
     if (u.defense === 'armor') tr.push(`Armor ${u.defVal}`);

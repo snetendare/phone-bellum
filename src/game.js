@@ -97,8 +97,9 @@ const Game = (() => {
     { id: 'blixten', name: 'Blixten', ability: 'Your first map purchase each round is free: a bribe, an offering at the altar of ice, your own elf tower or removing a mushroom tile.' },
     { id: 'noah', name: 'Noah', ability: 'Squads you buy in the shop start at level 2. Each costs its price plus one upgrade.' },
     { id: 'phil', name: 'Phil', ability: 'Tier 4 units are 100 gold cheaper to unlock.' },
+    { id: 'yotyot', name: 'Yot-Yot', ability: 'Every fight, Ember Imps pop up on random free tiles on your side of the board (your zone, no man’s land and, once open, your flank tiles): 1 in round 1, 2 in round 2, and so on. From round 3 they are level 2, from round 6 level 3. They get the skills you bought for Ember Imps.' },
   ];
-  const CHAR = { cageHp: 10, zoeTiles: 2, zoeDmg: 20, zoeHp: 20, zoeAps: 10, wilhelmArmor: 4, wilhelmDelay: 0.5, noahLevel: 1, philTier: 4, philOff: 100 };
+  const CHAR = { cageHp: 10, zoeTiles: 2, zoeDmg: 20, zoeHp: 20, zoeAps: 10, wilhelmArmor: 4, wilhelmDelay: 0.5, noahLevel: 1, philTier: 4, philOff: 100, yotUnit: 'Ember Imps', yotLv2: 3, yotLv3: 6 };
   const charOf = (m, side) => (m && m.chars && m.chars[side]) || null;
   const charInfo = (id) => CHARACTERS.find(c => c.id === id) || null;
   // Blixten: the first map purchase each round is free. m.mapFree[side][round] = the purchase that got it:
@@ -798,6 +799,35 @@ const Game = (() => {
       const w = tileToWorld(sg.col, sg.row), b = E.buildSquad(snowgreUnit(m, sg.strength), side, w.x, w.y, -10 - k, TILE, idx);
       idx += b.length; out.push(...b);
     });
+    // Yot-Yot's imps: single Ember Imp bodies on random free tiles, squad id YOT_SQUAD (not squads in the army)
+    const yot = yotImps(m, side);
+    if (yot.length) {
+      const ui = m.units.findIndex(u => u && u.name === CHAR.yotUnit);
+      const iu = { ...unitFor(m, side, ui), bodies: 1 };
+      for (const t of yot) {
+        const w = tileToWorld(t.col, t.row), b = E.buildSquad(iu, side, w.x, w.y, YOT_SQUAD, TILE, idx, yotLevel(m));
+        idx += b.length; out.push(...b);
+      }
+    }
+    return out;
+  }
+
+  // ---------- Yot-Yot's imps ----------
+  // At the start of every fight, one Ember Imp per round number on random free tiles on the player's side of the
+  // board: their zone, all of no man's land and (once flanks are open) their own flank tiles. Seeded from the
+  // match and round, so both phones get the same tiles.
+  const YOT_SQUAD = -100;
+  const yotLevel = (m) => m.round >= CHAR.yotLv3 ? 2 : m.round >= CHAR.yotLv2 ? 1 : 0;
+  function yotImps(m, side) {
+    if (charOf(m, side) !== 'yotyot' || !m.units.some(u => u && u.name === CHAR.yotUnit)) return [];
+    const taken = (col, row) => [0, 1].some(sd => occupied(m, sd, col, row)) || snowgres(m, 0).concat(snowgres(m, 1)).some(g => g.col === col && g.row === row);
+    const spots = [];
+    for (let row = 0; row < ROWS; row++) for (let col = 0; col < COLS; col++) {
+      if (reserved(side, col, row) || taken(col, row)) continue;
+      if (inZone(side, row) || inNoMans(row) || (flankOpen(m) && isFlank(side, col, row))) spots.push({ col, row });
+    }
+    const r = rng(m.seed + m.round * 7307 + side * 2903 + 41), out = [];
+    for (let k = 0; k < m.round && spots.length; k++) out.push(spots.splice(Math.floor(r() * spots.length), 1)[0]);
     return out;
   }
 
@@ -840,7 +870,7 @@ const Game = (() => {
     for (const k in res.squads) {
       const s = res.squads[k];
       if (s.side !== side || s.alive <= 0) continue;
-      if (s.squad <= -10) { const sg = snowgres(m, side)[-10 - s.squad]; if (sg) sum += SQUAD_POINTS * GOLEM.cost * sg.strength * s.alive / s.total; continue; } // a Snowgre
+      if (s.squad <= -10 && s.squad > YOT_SQUAD) { const sg = snowgres(m, side)[-10 - s.squad]; if (sg) sum += SQUAD_POINTS * GOLEM.cost * sg.strength * s.alive / s.total; continue; } // a Snowgre
       if (s.squad < 0) continue; // spawned bodies don't count
       const sq = m.armies[side].find(q => q.id === s.squad);
       const value = sq ? (m.units[sq.unit].cost || 1) : 1; // pricier squads hit harder, like their price
@@ -1088,7 +1118,7 @@ const Game = (() => {
     FLANK, flankRows, flankOpen, isFlank, reserved, canPlaceAt, enemyHolds, inNoMans, hasSkillType,
     ICE, ALTAR, GOLEM, isIce, hailRound, altarRound, stormShift, stormRows, hailTiles, altarCost, altarRefund, altarCount, pushRoom, altarBought, addAltar, buyAltar, undoAltar, snowgres, snowgreUnit,
     MAPS, ELF_TOWER, SHROOM, SHROOM_SPLIT, shroomAt, shroomTileAt, shroomRemoval, SHROOM_REMOVE, shroomCost, removeShroom, undoRemoveShroom, mapOf, elfSpot, rollMap, BRIBE_COST, bribeList, bribeGold, bribeCount, bribeNow, bribeCost, bribeRefund, ELF_POWER, elfPowered, elfUnit, ELF_OWN, elfOwnCost, elfOwnOf, elfOwnAt, elfOwnUnlocked, elfOwnOffered, canBuyElfOwn, elfOwnSpotOk, buyElfOwn, undoElfOwn, bribeLeader, canBribe, bribe, undoBribe,
-    CHARACTERS, CHAR, charOf, charInfo, isTier1, rollBuffTiles, onBuffTile, TOWER_SPOT, towerSpot,
+    CHARACTERS, CHAR, charOf, charInfo, isTier1, rollBuffTiles, onBuffTile, yotImps, yotLevel, TOWER_SPOT, towerSpot,
     zoneRows, inZone, tileToWorld, createMatch, place, unplace, bodiesFor, startBattle, resolve, aiDeploy, occupied,
   };
 })();

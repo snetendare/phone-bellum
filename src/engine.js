@@ -23,7 +23,7 @@ const Engine = (() => {
   // (see createBattle: bodies with `carrier` set stay out of the fight until that body dies). noFlank: can't be
   // deployed on flank tiles (the game checks it). noPack: never offered in a starting package (the game checks it)
   const RAM_REACH = 2;         // metres from its target at which a ram hits
-  // pctHit: every hit also deals this share of the target's max health (not to structures), before armor and ward
+  // pctHit: every hit also deals this share of the target's max health (not to structures); that part ignores armor (ward still caps the hit)
   const BLAST_RADIUS = 4;      // a body with deathBlast explodes when it dies, hitting enemies within this distance
   const PIERCE_DEPTH = 10;     // metres a piercing shot travels past its target
   const PIERCE_WIDTH = 1;      // half-width of the pierce corridor (m)
@@ -406,21 +406,26 @@ const Engine = (() => {
 
     function hurt(owner, v, hit, fromX, fromY) {
       const st = stats[owner.side];
-      if (owner.u.pctHit > 0 && !v.u.structure) hit = hit + v.u.hp * owner.u.pctHit / 100;
-      if (cripple[owner.side] > 0) hit = hit * (1 - towerDown.attack / 100);
+      let pct = owner.u.pctHit > 0 && !v.u.structure ? v.u.hp * owner.u.pctHit / 100 : 0;
+      if (cripple[owner.side] > 0) { hit = hit * (1 - towerDown.attack / 100); pct = pct * (1 - towerDown.attack / 100); }
       // Shield: the whole hit is blocked, however big, and it brings no poison
-      if (v.shield > 0) { v.shield--; st.blocked += hit; return; }
+      if (v.shield > 0) { v.shield--; st.blocked += hit + pct; return; }
       // ice walls (towers on the ice map): four walls, one per direction; each blocks a number of whole hits
       // coming from its side. walls = [north (+y), east (+x), south (-y), west (-x)]
       if (v.walls) {
         const dx = fromX - v.x, dy = fromY - v.y;
         const w = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 1 : 3) : (dy > 0 ? 0 : 2);
-        if (v.walls[w] > 0) { v.walls[w]--; st.blocked += hit; return; }
+        if (v.walls[w] > 0) { v.walls[w]--; st.blocked += hit + pct; return; }
       }
       let dmg = damageAfterDefense(hit, v, g);
       // damage the target's armor turned away earns it a little experience (g.armorXp per point, default 0.5)
       const armor = (v.u.defense === 'armor' ? v.u.defVal : 0) + (v.u.bonusArmor || 0);
       if (armor > 0) v.xp += (hit - Math.max(hit - armor, hit * g.minDmgPct / 100)) * (g.armorXp == null ? 0.5 : g.armorXp);
+      if (pct > 0) { // the health cut goes past armor; a ward still caps the whole hit
+        dmg += pct; hit += pct;
+        if (v.u.defense === 'ward') dmg = Math.min(dmg, v.u.defVal);
+        if (v.u.bonusWard > 0) dmg = Math.min(dmg, v.u.bonusWard);
+      }
       if (cripple[v.side] > 0) dmg = dmg * (1 + towerDown.taken / 100);
       st.blocked += hit - dmg;
       const applied = Math.min(dmg, v.hp);
