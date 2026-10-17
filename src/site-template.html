@@ -717,6 +717,12 @@ a { color: var(--you); }
       g.fillRect(-0.32, 0.27, 0.64, 0.08); } },
     yotyot: { field: '#3A1E16', charge: '#FFA94D', draw(g) { // the Ember Imp: a horned square
       g.beginPath(); for (const pt of Shapes.IMP) pt.p.forEach(([px, py], i) => i ? g.lineTo(px * 0.3, 0.06 + py * 0.3) : g.moveTo(px * 0.3, 0.06 + py * 0.3)); g.fill(); } },
+    felix: { field: '#3E6B2F', charge: '#F2C94C', draw(g) { // a stack of coins: more gold
+      for (const dy of [0.3, 0.12, -0.06]) { g.beginPath(); g.ellipse(0, dy, 0.28, 0.1, 0, 0, Math.PI * 2); g.fill(); }
+      g.lineWidth = 0.035; g.strokeStyle = '#3E6B2F'; for (const dy of [0.3, 0.12, -0.06]) { g.beginPath(); g.ellipse(0, dy, 0.28, 0.1, 0, 0, Math.PI * 2); g.stroke(); } } },
+    enzo: { field: '#5A2E6E', charge: '#EDEFF2', draw(g) { // a die: a random skill
+      g.beginPath(); g.roundRect(-0.3, -0.26, 0.6, 0.6, 0.08); g.fill();
+      g.fillStyle = '#5A2E6E'; for (const [px, py] of [[-0.15, -0.11], [0, 0.04], [0.15, 0.19]]) { g.beginPath(); g.arc(px, py, 0.06, 0, Math.PI * 2); g.fill(); } } },
   };
   function drawArms(g, id, x, y, w) {
     const a = ARMS[id]; if (!a) return;
@@ -1495,7 +1501,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
       <h2 class="${cls}">${head}</h2>
       <p class="big">${lines.join(' ')}</p>
       ${lvLines.join('')}
-      <p>Next round: +${sum.income || Game.incomeFor(sum.round + 1)} gold each.${bonus}</p>
+      <p>Next round: +${sum.income || Game.incomeFor(sum.round + 1)} gold each.${bonus}${sum.felix && sum.felix[me] ? ` Felix adds ${sum.felix[me]} more for you.` : ''}${sum.felix && sum.felix[foe()] ? ` Felix adds ${sum.felix[foe()]} more for ${mode === 'claude' ? 'Claude' : `the ${them.toLowerCase()}`}.` : ''}</p>
       <div class="btnrow">
         ${waiting ? '<p class="status wait">Waiting for your opponent</p>' : `<button class="btn primary" id="next">Next round</button>`}
         <button class="btn" id="menu">Main menu</button>
@@ -1652,7 +1658,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
     const matrix = units.map((u, i) => `${tag(u)}: ` + units.map((v, j) => i === j ? null : `${tag(v)} ${M[i][j] > 0 ? '+' : ''}${Math.round(M[i][j] * 100)}`).filter(Boolean).join(', ')).join('\n');
     const mine = m.armies[1].map(s => {
       const u = units[s.unit], need = s.level < Engine.MAX_LEVEL ? Math.round(Game.xpNeeded(u, s.level)) : null;
-      return `- id ${s.id}: ${u.name} at col ${s.col}, row ${s.row}${Game.isRider(s) ? ` (riding inside your ${units[(Game.carrierOf(m, 1, s) || s).unit].name}, id ${s.in})` : ''}, level ${s.level + 1}${need ? `, XP ${Math.round(s.xp)}/${need}` : ', max level'}${Game.isReady(m, s) ? ', READY TO LEVEL UP' : ''}${s.round < m.round ? `, sells for ${Game.sellValue(m, s)}` : ''}`;
+      return `- id ${s.id}: ${u.name} at col ${s.col}, row ${s.row}${Game.isRider(s) ? ` (riding inside your ${units[(Game.carrierOf(m, 1, s) || s).unit].name}, id ${s.in})` : ''}, level ${s.level + 1}${need ? `, XP ${Math.round(s.xp)}/${need}` : ', max level'}${Game.isReady(m, s) ? ', READY TO LEVEL UP' : ''}${s.round < m.round ? `, sells for ${Game.sellValue(m, s)}` : ''}${Game.enzoSkill(m, 1, s) != null ? `, has skill "${u.skillDefs[Game.enzoSkill(m, 1, s)].name}" (Enzo)` : ''}`;
     });
     const theirs = m.armies[0].filter(s => s.round < m.round && !Game.hiddenFromFoe(m, s)).map(s => { const p = Game.seenAt(m, s); return `- ${units[s.unit].name} at col ${p.col}, row ${p.row}, level ${s.level + 1}`; });
     const theirSkills = [];
@@ -2037,15 +2043,19 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       <div class="bar"><b style="font-family:var(--font-display);display:inline-flex;gap:6px;align-items:center">${LOCK_SVG} Locked</b>${phase === 'deploy' ? (why || !editable() ? `<button class="btn small" disabled>${why || `Unlock · ${cost} gold`}</button>` : `<button class="btn small" id="unlock">Unlock · ${cost} gold</button>`) : `<span class="hint">${cost} gold to unlock</span>`}</div>
       <span class="hint">Pay once to be able to field this unit for the rest of the match. The opponent sees it after the next fight.</span></div>`;
   }
-  function skillBlock(i, side) {
+  // sq (optional): the squad whose sheet this is, to show the skill it came with (Enzo)
+  function skillBlock(i, side, sq) {
     const defs = units[i].skillDefs || [];
     if (!defs.some(Boolean) || !m) return '';
-    const mine = side === undefined || side === me;
+    const mine = side === undefined || side === me, owner = mine ? me : side;
+    const enzo = Game.charOf(m, owner) === 'enzo' && (mine || charVisible(owner)), ek = Game.enzoSkill(m, owner, sq);
     const rows = Engine.SLOTS.filter(k => defs[k]).map(k => {
       const d = defs[k], cost = Game.skillCost(m, i, k);
       let act = '';
       if (Game.isInnate(m, i, k)) {
         act = `<span class="chip" style="color:var(--ink);border:1px solid currentColor;border-radius:99px;padding:1px 8px;font-size:12px">Built in</span>`;
+      } else if (enzo) {
+        act = sq && ek === k ? `<span class="chip" style="color:${mine ? 'var(--gold)' : 'var(--foe)'};border:1px solid currentColor;border-radius:99px;padding:1px 8px;font-size:12px">This squad has it</span>` : `<span class="hint">${sq ? 'Not on this squad' : 'Random per squad'}</span>`;
       } else if (mine) {
         if (Game.hasSkill(m, me, i, k)) {
           act = `<span class="chip" style="color:var(--gold);border:1px solid currentColor;border-radius:99px;padding:1px 8px;font-size:12px">Owned</span>`;
@@ -2062,7 +2072,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
         <div class="bar"><b style="font-family:var(--font-display)">${esc(d.name)}</b><span>${act}</span></div>
         <span class="hint">${esc(Engine.describeSkill(d))}</span></div>`;
     });
-    return `<div style="display:grid;gap:8px"><h4 style="margin:0;font-size:12px;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted)">Skills${mine ? ' · for all your squads of this unit' : ''}</h4>${rows.join('')}</div>`;
+    return `<div style="display:grid;gap:8px"><h4 style="margin:0;font-size:12px;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted)">Skills${enzo ? ' · Enzo: one random skill per squad, free' : mine ? ' · for all your squads of this unit' : ''}</h4>${rows.join('')}</div>`;
   }
 
   function openTowerSheet(side) {
@@ -2218,7 +2228,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   function sheetPane(i, sq, side, compact) {
     const base = units[i];
     const owner = side === undefined ? me : side;
-    const u = Engine.leveled(m ? Game.unitFor(m, owner, i) : base, sq ? sq.level : 0);
+    const u = Engine.leveled(m ? Game.unitFor(m, owner, i, sq) : base, sq ? sq.level : 0);
     let lvl = '';
     if (sq) {
       const next = sq.level < Engine.MAX_LEVEL ? Math.round(Game.xpNeeded(base, sq.level)) : null;
@@ -2272,7 +2282,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       ${sq && m && !compact ? (() => { const q = side === me ? sq : Game.seenAt(m, sq); return shroomBlock(q.col, q.row); })() : ''}
       ${unlockBlock(i, side)}
       ${tr.length ? `<div class="traits">${tr.map(x => `<span>${x}</span>`).join('')}</div>` : ''}
-      ${skillBlock(i, side)}
+      ${skillBlock(i, side, sq)}
       <div class="stats num">
         <div><span>Bodies</span>${u.bodies}</div><div><span>Health</span>${Math.round(u.hp)}</div>
         <div><span>${u.ram ? 'Ram' : 'Hit'}</span>${Math.round(u.hit)}</div>${u.ram ? '' : `<div><span>Attacks/s</span>${u.aps}</div>`}

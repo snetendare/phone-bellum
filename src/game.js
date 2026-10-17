@@ -98,8 +98,10 @@ const Game = (() => {
     { id: 'noah', name: 'Noah', ability: 'Squads you buy in the shop start at level 2. Each costs its price plus one upgrade.' },
     { id: 'phil', name: 'Phil', ability: 'Tier 4 units are 100 gold cheaper to unlock.' },
     { id: 'yotyot', name: 'Yot-Yot', ability: 'Every fight, Ember Imps pop up on random free tiles on your side of the board (your zone, no man’s land and, once open, your flank tiles): 1 in round 1, 2 in round 2, and so on. From round 3 they are level 2, from round 6 level 3. They get the skills you bought for Ember Imps.' },
+    { id: 'felix', name: 'Felix', ability: 'From round 3 on, you get 50 more gold every round.' },
+    { id: 'enzo', name: 'Enzo', ability: 'You can’t buy unit skills, but every squad you field comes with one random skill of its unit, for free.' },
   ];
-  const CHAR = { cageHp: 10, zoeTiles: 2, zoeDmg: 20, zoeHp: 20, zoeAps: 10, wilhelmArmor: 4, wilhelmDelay: 0.5, noahLevel: 1, philTier: 4, philOff: 100, yotUnit: 'Ember Imps', yotLv2: 3, yotLv3: 6 };
+  const CHAR = { cageHp: 10, zoeTiles: 2, zoeDmg: 20, zoeHp: 20, zoeAps: 10, wilhelmArmor: 4, wilhelmDelay: 0.5, noahLevel: 1, philTier: 4, philOff: 100, yotUnit: 'Ember Imps', yotLv2: 3, yotLv3: 6, felixRound: 3, felixGold: 50 };
   const charOf = (m, side) => (m && m.chars && m.chars[side]) || null;
   const charInfo = (id) => CHARACTERS.find(c => c.id === id) || null;
   // Blixten: the first map purchase each round is free. m.mapFree[side][round] = the purchase that got it:
@@ -539,9 +541,17 @@ const Game = (() => {
   const hasSkill = (m, side, ui, k) => isInnate(m, ui, k) || !!(m.tech && m.tech[side] && m.tech[side][ui] && m.tech[side][ui][k] > 0);
   // a skill bought this round is hidden from the opponent until the fight
   const skillVisible = (m, side, ui, k) => isInnate(m, ui, k) || (hasSkill(m, side, ui, k) && m.tech[side][ui][k] < m.round);
-  function unitFor(m, side, ui) {
-    const base = m.units[ui];
-    const defs = E.SLOTS.filter(k => hasSkill(m, side, ui, k)).map(k => skillDef(m, ui, k));
+  // Enzo: each of his squads has one random non-built-in skill of its unit (slot index, or null if the unit has none).
+  // Drawn from the match seed and the squad's id, so both phones get the same one without sending it.
+  function enzoSkill(m, side, sq) {
+    if (!sq || charOf(m, side) !== 'enzo' || !m.units[sq.unit]) return null;
+    const ks = E.SLOTS.filter(k => skillDef(m, sq.unit, k) && !isInnate(m, sq.unit, k));
+    return ks.length ? ks[Math.floor(rng(m.seed + side * 6151 + sq.id * 7919 + 313)() * ks.length)] : null;
+  }
+  // sq (optional): the squad, for a skill of its own (Enzo's)
+  function unitFor(m, side, ui, sq) {
+    const base = m.units[ui], ek = enzoSkill(m, side, sq);
+    const defs = E.SLOTS.filter(k => hasSkill(m, side, ui, k) || k === ek).map(k => skillDef(m, ui, k));
     let u = defs.length ? E.applySkills(base, defs, m.units) : base;
     if (charOf(m, side) === 'cage') { // Frickolas Cage: +10% health for every unit, spawned ones too
       const k = 1 + CHAR.cageHp / 100;
@@ -587,6 +597,7 @@ const Game = (() => {
   function canBuySkill(m, side, ui, k) {
     const d = skillDef(m, ui, k);
     if (!d || hasSkill(m, side, ui, k)) return false;
+    if (charOf(m, side) === 'enzo') return false; // Enzo's squads come with their skill instead
     if (!m.armies[side].some(s => s.unit === ui)) return false; // needs a squad of that type on the board
     return m.gold[side] >= skillCost(m, ui, k);
   }
@@ -751,7 +762,7 @@ const Game = (() => {
     for (const sq of m.armies[side]) {
       const w = tileToWorld(sq.col, sq.row);
       const ch = charOf(m, side), forward = isFlank(side, sq.col, sq.row) || inNoMans(sq.row);
-      let u = unitFor(m, side, sq.unit);
+      let u = unitFor(m, side, sq.unit, sq);
       const mp = mapOf(m);
       if (mp && mp.stealthDmg && u.stealth) u = { ...u, hit: u.hit * (1 + mp.stealthDmg / 100) }; // the map favours stealth units
       if (mp && mp.boostHp && (mp.boostUnits || []).includes(m.units[sq.unit].name)) u = { ...u, hp: u.hp * (1 + mp.boostHp / 100) }; // ...or these units by name
@@ -924,11 +935,16 @@ const Game = (() => {
     const income = incomeFor(m.round);
     m.gold[0] += income; m.gold[1] += income;
     summary.income = income;
+    summary.felix = [0, 1].map(sd => felixGold(m, sd));
+    for (const sd of [0, 1]) m.gold[sd] += summary.felix[sd];
     const loser = dmg[0] > dmg[1] ? 0 : dmg[1] > dmg[0] ? 1 : -1;
     if (loser >= 0) m.gold[loser] += LOSER_BONUS;
     summary.bonusTo = loser;
     return summary;
   }
+
+  // Felix: extra gold every round from CHAR.felixRound on (on top of the income)
+  const felixGold = (m, side, round = m.round) => charOf(m, side) === 'felix' && round >= CHAR.felixRound ? CHAR.felixGold : 0;
 
   // ---------- leveling (manual, costs gold) ----------
   const isReady = (m, sq) => sq.level < E.MAX_LEVEL && sq.xp >= xpNeeded(m.units[sq.unit], sq.level);
@@ -1118,7 +1134,7 @@ const Game = (() => {
     FLANK, flankRows, flankOpen, isFlank, reserved, canPlaceAt, enemyHolds, inNoMans, hasSkillType,
     ICE, ALTAR, GOLEM, isIce, hailRound, altarRound, stormShift, stormRows, hailTiles, altarCost, altarRefund, altarCount, pushRoom, altarBought, addAltar, buyAltar, undoAltar, snowgres, snowgreUnit,
     MAPS, ELF_TOWER, SHROOM, SHROOM_SPLIT, shroomAt, shroomTileAt, shroomRemoval, SHROOM_REMOVE, shroomCost, removeShroom, undoRemoveShroom, mapOf, elfSpot, rollMap, BRIBE_COST, bribeList, bribeGold, bribeCount, bribeNow, bribeCost, bribeRefund, ELF_POWER, elfPowered, elfUnit, ELF_OWN, elfOwnCost, elfOwnOf, elfOwnAt, elfOwnUnlocked, elfOwnOffered, canBuyElfOwn, elfOwnSpotOk, buyElfOwn, undoElfOwn, bribeLeader, canBribe, bribe, undoBribe,
-    CHARACTERS, CHAR, charOf, charInfo, isTier1, rollBuffTiles, onBuffTile, yotImps, yotLevel, TOWER_SPOT, towerSpot,
+    CHARACTERS, CHAR, charOf, charInfo, enzoSkill, felixGold, isTier1, rollBuffTiles, onBuffTile, yotImps, yotLevel, TOWER_SPOT, towerSpot,
     zoneRows, inZone, tileToWorld, createMatch, place, unplace, bodiesFor, startBattle, resolve, aiDeploy, occupied,
   };
 })();
