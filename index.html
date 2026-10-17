@@ -7,11 +7,11 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Phone Bellum">
+<meta name="apple-mobile-web-app-title" content="No Mans Land">
 <meta name="description" content="A small auto-battler. Deploy squads, counter your opponent, watch the armies fight. Play the AI or challenge a friend.">
 <link rel="icon" href="icon.png">
 <link rel="apple-touch-icon" href="icon.png">
-<title>Phone Bellum</title>
+<title>No Mans Land</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
@@ -4092,7 +4092,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
     try { resume = JSON.parse(localStorage.getItem(HOST_STORE) || 'null'); } catch (e) {}
     if (resume && !(resume.m && now() - resume.ts < 6 * 3600e3)) resume = null;
     overlay(`<div class="card">
-      <h2>Phone Bellum</h2>
+      <h2>No Mans Land</h2>
       <p class="big">Build an army. Watch it fight. Last one standing wins.</p>
       <button class="btn small" id="how">How to play</button>
     </div>`);
@@ -4431,7 +4431,7 @@ Worst choices against it: ${answers.slice(-3).reverse().map(([i, v]) => `${units
 ` : '';
     const placeNow = Game.deploysAllowed(m, 1);
     const cheapest = Math.min(...units.map(u => Game.unitCostOf(u)));
-    return `You are playing Phone Bellum, a small auto-battler, against a human player. You are the RED side. Decide your moves for round ${m.round}. The human places their new squads at the same time and can't see yours until the fight. You only see their squads from earlier rounds. Play to win: build counters to what they have, protect your damage dealers, and think about what they are likely to add next.
+    return `You are playing No Mans Land, a small auto-battler, against a human player. You are the RED side. Decide your moves for round ${m.round}. The human places their new squads at the same time and can't see yours until the fight. You only see their squads from earlier rounds. Play to win: build counters to what they have, protect your damage dealers, and think about what they are likely to add next.
 
 RULES
 - Board: columns 0-${Game.COLS - 1}, rows 0-${Game.ROWS - 1}, tiles ${Game.TILE} m wide. Your zone is rows 0-${Game.ZONE - 1}; row ${Game.ZONE - 1} is your front line, nearest the enemy, and row 0 is the back. Rows ${Game.ZONE}-${Game.ROWS - Game.ZONE - 1} are no man's land. From round ${Game.FLANK.round} each player may also deploy on flank tiles: columns ${Game.FLANK.cols.join(' and ')}, on the OPPONENT's half of the board: their whole zone plus their half of no man's land (yours: rows ${Math.min(...Game.flankRows(1))}-${Math.max(...Game.flankRows(1))}; theirs: rows ${Math.min(...Game.flankRows(0))}-${Math.max(...Game.flankRows(0))})${Game.flankOpen(m) ? ', OPEN NOW' : ''}. You can't use a tile the opponent already holds with a squad or their tower. Their flank columns on YOUR half (columns ${Game.FLANK.cols.join(' and ')}, rows ${Math.min(...Game.flankRows(0))}-${Math.max(...Game.flankRows(0))}) are reserved for them for the whole match: you can never place a squad or your tower there. Squads there start inside the enemy's lines, good for hitting their tower or backline from the side, so guard your own edges against theirs. A squad placed on a flank can't move or attack for the first ${Game.FLANK.delay} s of the first fight after it was placed; from the next round on it starts normally. The enemy zone is rows ${Game.ROWS - Game.ZONE}-${Game.ROWS - 1}; row ${Game.ROWS - Game.ZONE} is their front. One squad per tile. Squads keep their tile, except: once per round you may move ONE of your squads from an earlier round to another free tile you could place on, for ${Game.CONFIG.moveCost} gold ("move"). The opponent sees it on its old tile until the fight.
@@ -4673,7 +4673,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     const res = bt.result();
     $('clock').textContent = `${res.time.toFixed(1)} s`;
     if (lastSummary && (res.winner !== lastSummary.winner || Math.abs(res.time - lastSummary.time) > 1e-6)) {
-      console.warn('Phone Bellum: this screen’s replay differs from the host’s result; the host’s result counts.');
+      console.warn('No Mans Land: this screen’s replay differs from the host’s result; the host’s result counts.');
     }
     battlePre = null;
     render();
@@ -5289,7 +5289,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
         ${mapSeg()}
         ${charSeg()}
         <span class="hint">You both play with the units on this device: ${customSet ? `your ${units.length} Counter Lab units` : `the ${units.length} built-in units`}.</span>`)}`;
-    if ($('share')) $('share').addEventListener('click', () => { navigator.share({ title: 'Phone Bellum', text: `Fight me in Phone Bellum! Code ${net.code}`, url: link }).catch(() => {}); });
+    if ($('share')) $('share').addEventListener('click', () => { navigator.share({ title: 'No Mans Land', text: `Fight me in No Mans Land! Code ${net.code}`, url: link }).catch(() => {}); });
     $('copy').addEventListener('click', () => {
       const done = () => { $('copy').textContent = 'Copied'; setTimeout(() => { if ($('copy')) $('copy').textContent = 'Copy link'; }, 1500); };
       if (navigator.clipboard) navigator.clipboard.writeText(link).then(done, () => selectLink());

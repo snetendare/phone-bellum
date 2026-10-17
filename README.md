@@ -1,4 +1,4 @@
-# Phone Bellum
+# No Mans Land
 
 A small auto-battler for the phone browser. Buy squads, place them, and watch the armies fight. Play the AI or challenge a friend live.
 

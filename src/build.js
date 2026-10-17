@@ -26,7 +26,7 @@ ${lab.slice(0, cut)}
 </head>
 <body>
 ${lab.slice(cut)
-  .replace('<div class="eyebrow">Phone Bellum · balance sandbox</div>', '<div class="eyebrow"><a href="./" style="color:inherit">Phone Bellum</a> · balance sandbox</div>')
+  .replace('<div class="eyebrow">No Mans Land · balance sandbox</div>', '<div class="eyebrow"><a href="./" style="color:inherit">No Mans Land</a> · balance sandbox</div>')
   .replace('Tap a cell to watch that fight.</p>', 'Tap a cell to watch that fight. Units you make here show up in the game under Load units on this device.</p>')}
 </body>
 </html>
