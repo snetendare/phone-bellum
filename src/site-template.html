@@ -761,7 +761,7 @@ a { color: var(--you); }
     const c = teamCol(side), tt = [Game.OUTPOST, ...Game.TOWER_TYPES].find(k => k.id === kind) || Game.TOWER_TYPES[0];
     ctx.globalAlpha = 0.35 + 0.65 * (hpr == null ? 1 : hpr);
     ctx.fillStyle = tt.unit.color; ctx.strokeStyle = c; ctx.lineWidth = Math.max(1.5, s * 0.08);
-    const [w, h, n] = tt.id === 'sniper' ? [s * 0.36, s * 0.74, 3] : tt.id === 'bastion' ? [s * 0.86, s * 0.54, 7] : tt.id === 'outpost' ? [s * 0.46, s * 0.5, 5] : tt.id === 'mage' ? [s * 0.5, s * 0.5, 5] : [s * 0.62, s * 0.62, 5];
+    const [w, h, n] = tt.id === 'sniper' ? [s * 0.36, s * 0.74, 3] : tt.id === 'bastion' ? [s * 0.86, s * 0.54, 7] : tt.id === 'outpost' ? [s * 0.46, s * 0.5, 5] : tt.id === 'mage' ? [s * 0.5, s * 0.5, 5] : tt.id === 'bank' ? [s * 0.74, s * 0.52, 7] : tt.id === 'slime' ? [s * 0.56, s * 0.56, 5] : [s * 0.62, s * 0.62, 5];
     const x0 = x - w / 2, y0 = y - h / 2 + s * 0.06, m = w / n, mh = Math.min(m, s * 0.124) * 0.9;
     ctx.beginPath();
     ctx.moveTo(x0, y0 + h); ctx.lineTo(x0, y0);
@@ -777,6 +777,15 @@ a { color: var(--you); }
       ctx.quadraticCurveTo(sx + sw, sy + sh * 0.85, x, sy + sh); ctx.quadraticCurveTo(sx, sy + sh * 0.85, sx, sy + sh * 0.5);
       ctx.closePath(); ctx.fill();
       ctx.fillStyle = tt.unit.color; ctx.fillRect(x - sw * 0.07, sy + sh * 0.12, sw * 0.14, sh * 0.62); ctx.fillRect(sx + sw * 0.2, sy + sh * 0.3, sw * 0.6, sh * 0.13);
+    } else if (tt.id === 'bank') { // a gold coin in the team colour over a door
+      ctx.fillStyle = c; ctx.beginPath(); ctx.arc(x, y0 + h * 0.36, h * 0.24, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = tt.unit.color; ctx.font = `700 ${Math.max(6, h * 0.34)}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('$', x, y0 + h * 0.38);
+      ctx.fillStyle = c; ctx.fillRect(x - m * 0.5, y0 + h - m * 1.1, m, m * 1.1);
+    } else if (tt.id === 'slime') { // slime dripping down from the battlements, a round door
+      ctx.fillStyle = '#3FA81E'; ctx.beginPath(); ctx.moveTo(x0, y0);
+      for (let k = 0; k <= 4; k++) { const xa = x0 + w * k / 4; ctx.lineTo(xa, y0 + h * (k % 2 ? 0.34 : 0.18)); }
+      ctx.lineTo(x0 + w, y0); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = c; ctx.beginPath(); ctx.arc(x, y0 + h - m * 0.5, m * 0.6, Math.PI, 0); ctx.lineTo(x + m * 0.6, y0 + h); ctx.lineTo(x - m * 0.6, y0 + h); ctx.closePath(); ctx.fill();
     } else if (tt.id === 'mage') { // a pointed wizard roof in the team colour with a star, and an arched door
       ctx.fillStyle = c; ctx.beginPath(); ctx.moveTo(x0 - w * 0.12, y0 - mh); ctx.lineTo(x + w * 0.08, y0 - mh - h * 0.95); ctx.lineTo(x0 + w * 1.12, y0 - mh); ctx.closePath(); ctx.fill();
       ctx.fillStyle = '#F2C94C'; ctx.beginPath(); const sx = x + w * 0.02, sy = y0 - mh - h * 0.36, sr = Math.max(1.5, s * 0.07);
@@ -1183,7 +1192,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
         key: x.id,
         art: `<canvas data-ticon="${x.id}" width="96" height="96" style="width:48px;height:48px" aria-hidden="true"></canvas>`,
         name: esc(x.name), who: '', sub: `${x.unit.hp} hp · ${x.unit.range} m`,
-        det: `<b>${esc(x.name)}</b> · ${x.unit.hp} hp · hit ${x.unit.hit} × ${x.unit.aps}/s · ${x.unit.range} m${x.unit.splash ? ` · ${x.unit.splash} m splash` : ''}<br>${esc(x.text)}${x.skill ? `<br><span style="color:var(--gold)">Skill, bought separately for ${Game.TOWER_SKILL.cost} gold: ${esc(x.skill.name)}.</span> ${esc(x.skill.text)}` : ''}${x.generals ? `<br><span style="color:var(--gold)">Mage generals, one per round, for that round's fight:</span> ${Game.MAGE_GENERALS.map(g => `<b>${esc(g.name)}</b> (${g.cost} gold): ${esc(g.text)}`).join(' ')}` : ''}`,
+        det: `<b>${esc(x.name)}</b> · ${x.unit.hp} hp · hit ${x.unit.hit} × ${x.unit.aps}/s · ${x.unit.range} m${x.unit.splash ? ` · ${x.unit.splash} m splash` : ''}<br>${esc(x.text)}${x.skill ? `<br><span style="color:var(--gold)">Skill, bought separately for ${Game.TOWER_SKILL.cost} gold: ${esc(x.skill.name)}.</span> ${esc(x.skill.text)}` : ''}${x.loan ? `<br><span style="color:var(--gold)">Loan, every round:</span> ${esc(loanText())}` : ''}${x.passive ? `<br><span style="color:var(--gold)">${esc(x.passive.name)} (always on):</span> ${esc(x.passive.text)}` : ''}${x.generals ? `<br><span style="color:var(--gold)">Mage generals, one per round, for that round's fight:</span> ${Game.MAGE_GENERALS.map(g => `<b>${esc(g.name)}</b> (${g.cost} gold): ${esc(g.text)}`).join(' ')}` : ''}`,
       })),
     };
     return null;
@@ -1229,6 +1238,8 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
 
   // ---------- panel ----------
   // the picked tower's skill, not bought yet: offered as a button in the deploy panel
+  const loanText = () => `Take ${Game.LOAN.gold} gold right away; next round you get ${Game.LOAN.payback} gold less (never less than nothing). Once a round.`;
+  const loanOffer = () => !!m && Game.towerPicked(m, me) && !Game.needsTowerPick(m, me) && Game.towerType(m, me).id === 'bank';
   const mageOffer = () => !!m && Game.towerPicked(m, me) && !Game.needsTowerPick(m, me) && Game.towerType(m, me).id === 'mage';
   const tskillOffer = () => !!m && Game.towerPicked(m, me) && !Game.needsTowerPick(m, me) && !Game.towerSkillOf(m, me) && !!Game.towerType(m, me).skill;
   function panelDeploy() {
@@ -1268,6 +1279,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
     }
     const extraBtns = `<span style="display:flex;gap:6px;flex-wrap:wrap">
         <button class="btn small" id="buy-deploy" ${can && Game.canBuyDeploy(m, me) ? '' : 'disabled'}>+1 deployment · ${Game.CONFIG.extraDeployCost}</button>
+        ${loanOffer() ? (Game.loanNow(m, me) ? `<button class="btn small" id="loan-undo" ${can && m.gold[me] >= Game.LOAN.gold ? '' : 'disabled'}>Pay back loan · −${Game.LOAN.gold}</button>` : `<button class="btn small" id="loan" ${can ? '' : 'disabled'}>Loan · +${Game.LOAN.gold}</button>`) : ''}
         ${mageOffer() ? `<button class="btn small" id="mage-gen" ${can ? '' : 'disabled'}>${Game.mageGenOf(m, me) ? esc(Game.mageGenInfo(Game.mageGenOf(m, me)).name) : 'Mage general'}…</button>` : ''}
         ${tskillOffer() ? `<button class="btn small" id="buy-tskill" ${can && Game.canBuyTowerSkill(m, me) ? '' : 'disabled'}>${esc(Game.towerType(m, me).skill.name)} · ${Game.TOWER_SKILL.cost}</button>` : ''}
         ${can && m.extraDeploys[me] > 0 && left > 0 ? `<button class="btn small" id="refund-deploy">Refund unused</button>` : ''}
@@ -1325,6 +1337,8 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
     if ($('ready')) $('ready').addEventListener('click', toggleReady);
     $('buy-deploy').addEventListener('click', () => { if (editable() && Game.buyDeploy(m, me)) changed(); });
     if ($('mage-gen')) $('mage-gen').addEventListener('click', () => openTowerSheet(me));
+    if ($('loan')) $('loan').addEventListener('click', () => { if (editable() && Game.takeLoan(m, me)) changed(); });
+    if ($('loan-undo')) $('loan-undo').addEventListener('click', () => { if (editable() && Game.undoLoan(m, me)) changed(); });
     if ($('buy-tskill')) $('buy-tskill').addEventListener('click', () => { if (editable() && Game.buyTowerSkill(m, me)) changed(); });
     if ($('refund-deploy')) $('refund-deploy').addEventListener('click', () => { if (editable() && Game.refundDeploy(m, me)) changed(); });
     if ($('move-btn')) $('move-btn').addEventListener('click', () => { if (!editable()) return; moveMode = !moveMode; moving = null; if (moveMode) selected = null; changed(); });
@@ -1401,7 +1415,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
             ${Game.CHARACTERS.map(c => `<li>${armsImg(c.id)}<b>${esc(c.name)}</b>: ${esc(c.ability)}</li>`).join('')}`],
           ['Towers', `If yours falls, your army is crippled for a few seconds. Pick your real one in round ${Game.TOWER_PICK_ROUND}.`, `
             <li>Your tower stands in the back of your zone. Until round ${Game.TOWER_PICK_ROUND} it is a small outpost; then, before the clock runs, you pick one for the rest of the match.</li>
-            ${Game.TOWER_TYPES.map(x => `<li><b>${esc(x.name)}</b>: ${esc(x.text)} ${x.skill ? `Skill: <i>${esc(x.skill.name)}</i> (${Game.TOWER_SKILL.cost} gold, tap your tower). ${esc(x.skill.text)}` : ''}${x.generals ? `Every round you may call one mage general (tap your tower); it changes the attack for that round's fight only. ${Game.MAGE_GENERALS.map(g => `<i>${esc(g.name)}</i> (${g.cost} gold): ${esc(g.text)}`).join(' ')}` : ''}</li>`).join('')}`],
+            ${Game.TOWER_TYPES.map(x => `<li><b>${esc(x.name)}</b>: ${esc(x.text)} ${x.skill ? `Skill: <i>${esc(x.skill.name)}</i> (${Game.TOWER_SKILL.cost} gold, tap your tower). ${esc(x.skill.text)}` : ''}${x.loan ? `Loan, every round (tap your tower): ${esc(loanText())} ` : ''}${x.passive ? `<i>${esc(x.passive.name)}</i> (always on): ${esc(x.passive.text)} ` : ''}${x.generals ? `Every round you may call one mage general (tap your tower); it changes the attack for that round's fight only. ${Game.MAGE_GENERALS.map(g => `<i>${esc(g.name)}</i> (${g.cost} gold): ${esc(g.text)}`).join(' ')}` : ''}</li>`).join('')}`],
           ['Maps', 'Every map changes the rules of the fight.', `
             <li>The host picks the map before the packages, or leaves it random (never Standard, and never the same map twice in a row).</li>
             ${Game.MAPS.map(mp => `<li><b>${esc(mp.name)}</b>: ${esc(mp.text)}</li>`).join('')}`],
@@ -1518,7 +1532,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
       <h2 class="${cls}">${head}</h2>
       <p class="big">${lines.join(' ')}</p>
       ${lvLines.join('')}
-      <p>Next round: +${sum.income || Game.incomeFor(sum.round + 1)} gold each.${bonus}${sum.felix && sum.felix[me] ? ` Felix adds ${sum.felix[me]} more for you.` : ''}${sum.felix && sum.felix[foe()] ? ` Felix adds ${sum.felix[foe()]} more for ${mode === 'claude' ? 'Claude' : `the ${them.toLowerCase()}`}.` : ''}</p>
+      <p>Next round: +${sum.income || Game.incomeFor(sum.round + 1)} gold each.${bonus}${sum.felix && sum.felix[me] ? ` Felix adds ${sum.felix[me]} more for you.` : ''}${sum.loan && sum.loan[me] ? ` Your bank loan takes ${sum.loan[me]} back.` : ''}${sum.felix && sum.felix[foe()] ? ` Felix adds ${sum.felix[foe()]} more for ${mode === 'claude' ? 'Claude' : `the ${them.toLowerCase()}`}.` : ''}</p>
       <div class="btnrow">
         ${waiting ? '<p class="status wait">Waiting for your opponent</p>' : `<button class="btn primary" id="next">Next round</button>`}
         <button class="btn" id="menu">Main menu</button>
@@ -1751,7 +1765,7 @@ ${theirSkills.length ? 'Their skills: ' + theirSkills.join(', ') : ''}
 TOWERS
 - Each player has one tower. It never moves, is rebuilt every round and doesn't count for winning a round. If a tower falls during a fight, its owner's whole army deals ${Engine.TOWER_DOWN.attack}% less damage, moves ${Engine.TOWER_DOWN.move}% slower and takes ${Engine.TOWER_DOWN.taken}% more damage for ${Engine.TOWER_DOWN.secs} s. Sending a squad down an empty lane to break their tower can turn a fight; guard the lane to yours.
 - Until round ${Game.TOWER_PICK_ROUND} each tower is an Outpost (${Game.OUTPOST.unit.hp} hp, hit ${Game.OUTPOST.unit.hit} x ${Game.OUTPOST.unit.aps}/s, range ${Game.OUTPOST.unit.range} m). In round ${Game.TOWER_PICK_ROUND} each player picks a tower type that stays for the rest of the match: ${Game.towerChoices(m, 1).map(x => `"${x.id}" ${x.name}: ${x.unit.hp} hp, hit ${x.unit.hit} x ${x.unit.aps}/s, range ${x.unit.range} m${x.unit.splash ? `, ${x.unit.splash} m splash` : ''}`).join('; ')}.${Game.needsTowerPick(m, 1) ? ` ROUND ${Game.TOWER_PICK_ROUND}: pick yours now with "towerType" in your reply.` : ''}
-- Tower skills (one per tower type, ${Game.TOWER_SKILL.cost} gold, bought once per match after the pick with "towerSkill": true): ${Game.TOWER_TYPES.filter(x => x.skill).map(x => `${x.name}: "${x.skill.name}", ${x.skill.text}`).join(' ')} The Mage tower has no such skill; instead, every round you may call ONE mage general with "mageGeneral": "${Game.MAGE_GENERALS.map(g => g.id).join('" | "')}", for that round's fight only: ${Game.MAGE_GENERALS.map(g => `"${g.id}" ${g.name} (${g.cost} gold): ${g.text}`).join(' ')}${Game.towerSkillOf(m, 1) ? ' You own yours.' : Game.towerPicked(m, 1) || Game.needsTowerPick(m, 1) ? ' You can buy yours this round.' : ''}
+- Tower skills (one per tower type, ${Game.TOWER_SKILL.cost} gold, bought once per match after the pick with "towerSkill": true): ${Game.TOWER_TYPES.filter(x => x.skill).map(x => `${x.name}: "${x.skill.name}", ${x.skill.text}`).join(' ')} The Bank tower has no such skill; instead, every round you may take a loan with "loan": true: +${Game.LOAN.gold} gold now, ${Game.LOAN.payback} less gold next round (never below nothing).${Game.loanNow(m, 1) ? ' You took one this round.' : ''} The Slime tower has no skill to buy; every skill you buy for Slime Wizards or Slimeshots also works on it. The Mage tower has no such skill; instead, every round you may call ONE mage general with "mageGeneral": "${Game.MAGE_GENERALS.map(g => g.id).join('" | "')}", for that round's fight only: ${Game.MAGE_GENERALS.map(g => `"${g.id}" ${g.name} (${g.cost} gold): ${g.text}`).join(' ')}${Game.towerSkillOf(m, 1) ? ' You own yours.' : Game.towerPicked(m, 1) || Game.needsTowerPick(m, 1) ? ' You can buy yours this round.' : ''}
 - Your tower: ${Game.towerType(m, 1).name}, col ${m.towers[1].col}, row ${m.towers[1].row} (fixed; squads can't share its tile).
 - Their tower: ${m.round !== Game.TOWER_PICK_ROUND ? Game.towerType(m, 0).name + (Game.towerSkillVisible(m, 0) && Game.towerType(m, 0).skill ? ` with "${Game.towerType(m, 0).skill.name}"` : '') + ', ' : 'type hidden until the fight, '}col ${m.towers[0].col}, row ${m.towers[0].row}.
 
@@ -1763,7 +1777,7 @@ CHARACTERS (each package comes with one; its ability lasts the whole match)
 - Theirs: ${m.round > 1 && Game.charOf(m, 0) ? `${Game.charInfo(Game.charOf(m, 0)).name}: ${Game.charInfo(Game.charOf(m, 0)).ability}` : 'hidden until the first fight'}
 
 Reply with only a JSON object in this shape:
-{${Game.needsPack(m, 1) ? '"package":0,' : ''}${Game.needsTowerPick(m, 1) ? '"towerType":"keep",' : ''}${Game.needsTowerPick(m, 1) || (Game.towerPicked(m, 1) && !Game.towerSkillOf(m, 1) && Game.towerType(m, 1).skill) ? '"towerSkill":false,' : ''}${Game.needsTowerPick(m, 1) || (Game.towerPicked(m, 1) && Game.towerType(m, 1).id === 'mage') ? '"mageGeneral":null,' : ''}"unlock":["unit name"],"sell":[squad ids],"levelUp":[squad ids, list one twice to level it twice],"skills":[{"unit":"unit name","slot":1}],"extraDeployments":0,${Game.elfSpot(m) ? '"bribe":0,' : ''}${Game.elfOwnOffered(m, 1) && !Game.elfOwnOf(m, 1) ? '"elfTower":null,' : ''}${(Game.mapOf(m) || {}).shrooms ? '"removeTiles":[],' : ''}${Game.altarRound(m) ? '"altar":[],' : ''}"move":{"id":squad id,"col":5,"row":3} or null,"place":[{"unit":"unit name","col":5,"row":3}],"say":"one short playful line to your opponent, at most 15 words, shown after the fight"}
+{${Game.needsPack(m, 1) ? '"package":0,' : ''}${Game.needsTowerPick(m, 1) ? '"towerType":"keep",' : ''}${Game.needsTowerPick(m, 1) || (Game.towerPicked(m, 1) && !Game.towerSkillOf(m, 1) && Game.towerType(m, 1).skill) ? '"towerSkill":false,' : ''}${Game.needsTowerPick(m, 1) || (Game.towerPicked(m, 1) && Game.towerType(m, 1).id === 'mage') ? '"mageGeneral":null,' : ''}${Game.needsTowerPick(m, 1) || Game.canTakeLoan(m, 1) ? '"loan":false,' : ''}"unlock":["unit name"],"sell":[squad ids],"levelUp":[squad ids, list one twice to level it twice],"skills":[{"unit":"unit name","slot":1}],"extraDeployments":0,${Game.elfSpot(m) ? '"bribe":0,' : ''}${Game.elfOwnOffered(m, 1) && !Game.elfOwnOf(m, 1) ? '"elfTower":null,' : ''}${(Game.mapOf(m) || {}).shrooms ? '"removeTiles":[],' : ''}${Game.altarRound(m) ? '"altar":[],' : ''}"move":{"id":squad id,"col":5,"row":3} or null,"place":[{"unit":"unit name","col":5,"row":3}],"say":"one short playful line to your opponent, at most 15 words, shown after the fight"}
 For "say": make it about what is happening in this match, and never repeat a line.${claude.history.length ? ' Lines you already used:\n' + claude.history.slice(-6).map(x => '- ' + x).join('\n') : ''}
 Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills, ${Game.elfSpot(m) ? 'bribe, ' : ''}${Game.elfOwnOffered(m, 1) && !Game.elfOwnOf(m, 1) ? 'elfTower, ' : ''}${(Game.mapOf(m) || {}).shrooms ? 'removeTiles, ' : ''}${Game.altarRound(m) ? 'altar, ' : ''}extraDeployments, move, place. Anything you can't afford or that breaks a rule is skipped, so keep the total cost within your gold (${m.gold[1]} plus any sales). Use exact unit names. Unspent gold isn't lost, but squads on the board win rounds.`;
   }
@@ -1783,6 +1797,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     }
     if (mv.towerType) Game.setTowerType(m, 1, String(mv.towerType));
     if (mv.towerSkill === true && Game.buyTowerSkill(m, 1)) did.push('bought its tower skill');
+    if (mv.loan === true && Game.takeLoan(m, 1)) did.push('took a bank loan');
     if (mv.mageGeneral && Game.buyMageGen(m, 1, String(mv.mageGeneral))) did.push(`called the ${Game.mageGenInfo(String(mv.mageGeneral)).name}`);
     for (const id of list(mv.sell)) {
       const sq = m.armies[1].find(s => s.id === int(id));
@@ -2098,7 +2113,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     const D = Engine.TOWER_DOWN, shown = towerTypeVisible(side), tt = Game.towerType(m, side), T = tt.unit;
     $('sheet').innerHTML = `
       <div class="bar"><h3 id="sheet-h">${side === me ? 'Your tower' : `${esc(foeName())}'s tower`}${shown ? ` · ${esc(tt.name)}` : ''}</h3><button class="btn small" id="close">Close</button></div>
-      ${shown && Game.towerPicked(m, side) ? towerSkillBlock(side, tt) + mageGenBlock(side, tt) : ''}
+      ${shown && Game.towerPicked(m, side) ? towerSkillBlock(side, tt) + mageGenBlock(side, tt) + loanBlock(side, tt) + passiveBlock(side, tt) : ''}
       <p style="margin:0">${(() => { const id = Game.charOf(m, side); return !charVisible(side) ? 'Character: hidden until the first fight.' : id ? `Character: ${charLine(id)}` : 'Character: not picked yet.'; })()}</p>
       <p class="role" style="margin:0">The tower stands in the back of the zone and shoots anything that comes close. It is rebuilt for every round.${shown ? ` ${esc(tt.text)}` : ` Its type stays hidden until the round ${Game.TOWER_PICK_ROUND} fight.`}</p>
       <p style="margin:0"><span style="color:var(--foe)">If it falls:</span> that army deals ${D.attack}% less damage, moves ${D.move}% slower and takes ${D.taken}% more damage for ${D.secs} s.</p>
@@ -2110,7 +2125,34 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if ($('tskill')) $('tskill').addEventListener('click', () => { if (editable() && Game.buyTowerSkill(m, me)) { changed(); openTowerSheet(me); } });
     if ($('tskill-undo')) $('tskill-undo').addEventListener('click', () => { if (editable() && Game.undoTowerSkill(m, me)) { changed(); openTowerSheet(me); } });
     $('sheet').querySelectorAll('[data-mgen]').forEach(b => b.addEventListener('click', () => { if (editable() && Game.buyMageGen(m, me, b.dataset.mgen)) { changed(); openTowerSheet(me); } }));
+    if ($('tloan')) $('tloan').addEventListener('click', () => { if (editable() && Game.takeLoan(m, me)) { changed(); openTowerSheet(me); } });
+    if ($('tloan-undo')) $('tloan-undo').addEventListener('click', () => { if (editable() && Game.undoLoan(m, me)) { changed(); openTowerSheet(me); } });
     if ($('mgen-undo')) $('mgen-undo').addEventListener('click', () => { if (editable() && Game.undoMageGen(m, me)) { changed(); openTowerSheet(me); } });
+  }
+  const abilityRow = (name, act, text) => `<div style="display:grid;gap:4px;border-top:1px solid var(--line);padding-top:8px">
+      <div class="bar"><b style="font-family:var(--font-display)">${esc(name)}</b><span>${act}</span></div>
+      <span class="hint">${text}</span></div>`;
+  // the bank tower's loan: take one this round (yours), or whether they took one (theirs, once the fight is on)
+  function loanBlock(side, tt) {
+    if (!tt.loan) return '';
+    const L = Game.LOAN, took = Game.loanNow(m, side), chip = (txt, col) => `<span class="chip" style="color:${col};border:1px solid currentColor;border-radius:99px;padding:1px 8px;font-size:12px">${txt}</span>`;
+    let act;
+    if (side !== me) act = took && phase !== 'deploy' ? chip('Took one', 'var(--foe)') : '';
+    else if (took) act = chip('Taken', 'var(--gold)') + (phase === 'deploy' && editable() ? ` <button class="btn small" id="tloan-undo" ${m.gold[me] >= L.gold ? '' : 'disabled'}>Pay back · −${L.gold}</button>` : '');
+    else if (phase === 'deploy') act = `<button class="btn small${editable() ? ' primary' : ''}" id="tloan" ${editable() ? '' : 'disabled'}>Take · +${L.gold} gold</button>`;
+    else act = '';
+    return abilityRow('Loan', act, esc(loanText()) + (side === me && took ? ` Next round: −${L.payback}.` : ''));
+  }
+  // an always-on tower ability (slime tower: the slime skills it gets)
+  function passiveBlock(side, tt) {
+    if (!tt.passive) return '';
+    let on = '';
+    if (tt.id === 'slime' && (side === me || phase !== 'deploy')) {
+      const names = [];
+      units.forEach((u, i) => { if (Game.SLIME_UNITS.includes(u.name)) Engine.SLOTS.forEach(k => { if (Game.hasSkill(m, side, i, k) && !Game.isInnate(m, i, k) && (side === me || Game.skillVisible(m, side, i, k))) names.push(`${u.skillDefs[k].name} (${u.name})`); }); });
+      on = names.length ? ` On now: ${esc(names.join(', '))}.` : ' None bought yet.';
+    }
+    return abilityRow(tt.passive.name, `<span class="chip" style="color:var(--ink);border:1px solid currentColor;border-radius:99px;padding:1px 8px;font-size:12px">Always on</span>`, esc(tt.passive.text) + on);
   }
   // the mage tower's generals: call one for this round (yours; calling another swaps it), or the one they called (theirs, once the fight is on)
   function mageGenBlock(side, tt) {
@@ -2583,6 +2625,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       if (s.elfOwn && s.elfOwn[0] && s.elfOwn[0].round === m.round) s.elfOwn[0] = null; // and an elf tower bought this round
       if (s.towerSkill && s.towerSkill[0] === m.round) s.towerSkill[0] = 0; // and a tower skill
       if (s.mageGen) s.mageGen[0] = null; // and the mage general called this round
+      if (s.loan && s.loan[0] === m.round) s.loan[0] = 0; // and a bank loan taken this round
       if (s.mapFree && s.mapFree[0]) delete s.mapFree[0][m.round]; // and which purchase got Blixten's free slot
       if (s.map && s.map.removed) s.map.removed = s.map.removed.filter(x => !(x.side === 0 && x.round === m.round)); // and mushroom tiles removed this round
       if (s.altar) s.altar = s.altar.filter(x => !(x.side === 0 && x.round === m.round)); // and altar purchases
@@ -2673,6 +2716,10 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     // the guest's mage general for this round (gold was checked on their side)
     if (!m.mageGen) m.mageGen = [null, null];
     m.mageGen[1] = Game.mageGenInfo(d.mageGen) && Game.towerPicked(m, 1) && Game.towerType(m, 1).id === 'mage' ? { round: m.round, id: d.mageGen } : null;
+    // the guest's bank loan: an earlier one stays (it is paid back after this round's fight), one sent for this round is taken
+    if (!m.loan) m.loan = [0, 0];
+    if (!(m.loan[1] > 0 && m.loan[1] < m.round)) m.loan[1] = 0;
+    if ((d.loan | 0) === m.round && Game.towerPicked(m, 1) && Game.towerType(m, 1).id === 'bank') m.loan[1] = m.round;
     // the guest's elf bribes: earlier ones stay, the ones sent for this round are taken (gold was checked on their side)
     if (!m.bribe) m.bribe = [[], []];
     const newBribes = Game.elfSpot(m) ? (Array.isArray(d.bribe) ? d.bribe : [d.bribe]).filter(r => (r | 0) === m.round).slice(0, 200) : [];
@@ -2810,7 +2857,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
 
   function sendSide() {
     if (mode !== 'guest' || !m || phase !== 'deploy') return;
-    send({ t: 'side', round: m.round, army: m.armies[1], gold: m.gold[1], extra: m.extraDeploys[1], nextId: m.nextId[1], tech: (m.tech && m.tech[1]) || {}, tower: (m.towers && m.towers[1]) || null, pack: m.pack ? m.pack[1] : null, unlocks: (m.unlocks && m.unlocks[1]) || {}, bribe: Game.bribeList(m, 1), elfOwn: Game.elfOwnOf(m, 1), towerSkill: (m.towerSkill && m.towerSkill[1]) || 0, mageGen: Game.mageGenOf(m, 1), altar: (m.altar || []).filter(x => x.side === 1 && x.round === m.round).map(x => x.type), shrooms: ((m.map && m.map.removed) || []).filter(x => x.side === 1 && x.round === m.round).map(x => ({ col: x.col, row: x.row })), ready: ready[1] || timeUp });
+    send({ t: 'side', round: m.round, army: m.armies[1], gold: m.gold[1], extra: m.extraDeploys[1], nextId: m.nextId[1], tech: (m.tech && m.tech[1]) || {}, tower: (m.towers && m.towers[1]) || null, pack: m.pack ? m.pack[1] : null, unlocks: (m.unlocks && m.unlocks[1]) || {}, bribe: Game.bribeList(m, 1), elfOwn: Game.elfOwnOf(m, 1), towerSkill: (m.towerSkill && m.towerSkill[1]) || 0, mageGen: Game.mageGenOf(m, 1), loan: Game.loanNow(m, 1) ? m.round : 0, altar: (m.altar || []).filter(x => x.side === 1 && x.round === m.round).map(x => x.type), shrooms: ((m.map && m.map.removed) || []).filter(x => x.side === 1 && x.round === m.round).map(x => ({ col: x.col, row: x.row })), ready: ready[1] || timeUp });
   }
 
   function guestRecv(d) {
@@ -2840,9 +2887,11 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
           if (!m.elfOwn) m.elfOwn = [null, null];
           if (!incoming.mapFree) incoming.mapFree = [{}, {}];
           if (!incoming.mageGen) incoming.mageGen = [null, null];
+          if (!incoming.loan) incoming.loan = [0, 0];
+          if (!m.loan) m.loan = [0, 0];
           if (!m.mageGen) m.mageGen = [null, null];
           if (!m.mapFree) m.mapFree = [{}, {}];
-          for (const k of ['armies', 'gold', 'extraDeploys', 'nextId', 'tech', 'towers', 'unlocks', 'pack', 'chars', 'buff', 'bribe', 'towerSkill', 'elfOwn', 'mapFree', 'mageGen']) incoming[k][1] = (m[k] || [null, null])[1];
+          for (const k of ['armies', 'gold', 'extraDeploys', 'nextId', 'tech', 'towers', 'unlocks', 'pack', 'chars', 'buff', 'bribe', 'towerSkill', 'elfOwn', 'mapFree', 'mageGen', 'loan']) incoming[k][1] = (m[k] || [null, null])[1];
           if (incoming.map && m.map) incoming.map.removed = (incoming.map.removed || []).filter(x => !(x.side === 1 && x.round === incoming.round)).concat((m.map.removed || []).filter(x => x.side === 1 && x.round === incoming.round));
           incoming.altar = (incoming.altar || []).filter(x => !(x.side === 1 && x.round === incoming.round)).concat((m.altar || []).filter(x => x.side === 1 && x.round === incoming.round));
           m = incoming; ready[0] = theirReady;

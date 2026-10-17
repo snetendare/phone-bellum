@@ -41,6 +41,10 @@ const Game = (() => {
       skill: { name: 'Home ground', text: 'In fights, your units get +2 armor and +10% health while they stand in your own zone. They lose it in no man’s land and get it back if they return.' } },
     { id: 'mage', name: 'Mage tower', text: 'A small sun-priest beam: it locks onto one enemy and hits harder and faster the longer it stays on it. Slow against swarms, but melts big units after a few seconds.', unit: { ...TOWER, name: 'Mage Tower', kind: 'mage', hit: 14, aps: 1.5, range: 12, spinUp: 50, spinHit: 50, color: '#A493DE' },
       generals: true }, // no once-per-match skill: a mage general can be called every round instead (MAGE_GENERALS)
+    { id: 'bank', name: 'Bank tower', text: 'Sturdy, with an attack between the keep and the sniper tower: medium range, medium fire rate.', unit: { ...TOWER, name: 'Bank Tower', kind: 'bank', hp: 700, hit: 45, aps: 0.8, range: 18, color: '#D9B95B' },
+      loan: true }, // no once-per-match skill: a loan can be taken every round instead (LOAN)
+    { id: 'slime', name: 'Slime tower', text: 'Lobs splashing slime globs like one Slimeshots body, with 5 m more range.', unit: { ...TOWER, name: 'Slime Tower', kind: 'slime', hit: 7, aps: 0.8, range: 26, splash: 3, projSpeed: 30, spinUp: 0.1, color: '#7BD93F' },
+      passive: { name: 'Slime lore', text: 'Every skill you buy for Slime Wizards or Slimeshots works on the slime tower too.' } }, // see slimeTowerUnit
   ];
   // a picked type, or the Outpost until the pick is made (a match saved without a pick past it gets the Keep)
   const towerType = (m, side) => {
@@ -122,6 +126,31 @@ const Game = (() => {
     if (id === 'lightning') return { ...plain, hit: MAGE.boltHit, aps: MAGE.boltAps, chain: { jumps: MAGE.jumps, hit: MAGE.jumpHit, reach: MAGE.jumpReach }, general: id };
     if (id === 'water') return { ...plain, hit: 0, mend: MAGE.waterHeal, aps: MAGE.waterAps, range: MAGE.waterRange, general: id };
     return base;
+  }
+  // Bank tower: once a round, a loan of LOAN.gold right away; the next round's gold (income, loser bonus and
+  // the rest) is LOAN.payback less, never below nothing. m.loan[side] = the round the last loan was taken in.
+  const LOAN = { gold: 200, payback: 300 };
+  const loanNow = (m, side) => !!(m && m.loan && m.loan[side] === m.round);
+  const canTakeLoan = (m, side) => towerPicked(m, side) && towerType(m, side).id === 'bank' && !loanNow(m, side);
+  function takeLoan(m, side) {
+    if (!canTakeLoan(m, side)) return false;
+    if (!m.loan) m.loan = [0, 0];
+    m.loan[side] = m.round;
+    m.gold[side] += LOAN.gold;
+    return true;
+  }
+  function undoLoan(m, side) {
+    if (!loanNow(m, side) || m.gold[side] < LOAN.gold) return false;
+    m.loan[side] = 0;
+    m.gold[side] -= LOAN.gold;
+    return true;
+  }
+  // Slime tower: the skills bought for Slime Wizards and Slimeshots work on it too
+  const SLIME_UNITS = ['Slime Wizard', 'Slimeshots'];
+  function slimeTowerUnit(m, side, base) {
+    const defs = [];
+    (m.units || []).forEach((u, ui) => { if (u && SLIME_UNITS.includes(u.name)) for (const k of E.SLOTS) if (hasSkill(m, side, ui, k) && !isInnate(m, ui, k)) defs.push(skillDef(m, ui, k)); });
+    return defs.length ? E.applySkills(base, defs, m.units) : base;
   }
   // the skill in force for a fight: the tower's type and whether it was bought
   const towerSkillOn = (m, side, id) => towerSkillOf(m, side) && towerType(m, side).id === id;
@@ -567,6 +596,7 @@ const Game = (() => {
       bribe: [[], []], // the round of each bribe each player paid the elves (see the bribe-off)
       elfOwn: [null, null], // each player's own elf tower: { col, row, round bought }
       towerSkill: [0, 0], // round each player bought their tower's skill in (0 = not bought)
+      loan: [0, 0], // the round each player last took a bank loan in (Bank tower)
       mageGen: [null, null], // the mage general each player called this round: { round, id } (Mage tower)
       mapFree: [{}, {}], // Blixten's free map purchase per round (see mapFreeOf)
     };
@@ -833,6 +863,7 @@ const Game = (() => {
     const t = m.towers && m.towers[side];
     if (t) {
       let tu = mageTowerUnit(m, side, towerType(m, side).unit);
+      if (towerType(m, side).id === 'slime') tu = slimeTowerUnit(m, side, tu);
       if (eagle) tu = { ...tu, range: tu.range + TOWER_SKILL.eagleRange, aps: tu.aps * (1 + TOWER_SKILL.eagleAps / 100) };
       const w = tileToWorld(t.col, t.row), tb = E.buildSquad(tu, side, w.x, w.y, -2, TILE, idx);
       if (altarBought(m, side, 'walls')) for (const x of tb) x.walls = [ICE.wallHits, ICE.wallHits, ICE.wallHits, ICE.wallHits];
@@ -974,7 +1005,7 @@ const Game = (() => {
     m.moved = [null, null];
     for (const a of m.armies) for (const sq of a) { delete sq.from; delete sq.movedRound; }
     rollBuffTiles(m, 0); rollBuffTiles(m, 1);
-    const income = incomeFor(m.round);
+    const income = incomeFor(m.round), before = m.gold.slice();
     m.gold[0] += income; m.gold[1] += income;
     summary.income = income;
     summary.felix = [0, 1].map(sd => felixGold(m, sd));
@@ -982,6 +1013,13 @@ const Game = (() => {
     const loser = dmg[0] > dmg[1] ? 0 : dmg[1] > dmg[0] ? 1 : -1;
     if (loser >= 0) m.gold[loser] += LOSER_BONUS;
     summary.bonusTo = loser;
+    // a bank loan taken in the round just fought is paid back out of this round's gold (never below nothing)
+    summary.loan = [0, 1].map(sd => {
+      if (!(m.loan && m.loan[sd] === m.round - 1)) return 0;
+      const cut = Math.min(LOAN.payback, m.gold[sd] - before[sd]);
+      m.gold[sd] -= cut;
+      return cut;
+    });
     return summary;
   }
 
@@ -1049,6 +1087,7 @@ const Game = (() => {
     }
     if (needsTowerPick(m, side)) { const ch = towerChoices(m, side); setTowerType(m, side, ch[Math.floor(rng(m.seed + side * 7477)() * ch.length)].id); } // own stream: the rest of the AI rolls stay as they were
     if (canBuyTowerSkill(m, side) && rng(m.seed + m.round * 331 + side * 17)() < 0.5) buyTowerSkill(m, side); // own stream, as above
+    if (canTakeLoan(m, side) && m.gold[side] < SQUAD_COST * 3 && rng(m.seed + m.round * 613 + side * 37)() < 0.4) takeLoan(m, side); // short on gold: sometimes a loan
     if (towerPicked(m, side) && towerType(m, side).id === 'mage') { // a mage general most rounds, if it leaves gold for a squad
       const q = rng(m.seed + m.round * 577 + side * 29), g = MAGE_GENERALS[Math.floor(q() * MAGE_GENERALS.length)];
       if (q() < 0.6 && m.gold[side] - g.cost >= SQUAD_COST) buyMageGen(m, side, g.id);
@@ -1176,7 +1215,7 @@ const Game = (() => {
     unlockCost, tierOf, startLevel, shopCost, mapFreeOf, mapFreeLeft, isUnlocked, unlockVisible, unlock, undoUnlock,
     skillDef, skillCost, isInnate, hasSkill, skillVisible, unitFor, canBuySkill, buySkill, undoSkill, sellValue, sell,
     isRider, hiddenFromFoe, isCarrier, riderOf, carrierOf, squadAt, boardable, unplaceSquad,
-    TOWER, TOWER_TYPES, OUTPOST, TOWER_PICK_ROUND, towerType, towerChoices, needsTowerPick, setTowerType, settleTowerPicks, TOWER_SKILL, towerSkillOf, towerSkillVisible, towerPicked, canBuyTowerSkill, buyTowerSkill, undoTowerSkill, MAGE_GENERALS, MAGE, mageGenInfo, mageGenOf, mageGenCost, canBuyMageGen, buyMageGen, undoMageGen, mageTowerUnit, TOWER_MID, towerColOk, towerAt, needsTower, placeTower, ensureTower,
+    TOWER, TOWER_TYPES, OUTPOST, TOWER_PICK_ROUND, towerType, towerChoices, needsTowerPick, setTowerType, settleTowerPicks, TOWER_SKILL, towerSkillOf, towerSkillVisible, towerPicked, canBuyTowerSkill, buyTowerSkill, undoTowerSkill, MAGE_GENERALS, MAGE, mageGenInfo, mageGenOf, mageGenCost, canBuyMageGen, buyMageGen, undoMageGen, mageTowerUnit, LOAN, loanNow, canTakeLoan, takeLoan, undoLoan, SLIME_UNITS, slimeTowerUnit, TOWER_MID, towerColOk, towerAt, needsTower, placeTower, ensureTower,
     FLANK, flankRows, flankOpen, isFlank, reserved, canPlaceAt, enemyHolds, inNoMans, hasSkillType,
     ICE, ALTAR, GOLEM, isIce, hailRound, altarRound, stormShift, stormRows, hailTiles, altarCost, altarRefund, altarCount, pushRoom, altarBought, addAltar, buyAltar, undoAltar, snowgres, snowgreUnit,
     MAPS, ELF_TOWER, SHROOM, SHROOM_SPLIT, shroomAt, shroomTileAt, shroomRemoval, SHROOM_REMOVE, shroomCost, removeShroom, undoRemoveShroom, mapOf, elfSpot, rollMap, BRIBE_COST, bribeList, bribeGold, bribeCount, bribeNow, bribeCost, bribeRefund, ELF_POWER, elfPowered, elfUnit, ELF_OWN, elfOwnCost, elfOwnOf, elfOwnAt, elfOwnUnlocked, elfOwnOffered, canBuyElfOwn, elfOwnSpotOk, buyElfOwn, undoElfOwn, bribeLeader, canBribe, bribe, undoBribe,
