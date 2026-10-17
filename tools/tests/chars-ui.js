@@ -14,7 +14,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   // vs bot, pick Zoe
   const p = await mk('ai');
   await p.goto('http://127.0.0.1:8766/?test'); await sleep(500);
-  await p.click('[data-tm="0"]'); await p.click('#go'); await sleep(300);
+  await p.click('#settings summary'); await p.click('[data-tm="0"]'); await p.click('#go'); await sleep(300);
   console.log('hint:', await hint(p));
   const ps = await packs(p);
   console.log('packs:', ps.length, ps.map(t => t.match(/(Frickolas Cage|Zoe|Emile|Wilhelm)/)?.[1]).join(', '));

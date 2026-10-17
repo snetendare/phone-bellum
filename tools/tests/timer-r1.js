@@ -6,7 +6,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   p.on('pageerror', e => console.log('PAGE ERROR', e.message));
   const tap = async (c, r) => { const b2 = await p.locator('#board').boundingBox(); await p.mouse.click(b2.x + (c + .5) * b2.width / 12, b2.y + (r + .5) * b2.height / 16); };
   await p.goto('http://127.0.0.1:8766/'); await sleep(500);
-  await p.click('[data-tm="1"]'); await p.click('#go'); await sleep(1200);
+  await p.click('#settings summary'); await p.click('[data-tm="1"]'); await p.click('#go'); await sleep(1200);
   console.log('round 1 timer:', await p.locator('#timer').textContent());
   await p.dblclick('[data-pack="0"]'); await sleep(200); await tap(1, 15); await sleep(200);
   await p.click('.ucard:not([data-locked])'); await tap(5, 13); await p.click('#fight'); await sleep(500); await p.click('#skip'); await sleep(800);

@@ -10,7 +10,7 @@ const { chromium } = require('playwright-core');
   const st = () => p.evaluate(() => { const { m, me } = window.__pb(); return { gold: m.gold[me], hp: m.hp, moved: m.moved, army: m.armies[me].map(s => ({ id: s.id, col: s.col, row: s.row, round: s.round, free: !!s.free, from: s.from })) }; });
   const hint = async () => (await p.locator('#panel .hint').first().textContent());
   await p.goto('http://127.0.0.1:8766/?test'); await p.waitForTimeout(500);
-  await p.click('[data-tm="0"]'); await p.click('#go'); await p.waitForTimeout(300);
+  await p.click('#settings summary'); await p.click('[data-tm="0"]'); await p.click('#go'); await p.waitForTimeout(300);
   await p.dblclick('[data-pack="0"]'); await p.waitForTimeout(200);
   let s = await st(); console.log('hp', s.hp, '| pre-placed', JSON.stringify(s.army));
   await tap(1, 15);
