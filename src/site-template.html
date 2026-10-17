@@ -45,6 +45,9 @@ a { color: var(--you); }
 .songs button { text-align: left; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--ink); padding: 10px 12px; font: 500 14px var(--font-body); display: grid; gap: 2px; }
 .songs button span { font-size: 12px; color: var(--muted); }
 .songs button[aria-pressed="true"] { border-color: var(--gold); color: var(--gold); }
+.hist { display: grid; gap: 6px; max-height: 60vh; overflow-y: auto; margin: 0; padding: 0; list-style: none; }
+.hist li { border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; display: grid; gap: 2px; font: 500 14px var(--font-body); }
+.hist li span { font-size: 12px; color: var(--muted); }
 .volrow { display: flex; align-items: center; gap: 10px; flex: 1; justify-content: flex-end; }
 .volrow input { flex: 1; max-width: 220px; accent-color: var(--gold); }
 .volrow .num { width: 3ch; text-align: right; font-family: var(--font-data); font-size: 13px; }
@@ -1618,9 +1621,10 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
     overlay(`<div class="card">
       <h2>No Mans Land</h2>
       <p class="big">Build an army. Watch it fight. Last one standing wins.</p>
-      <span class="btnrow"><button class="btn small" id="how">How to play</button><button class="btn small" id="music-open">Music</button></span>
+      <span class="btnrow"><button class="btn small" id="how">How to play</button><button class="btn small" id="music-open">Music</button>${HISTORY_URL ? `<button class="btn small" id="hist-open">Match history</button>` : ''}</span>
     </div>`);
     $('music-open').addEventListener('click', openSoundSheet);
+    if ($('hist-open')) $('hist-open').addEventListener('click', openHistorySheet);
     $('panel').innerHTML = `
       ${resume ? `<button class="btn primary" id="resume">Resume match ${esc(resume.code)}</button>` : ''}
       <div class="bar">
@@ -1826,6 +1830,43 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
     if (m && m.over) { report.over = true; report.winner = m.winner === you ? 'you' : m.winner === them ? 'them' : 'draw'; report.hpLeft = { you: m.hp[you], them: m.hp[them] }; }
     const body = JSON.parse(JSON.stringify(report)), ref = reportDb.doc('matches/' + report.id);
     reportChain = reportChain.then(() => ref.set(body)).catch((e) => console.warn('match report not saved', e && e.code));
+  }
+
+  // ---------- match history ----------
+  // Two-player matches only: the host's phone posts each round, once, to a Google Sheet web app
+  // (tools/match-history.gs). Empty URL: nothing is saved and the Match history button is hidden.
+  const HISTORY_URL = '';
+  function saveHistory(pre, sum) {
+    if (!HISTORY_URL || mode !== 'host') return;
+    const p = withUnits(pre), charName = (sd) => { const c = Game.charInfo(Game.charOf(p, sd)); return c ? c.name : ''; };
+    const army = (sd) => armyOf(p, sd).map(q => `${q.unit} L${q.level}`).join(', ');
+    const row = {
+      code: net.code, round: sum.round, map: (Game.mapOf(p) || {}).name || '', hostChar: charName(0), guestChar: charName(1),
+      winner: sum.winner === 0 ? 'host' : sum.winner === 1 ? 'guest' : 'draw', timeout: !!sum.timeout, seconds: Math.round(sum.time),
+      dmgHost: sum.dmg[0], dmgGuest: sum.dmg[1], hpHost: m.hp[0], hpGuest: m.hp[1], over: !!m.over,
+      matchWinner: m.over ? (m.winner === 0 ? 'host' : m.winner === 1 ? 'guest' : 'draw') : '',
+      hostArmy: army(0), guestArmy: army(1), hostSkills: skillsOf(p, 0).join(', '), guestSkills: skillsOf(p, 1).join(', '),
+    };
+    // text/plain keeps it a simple request (no CORS preflight, which Apps Script doesn't answer)
+    try { fetch(HISTORY_URL, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify(row) }).catch(() => {}); } catch (e) {}
+  }
+  async function openHistorySheet() {
+    $('sheet').innerHTML = `<div class="bar"><h3 id="sheet-h">Match history</h3><button class="btn small" id="close">Close</button></div>
+      <p class="hint" id="hist-msg" aria-live="polite" style="margin:0">Loading…</p><ul class="hist" id="hist"></ul>`;
+    $('sheet-back').hidden = false;
+    $('close').addEventListener('click', closeSheet);
+    let rows;
+    try { rows = (await (await fetch(HISTORY_URL + '?n=40')).json()).rows || []; } catch (e) { rows = null; }
+    if (!$('hist')) return;
+    if (!rows) { $('hist-msg').textContent = 'Couldn’t load the history. Check your connection and try again.'; return; }
+    $('hist-msg').textContent = rows.length ? `The latest ${rows.length === 1 ? 'battle' : rows.length + ' battles'} from two-player matches.` : 'No battles saved yet. Play a match against a friend.';
+    $('hist').innerHTML = rows.map(r => {
+      const who = (w) => w === 'host' ? (r.hostChar || 'Host') : w === 'guest' ? (r.guestChar || 'Guest') : 'Draw';
+      const when = new Date(r.time), t = isNaN(when) ? '' : when.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+      return `<li>${esc(r.hostChar || 'Host')} vs ${esc(r.guestChar || 'Guest')} · round ${esc(r.round)}: ${r.winner === 'draw' ? 'draw' : esc(who(r.winner)) + ' won'}${r.timeout ? ' on time' : ''}
+        <span>${esc(t)} · match ${esc(r.code)}${r.map ? ' · ' + esc(r.map) : ''} · damage ${esc(r.dmgHost)}/${esc(r.dmgGuest)}${r.over === true || r.over === 'TRUE' ? ` · match over, ${r.matchWinner === 'draw' ? 'draw' : esc(who(r.matchWinner)) + ' won'}` : ''}</span>
+        <span>${esc(r.hostArmy || '–')} vs ${esc(r.guestArmy || '–')}</span></li>`;
+    }).join('');
   }
 
   // ---------- flow: vs Claude ----------
@@ -2152,6 +2193,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     while (sim.step()) {}
     const summary = Game.resolve(m, sim.result());
     recordRound(pre, summary);
+    saveHistory(pre, summary);
     lastSummary = summary; nextReady = [false, false]; rematch = [false, false];
     if (mode === 'host') { send({ t: 'fight', pre, post: snapshot(m), summary }); saveHost(); }
     playBattle(pre);
