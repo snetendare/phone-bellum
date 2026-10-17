@@ -140,6 +140,10 @@ a { color: var(--you); }
 .round-sub { display: flex; align-items: center; justify-content: center; gap: 6px; }
 .cog { width: 24px; height: 24px; padding: 0; border: 1px solid var(--line); border-radius: 50%; background: transparent; color: var(--muted); display: grid; place-items: center; cursor: pointer; }
 .cog:hover, .cog:focus-visible { color: var(--gold); border-color: var(--gold); }
+.songs { display: grid; gap: 6px; }
+.songs button { text-align: left; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--ink); padding: 10px 12px; font: 500 14px var(--font-body); display: grid; gap: 2px; }
+.songs button span { font-size: 12px; color: var(--muted); }
+.songs button[aria-pressed="true"] { border-color: var(--gold); color: var(--gold); }
 .volrow { display: flex; align-items: center; gap: 10px; flex: 1; justify-content: flex-end; }
 .volrow input { flex: 1; max-width: 220px; accent-color: var(--gold); }
 .volrow .num { width: 3ch; text-align: right; font-family: var(--font-data); font-size: 13px; }
@@ -226,7 +230,7 @@ a { color: var(--you); }
 <div class="app">
   <div class="hud" aria-label="Match status">
     <div class="side you"><div class="lbl"><span>You</span><span class="num" id="hp-you">50</span></div><div class="hp"><i id="hpbar-you" style="width:100%"></i></div></div>
-    <div class="round"><b class="num" id="round">1</b><div class="round-sub"><span id="phase">Deploy</span><button class="cog" id="cog" aria-label="Sound settings"><svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M19.4 13a7.6 7.6 0 0 0 0-2l2.1-1.6-2-3.4-2.5 1a7.4 7.4 0 0 0-1.7-1L15 3.3h-4l-.4 2.7a7.4 7.4 0 0 0-1.7 1l-2.5-1-2 3.4L6.6 11a7.6 7.6 0 0 0 0 2l-2.1 1.6 2 3.4 2.5-1a7.4 7.4 0 0 0 1.7 1l.4 2.7h4l.4-2.7a7.4 7.4 0 0 0 1.7-1l2.5 1 2-3.4zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)"/></svg></button></div></div>
+    <div class="round"><b class="num" id="round">1</b><div class="round-sub"><span id="phase">Deploy</span><button class="cog" id="cog" aria-label="Music settings"><svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M19.4 13a7.6 7.6 0 0 0 0-2l2.1-1.6-2-3.4-2.5 1a7.4 7.4 0 0 0-1.7-1L15 3.3h-4l-.4 2.7a7.4 7.4 0 0 0-1.7 1l-2.5-1-2 3.4L6.6 11a7.6 7.6 0 0 0 0 2l-2.1 1.6 2 3.4 2.5-1a7.4 7.4 0 0 0 1.7 1l.4 2.7h4l.4-2.7a7.4 7.4 0 0 0 1.7-1l2.5 1 2-3.4zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)"/></svg></button></div></div>
     <div class="side foe"><div class="lbl"><span id="foe-name">Enemy</span><span class="num" id="hp-foe">50</span></div><div class="hp"><i id="hpbar-foe" style="width:100%"></i></div></div>
   </div>
   <div class="net" id="net" hidden aria-live="polite"><i></i><span id="net-text"></span></div>
@@ -2971,14 +2975,18 @@ if (typeof module !== 'undefined') module.exports = Game;
   // while players deploy (round 1's starter pack choice included); silence during fights and results.
   // Volume goes through Web Audio because iPhones ignore audio.volume.
   const SOUND_STORE = 'phonebellum.sound.v1';
-  const PLAYLISTS = { // all tracks mastered to the same loudness
-    menu: ['audio/menu-jonah.mp3', 'audio/menu-long.mp3'],
-    deploy: ['audio/deploy-fuck-it-2.mp3'],
+  const SONGS = { // all mastered to the same loudness
+    jonah: { title: 'Jonah', file: 'audio/jonah.mp3' },
+    long: { title: 'Long', file: 'audio/long.mp3' },
+    bulgaria: { title: 'Bulgaria', file: 'audio/bulgaria.mp3' },
   };
-  let snd = { vol: 60, muted: false };
+  const ARTIST = 'Snetänd';
+  const songName = (id) => `“${SONGS[id].title}” - ${ARTIST}`;
+  const PLAYLISTS = { menu: ['jonah', 'long'], deploy: ['bulgaria'] };
+  let snd = { vol: 60, muted: false, song: '' }; // song: the one menu song the player picked ('' = the menu playlist)
   try {
     const p = JSON.parse(localStorage.getItem(SOUND_STORE) || 'null');
-    if (p && isFinite(p.vol)) snd = { vol: Math.max(0, Math.min(100, +p.vol)), muted: !!p.muted };
+    if (p && isFinite(p.vol)) snd = { vol: Math.max(0, Math.min(100, +p.vol)), muted: !!p.muted, song: SONGS[p.song] ? p.song : '' };
     else if (localStorage.getItem('phonebellum.music.v1') === 'off') snd.muted = true; // the old On/Off switch
   } catch (e) {}
   const saveSound = () => { try { localStorage.setItem(SOUND_STORE, JSON.stringify(snd)); } catch (e) {} };
@@ -2988,10 +2996,15 @@ if (typeof module !== 'undefined') module.exports = Game;
   // a paused playlist picks up where it stopped
   function playlist(tracks) {
     let track = Math.floor(Math.random() * tracks.length), gain = null, stopT = 0;
-    const el = new Audio(tracks[track]);
+    const el = new Audio(SONGS[tracks[track]].file);
     el.preload = 'none';
     const pl = { el, playing: false };
-    el.addEventListener('ended', () => { track = (track + 1) % tracks.length; el.src = tracks[track]; if (pl.playing) el.play().catch(() => {}); });
+    el.addEventListener('ended', () => { track = (track + 1) % tracks.length; el.src = SONGS[tracks[track]].file; if (pl.playing) el.play().catch(() => {}); });
+    pl.tracks = (list) => { // switch to another list of songs, from the start of its first one
+      if (list.join() === tracks.join()) return;
+      tracks = list; track = 0; el.src = SONGS[tracks[0]].file;
+      if (pl.playing) el.play().catch(() => {});
+    };
     pl.ramp = (v, secs) => {
       if (!gain) { el.volume = v; return; }
       const t = actx.currentTime, g = gain.gain;
@@ -3013,7 +3026,8 @@ if (typeof module !== 'undefined') module.exports = Game;
     };
     return pl;
   }
-  const music = { menu: playlist(PLAYLISTS.menu), deploy: playlist(PLAYLISTS.deploy) };
+  const menuSongs = () => snd.song ? [snd.song] : PLAYLISTS.menu;
+  const music = { menu: playlist(menuSongs()), deploy: playlist(PLAYLISTS.deploy) };
   function syncMusic() {
     const on = musicUnlocked && musicLevel() > 0;
     music.menu.set(on && (phase === 'start' || phase === 'lobby'));
@@ -3031,7 +3045,12 @@ if (typeof module !== 'undefined') module.exports = Game;
   ['pointerdown', 'keydown'].forEach(t => document.addEventListener(t, unlockMusic, { once: true, capture: true }));
   function openSoundSheet() {
     $('sheet').innerHTML = `
-      <div class="bar"><h3 id="sheet-h">Sound</h3><button class="btn small" id="close">Close</button></div>
+      <div class="bar"><h3 id="sheet-h">Music</h3><button class="btn small" id="close">Close</button></div>
+      <div class="songs" role="group" aria-label="Menu music">
+        <span class="hint">Menu music</span>
+        <button data-song="" aria-pressed="${!snd.song}">All menu songs<span>${PLAYLISTS.menu.map(songName).join(', ')}</span></button>
+        ${Object.keys(SONGS).map(id => `<button data-song="${id}" aria-pressed="${snd.song === id}">${esc(songName(id))}</button>`).join('')}
+      </div>
       <div class="bar">
         <span class="hint">Music volume</span>
         <span class="volrow"><input type="range" id="vol" min="0" max="100" step="5" value="${snd.vol}" aria-label="Music volume"><span class="num" id="vol-n">${snd.vol}</span></span>
@@ -3042,7 +3061,7 @@ if (typeof module !== 'undefined') module.exports = Game;
           <button data-mute="0" aria-pressed="${!snd.muted}">Sound on</button><button data-mute="1" aria-pressed="${snd.muted}">Muted</button>
         </div>
       </div>
-      <p class="hint" style="margin:0">Menu music plays on the main menu and in the lobby, deployment music while you deploy. Your settings are saved on this device.</p>`;
+      <p class="hint" style="margin:0">Menu music plays on the main menu and in the lobby. While you deploy, ${PLAYLISTS.deploy.map(songName).join(', ')} plays. Your settings are saved on this device.</p>`;
     $('sheet-back').hidden = false;
     $('close').addEventListener('click', closeSheet);
     $('vol').addEventListener('input', (e) => {
@@ -3050,6 +3069,11 @@ if (typeof module !== 'undefined') module.exports = Game;
       Object.values(music).forEach(pl => { if (pl.playing) pl.ramp(musicLevel(), 0.05); });
       syncMusic();
     });
+    $('sheet').querySelectorAll('[data-song]').forEach(b => b.addEventListener('click', () => {
+      snd.song = b.dataset.song; saveSound();
+      $('sheet').querySelectorAll('[data-song]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+      music.menu.tracks(menuSongs());
+    }));
     $('sheet').querySelectorAll('[data-mute]').forEach(b => b.addEventListener('click', () => {
       snd.muted = b.dataset.mute === '1'; saveSound();
       $('sheet').querySelectorAll('[data-mute]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
@@ -4191,8 +4215,9 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
     overlay(`<div class="card">
       <h2>No Mans Land</h2>
       <p class="big">Build an army. Watch it fight. Last one standing wins.</p>
-      <button class="btn small" id="how">How to play</button>
+      <span class="btnrow"><button class="btn small" id="how">How to play</button><button class="btn small" id="music-open">Music</button></span>
     </div>`);
+    $('music-open').addEventListener('click', openSoundSheet);
     $('panel').innerHTML = `
       ${resume ? `<button class="btn primary" id="resume">Resume match ${esc(resume.code)}</button>` : ''}
       <div class="bar">
@@ -4208,10 +4233,6 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
       ${settingsBox(`
         ${mapSeg()}
         ${charSeg()}
-        <div class="bar">
-          <span class="hint">Music</span>
-          <button class="btn small" id="sound-open">Volume and mute</button>
-        </div>
         <div class="bar">
           <span class="hint">Deploy timer vs AI</span>
           <div class="seg" role="group" aria-label="Deploy timer vs AI">
@@ -4246,7 +4267,6 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
       $('panel').querySelectorAll('[data-c]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
     }));
     wireMapSeg(); wireCharSeg(); wireSettings();
-    $('sound-open').addEventListener('click', openSoundSheet);
     $('panel').querySelectorAll('[data-tm]').forEach(b => b.addEventListener('click', () => {
       timerOn = b.dataset.tm === '1';
       $('panel').querySelectorAll('[data-tm]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
