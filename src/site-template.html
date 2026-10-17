@@ -37,6 +37,12 @@ body { padding-top: calc(12px + env(safe-area-inset-top, 0px)); padding-bottom: 
 .status.wait::after { content: ""; display: inline-block; width: 1.2em; text-align: left; animation: dots 1.4s steps(4) infinite; }
 @keyframes dots { 0% { content: ""; } 25% { content: "."; } 50% { content: ".."; } 75% { content: "..."; } }
 a { color: var(--you); }
+.round-sub { display: flex; align-items: center; justify-content: center; gap: 6px; }
+.cog { width: 24px; height: 24px; padding: 0; border: 1px solid var(--line); border-radius: 50%; background: transparent; color: var(--muted); display: grid; place-items: center; cursor: pointer; }
+.cog:hover, .cog:focus-visible { color: var(--gold); border-color: var(--gold); }
+.volrow { display: flex; align-items: center; gap: 10px; flex: 1; justify-content: flex-end; }
+.volrow input { flex: 1; max-width: 220px; accent-color: var(--gold); }
+.volrow .num { width: 3ch; text-align: right; font-family: var(--font-data); font-size: 13px; }
 /* unit shop: one tab per tier, rarity colours, locked units greyed out */
 .tiers { display: grid; grid-template-columns: repeat(var(--n, 4), minmax(0, 1fr)); gap: 6px; }
 .tiers button { min-width: 0; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--muted); padding: 6px 6px; font: 600 14px var(--font-display); display: grid; gap: 1px; text-align: left; border-top: 3px solid var(--tier); }
@@ -111,7 +117,7 @@ a { color: var(--you); }
 <div class="app">
   <div class="hud" aria-label="Match status">
     <div class="side you"><div class="lbl"><span>You</span><span class="num" id="hp-you">50</span></div><div class="hp"><i id="hpbar-you" style="width:100%"></i></div></div>
-    <div class="round"><b class="num" id="round">1</b><span id="phase">Deploy</span></div>
+    <div class="round"><b class="num" id="round">1</b><div class="round-sub"><span id="phase">Deploy</span><button class="cog" id="cog" aria-label="Sound settings"><svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M19.4 13a7.6 7.6 0 0 0 0-2l2.1-1.6-2-3.4-2.5 1a7.4 7.4 0 0 0-1.7-1L15 3.3h-4l-.4 2.7a7.4 7.4 0 0 0-1.7 1l-2.5-1-2 3.4L6.6 11a7.6 7.6 0 0 0 0 2l-2.1 1.6 2 3.4 2.5-1a7.4 7.4 0 0 0 1.7 1l.4 2.7h4l.4-2.7a7.4 7.4 0 0 0 1.7-1l2.5 1 2-3.4zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)"/></svg></button></div></div>
     <div class="side foe"><div class="lbl"><span id="foe-name">Enemy</span><span class="num" id="hp-foe">50</span></div><div class="hp"><i id="hpbar-foe" style="width:100%"></i></div></div>
   </div>
   <div class="net" id="net" hidden aria-live="polite"><i></i><span id="net-text"></span></div>
@@ -306,28 +312,76 @@ a { color: var(--you); }
   let drag = null, dragEndAt = 0; // dragging one of your squads to another tile
   let timerOn = true;       // vs AI: deploy countdown on or off
 
-  // ---------- menu music: loops on the start screen and in the lobby, fades out when a match starts ----------
-  const MUSIC_STORE = 'phonebellum.music.v1';
-  let musicOn = true;
-  try { musicOn = localStorage.getItem(MUSIC_STORE) !== 'off'; } catch (e) {}
-  const music = new Audio('audio/menu-music.mp3');
-  music.loop = true; music.preload = 'auto';
-  let musicFade = 0, musicUnlocked = false;
+  // ---------- menu music: a playlist on the start screen and in the lobby, fades out when a match starts ----------
+  // Volume goes through Web Audio because iPhones ignore audio.volume.
+  const SOUND_STORE = 'phonebellum.sound.v1';
+  const TRACKS = ['audio/menu-jonah.mp3', 'audio/menu-long.mp3']; // mastered to the same loudness
+  let snd = { vol: 60, muted: false };
+  try {
+    const p = JSON.parse(localStorage.getItem(SOUND_STORE) || 'null');
+    if (p && isFinite(p.vol)) snd = { vol: Math.max(0, Math.min(100, +p.vol)), muted: !!p.muted };
+    else if (localStorage.getItem('phonebellum.music.v1') === 'off') snd.muted = true; // the old On/Off switch
+  } catch (e) {}
+  const saveSound = () => { try { localStorage.setItem(SOUND_STORE, JSON.stringify(snd)); } catch (e) {} };
+  let track = Math.floor(Math.random() * TRACKS.length);
+  const music = new Audio(TRACKS[track]);
+  music.preload = 'auto';
+  let actx = null, gain = null, musicPlaying = false, musicStop = 0, musicUnlocked = false;
+  music.addEventListener('ended', () => { track = (track + 1) % TRACKS.length; music.src = TRACKS[track]; if (musicPlaying) music.play().catch(() => {}); });
+  const musicLevel = () => snd.muted ? 0 : snd.vol / 100;
+  function rampMusic(v, secs) {
+    if (!gain) { music.volume = v; return; }
+    const t = actx.currentTime, g = gain.gain;
+    g.cancelScheduledValues(t); g.setValueAtTime(g.value, t); g.linearRampToValueAtTime(v, t + secs);
+  }
   function syncMusic() {
-    const want = musicOn && musicUnlocked && (phase === 'start' || phase === 'lobby');
-    if (want && (music.paused || musicFade)) {
-      clearInterval(musicFade); musicFade = 0; music.volume = 0.6;
-      music.play().catch(() => {});
-    } else if (!want && !music.paused && !musicFade) {
-      musicFade = setInterval(() => {
-        music.volume = Math.max(0, music.volume - 0.06);
-        if (music.volume === 0) { clearInterval(musicFade); musicFade = 0; music.pause(); }
-      }, 50);
+    const want = musicUnlocked && musicLevel() > 0 && (phase === 'start' || phase === 'lobby');
+    if (want && !musicPlaying) {
+      musicPlaying = true; clearTimeout(musicStop);
+      rampMusic(musicLevel(), 0.3); music.play().catch(() => {});
+    } else if (!want && musicPlaying) {
+      musicPlaying = false; rampMusic(0, 0.6);
+      musicStop = setTimeout(() => music.pause(), 650);
     }
   }
   // phones only allow sound after the player touches the page
-  const unlockMusic = () => { musicUnlocked = true; syncMusic(); };
+  const unlockMusic = () => {
+    if (!actx) try {
+      actx = new (window.AudioContext || window.webkitAudioContext)();
+      gain = actx.createGain(); gain.gain.value = 0;
+      actx.createMediaElementSource(music).connect(gain).connect(actx.destination);
+    } catch (e) { actx = null; gain = null; }
+    if (actx && actx.state === 'suspended') actx.resume();
+    musicUnlocked = true; syncMusic();
+  };
   ['pointerdown', 'keydown'].forEach(t => document.addEventListener(t, unlockMusic, { once: true, capture: true }));
+  function openSoundSheet() {
+    $('sheet').innerHTML = `
+      <div class="bar"><h3 id="sheet-h">Sound</h3><button class="btn small" id="close">Close</button></div>
+      <div class="bar">
+        <span class="hint">Music volume</span>
+        <span class="volrow"><input type="range" id="vol" min="0" max="100" step="5" value="${snd.vol}" aria-label="Music volume"><span class="num" id="vol-n">${snd.vol}</span></span>
+      </div>
+      <div class="bar">
+        <span class="hint">Mute</span>
+        <div class="seg" role="group" aria-label="Mute">
+          <button data-mute="0" aria-pressed="${!snd.muted}">Sound on</button><button data-mute="1" aria-pressed="${snd.muted}">Muted</button>
+        </div>
+      </div>
+      <p class="hint" style="margin:0">Music plays on the main menu and in the lobby. Your settings are saved on this device.</p>`;
+    $('sheet-back').hidden = false;
+    $('close').addEventListener('click', closeSheet);
+    $('vol').addEventListener('input', (e) => {
+      snd.vol = +e.target.value; $('vol-n').textContent = snd.vol; saveSound();
+      if (musicPlaying) rampMusic(musicLevel(), 0.05);
+      syncMusic();
+    });
+    $('sheet').querySelectorAll('[data-mute]').forEach(b => b.addEventListener('click', () => {
+      snd.muted = b.dataset.mute === '1'; saveSound();
+      $('sheet').querySelectorAll('[data-mute]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+      syncMusic();
+    }));
+  }
   let mapPick = '';         // the map the host picked for the next match ('' = random)
   let pickFor = '', pickSel = null, pickPeek = false, pickHtml = ''; // the choose-one-of-3 cards over the board (syncPick)
   const MAP_SHORT = { standard: 'Standard', forest: 'Forest', cavern: 'Cavern', ice: 'Peak' };
@@ -1498,12 +1552,6 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
       ${mapSeg()}
       ${charSeg()}
       <div class="bar">
-        <span class="hint">Menu music</span>
-        <div class="seg" role="group" aria-label="Menu music">
-          <button data-mu="1" aria-pressed="${musicOn}">On</button><button data-mu="0" aria-pressed="${!musicOn}">Off</button>
-        </div>
-      </div>
-      <div class="bar">
         <span class="hint">Deploy timer vs AI</span>
         <div class="seg" role="group" aria-label="Deploy timer vs AI">
           <button data-tm="1" aria-pressed="${timerOn}">On</button><button data-tm="0" aria-pressed="${!timerOn}">Off</button>
@@ -1532,12 +1580,6 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
       $('panel').querySelectorAll('[data-c]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
     }));
     wireMapSeg(); wireCharSeg();
-    $('panel').querySelectorAll('[data-mu]').forEach(b => b.addEventListener('click', () => {
-      musicOn = b.dataset.mu === '1';
-      try { localStorage.setItem(MUSIC_STORE, musicOn ? 'on' : 'off'); } catch (e) {}
-      $('panel').querySelectorAll('[data-mu]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
-      unlockMusic();
-    }));
     $('panel').querySelectorAll('[data-tm]').forEach(b => b.addEventListener('click', () => {
       timerOn = b.dataset.tm === '1';
       $('panel').querySelectorAll('[data-tm]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
@@ -2543,6 +2585,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     });
   }
   $('sheet-back').addEventListener('click', (e) => { if (e.target.id === 'sheet-back') closeSheet(); });
+  $('cog').addEventListener('click', openSoundSheet);
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSheet(); });
 
   // =====================================================================
