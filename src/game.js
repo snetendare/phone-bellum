@@ -147,9 +147,14 @@ const Game = (() => {
   }
   // Slime tower: the skills bought for Slime Wizards and Slimeshots work on it too
   const SLIME_UNITS = ['Slime Wizard', 'Slimeshots'];
-  function slimeTowerUnit(m, side, base) {
+  // the skills bought for slime units (except unit type skipUi)
+  function slimeSkillDefs(m, side, skipUi) {
     const defs = [];
-    (m.units || []).forEach((u, ui) => { if (u && SLIME_UNITS.includes(u.name)) for (const k of E.SLOTS) if (hasSkill(m, side, ui, k) && !isInnate(m, ui, k)) defs.push(skillDef(m, ui, k)); });
+    (m.units || []).forEach((u, ui) => { if (u && ui !== skipUi && SLIME_UNITS.includes(u.name)) for (const k of E.SLOTS) if (hasSkill(m, side, ui, k) && !isInnate(m, ui, k)) defs.push(skillDef(m, ui, k)); });
+    return defs;
+  }
+  function slimeTowerUnit(m, side, base) {
+    const defs = slimeSkillDefs(m, side);
     return defs.length ? E.applySkills(base, defs, m.units) : base;
   }
   // the skill in force for a fight: the tower's type and whether it was bought
@@ -165,9 +170,10 @@ const Game = (() => {
     { id: 'emile', name: 'Emile', ability: 'Tier 1 units are free to unlock.' },
     { id: 'wilhelm', name: 'Wilhelm', ability: 'Your squads on flank tiles and in no man’s land get +4 armor, and flank squads start twice as fast.' },
     { id: 'blixten', name: 'Blixten', ability: 'Your first map purchase each round is free: a bribe, an offering at the altar of ice, your own elf tower or removing a mushroom tile.' },
-    { id: 'noah', name: 'Noah', ability: 'Squads you buy in the shop start at level 2. Each costs its price plus one upgrade.' },
+    { id: 'noah', name: 'Noah - The Bog', ability: 'Squads you buy in the shop start at level 2. Each costs its price plus one upgrade.' },
     { id: 'phil', name: 'Phil', ability: 'Tier 4 units are 100 gold cheaper to unlock.' },
     { id: 'yotyot', name: 'Yot-Yot', ability: 'Every fight, Ember Imps pop up on random free tiles on your side of the board (your zone, no man’s land and, once open, your flank tiles): 1 in round 1, 2 in round 2, and so on. From round 3 they are level 2, from round 6 level 3. They get the skills you bought for Ember Imps.' },
+    { id: 'mubarak', name: 'Mubarak - Slime Lord', ability: 'Your slime units (Slime Wizards and Slimeshots) get every skill you buy for any slime unit, not just their own.' },
     { id: 'felix', name: 'Felix', ability: 'From round 3 on, you get 50 more gold every round.' },
     { id: 'enzo', name: 'Enzo', ability: 'You can’t buy unit skills, but every squad you field comes with one random skill of its unit, for free.' },
   ];
@@ -624,6 +630,8 @@ const Game = (() => {
   function unitFor(m, side, ui, sq) {
     const base = m.units[ui], ek = enzoSkill(m, side, sq);
     const defs = E.SLOTS.filter(k => hasSkill(m, side, ui, k) || k === ek).map(k => skillDef(m, ui, k));
+    // Mubarak: a slime unit also gets the skills bought for the other slime units
+    if (charOf(m, side) === 'mubarak' && base && SLIME_UNITS.includes(base.name)) defs.push(...slimeSkillDefs(m, side, ui));
     let u = defs.length ? E.applySkills(base, defs, m.units) : base;
     if (charOf(m, side) === 'cage') { // Frickolas Cage: +10% health for every unit, spawned ones too
       const k = 1 + CHAR.cageHp / 100;
@@ -1215,7 +1223,7 @@ const Game = (() => {
     unlockCost, tierOf, startLevel, shopCost, mapFreeOf, mapFreeLeft, isUnlocked, unlockVisible, unlock, undoUnlock,
     skillDef, skillCost, isInnate, hasSkill, skillVisible, unitFor, canBuySkill, buySkill, undoSkill, sellValue, sell,
     isRider, hiddenFromFoe, isCarrier, riderOf, carrierOf, squadAt, boardable, unplaceSquad,
-    TOWER, TOWER_TYPES, OUTPOST, TOWER_PICK_ROUND, towerType, towerChoices, needsTowerPick, setTowerType, settleTowerPicks, TOWER_SKILL, towerSkillOf, towerSkillVisible, towerPicked, canBuyTowerSkill, buyTowerSkill, undoTowerSkill, MAGE_GENERALS, MAGE, mageGenInfo, mageGenOf, mageGenCost, canBuyMageGen, buyMageGen, undoMageGen, mageTowerUnit, LOAN, loanNow, canTakeLoan, takeLoan, undoLoan, SLIME_UNITS, slimeTowerUnit, TOWER_MID, towerColOk, towerAt, needsTower, placeTower, ensureTower,
+    TOWER, TOWER_TYPES, OUTPOST, TOWER_PICK_ROUND, towerType, towerChoices, needsTowerPick, setTowerType, settleTowerPicks, TOWER_SKILL, towerSkillOf, towerSkillVisible, towerPicked, canBuyTowerSkill, buyTowerSkill, undoTowerSkill, MAGE_GENERALS, MAGE, mageGenInfo, mageGenOf, mageGenCost, canBuyMageGen, buyMageGen, undoMageGen, mageTowerUnit, LOAN, loanNow, canTakeLoan, takeLoan, undoLoan, SLIME_UNITS, slimeTowerUnit, slimeSkillDefs, TOWER_MID, towerColOk, towerAt, needsTower, placeTower, ensureTower,
     FLANK, flankRows, flankOpen, isFlank, reserved, canPlaceAt, enemyHolds, inNoMans, hasSkillType,
     ICE, ALTAR, GOLEM, isIce, hailRound, altarRound, stormShift, stormRows, hailTiles, altarCost, altarRefund, altarCount, pushRoom, altarBought, addAltar, buyAltar, undoAltar, snowgres, snowgreUnit,
     MAPS, ELF_TOWER, SHROOM, SHROOM_SPLIT, shroomAt, shroomTileAt, shroomRemoval, SHROOM_REMOVE, shroomCost, removeShroom, undoRemoveShroom, mapOf, elfSpot, rollMap, BRIBE_COST, bribeList, bribeGold, bribeCount, bribeNow, bribeCost, bribeRefund, ELF_POWER, elfPowered, elfUnit, ELF_OWN, elfOwnCost, elfOwnOf, elfOwnAt, elfOwnUnlocked, elfOwnOffered, canBuyElfOwn, elfOwnSpotOk, buyElfOwn, undoElfOwn, bribeLeader, canBribe, bribe, undoBribe,

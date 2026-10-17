@@ -717,6 +717,10 @@ a { color: var(--you); }
       g.fillRect(-0.32, 0.27, 0.64, 0.08); } },
     yotyot: { field: '#3A1E16', charge: '#FFA94D', draw(g) { // the Ember Imp: a horned square
       g.beginPath(); for (const pt of Shapes.IMP) pt.p.forEach(([px, py], i) => i ? g.lineTo(px * 0.3, 0.06 + py * 0.3) : g.moveTo(px * 0.3, 0.06 + py * 0.3)); g.fill(); } },
+    mubarak: { field: '#245C2A', charge: '#8BEA4A', draw(g) { // a crowned slime blob
+      g.beginPath(); g.moveTo(-0.34, 0.38); g.quadraticCurveTo(-0.4, -0.06, -0.12, -0.1); g.quadraticCurveTo(0, -0.16, 0.12, -0.1); g.quadraticCurveTo(0.4, -0.06, 0.34, 0.38); g.closePath(); g.fill();
+      g.fillStyle = '#F2C94C'; g.beginPath(); g.moveTo(-0.2, -0.14); g.lineTo(-0.22, -0.4); g.lineTo(-0.1, -0.26); g.lineTo(0, -0.44); g.lineTo(0.1, -0.26); g.lineTo(0.22, -0.4); g.lineTo(0.2, -0.14); g.closePath(); g.fill();
+      g.fillStyle = '#245C2A'; for (const ex of [-0.12, 0.12]) { g.beginPath(); g.arc(ex, 0.12, 0.05, 0, Math.PI * 2); g.fill(); } } },
     felix: { field: '#3E6B2F', charge: '#F2C94C', draw(g) { // a stack of coins: more gold
       for (const dy of [0.3, 0.12, -0.06]) { g.beginPath(); g.ellipse(0, dy, 0.28, 0.1, 0, 0, Math.PI * 2); g.fill(); }
       g.lineWidth = 0.035; g.strokeStyle = '#3E6B2F'; for (const dy of [0.3, 0.12, -0.06]) { g.beginPath(); g.ellipse(0, dy, 0.28, 0.1, 0, 0, Math.PI * 2); g.stroke(); } } },
