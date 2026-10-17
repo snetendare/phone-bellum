@@ -328,17 +328,21 @@ a { color: var(--you); }
   let timerOn = true;       // vs AI: deploy countdown on or off
 
   // ---------- music: the menu playlist on the start screen and in the lobby, the deployment phase playlist
-  // while players deploy (round 1's starter pack choice included); silence during fights and results.
+  // while players deploy (round 1's starter pack choice included), the battle playlist during fights and their
+  // results. Each fades out when its phase ends and fades back in where it stopped when the phase comes round again.
   // Volume goes through Web Audio because iPhones ignore audio.volume.
   const SOUND_STORE = 'phonebellum.sound.v1';
   const SONGS = { // all mastered to the same loudness
     jonah: { title: 'Jonah', file: 'audio/jonah.mp3' },
     long: { title: 'Long', file: 'audio/long.mp3' },
+    superCoffee: { title: 'Super coffee', file: 'audio/super-coffee.mp3' },
     bulgaria: { title: 'Bulgaria', file: 'audio/bulgaria.mp3' },
+    habbyourmam: { title: 'Habbyourmam', file: 'audio/habbyourmam.mp3' },
   };
   const ARTIST = 'Snetänd';
   const songName = (id) => `“${SONGS[id].title}” - ${ARTIST}`;
-  const PLAYLISTS = { menu: ['jonah', 'long'], deploy: ['bulgaria'] };
+  const PLAYLISTS = { menu: ['jonah', 'long', 'superCoffee'], deploy: ['bulgaria'], battle: ['habbyourmam'] };
+  const FADE_IN = 1, FADE_OUT = 1; // seconds
   let snd = { vol: 60, muted: false, song: '' }; // song: the one menu song the player picked ('' = the menu playlist)
   try {
     const p = JSON.parse(localStorage.getItem(SOUND_STORE) || 'null');
@@ -374,20 +378,21 @@ a { color: var(--you); }
     pl.set = (want) => {
       if (want && (!pl.playing || el.paused)) { // el.paused: an earlier play() was refused, try again
         pl.playing = true; clearTimeout(stopT);
-        pl.ramp(musicLevel(), 0.3); el.play().catch(() => {});
+        pl.ramp(musicLevel(), FADE_IN); el.play().catch(() => {});
       } else if (!want && pl.playing) {
-        pl.playing = false; pl.ramp(0, 0.6);
-        stopT = setTimeout(() => el.pause(), 650);
+        pl.playing = false; pl.ramp(0, FADE_OUT);
+        stopT = setTimeout(() => el.pause(), FADE_OUT * 1000 + 50);
       }
     };
     return pl;
   }
   const menuSongs = () => snd.song ? [snd.song] : PLAYLISTS.menu;
-  const music = { menu: playlist(menuSongs()), deploy: playlist(PLAYLISTS.deploy) };
+  const music = { menu: playlist(menuSongs()), deploy: playlist(PLAYLISTS.deploy), battle: playlist(PLAYLISTS.battle) };
   function syncMusic() {
     const on = musicUnlocked && musicLevel() > 0;
     music.menu.set(on && (phase === 'start' || phase === 'lobby'));
     music.deploy.set(on && phase === 'deploy');
+    music.battle.set(on && (phase === 'battle' || phase === 'result'));
   }
   // phones only allow sound after the player touches the page
   // (iPhones only count the end of a touch, so every tap retries until the sound is running)
@@ -417,7 +422,7 @@ a { color: var(--you); }
           <button data-mute="0" aria-pressed="${!snd.muted}">Sound on</button><button data-mute="1" aria-pressed="${snd.muted}">Muted</button>
         </div>
       </div>
-      <p class="hint" style="margin:0">Menu music plays on the main menu and in the lobby. While you deploy, ${PLAYLISTS.deploy.map(songName).join(', ')} plays. Your settings are saved on this device.</p>`;
+      <p class="hint" style="margin:0">Menu music plays on the main menu and in the lobby. While you deploy, ${PLAYLISTS.deploy.map(songName).join(', ')} plays, and during fights ${PLAYLISTS.battle.map(songName).join(', ')}. Your settings are saved on this device.</p>`;
     $('sheet-back').hidden = false;
     $('close').addEventListener('click', closeSheet);
     $('vol').addEventListener('input', (e) => {
