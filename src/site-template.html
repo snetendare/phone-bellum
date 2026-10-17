@@ -18,6 +18,7 @@
 <style>
 /*BASECSS*/
 [hidden] { display: none !important; }
+.panel:empty { display: none; }
 body { padding-top: calc(12px + env(safe-area-inset-top, 0px)); padding-bottom: calc(28px + env(safe-area-inset-bottom, 0px)); margin: 0; }
 .net { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 8px; justify-content: center; min-height: 18px; }
 .net i { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); display: inline-block; }
@@ -80,6 +81,15 @@ a { color: var(--you); }
 .chars-pick button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chars-pick button[aria-pressed="true"] { border-color: var(--gold); color: var(--ink); opacity: 1; text-decoration: none; }
 .maps button[aria-pressed="true"] { border-color: var(--gold); color: var(--gold); box-shadow: inset 0 0 0 1px var(--gold); }
+/* folded match settings on the menu and in the lobby */
+.settings { border: 1px solid var(--line); border-radius: 6px; }
+.settings summary { list-style: none; cursor: pointer; display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 12px; font: 600 14px var(--font-display); color: var(--ink); }
+.settings summary::-webkit-details-marker { display: none; }
+.settings summary span { font: 400 13px var(--font-body); color: var(--muted); }
+.settings summary span::after { content: " ▾"; color: var(--gold); }
+.settings[open] summary span::after { content: " ▴"; }
+.settings-body { display: grid; gap: 12px; padding: 0 12px 12px; }
+.linkbtn { border: 0; background: none; padding: 0; font: inherit; color: var(--gold); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
 /* choose one of 3 (starting package, tower): cards over the board, like a level-up pick */
 .pick { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 8px; padding: 12px 10px; overflow-y: auto; -webkit-overflow-scrolling: touch;
   background: radial-gradient(ellipse at 50% 40%, rgba(13, 19, 21, 0.72), rgba(13, 19, 21, 0.93)); text-align: center; z-index: 2; }
@@ -242,6 +252,7 @@ a { color: var(--you); }
   const HOST_STORE = 'phonebellum.host.v1';
   const LAB_STORE = 'counterlab.v1';
   const qs = new URLSearchParams(location.search);
+  const TEST = qs.has('test'); // test-only settings show on the menu
 
   // ---------- unit sets: built-in, or loaded from Counter Lab ----------
   const BUILTIN = { units: DATA.units, matrix: DATA.matrix, skills: DATA.skills || [] };
@@ -317,6 +328,8 @@ a { color: var(--you); }
   const wireMapSeg = () => $('panel').querySelectorAll('[data-map]').forEach(b => b.addEventListener('click', () => {
     mapPick = b.dataset.map;
     $('panel').querySelectorAll('[data-map]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+    const sum = $('panel').querySelector('#settings summary span');
+    if (sum) sum.textContent = mapPick ? Game.MAPS.find(mp => mp.id === mapPick).name : 'Random map';
   }));
   // characters left out of the package draw (saved on this device; the host's list counts in a match with a friend)
   let offChars = [];
@@ -334,6 +347,10 @@ a { color: var(--you); }
     try { localStorage.setItem('pb-off-chars', JSON.stringify(offChars)); } catch (e) {}
     b.setAttribute('aria-pressed', String(off));
   }));
+  // match settings (map, characters, timer, units) sit folded away on the menu and in the lobby
+  let settingsOpen = false;
+  const settingsBox = (inner) => `<details class="settings" id="settings"${settingsOpen ? ' open' : ''}><summary>Match settings<span>${esc(mapPick ? Game.MAPS.find(mp => mp.id === mapPick).name : 'Random map')}</span></summary><div class="settings-body">${inner}</div></details>`;
+  const wireSettings = () => { const d = $('settings'); if (d) d.addEventListener('toggle', () => { settingsOpen = d.open; }); };
   let deadline = 0;         // local time the deploy phase ends (0 = no countdown running)
   let pausedLeft = 0;       // host: countdown time left while the opponent is away
   let heldMs = 0;           // the deploy countdown, held back until the players have picked their towers (round 3)
@@ -1145,6 +1162,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
     $('round').textContent = v ? v.round : 1;
     $('phase').textContent = { start: 'Ready', lobby: 'Lobby', deploy: 'Deploy', battle: 'Battle', result: 'Result', end: 'Match over' }[phase];
     $('foe-name').textContent = foeName();
+    document.querySelector('.hud').hidden = phase === 'start' || phase === 'lobby'; // no match yet: nothing to show
     syncPick();
   }
 
@@ -1181,7 +1199,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
     }
     if ((phase === 'result' || phase === 'end') && resultShownAt) {
       const left = resultShownAt + NEXT_SECONDS * 1000 - t;
-      const nb = $('pbtn');
+      const nb = $('next');
       if (phase === 'result' && !nextReady[me]) {
         if (left <= 0) tapNext();
         else if (nb && !solo()) nb.textContent = `Next round · ${Math.ceil(left / 1000)}`;
@@ -1196,7 +1214,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
     if (!m || !editable()) return null;
     if (choosingPack()) return {
       kind: 'pack', eyebrow: `Round 1 · ${esc((Game.mapOf(m) || { name: 'Standard' }).name)}`, title: 'Choose your start',
-      sub: `Two units unlocked, their squads for free, a character for the whole match, plus ${m.gold[me]} gold.`,
+      sub: `Free squads and a character, plus ${m.gold[me]} gold.`,
       items: m.packages[me].map((p, k) => {
         const n = {}; p.squads.forEach(ui => { n[ui] = (n[ui] || 0) + 1; });
         const c = p.char && Game.charInfo(p.char);
@@ -1211,7 +1229,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
     };
     if (choosingTower()) return {
       kind: 'tower', eyebrow: `Round ${m.round}`, title: 'Choose your tower',
-      sub: 'It replaces your outpost from this fight on, for the rest of the match.',
+      sub: 'It stays for the rest of the match.',
       items: Game.towerChoices(m, me).map(x => ({
         key: x.id,
         art: `<canvas data-ticon="${x.id}" width="96" height="96" style="width:48px;height:48px" aria-hidden="true"></canvas>`,
@@ -1254,7 +1272,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
     }
     el.querySelectorAll('[data-opt]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.opt === pickSel)));
     const sel = o.items.find(x => x.key === pickSel);
-    $('pick-det').innerHTML = sel ? sel.det : 'Tap a card to see what it does, then tap it again to choose it.';
+    $('pick-det').innerHTML = sel ? sel.det : ''; $('pick-det').style.visibility = sel ? '' : 'hidden'; // keeps its space, so the cards don't jump
     $('pick-go').disabled = !sel;
   }
 
@@ -1262,6 +1280,12 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
 
   // ---------- panel ----------
   // the picked tower's skill, not bought yet: offered as a button in the deploy panel
+  const MORE = (id) => `<button class="linkbtn" id="${id}">More</button>`; // opens the full rules in a sheet
+  function overlayMsgSheet(head, text) {
+    $('sheet').innerHTML = `<div class="bar"><h3 id="sheet-h">${esc(head)}</h3><button class="btn small" id="close">Close</button></div><p style="margin:0">${esc(text)}</p>`;
+    $('sheet-back').hidden = false;
+    $('close').addEventListener('click', closeSheet);
+  }
   const loanText = () => `Take ${Game.LOAN.gold} gold right away; next round you get ${Game.LOAN.payback} gold less (never less than nothing). Once a round.`;
   const loanOffer = () => !!m && Game.towerPicked(m, me) && !Game.needsTowerPick(m, me) && Game.towerType(m, me).id === 'bank';
   const mageOffer = () => !!m && Game.towerPicked(m, me) && !Game.needsTowerPick(m, me) && Game.towerType(m, me).id === 'mage';
@@ -1286,16 +1310,16 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
       if (left <= 0 && selected === null) hint = Game.canBuyDeploy(m, me) || m.extraDeploys[me] < Game.CONFIG.maxExtraDeploys ? `No deployments left. Buy one more for ${Game.CONFIG.extraDeployCost} gold (once per round), or spend gold on upgrades.` : 'No deployments left this round. Spend gold on upgrades.';
       if (readyN && selected === null) hint = `${readyN} squad${readyN === 1 ? ' is' : 's are'} ready to level up. Tap ${readyN === 1 ? 'it' : 'one'} to upgrade.`;
       if (Game.charOf(m, me) === 'zoe' && selected === null && (m.buff && m.buff[me] || []).length) hint += ` Starred tiles are your buff tiles this round: +${Game.CHAR.zoeDmg}% damage, +${Game.CHAR.zoeHp}% health and +${Game.CHAR.zoeAps}% attack speed for a squad that starts the fight there.`;
-      if (Game.altarRound(m) && selected === null && !fresh) hint = 'The altar of ice has risen in the middle of the board. Tap it to buy ice walls, push the hailstorm or summon a Snowgre.';
-      if (Game.hailRound(m) && selected === null && !fresh) hint = `Hailstorm this round: units standing on the ${Game.ICE.hailTiles} hail tiles take ${Game.ICE.hailDps} damage per second.`;
-      if (m.round === Game.FLANK.round && selected === null && !fresh) hint = `Flank columns are open: you can now also deploy on the blue edge columns on the enemy's half, and they can on the red ones on yours. A squad placed there can't move or attack for the first ${Game.FLANK.delay} s of its first fight; after that it starts like any other.`;
+      if (Game.hailRound(m) && selected === null && !fresh) hint = `Hail this round: ${Game.ICE.hailDps} damage a second on hail tiles. ${MORE('map-more')}`;
+      if (Game.altarRound(m) && selected === null && !fresh) hint = `${Game.hailRound(m) ? 'Hail this round, and the' : 'The'} altar of ice has risen: tap it for ice walls, a push of the hail or a Snowgre. ${MORE('map-more')}`;
+      if (m.round === Game.FLANK.round && selected === null && !fresh) hint = `Flanks are open: you can deploy on the blue edge columns in their half. ${MORE('flank-more')}`;
       if (m.round === 1 && selected === null && m.armies[me].some(s => s.free)) hint = 'Your package squads are already on the board. Drag them where you want them, or tap one to take it back.';
       if (moveMode) hint = moving == null ? `Tap one of your squads from an earlier round to move it (${Game.CONFIG.moveCost} gold, once per round).` : `Tap a free tile to move ${esc(units[m.armies[me].find(s => s.id === moving).unit].name)} there, or drag it.`;
       if (selected !== null && !moveMode && m.armies[me].some(q => Game.boardable(m, me, q.col, q.row, selected))) hint += ` Or tap your ${esc(units[m.armies[me].find(q => Game.boardable(m, me, q.col, q.row, selected)).unit].name)} (gold outline) to hide this squad inside it.`;
       if (selected !== null && Game.isCarrier(m, selected)) hint += ` It carries one squad of any other unit, hidden from your opponent: place one on its tile.`;
       const freeL = Game.freeLeft(m, me);
       if (freeL.length && !placingTower() && selected === null) hint = `Place your free package squads: ${[...new Set(freeL)].map(ui => `${freeL.filter(x => x === ui).length}× ${esc(units[ui].name)}`).join(', ')}. They cost no gold and no deployments.`;
-      if (choosingPack()) hint = `Choose your starting package and character on the board. Your opponent picks from their own packages.${(() => { const mp = Game.mapOf(m); return mp ? ` Map: <b>${esc(mp.name)}</b>. ${esc(mp.text)}` : ''; })()}`;
+      if (choosingPack()) hint = (() => { const mp = Game.mapOf(m); return mp ? `<b>${esc(mp.name)}</b> · ${esc(mp.short || '')} ${mp.plain ? '' : MORE('map-more')}` : 'Choose your start.'; })();
       if (tskillOffer() && m.round === Game.TOWER_PICK_ROUND && selected === null && !fresh) hint = `Your ${esc(Game.towerType(m, me).name)} has a skill: ${esc(Game.towerType(m, me).skill.name)}. ${esc(Game.towerType(m, me).skill.text)} It isn’t on until you buy it (${Game.towerSkillCost(m, me)} gold, once per match).`;
       if (choosingTower()) hint = `Choose your tower on the board. The clock starts once ${solo() ? 'you have' : 'both players have'} picked.`;
       if (placingElf()) hint = 'Tap a free tile in your zone to place your elf tower. Tap anywhere else to cancel.';
@@ -1323,7 +1347,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
     }
     $('panel').innerHTML = `
       <div class="bar"><span class="gold num">${g} gold</span><span class="deploys num">${Math.max(0, left)} of ${allowed} deployments left</span><span class="timer" id="timer">${deadline ? fmtClock(deadline - now()) : ''}</span></div>
-      <div class="bar"><span class="hint">${hint}</span>${extraBtns}</div>
+      <div class="bar"><span class="hint">${hint}</span>${(choosingPack() || choosingTower()) && can ? '' : extraBtns}</div>
       ${(choosingPack() || choosingTower()) && can ? '' : (() => {
         const tiers = [...new Set(units.map((u, i) => tierOf(i)))].sort((a, b) => a - b);
         if (!tiers.includes(shopTier)) shopTier = tiers[0];
@@ -1359,7 +1383,9 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
     shop.querySelectorAll('[data-info]').forEach(el => el.addEventListener('click', () => openSheet(+el.dataset.info)));
     if ($('fight')) $('fight').addEventListener('click', runFight);
     if ($('ready')) $('ready').addEventListener('click', toggleReady);
-    $('buy-deploy').addEventListener('click', () => { if (editable() && Game.buyDeploy(m, me)) changed(); });
+    if ($('buy-deploy')) $('buy-deploy').addEventListener('click', () => { if (editable() && Game.buyDeploy(m, me)) changed(); });
+    if ($('map-more')) $('map-more').addEventListener('click', () => openMapSheet());
+    if ($('flank-more')) $('flank-more').addEventListener('click', () => overlayMsgSheet('Flanks', `From round ${Game.FLANK.round}, the blue edge columns on the enemy’s half are yours to deploy on too, and the red ones on your half are theirs. A squad placed on a flank can’t move or attack for the first ${Game.FLANK.delay} s of its first fight.`));
     if ($('mage-gen')) $('mage-gen').addEventListener('click', () => openTowerSheet(me));
     if ($('loan')) $('loan').addEventListener('click', () => { if (editable() && Game.takeLoan(m, me)) changed(); });
     if ($('loan-undo')) $('loan-undo').addEventListener('click', () => { if (editable() && Game.undoLoan(m, me)) changed(); });
@@ -1393,8 +1419,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
           ${[1, 2, 4].map(s => `<button data-s="${s}" aria-pressed="${speed === s}">${s}×</button>`).join('')}
         </div>
         <button class="btn small" id="skip">Skip to result</button>
-      </div>
-      <span class="hint">Blue is you, red is ${mode === 'claude' ? 'Claude' : 'the ' + foeName().toLowerCase()}. Battles speed up on their own after 20 seconds.</span>`;
+      </div>`;
     $('panel').querySelectorAll('[data-s]').forEach(b => b.addEventListener('click', () => {
       speed = +b.dataset.s;
       $('panel').querySelectorAll('[data-s]').forEach(x => x.setAttribute('aria-pressed', String(+x.dataset.s === speed)));
@@ -1423,8 +1448,71 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
     try { resume = JSON.parse(localStorage.getItem(HOST_STORE) || 'null'); } catch (e) {}
     if (resume && !(resume.m && now() - resume.ts < 6 * 3600e3)) resume = null;
     overlay(`<div class="card">
-      <span class="eyebrow">A small auto-battler</span>
       <h2>Phone Bellum</h2>
+      <p class="big">Build an army. Watch it fight. Last one standing wins.</p>
+      <button class="btn small" id="how">How to play</button>
+    </div>`);
+    $('panel').innerHTML = `
+      ${resume ? `<button class="btn primary" id="resume">Resume match ${esc(resume.code)}</button>` : ''}
+      <div class="bar">
+        <button class="btn ${resume ? '' : 'primary'}" id="friend" style="flex:1">Challenge a friend</button>
+        <button class="btn" id="go" style="flex:1">Play vs AI</button>
+      </div>
+      ${sampleFn ? `<button class="btn primary" id="vs-claude">Play vs Claude</button>` : ''}
+      <div class="bar">
+        <span class="hint">Have a code?</span>
+        <span class="joinrow"><input id="code-in" maxlength="5" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-label="Match code" placeholder="CODE"><button class="btn" id="join">Join</button></span>
+      </div>
+      <span class="hint" id="join-msg" aria-live="polite" hidden></span>
+      ${settingsBox(`
+        ${mapSeg()}
+        ${charSeg()}
+        <div class="bar">
+          <span class="hint">Deploy timer vs AI</span>
+          <div class="seg" role="group" aria-label="Deploy timer vs AI">
+            <button data-tm="1" aria-pressed="${timerOn}">On</button><button data-tm="0" aria-pressed="${!timerOn}">Off</button>
+          </div>
+        </div>
+        ${TEST ? `<div class="bar">
+          <span class="hint">Level-up cost (test setting)</span>
+          <div class="seg" role="group" aria-label="Level-up cost">
+            ${[50, 75].map(c => `<button data-c="${c}" aria-pressed="${Game.CONFIG.levelCostPerTier === c}">${c} gold</button>`).join('')}
+          </div>
+        </div>` : ''}
+        <div class="bar">
+          <span class="hint">${customSet ? `Your ${units.length} Counter Lab units` : `${units.length} built-in units`}${reportDb ? '. Matches are saved for Claude to review.' : ''}</span>
+          <span class="btnrow"><button class="btn small" id="load-units">Load units</button><a class="btn small" id="lab-link" href="lab.html" style="text-decoration:none;color:inherit;display:inline-block">Counter Lab</a></span>
+        </div>`)}`;
+    $('how').addEventListener('click', openHowTo);
+    $('friend').addEventListener('click', hostLobby);
+    $('go').addEventListener('click', startAiMatch);
+    if ($('vs-claude')) $('vs-claude').addEventListener('click', startClaudeMatch);
+    if ($('resume')) $('resume').addEventListener('click', () => resumeHost(resume));
+    $('load-units').addEventListener('click', openLoader);
+    const joinNow = () => {
+      const c = $('code-in').value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+      if (c.length !== 5) { $('join-msg').hidden = false; $('join-msg').textContent = 'Codes are 5 letters and numbers.'; return; }
+      joinMatch(c);
+    };
+    $('join').addEventListener('click', joinNow);
+    $('code-in').addEventListener('keydown', (e) => { if (e.key === 'Enter') joinNow(); });
+    $('panel').querySelectorAll('[data-c]').forEach(b => b.addEventListener('click', () => {
+      Game.CONFIG.levelCostPerTier = +b.dataset.c;
+      $('panel').querySelectorAll('[data-c]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+    }));
+    wireMapSeg(); wireCharSeg(); wireSettings();
+    $('panel').querySelectorAll('[data-tm]').forEach(b => b.addEventListener('click', () => {
+      timerOn = b.dataset.tm === '1';
+      $('panel').querySelectorAll('[data-tm]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+    }));
+    size(); render();
+  }
+
+  // the rules, kept out of the way: the menu only has a one-line pitch and this button
+  function openHowTo() {
+    $('sheet').innerHTML = `
+      <div class="bar"><h3 id="sheet-h">How to play</h3><button class="btn small" id="close">Close</button></div>
+      <div class="card" style="max-width:none;justify-items:stretch">
       <ul>
         <li>Each round you buy squads with gold and place them in your bottom six rows. Then the armies fight on their own.</li>
         <li>Squads stay all match, and you see the enemy’s earlier ones while you deploy. Build counters.</li>
@@ -1454,59 +1542,9 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
             <li>You can buy one extra deployment per round for ${Game.CONFIG.extraDeployCost} gold. Tap a squad from an earlier round to sell it for half its worth: its price plus the upgrades it has.</li>`],
         ].map(([h, gist, body]) => `<details><summary><b>${h}</b><span>${gist}</span></summary><ul>${body}</ul></details>`).join('')}
       </div>
-    </div>`);
-    $('panel').innerHTML = `
-      ${resume ? `<button class="btn primary" id="resume">Resume match ${esc(resume.code)}</button>` : ''}
-      <div class="bar">
-        <button class="btn ${resume ? '' : 'primary'}" id="friend" style="flex:1">Challenge a friend</button>
-        <button class="btn" id="go" style="flex:1">Play vs AI</button>
-      </div>
-      ${sampleFn ? `<button class="btn primary" id="vs-claude">Play vs Claude</button>` : ''}
-      <div class="bar">
-        <span class="hint">Got a code from a friend?</span>
-        <span class="joinrow"><input id="code-in" maxlength="5" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-label="Match code" placeholder="CODE"><button class="btn" id="join">Join</button></span>
-      </div>
-      <span class="hint" id="join-msg" aria-live="polite" hidden></span>
-      <div class="bar">
-        <span class="hint">Playing with ${customSet ? `your ${units.length} units from Counter Lab` : `the ${units.length} built-in units`}.${reportDb ? ' Your matches are saved here so you can ask Claude to review them.' : ''}</span>
-        <span class="btnrow"><button class="btn small" id="load-units">Load units</button><a class="btn small" id="lab-link" href="lab.html" style="text-decoration:none;color:inherit;display:inline-block">Counter Lab</a></span>
-      </div>
-      ${mapSeg()}
-      ${charSeg()}
-      <div class="bar">
-        <span class="hint">Deploy timer vs AI</span>
-        <div class="seg" role="group" aria-label="Deploy timer vs AI">
-          <button data-tm="1" aria-pressed="${timerOn}">On</button><button data-tm="0" aria-pressed="${!timerOn}">Off</button>
-        </div>
-      </div>
-      <div class="bar">
-        <span class="hint">Level-up cost (test setting)</span>
-        <div class="seg" role="group" aria-label="Level-up cost">
-          ${[50, 75].map(c => `<button data-c="${c}" aria-pressed="${Game.CONFIG.levelCostPerTier === c}">${c} gold</button>`).join('')}
-        </div>
       </div>`;
-    $('friend').addEventListener('click', hostLobby);
-    $('go').addEventListener('click', startAiMatch);
-    if ($('vs-claude')) $('vs-claude').addEventListener('click', startClaudeMatch);
-    if ($('resume')) $('resume').addEventListener('click', () => resumeHost(resume));
-    $('load-units').addEventListener('click', openLoader);
-    const joinNow = () => {
-      const c = $('code-in').value.toUpperCase().replace(/[^A-Z0-9]/g, '');
-      if (c.length !== 5) { $('join-msg').hidden = false; $('join-msg').textContent = 'Codes are 5 letters and numbers.'; return; }
-      joinMatch(c);
-    };
-    $('join').addEventListener('click', joinNow);
-    $('code-in').addEventListener('keydown', (e) => { if (e.key === 'Enter') joinNow(); });
-    $('panel').querySelectorAll('[data-c]').forEach(b => b.addEventListener('click', () => {
-      Game.CONFIG.levelCostPerTier = +b.dataset.c;
-      $('panel').querySelectorAll('[data-c]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
-    }));
-    wireMapSeg(); wireCharSeg();
-    $('panel').querySelectorAll('[data-tm]').forEach(b => b.addEventListener('click', () => {
-      timerOn = b.dataset.tm === '1';
-      $('panel').querySelectorAll('[data-tm]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
-    }));
-    size(); render();
+    $('sheet-back').hidden = false;
+    $('close').addEventListener('click', closeSheet);
   }
 
   function showResult(sum) {
@@ -1543,28 +1581,29 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
           <button class="btn" id="menu">Main menu</button>
         </div>
       </div>`);
-      if (solo()) panelInfo(mode === 'claude' ? 'Claude plans each round from what it has seen of your army.' : 'The AI buys units that counter what you fielded last round.', 'Play again', mode === 'claude' ? startClaudeMatch : startAiMatch);
-      else panelInfo(wait ? 'Waiting for your opponent to accept the rematch.' : 'A rematch starts when you both tap Rematch.', wait ? '' : 'Rematch', askRematch);
+      $('panel').innerHTML = '';
       $('again').addEventListener('click', mode === 'claude' ? startClaudeMatch : mode === 'ai' ? startAiMatch : askRematch);
       $('menu').addEventListener('click', () => { if (mode === 'host') clearHost(); showStart(); });
       return;
     }
     phase = 'result'; hud(); netStatus();
-    const bonus = sum.bonusTo === me ? ` You get ${Game.LOSER_BONUS} extra for losing the round.` : sum.bonusTo === foe() ? ` ${mode === 'claude' ? 'Claude gets' : `The ${them.toLowerCase()} gets`} ${Game.LOSER_BONUS} extra for losing the round.` : '';
+    const gold = [`+${sum.income || Game.incomeFor(sum.round + 1)} gold`];
+    if (sum.bonusTo === me) gold.push(`+${Game.LOSER_BONUS} for losing`);
+    if (sum.felix && sum.felix[me]) gold.push(`+${sum.felix[me]} Felix`);
+    if (sum.invest && sum.invest[me]) gold.push(`+${sum.invest[me]} investment`);
+    if (sum.loan && sum.loan[me]) gold.push(`−${sum.loan[me]} loan`);
     const waiting = !solo() && nextReady[me];
     overlay(`<div class="card">
-      <span class="eyebrow">${Math.round(sum.time)} s of fighting</span>
       <h2 class="${cls}">${head}</h2>
       <p class="big">${lines.join(' ')}</p>
       ${lvLines.join('')}
-      <p>Next round: +${sum.income || Game.incomeFor(sum.round + 1)} gold each.${bonus}${sum.felix && sum.felix[me] ? ` Felix adds ${sum.felix[me]} more for you.` : ''}${sum.loan && sum.loan[me] ? ` Your bank loan takes ${sum.loan[me]} back.` : ''}${sum.invest && sum.invest[me] ? ` Your major investment pays out ${sum.invest[me]}.` : ''}${sum.felix && sum.felix[foe()] ? ` Felix adds ${sum.felix[foe()]} more for ${mode === 'claude' ? 'Claude' : `the ${them.toLowerCase()}`}.` : ''}</p>
+      <p class="num" style="color:var(--gold)">${gold.join(' · ')}</p>
       <div class="btnrow">
         ${waiting ? '<p class="status wait">Waiting for your opponent</p>' : `<button class="btn primary" id="next">Next round</button>`}
         <button class="btn" id="menu">Main menu</button>
       </div>
     </div>`);
-    if (waiting) panelInfo('The next round starts when your opponent is ready too.', '', null);
-    else panelInfo('Your squads keep their tiles. Add more to counter what you just saw.', 'Next round', tapNext);
+    $('panel').innerHTML = '';
     if ($('next')) $('next').addEventListener('click', tapNext);
     // leaving mid-match takes a second tap, so it can't happen by accident
     $('menu').addEventListener('click', () => {
@@ -2141,13 +2180,13 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       <div class="bar"><h3 id="sheet-h">${side === me ? 'Your tower' : `${esc(foeName())}'s tower`}${shown ? ` · ${esc(tt.name)}` : ''}</h3><button class="btn small" id="close">Close</button></div>
       ${shown && Game.towerPicked(m, side) ? towerSkillBlock(side, tt) + towerSkill2Block(side, tt) + mageGenBlock(side, tt) + loanBlock(side, tt) + passiveBlock(side, tt) : ''}
       <p style="margin:0">${(() => { const id = Game.charOf(m, side); return !charVisible(side) ? 'Character: hidden until the first fight.' : id ? `Character: ${charLine(id)}` : 'Character: not picked yet.'; })()}</p>
-      <p class="role" style="margin:0">The tower stands in the back of the zone and shoots anything that comes close. It is rebuilt for every round.${shown ? ` ${esc(tt.text)}` : ` Its type stays hidden until the round ${Game.TOWER_PICK_ROUND} fight.`}</p>
-      <p style="margin:0"><span style="color:var(--foe)">If it falls:</span> that army deals ${D.attack}% less damage, moves ${D.move}% slower and takes ${D.taken}% more damage for ${D.secs} s.</p>
+      <p class="role" style="margin:0">${shown ? (tt.id === 'outpost' ? `A small watchtower. You pick your real tower in round ${Game.TOWER_PICK_ROUND}.` : esc(tt.text)) : `Its type stays hidden until the round ${Game.TOWER_PICK_ROUND} fight.`}</p>
+      <p style="margin:0"><span style="color:var(--foe)">If it falls:</span> that army is crippled for ${D.secs} s. ${MORE('fall-more')}</p>
       ${shown ? towerStats(T) : ''}
-      ${m.round < Game.TOWER_PICK_ROUND ? `<p class="hint" style="margin:0">At the start of round ${Game.TOWER_PICK_ROUND}, before the clock runs, each player picks a tower for the rest of the match: ${Game.TOWER_TYPES.map(x => esc(x.name)).join(', ')}. Each has skills you can buy once picked (the Mage tower calls a mage general each round instead).</p>` : ''}
 `;
     $('sheet-back').hidden = false;
     $('close').addEventListener('click', closeSheet);
+    if ($('fall-more')) $('fall-more').addEventListener('click', () => { $('fall-more').parentNode.innerHTML = `<span style="color:var(--foe)">If it falls:</span> that army deals ${D.attack}% less damage, moves ${D.move}% slower and takes ${D.taken}% more damage for ${D.secs} s.`; });
     if ($('tskill')) $('tskill').addEventListener('click', () => { if (editable() && Game.buyTowerSkill(m, me)) { changed(); openTowerSheet(me); } });
     if ($('tskill-undo')) $('tskill-undo').addEventListener('click', () => { if (editable() && Game.undoTowerSkill(m, me)) { changed(); openTowerSheet(me); } });
     if ($('tskill2')) $('tskill2').addEventListener('click', () => { if (editable() && Game.buyTowerSkill2(m, me)) { changed(); openTowerSheet(me); } });
@@ -2587,13 +2626,13 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     const link = shareLink();
     const here = net.connected;
     overlay(`<div class="card">
-      <span class="eyebrow">Challenge a friend · match code</span>
+      <span class="eyebrow">Match code</span>
       <span class="code" aria-label="Match code">${net.code}</span>
       <p class="status ${here ? '' : 'wait'}" id="lobby-status">${problem ? esc(problem) : here ? 'Your friend is here!' : (net.peer && net.peer.open ? 'Waiting for your friend to open the link' : 'Setting up the match')}</p>
       <button class="btn primary" id="start" ${here ? '' : 'disabled'}>Start match</button>
     </div>`);
     $('panel').innerHTML = `
-      <span class="hint">Send your friend this link. It works in any browser and nobody needs an account. Keep this page open while they join.</span>
+      <span class="hint">Send this link to a friend and keep this page open.</span>
       <div class="linkbox" id="link">${esc(link)}</div>
       <div class="bar">
         <span class="btnrow">
@@ -2602,9 +2641,10 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
         </span>
         <button class="btn" id="cancel">Cancel</button>
       </div>
-      ${mapSeg()}
-      ${charSeg()}
-      <span class="hint">You both play with the units on this device: ${customSet ? `your ${units.length} Counter Lab units` : `the ${units.length} built-in units`}.</span>`;
+      ${settingsBox(`
+        ${mapSeg()}
+        ${charSeg()}
+        <span class="hint">You both play with the units on this device: ${customSet ? `your ${units.length} Counter Lab units` : `the ${units.length} built-in units`}.</span>`)}`;
     if ($('share')) $('share').addEventListener('click', () => { navigator.share({ title: 'Phone Bellum', text: `Fight me in Phone Bellum! Code ${net.code}`, url: link }).catch(() => {}); });
     $('copy').addEventListener('click', () => {
       const done = () => { $('copy').textContent = 'Copied'; setTimeout(() => { if ($('copy')) $('copy').textContent = 'Copy link'; }, 1500); };
@@ -2613,7 +2653,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     });
     $('cancel').addEventListener('click', () => { clearHost(); showStart(); });
     $('start').addEventListener('click', hostStartMatch);
-    wireMapSeg(); wireCharSeg();
+    wireMapSeg(); wireCharSeg(); wireSettings();
   }
   function selectLink() { const r = document.createRange(); r.selectNodeContents($('link')); const s = getSelection(); s.removeAllRanges(); s.addRange(r); }
 

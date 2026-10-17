@@ -8,7 +8,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   // vs bot
   const p = await mk('ai');
   await p.goto('http://127.0.0.1:8766/'); await sleep(500);
-  await p.click('[data-tm="0"]'); await p.click('#go'); await sleep(300);
+  await p.click('#settings summary'); await p.click('[data-tm="0"]'); await p.click('#go'); await sleep(300);
   console.log('1:', await hint(p));
   console.log('packs:', (await p.$$eval('[data-pack]', bs => bs.map(x => x.textContent.replace(/\s+/g, ' ').trim().slice(0, 60)))).join(' || '));
   await p.screenshot({ path: 'pack-choose.png' });

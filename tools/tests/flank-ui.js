@@ -6,7 +6,7 @@ const { chromium } = require('playwright-core');
   const tap = async (c, r) => { const b2 = await p.locator('#board').boundingBox(); await p.mouse.click(b2.x + (c + .5) * b2.width / 12, b2.y + (r + .5) * b2.height / 16); };
   const squads = async () => (await p.locator('#panel .hint').last().textContent());
   await p.goto('http://127.0.0.1:8766/'); await p.waitForTimeout(500);
-  await p.click('[data-tm="0"]'); await p.click('#go'); await p.waitForTimeout(300);
+  await p.click('#settings summary'); await p.click('[data-tm="0"]'); await p.click('#go'); await p.waitForTimeout(300);
   await tap(1, 15);
   await p.click('.ucard >> nth=1'); await tap(5, 13);
   for (let round = 1; round <= 2; round++) {
