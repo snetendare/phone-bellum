@@ -366,13 +366,13 @@ a { color: var(--you); }
       const t = actx.currentTime, g = gain.gain;
       g.cancelScheduledValues(t); g.setValueAtTime(g.value, t); g.linearRampToValueAtTime(v, t + secs);
     };
-    pl.hook = () => {
+    pl.hook = () => { // only once Web Audio runs: until then the song plays straight from the element
       if (!actx || gain) return;
-      gain = actx.createGain(); gain.gain.value = 0;
+      gain = actx.createGain(); gain.gain.value = pl.playing ? musicLevel() : 0;
       actx.createMediaElementSource(el).connect(gain).connect(actx.destination);
     };
     pl.set = (want) => {
-      if (want && !pl.playing) {
+      if (want && (!pl.playing || el.paused)) { // el.paused: an earlier play() was refused, try again
         pl.playing = true; clearTimeout(stopT);
         pl.ramp(musicLevel(), 0.3); el.play().catch(() => {});
       } else if (!want && pl.playing) {
@@ -390,15 +390,15 @@ a { color: var(--you); }
     music.deploy.set(on && phase === 'deploy');
   }
   // phones only allow sound after the player touches the page
+  // (iPhones only count the end of a touch, so every tap retries until the sound is running)
+  try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) {} // play even with the iPhone's silent switch on
   const unlockMusic = () => {
-    if (!actx) try {
-      actx = new (window.AudioContext || window.webkitAudioContext)();
-      Object.values(music).forEach(pl => pl.hook());
-    } catch (e) { actx = null; }
-    if (actx && actx.state === 'suspended') actx.resume();
+    if (!actx) try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
+    if (actx && actx.state !== 'running') actx.resume().then(() => Object.values(music).forEach(pl => pl.hook())).catch(() => {});
+    else if (actx) Object.values(music).forEach(pl => pl.hook());
     musicUnlocked = true; syncMusic();
   };
-  ['pointerdown', 'keydown'].forEach(t => document.addEventListener(t, unlockMusic, { once: true, capture: true }));
+  ['touchend', 'click', 'keydown'].forEach(t => document.addEventListener(t, unlockMusic, { capture: true, passive: true }));
   function openSoundSheet() {
     $('sheet').innerHTML = `
       <div class="bar"><h3 id="sheet-h">Music</h3><button class="btn small" id="close">Close</button></div>
