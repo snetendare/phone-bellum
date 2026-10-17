@@ -338,12 +338,13 @@ a { color: var(--you); }
     superCoffee: { title: 'Super coffee', file: 'audio/super-coffee.mp3' },
     bulgaria: { title: 'Bulgaria', file: 'audio/bulgaria.mp3' },
     icyOne: { title: 'Icy one', file: 'audio/icy-one.mp3' },
+    sirski: { title: 'SIRSKI', file: 'audio/sirski.mp3' },
     habbyourmam: { title: 'Habbyourmam', file: 'audio/habbyourmam.mp3' },
   };
   const ARTIST = 'Snetänd';
   const songName = (id) => `“${SONGS[id].title}” - ${ARTIST}`;
   const PLAYLISTS = { menu: ['jonah', 'long', 'superCoffee'], deploy: ['bulgaria'], battle: ['habbyourmam'] };
-  const MAP_DEPLOY = { ice: ['icyOne'] }; // maps with their own deployment music, in place of PLAYLISTS.deploy
+  const MAP_DEPLOY = { ice: ['icyOne'], cavern: ['sirski'] }; // maps with their own deployment music, in place of PLAYLISTS.deploy
   const FADE_IN = 1, FADE_OUT = 1; // seconds
   let snd = { vol: 60, muted: false, song: '' }; // song: the one menu song the player picked ('' = the menu playlist)
   try {

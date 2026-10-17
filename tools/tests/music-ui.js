@@ -1,5 +1,5 @@
 // Music: the menu playlist starts on the first tap, the deployment phase playlist takes over while deploying
-// (starter pack choice included; Frozen Peak has its own) and the battle playlist during the fight; each resumes where it was paused. The cog (in a match) and Match settings
+// (starter pack choice included; Frozen Peak and Mushroom Cavern have their own) and the battle playlist during the fight; each resumes where it was paused. The cog (in a match) and Match settings
 // (on the menu) open the music sheet, its settings stick, and a picked menu song replaces the menu playlist.
 const { chromium } = require('playwright-core');
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -46,5 +46,8 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   // Frozen Peak has its own deployment music
   await p.click('#settings summary'); await p.click('[data-map="ice"]'); await p.click('#go'); await sleep(1500);
   console.log('Frozen Peak deploy:', await playing());
+  await p.goto('http://127.0.0.1:8766/'); await sleep(500); await p.mouse.click(5, 5);
+  await p.click('#settings summary'); await p.click('[data-map="cavern"]'); await p.click('#go'); await sleep(1500);
+  console.log('Mushroom Cavern deploy:', await playing());
   await b.close();
 })();
