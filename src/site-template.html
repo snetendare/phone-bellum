@@ -290,6 +290,7 @@ a { color: var(--you); }
   let lastSummary = null;
   let lastAiLevels = [];
   let hoverTile = null;
+  let charmMode = false;    // Matteo is giving his first Charisma stack: tap one of your squads
   let moveMode = false;     // the Move ability is active: tap an older squad, then a tile
   let moving = null;        // id of the older squad picked to move
   // the unit being placed or moved right now (some units may use extra tiles, e.g. Forward planting)
@@ -680,6 +681,12 @@ a { color: var(--you); }
       ctx.strokeStyle = css('--bg'); ctx.lineWidth = Math.max(1.5, br * 0.3);
       ctx.beginPath(); ctx.moveTo(bx - br * 0.5, by); ctx.lineTo(bx + br * 0.5, by); ctx.moveTo(bx, by - br * 0.5); ctx.lineTo(bx, by + br * 0.5); ctx.stroke();
     }
+    if (Game.charmOf(sq) > 0) { // Matteo's charisma: a pink pip per stack up the left edge, a top hat for a Gentleman
+      const pr = Math.max(1.5, t * 0.05);
+      ctx.fillStyle = CHARM_COL;
+      for (let k = 0; k < Game.charmOf(sq); k++) { ctx.beginPath(); ctx.arc(c * t + pr + 2, (r0 + 1) * t - pr - 3 - k * (pr * 2.6), pr, 0, Math.PI * 2); ctx.fill(); }
+      if (Game.isGentleman(sq)) drawHat((c + 0.5) * t, r0 * t + t * 0.2, t * 0.22);
+    }
     if (sq.level > 0) {
       ctx.fillStyle = css('--gold');
       const pr = Math.max(2, t * 0.07);
@@ -694,6 +701,15 @@ a { color: var(--you); }
     }
   }
 
+  // the squad Matteo gave his first Charisma stack to this round, if he did
+  const charmGivenNow = () => m && m.armies[me].find(q => q.charmGiven === m.round && q.charm === 1);
+  // Matteo's charisma colour, and the Gentleman's top hat (brim centred on x, y; s = its width)
+  const CHARM_COL = '#FF7AB6';
+  function drawHat(x, y, s) {
+    ctx.fillStyle = '#16161C'; ctx.strokeStyle = '#EDEFF2'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.rect(x - s / 2, y - s * 0.12, s, s * 0.12); ctx.rect(x - s * 0.3, y - s * 0.75, s * 0.6, s * 0.65); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = CHARM_COL; ctx.fillRect(x - s * 0.3, y - s * 0.3, s * 0.6, s * 0.12);
+  }
   // a little keep with battlements, in the team colour. kind: 'keep', 'outpost' (a smaller keep), 'sniper' (tall
   // and skinny, a yellow stripe) or 'bastion' (wide and squat, a shield on the front). g: another canvas to draw on
   // Each character's coat of arms: a field colour and a bold charge, drawn on a small shield.
@@ -727,6 +743,9 @@ a { color: var(--you); }
     enzo: { field: '#5A2E6E', charge: '#EDEFF2', draw(g) { // a die: a random skill
       g.beginPath(); g.roundRect(-0.3, -0.26, 0.6, 0.6, 0.08); g.fill();
       g.fillStyle = '#5A2E6E'; for (const [px, py] of [[-0.15, -0.11], [0, 0.04], [0.15, 0.19]]) { g.beginPath(); g.arc(px, py, 0.06, 0, Math.PI * 2); g.fill(); } } },
+    matteo: { field: '#5B1F3A', charge: '#EDEFF2', draw(g) { // a top hat with a pink band: the Gentleman
+      g.fillRect(-0.38, 0.22, 0.76, 0.1); g.fillRect(-0.22, -0.34, 0.44, 0.58);
+      g.fillStyle = '#FF7AB6'; g.fillRect(-0.22, 0.06, 0.44, 0.1); } },
   };
   function drawArms(g, id, x, y, w) {
     const a = ARMS[id]; if (!a) return;
@@ -1029,6 +1048,13 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
         ctx.strokeStyle = c; ctx.lineWidth = 2.5;
         ctx.beginPath(); ctx.arc(PX(b.x), PY(b.y), r + 4, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * (1 - b.windT / b.u.windUp)); ctx.stroke();
       }
+      const ch = bt.charm ? bt.charm(b.side, b.squad) : 0;
+      if (ch >= Engine.CHARM_MAX) drawHat(PX(b.x), PY(b.y) - r * 0.8, Math.max(6, r * 1.3)); // a Gentleman
+      else if (ch > 0) { ctx.fillStyle = CHARM_COL; ctx.beginPath(); ctx.arc(PX(b.x), PY(b.y) - r * 1.1, Math.max(1.5, r * 0.25), 0, Math.PI * 2); ctx.fill(); }
+      if (b.convert) { // won over by a Gentleman: a pink ring
+        ctx.strokeStyle = CHARM_COL; ctx.lineWidth = 1.5; ctx.setLineDash([2, 2]);
+        ctx.beginPath(); ctx.arc(PX(b.x), PY(b.y), r + 3, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
+      }
       if (b.level > 0) {
         ctx.strokeStyle = gold; ctx.lineWidth = Math.min(2.5, 0.8 + b.level * 0.5);
         Shapes.outline(ctx, b.u.shape, PX(b.x), PY(b.y), r + 3.5, upOf(b.side));
@@ -1270,6 +1296,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
       if (Game.hailRound(m) && selected === null && !fresh) hint = `Hailstorm this round: units standing on the ${Game.ICE.hailTiles} hail tiles take ${Game.ICE.hailDps} damage per second.`;
       if (m.round === Game.FLANK.round && selected === null && !fresh) hint = `Flank columns are open: you can now also deploy on the blue edge columns on the enemy's half, and they can on the red ones on yours. A squad placed there can't move or attack for the first ${Game.FLANK.delay} s of its first fight; after that it starts like any other.`;
       if (m.round === 1 && selected === null && m.armies[me].some(s => s.free)) hint = 'Your package squads are already on the board. Drag them where you want them, or tap one to take it back.';
+      if (charmMode && Game.canGiveCharm(m, me)) hint = 'Tap one of your squads to give it a stack of Charisma.';
       if (moveMode) hint = moving == null ? `Tap one of your squads from an earlier round to move it (${Game.CONFIG.moveCost} gold, once per round).` : `Tap a free tile to move ${esc(units[m.armies[me].find(s => s.id === moving).unit].name)} there, or drag it.`;
       if (selected !== null && !moveMode && m.armies[me].some(q => Game.boardable(m, me, q.col, q.row, selected))) hint += ` Or tap your ${esc(units[m.armies[me].find(q => Game.boardable(m, me, q.col, q.row, selected)).unit].name)} (gold outline) to hide this squad inside it.`;
       if (selected !== null && Game.isCarrier(m, selected)) hint += ` It carries one squad of any other unit, hidden from your opponent: place one on its tile.`;
@@ -1287,6 +1314,8 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
         ${mageOffer() ? `<button class="btn small" id="mage-gen" ${can ? '' : 'disabled'}>${Game.mageGenOf(m, me) ? esc(Game.mageGenInfo(Game.mageGenOf(m, me)).name) : 'Mage general'}…</button>` : ''}
         ${tskillOffer() ? `<button class="btn small" id="buy-tskill" ${can && Game.canBuyTowerSkill(m, me) ? '' : 'disabled'}>${esc(Game.towerType(m, me).skill.name)} · ${Game.TOWER_SKILL.cost}</button>` : ''}
         ${can && m.extraDeploys[me] > 0 && left > 0 ? `<button class="btn small" id="refund-deploy">Refund unused</button>` : ''}
+        ${Game.charOf(m, me) !== 'matteo' ? '' : charmGivenNow() ? `<button class="btn small" id="charm-undo" ${can ? '' : 'disabled'}>Take back Charisma</button>`
+          : Game.canGiveCharm(m, me) ? `<button class="btn small" id="charm-btn" aria-pressed="${charmMode}" ${can && m.armies[me].length ? '' : 'disabled'}>${charmMode ? 'Cancel' : 'Give Charisma'}</button>` : ''}
         ${Game.movedId(m, me) != null
           ? `<button class="btn small" id="undo-move" ${can ? '' : 'disabled'}>Undo move · +${Game.CONFIG.moveCost}</button>`
           : `<button class="btn small" id="move-btn" aria-pressed="${moveMode}" ${(can && m.armies[me].some(s => s.round < m.round) && (moveMode || g >= Game.CONFIG.moveCost)) ? '' : 'disabled'}>${moveMode ? 'Cancel move' : `Move a squad · ${Game.CONFIG.moveCost}`}</button>`}
@@ -1345,6 +1374,8 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
     if ($('loan-undo')) $('loan-undo').addEventListener('click', () => { if (editable() && Game.undoLoan(m, me)) changed(); });
     if ($('buy-tskill')) $('buy-tskill').addEventListener('click', () => { if (editable() && Game.buyTowerSkill(m, me)) changed(); });
     if ($('refund-deploy')) $('refund-deploy').addEventListener('click', () => { if (editable() && Game.refundDeploy(m, me)) changed(); });
+    if ($('charm-btn')) $('charm-btn').addEventListener('click', () => { if (!editable()) return; charmMode = !charmMode; if (charmMode) { selected = null; moveMode = false; moving = null; } changed(); });
+    if ($('charm-undo')) $('charm-undo').addEventListener('click', () => { const q = charmGivenNow(); if (editable() && q && Game.undoCharm(m, me, q.id)) changed(); });
     if ($('move-btn')) $('move-btn').addEventListener('click', () => { if (!editable()) return; moveMode = !moveMode; moving = null; if (moveMode) selected = null; changed(); });
     if ($('undo-move')) $('undo-move').addEventListener('click', () => { if (editable() && Game.undoMove(m, me)) changed(); });
     tick();
@@ -1505,6 +1536,8 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
     if (mode === 'claude' && claude.did.length) lvLines.push(`<p><span style="color:var(--gold)">Claude also:</span> ${esc(claude.did.join(', '))}.</p>`);
     if (mode === 'claude' && claude.say) lvLines.push(`<p class="big" style="color:var(--foe);font-style:italic">“${esc(claude.say)}”</p>`);
     if (mode === 'claude' && claude.note) lvLines.push(`<p>${esc(claude.note)}</p>`);
+    if (sum.gentlemen && sum.gentlemen[me].length) lvLines.push(`<p><span style="color:${CHARM_COL}">Now Gentlemen (5 Charisma):</span> ${sum.gentlemen[me].map(x => esc(units[x.unit].name)).join(', ')}.</p>`);
+    if (sum.converted && (sum.converted[me] || sum.converted[foe()])) lvLines.push(`<p><span style="color:${CHARM_COL}">Won over:</span> ${[sum.converted[me] ? `your Gentlemen charmed ${sum.converted[me]} enemy ${sum.converted[me] === 1 ? 'body' : 'bodies'}` : '', sum.converted[foe()] ? `${sum.converted[foe()]} of yours went over to ${esc(them)}` : ''].filter(Boolean).join('; ')}.</p>`);
     if (sum.newlyReady[me].length) lvLines.push(`<p><span style="color:var(--gold)">Ready to level up:</span> ${lv(sum.newlyReady[me])}.</p>`);
     resultShownAt = now();
     if (m.over) {
@@ -1693,7 +1726,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
     const matrix = units.map((u, i) => `${tag(u)}: ` + units.map((v, j) => i === j ? null : `${tag(v)} ${M[i][j] > 0 ? '+' : ''}${Math.round(M[i][j] * 100)}`).filter(Boolean).join(', ')).join('\n');
     const mine = m.armies[1].map(s => {
       const u = units[s.unit], need = s.level < Engine.MAX_LEVEL ? Math.round(Game.xpNeeded(u, s.level)) : null;
-      return `- id ${s.id}: ${u.name} at col ${s.col}, row ${s.row}${Game.isRider(s) ? ` (riding inside your ${units[(Game.carrierOf(m, 1, s) || s).unit].name}, id ${s.in})` : ''}, level ${s.level + 1}${need ? `, XP ${Math.round(s.xp)}/${need}` : ', max level'}${Game.isReady(m, s) ? ', READY TO LEVEL UP' : ''}${s.round < m.round ? `, sells for ${Game.sellValue(m, s)}` : ''}${Game.enzoSkill(m, 1, s) != null ? `, has skill "${u.skillDefs[Game.enzoSkill(m, 1, s)].name}" (Enzo)` : ''}`;
+      return `- id ${s.id}: ${u.name} at col ${s.col}, row ${s.row}${Game.isRider(s) ? ` (riding inside your ${units[(Game.carrierOf(m, 1, s) || s).unit].name}, id ${s.in})` : ''}, level ${s.level + 1}${need ? `, XP ${Math.round(s.xp)}/${need}` : ', max level'}${Game.isReady(m, s) ? ', READY TO LEVEL UP' : ''}${s.round < m.round ? `, sells for ${Game.sellValue(m, s)}` : ''}${Game.enzoSkill(m, 1, s) != null ? `, has skill "${u.skillDefs[Game.enzoSkill(m, 1, s)].name}" (Enzo)` : ''}${Game.charmOf(s) ? `, charisma ${Game.charmOf(s)}/${Engine.CHARM_MAX}${Game.isGentleman(s) ? ' (Gentleman)' : ''}` : ''}`;
     });
     const theirs = m.armies[0].filter(s => s.round < m.round && !Game.hiddenFromFoe(m, s)).map(s => { const p = Game.seenAt(m, s); return `- ${units[s.unit].name} at col ${p.col}, row ${p.row}, level ${s.level + 1}`; });
     const theirSkills = [];
@@ -2021,6 +2054,11 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (placingTower()) { if (editable() && Game.placeTower(m, me, t.col, t.row)) changed(); return; }
     if (placingElf()) { if (editable() && Game.buyElfOwn(m, me, t.col, t.row)) { elfPlacing = false; changed(); } else if (!Game.elfOwnSpotOk(m, me, t.col, t.row)) { elfPlacing = false; render(); hud(); panelDeploy(); } return; }
     if (Game.elfOwnAt(m, me, t.col, t.row)) { openMapSheet(); return; }
+    if (charmMode && editable() && Game.canGiveCharm(m, me)) { // Matteo: the first Charisma stack goes to the squad tapped
+      const own = Game.squadAt(m, me, t.col, t.row);
+      if (own && Game.giveCharm(m, me, own.id)) { charmMode = false; changed(); }
+      return;
+    }
     if (moveMode && editable()) { // Move ability: pick an older squad, then a free tile
       const own = Game.squadAt(m, me, t.col, t.row), mv = moving != null && m.armies[me].find(s => s.id === moving);
       if (mv && (!own || Game.boardable(m, me, t.col, t.row, mv.unit)) && Game.moveSquad(m, me, moving, t.col, t.row)) { moveMode = false; moving = null; changed(); return; }
@@ -2317,7 +2355,8 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (sq) {
       const next = sq.level < Engine.MAX_LEVEL ? Math.round(Game.xpNeeded(base, sq.level)) : null;
       const shown = next ? Math.min(Math.round(sq.xp), next) : 0;
-      lvl = `<p style="margin:0"><span style="color:var(--gold)">Level ${sq.level + 1}${sq.level ? ` · ${sq.level + 1}× health and attack` : ''}</span> · ${next ? `${shown.toLocaleString('en-US')} / ${next.toLocaleString('en-US')} XP to level ${sq.level + 2}` : 'max level'}</p>`;
+      const charmLine = Game.charmOf(sq) > 0 ? `<p style="margin:0"><span style="color:${CHARM_COL}">Charisma ${Game.charmOf(sq)} / ${Engine.CHARM_MAX}${Game.isGentleman(sq) ? ' · Gentleman' : ''}</span> · ${Game.isGentleman(sq) ? 'the first enemy it would kill each fight joins its side for that fight, at half health' : `kills add a stack and give one to a squad without any; at ${Engine.CHARM_MAX} it becomes a Gentleman`}</p>` : '';
+      lvl = charmLine + `<p style="margin:0"><span style="color:var(--gold)">Level ${sq.level + 1}${sq.level ? ` · ${sq.level + 1}× health and attack` : ''}</span> · ${next ? `${shown.toLocaleString('en-US')} / ${next.toLocaleString('en-US')} XP to level ${sq.level + 2}` : 'max level'}</p>`;
       if (side === me && phase === 'deploy') {
         const cost = Game.levelCost(base);
         const boughtNow = sq.boughtLevels && sq.boughtLevels[m.round] > 0;
@@ -2326,6 +2365,8 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
           ? `<button class="btn primary" data-act="lvl-up">Level up · ${cost} gold</button>`
           : `<button class="btn primary" disabled>${editable() ? `Need ${cost} gold` : `Level up · ${cost} gold`}</button>`);
         if (boughtNow && editable()) btns.push(`<button class="btn" data-act="lvl-undo">Undo level-up</button>`);
+        if (editable() && Game.canGiveCharm(m, me)) btns.push(`<button class="btn" data-act="charm-give" style="border-color:${CHARM_COL}">Give Charisma</button>`);
+        if (editable() && sq.charmGiven === m.round && sq.charm === 1) btns.push(`<button class="btn" data-act="charm-undo">Take back Charisma</button>`);
         if (sq.round === m.round && editable()) btns.push(`<button class="btn" data-act="take-back">Take back${sq.cost ? ` · +${sq.cost}` : ''}</button>`);
         if (sq.round === m.round && editable() && Game.isRider(sq)) btns.push(`<button class="btn" data-act="move-sq">Take out</button>`);
         if (sq.round < m.round && editable() && Game.movedId(m, me) === sq.id) btns.push(`<button class="btn" data-act="move-undo">Undo move · +${Game.CONFIG.moveCost}</button>`);
@@ -2383,6 +2424,8 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     const after = () => { changed(); reopen(); };
     on('lvl-up', () => { if (editable() && Game.levelUp(m, me, sq.id)) after(); });
     on('lvl-undo', () => { if (editable() && Game.undoLevel(m, me, sq.id)) after(); });
+    on('charm-give', () => { if (editable() && Game.giveCharm(m, me, sq.id)) after(); });
+    on('charm-undo', () => { if (editable() && Game.undoCharm(m, me, sq.id)) after(); });
     on('take-back', () => { if (editable() && Game.unplaceSquad(m, me, sq.id)) after(); });
     root.querySelectorAll('[data-skill]').forEach(b => b.addEventListener('click', () => { if (editable() && Game.buySkill(m, me, i, +b.dataset.skill)) after(); }));
     root.querySelectorAll('[data-unskill]').forEach(b => b.addEventListener('click', () => { if (editable() && Game.undoSkill(m, me, i, +b.dataset.unskill)) after(); }));
@@ -2615,7 +2658,9 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (phase === 'deploy') {
       s.armies[0] = s.armies[0].filter(q => q.round < m.round && !Game.hiddenFromFoe(m, q)).map(q => { // a squad moved this round shows on its old tile
         if (q.from && q.movedRound === m.round) { q.col = q.from.col; q.row = q.from.row; }
-        delete q.from; delete q.movedRound; return q;
+        delete q.from; delete q.movedRound;
+        if (q.charmGiven === m.round) { delete q.charm; delete q.charmGiven; } // Matteo's first stack, given this round
+        return q;
       });
       if (s.moved) s.moved[0] = null;
       // skills bought this round stay hidden too
@@ -2678,7 +2723,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (!m.tech) m.tech = [{}, {}];
     m.tech[1] = tech;
     const army = d.army.filter(s => s && Number.isInteger(s.unit) && s.unit >= 0 && s.unit < n && Number.isInteger(s.col) && s.col >= 0 && s.col < Game.COLS && Number.isInteger(s.row) && Game.canPlaceAt(m, 1, s.col, s.row, s.unit));
-    const seen = new Set();
+    const seen = new Set(), had = new Map(m.armies[1].map(q => [q.id, q]));
     m.armies[1] = army.filter(s => { const k = Number.isInteger(s.in) ? 'in' + s.in : s.col + ',' + s.row; if (seen.has(k)) return false; seen.add(k); return true; }).map(s => ({
       ...(Number.isInteger(s.in) ? { in: s.in } : {}),
       id: s.id | 0, unit: s.unit, col: s.col, row: s.row, round: s.round | 0, xp: Math.max(0, +s.xp || 0),
@@ -2694,6 +2739,10 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       if (!c || c.in != null || !Game.isCarrier(m, c.unit) || Game.isCarrier(m, q.unit) || c.col !== q.col || c.row !== q.row || full.has(c.id)) return false;
       full.add(c.id); return true;
     });
+    // the guest's charisma (Matteo): stacks come from the fights played here; the guest only gives the first stack
+    for (const q of m.armies[1]) { const h = had.get(q.id); if (h && h.charm > 0 && h.charmGiven !== m.round) { q.charm = h.charm; if (h.charmGiven) q.charmGiven = h.charmGiven; } }
+    const gave = d.army.find(s => s && s.charm > 0 && (s.charmGiven | 0) === m.round);
+    if (gave) Game.giveCharm(m, 1, gave.id | 0);
     // the guest's move this round: one squad at most
     if (!m.moved) m.moved = [null, null];
     m.moved[1] = null;

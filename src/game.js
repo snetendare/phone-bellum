@@ -176,8 +176,36 @@ const Game = (() => {
     { id: 'mubarak', name: 'Mubarak - Slime Lord', ability: 'Your slime units (Slime Wizards and Slimeshots) get every skill you buy for any slime unit, not just their own.' },
     { id: 'felix', name: 'Felix', ability: 'From round 3 on, you get 50 more gold every round.' },
     { id: 'enzo', name: 'Enzo', ability: 'You can’t buy unit skills, but every squad you field comes with one random skill of its unit, for free.' },
+    { id: 'matteo', name: 'Matteo - the Gentleman', ability: 'Give one of your squads a stack of Charisma. When a squad with Charisma kills an enemy, it gains a stack and gives one to a squad of yours without any. At 5 stacks a squad is a Gentleman: the first enemy it would kill each fight joins your side for that fight instead, at half health.' },
   ];
   const CHAR = { cageHp: 10, zoeTiles: 2, zoeDmg: 20, zoeHp: 20, zoeAps: 10, wilhelmArmor: 4, wilhelmDelay: 0.5, noahLevel: 1, philTier: 4, philOff: 100, yotUnit: 'Ember Imps', yotLv2: 3, yotLv3: 6, felixRound: 3, felixGold: 50 };
+  // ---------- Matteo's charisma ----------
+  // sq.charm = Charisma stacks on a squad, kept between rounds; they grow in fights (see Engine: opts.charm).
+  // Matteo gives the first stack to a squad of his choice (again whenever none of his squads has any, e.g. after
+  // selling it); sq.charmGiven = the round he gave it. If he hasn't by the fight, his priciest squad gets it.
+  const charmOf = (sq) => (sq && sq.charm) || 0;
+  const isGentleman = (sq) => charmOf(sq) >= E.CHARM_MAX;
+  const canGiveCharm = (m, side) => charOf(m, side) === 'matteo' && !m.armies[side].some(q => q.charm > 0);
+  function giveCharm(m, side, sqId) {
+    const sq = m.armies[side].find(q => q.id === sqId);
+    if (!sq || !canGiveCharm(m, side)) return false;
+    sq.charm = 1; sq.charmGiven = m.round;
+    return true;
+  }
+  // take back the first stack, given this round (to give it to another squad)
+  function undoCharm(m, side, sqId) {
+    const sq = m.armies[side].find(q => q.id === sqId);
+    if (!sq || sq.charmGiven !== m.round || sq.charm !== 1) return false;
+    delete sq.charm; delete sq.charmGiven;
+    return true;
+  }
+  function ensureCharm(m, side) {
+    if (!canGiveCharm(m, side)) return;
+    let best = null;
+    for (const q of m.armies[side]) if (!best || (m.units[q.unit].cost || 0) > (m.units[best.unit].cost || 0)) best = q;
+    if (best) giveCharm(m, side, best.id);
+  }
+  const charmMap = (m, side) => charOf(m, side) === 'matteo' ? Object.fromEntries(m.armies[side].map(q => [q.id, charmOf(q)])) : null;
   const charOf = (m, side) => (m && m.chars && m.chars[side]) || null;
   const charInfo = (id) => CHARACTERS.find(c => c.id === id) || null;
   // Blixten: the first map purchase each round is free. m.mapFree[side][round] = the purchase that got it:
@@ -941,6 +969,7 @@ const Game = (() => {
     ensureTower(m, 0); ensureTower(m, 1);
     settleTowerPicks(m);
     ensurePack(m, 0); ensurePack(m, 1);
+    ensureCharm(m, 0); ensureCharm(m, 1);
     const mp = mapOf(m), elf = elfSpot(m);
     const g = mp && mp.healMul ? { ...SETTINGS, healMul: mp.healMul } : SETTINGS;
     const T2 = TILE / 2, tiles = [];
@@ -953,7 +982,7 @@ const Game = (() => {
     for (const h of hailTiles(m)) { const w = tileToWorld(h.col, h.row); tiles.push({ type: 'hail', dps: ICE.hailDps, x0: w.x - T2, x1: w.x + T2, y0: w.y - T2, y1: w.y + T2 }); }
     const neutrals = elf ? [{ u: elfUnit(m), x: elf.x, y: elf.y, friends: [bribeLeader(m) === 0, bribeLeader(m) === 1] }] : [];
     for (const side of [0, 1]) { const e = elfOwnOf(m, side); if (e) { const w = tileToWorld(e.col, e.row); neutrals.push({ u: elfUnit(m), x: w.x, y: w.y, friends: [side === 0, side === 1], side }); } }
-    return E.createBattle(bodiesFor(m, 0), bodiesFor(m, 1), g, { record: true, tiles, neutrals });
+    return E.createBattle(bodiesFor(m, 0), bodiesFor(m, 1), g, { record: true, tiles, neutrals, charm: [charmMap(m, 0), charmMap(m, 1)] });
   }
 
   // Damage a side deals = points of its squads, scaled by how much of each squad is still alive
@@ -1000,7 +1029,18 @@ const Game = (() => {
       if (r) squads[side].push({ id: sq.id, unit: sq.unit, level: sq.level, left: r.alive / r.total, dealt: Math.round(r.dealt || 0) });
     }
     const towerFell = [0, 1].map(sd => { const q = res.squads[sd + ':-2']; return !!(q && q.alive === 0); });
-    const summary = { round: m.round, winner: roundWinner, timeout: res.timeout, dmg, time: res.time, newlyReady, squads, towerFell };
+    // Matteo: the squads keep the charisma they ended the fight with; note the ones that became Gentlemen
+    const gentlemen = [[], []];
+    for (let side = 0; side < 2; side++) {
+      const c = res.charm && res.charm[side];
+      if (!c) continue;
+      for (const sq of m.armies[side]) {
+        const was = isGentleman(sq);
+        if (c[sq.id] > 0) sq.charm = c[sq.id];
+        if (!was && isGentleman(sq)) gentlemen[side].push({ id: sq.id, unit: sq.unit });
+      }
+    }
+    const summary = { round: m.round, winner: roundWinner, timeout: res.timeout, dmg, time: res.time, newlyReady, squads, towerFell, gentlemen, converted: res.converted || [0, 0] };
     m.history.push(summary);
     if (m.hp[0] <= 0 || m.hp[1] <= 0) {
       m.over = true;
@@ -1227,7 +1267,7 @@ const Game = (() => {
     FLANK, flankRows, flankOpen, isFlank, reserved, canPlaceAt, enemyHolds, inNoMans, hasSkillType,
     ICE, ALTAR, GOLEM, isIce, hailRound, altarRound, stormShift, stormRows, hailTiles, altarCost, altarRefund, altarCount, pushRoom, altarBought, addAltar, buyAltar, undoAltar, snowgres, snowgreUnit,
     MAPS, ELF_TOWER, SHROOM, SHROOM_SPLIT, shroomAt, shroomTileAt, shroomRemoval, SHROOM_REMOVE, shroomCost, removeShroom, undoRemoveShroom, mapOf, elfSpot, rollMap, BRIBE_COST, bribeList, bribeGold, bribeCount, bribeNow, bribeCost, bribeRefund, ELF_POWER, elfPowered, elfUnit, ELF_OWN, elfOwnCost, elfOwnOf, elfOwnAt, elfOwnUnlocked, elfOwnOffered, canBuyElfOwn, elfOwnSpotOk, buyElfOwn, undoElfOwn, bribeLeader, canBribe, bribe, undoBribe,
-    CHARACTERS, CHAR, charOf, charInfo, enzoSkill, felixGold, isTier1, rollBuffTiles, onBuffTile, yotImps, yotLevel, TOWER_SPOT, towerSpot,
+    CHARACTERS, CHAR, charOf, charInfo, enzoSkill, charmOf, isGentleman, canGiveCharm, giveCharm, undoCharm, ensureCharm, felixGold, isTier1, rollBuffTiles, onBuffTile, yotImps, yotLevel, TOWER_SPOT, towerSpot,
     zoneRows, inZone, tileToWorld, createMatch, place, unplace, bodiesFor, startBattle, resolve, aiDeploy, occupied,
   };
 })();

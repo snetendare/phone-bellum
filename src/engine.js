@@ -34,6 +34,13 @@ const Engine = (() => {
   const PROJ_HIT_RADIUS = 1;   // a projectile hits a body within this distance of where it lands
   // A side whose tower falls is crippled for a while: it deals less damage, walks slower and takes more damage
   const TOWER_DOWN = { secs: 9, attack: 90, move: 70, taken: 50 };
+  // Charisma (Matteo): opts.charm = [stacks by squad id or null, same for side 1]. A body of a squad with any
+  // charisma that kills an enemy body (not a structure) gives its squad one more stack, up to CHARM_MAX, and one
+  // stack to a friendly squad without any (the one with a body nearest the killer). A squad at CHARM_MAX is a
+  // Gentleman: the first enemy body it would kill in a fight switches sides instead, at CONVERT_HP % of its max health.
+  const CHARM_MAX = 5;
+  const CONVERT_HP = 50;
+  const CONVERT_SQUAD = -200;  // squad id of bodies that switched sides (not a squad in either army)
   const TURN = 6;              // how fast a walking body swings to a new heading (share of the turn per second)
   const SIGHT = 15;            // metres beyond its own range at which a unit notices an enemy and turns toward it
   const MIN_SIGHT = 18;        // ...but never less than this many metres from the unit (3 tiles), however short its range
@@ -348,6 +355,29 @@ const Engine = (() => {
       }
     };
     const pendingKids = [];
+    const charm = [0, 1].map(k => opts.charm && opts.charm[k] ? { ...opts.charm[k] } : null);
+    const charmUsed = [{}, {}]; // Gentleman squads that already won a body over this fight
+    const turning = [];          // bodies won over this tick: they switch sides at the end of it
+    // owner is about to kill v: count the kill for charisma, or win v over instead (returns true; v lives on)
+    function finishing(owner, v) {
+      const c = charm[owner.side];
+      if (!c || v.side === owner.side || v.u.structure || !(c[owner.squad] > 0)) return false;
+      if (c[owner.squad] >= CHARM_MAX && !charmUsed[owner.side][owner.squad] && !v.u.carrier && !v.convert) {
+        charmUsed[owner.side][owner.squad] = true;
+        v.hp = v.u.hp * CONVERT_HP / 100; v.turning = true; v.poison = null;
+        turning.push(v);
+        return true;
+      }
+      c[owner.squad] = Math.min(CHARM_MAX, c[owner.squad] + 1);
+      let to = null, td = Infinity;
+      for (const f of sides[owner.side]) {
+        if (f.squad < 0 || c[f.squad] > 0) continue;
+        const d = f.alive ? dist(f, owner) : Infinity;
+        if (to == null || d < td) { to = f.squad; td = d; }
+      }
+      if (to != null) c[to] = 1;
+      return false;
+    }
     // healing and regeneration strength (a map can make them stronger)
     const healMul = g.healMul > 0 ? g.healMul : 1;
     // neutral structures (a map's elf tower): they belong to neither side, can't be hit, and shoot at
@@ -376,6 +406,7 @@ const Engine = (() => {
     const SPAWN_SPOTS = [[0.7, 0.7], [-0.7, 0.7], [0, 1], [1, 0], [-1, 0], [0.7, -0.7], [-0.7, -0.7], [0, -1]]; // (side, forward): front first
     // damage that skips armor and ward (poison)
     function direct(owner, v, amount) {
+      if (v.turning) return;
       const applied = Math.min(amount, v.hp);
       if (applied <= 0) return;
       stats[owner.side].dealt += applied;
@@ -383,10 +414,12 @@ const Engine = (() => {
       owner.xp += applied;
       v.xp += applied * (g.absorbXp == null ? 0.5 : g.absorbXp);
       v.hp -= applied;
+      if (v.hp <= 1e-9 && finishing(owner, v)) return;
       if (v.hp <= 1e-9) { v.hp = 0; v.alive = false; v.diedTick = tick; owner.xp += v.u.hp * v.level; fell(v); }
     }
     // damage from the map itself (elf tower, toxic tiles): counts for neither side, earns no experience
     function neutralDamage(v, dmg) {
+      if (v.turning) return;
       if (cripple[v.side] > 0) dmg = dmg * (1 + towerDown.taken / 100);
       v.hp -= dmg;
       if (v.hp <= 1e-9) { v.hp = 0; v.alive = false; v.diedTick = tick; fell(v); }
@@ -408,6 +441,7 @@ const Engine = (() => {
     const aliveCount = (arr) => { let c = 0; for (const b of arr) if (b.alive && !b.u.structure) c++; return c; };
 
     function hurt(owner, v, hit, fromX, fromY) {
+      if (v.turning) return; // being won over: nothing hurts it until it has switched sides
       const st = stats[owner.side];
       let pct = owner.u.pctHit > 0 && !v.u.structure ? v.u.hp * owner.u.pctHit / 100 : 0;
       if (cripple[owner.side] > 0) { hit = hit * (1 - towerDown.attack / 100); pct = pct * (1 - towerDown.attack / 100); }
@@ -440,6 +474,7 @@ const Engine = (() => {
       owner.xp += applied;
       v.xp += applied * (g.absorbXp == null ? 0.5 : g.absorbXp);
       v.hp -= dmg;
+      if (v.hp <= 0 && finishing(owner, v)) return;
       if (v.hp <= 0) { v.hp = 0; v.alive = false; v.diedTick = tick; owner.xp += v.u.hp * v.level; fell(v); return; }
       if (owner.u.poisonPct > 0) {
         // poison: a share of the hit, spread over its duration. Each attacker keeps one dose on the target;
@@ -811,7 +846,7 @@ const Engine = (() => {
       // attacks. A body killed earlier in this same tick still gets its attack, so neither side
       // wins a trade just by being processed first (side 0 used to win one-shot duels like Sniper vs Sniper)
       for (const b of all) {
-        if ((!b.alive && b.diedTick !== tick) || b.delay > 0 || b.u.ram || b.boarded) continue;
+        if ((!b.alive && b.diedTick !== tick) || b.delay > 0 || b.u.ram || b.boarded || b.turning) continue;
         b.cd -= dt * (b.slowT > 0 ? 1 - b.slowAtk / 100 : 1); // slowed units reload slower
         if (b.firing >= 0) b.firing += dt;
         if (b.u.mend > 0) { // a healer that never attacks: the most wounded ally in range gets b.u.mend
@@ -979,6 +1014,22 @@ const Engine = (() => {
         }
         projectiles = next;
       }
+      // bodies won over by a Gentleman switch sides; they start fresh (no target, no burst, no effects from before)
+      for (const v of turning) {
+        const from = sides[v.side];
+        from.splice(from.indexOf(v), 1);
+        v.convert = { side: v.side, squad: v.squad, xp: v.xp, dealt: v.dealt || 0 }; // what it earned for its old squad
+        v.side = 1 - v.side; v.squad = CONVERT_SQUAD; v.xp = 0; v.dealt = 0; v.turning = false;
+        v.windTarget = null; v.windT = 0; v.setUp = false; v.firing = -1; v.burstLeft = 0; v.trampleLeft = 0; v.trampled = null;
+        v.spinTarget = null; v.aims = null; v.engaged = false; v.holdT = 0; v.delay = 0; v.band = null; v.hidden = false;
+        v.slowT = 0; v.slowMove = 0; v.slowAtk = 0; v.shrinkT = 0; v.shrinkM = 0; v.kids = null;
+        sides[v.side].push(v); stats[v.side].totalHp += v.hp;
+        for (const b of all) {
+          if (b.windTarget === v) { b.windTarget = null; b.windT = 0; }
+          if (b.spinTarget === v) b.spinTarget = null;
+        }
+      }
+      turning.length = 0;
       // bodies spawned by deaths this tick join the fight
       for (const kid of pendingKids) { all.push(kid); sides[kid.side].push(kid); stats[kid.side].totalHp += kid.u.hp; }
       pendingKids.length = 0;
@@ -1006,6 +1057,11 @@ const Engine = (() => {
       // survivors per squad: { squadId: { side, total, alive } }
       const squads = {};
       for (const b of all) {
+        if (b.convert) { // a body won over still counts, as lost, for the squad it came from
+          const k = b.convert.side + ':' + b.convert.squad;
+          const s = squads[k] || (squads[k] = { side: b.convert.side, squad: b.convert.squad, total: 0, alive: 0, xp: 0, dealt: 0 });
+          s.total++; s.xp += b.convert.xp; s.dealt += b.convert.dealt;
+        }
         const k = b.side + ':' + b.squad;
         const s = squads[k] || (squads[k] = { side: b.side, squad: b.squad, total: 0, alive: 0, xp: 0, dealt: 0 });
         s.total++; if (b.alive || inside(b)) s.alive++;
@@ -1016,10 +1072,12 @@ const Engine = (() => {
         score: frac[0] - frac[1],
         survivors: [aliveA, aliveB], counts: [A.length, B.length],
         stats, squads,
+        charm, // charisma stacks after the fight, by side and squad id (null for a side without)
+        converted: [0, 1].map(k => all.filter(b => b.convert && b.side === k).length), // bodies each side won over
       };
     }
 
-    return { step, frame, result, bodies: all, neutrals, isOver: () => over, time: () => t, lastShots: () => shots, projectiles: () => projectiles, crippled: (side) => cripple[side] };
+    return { step, frame, result, bodies: all, neutrals, isOver: () => over, time: () => t, lastShots: () => shots, projectiles: () => projectiles, crippled: (side) => cripple[side], charm: (side, squad) => (charm[side] && charm[side][squad]) || 0 };
   }
 
   function matrix(units, g) {
@@ -1040,6 +1098,6 @@ const Engine = (() => {
     return m;
   }
 
-  return { TOWER_DOWN, SKILL_SLOTS, SLOTS, SKILL_TYPES, skillParam, describeSkill, applySkills, innateUnit, fairBudget, battle, makeArmy, matrix, createBattle, buildSquad, rawStrength, squadsFor, withTraits, leveled, TRAIT_DEFAULTS, SPIN_CAP, CHARGE_RUN, TRAMPLE_RUN, BLAST_RADIUS, RAM_REACH, LEVEL_BONUS, MAX_LEVEL };
+  return { TOWER_DOWN, SKILL_SLOTS, SLOTS, SKILL_TYPES, skillParam, describeSkill, applySkills, innateUnit, fairBudget, battle, makeArmy, matrix, createBattle, buildSquad, rawStrength, squadsFor, withTraits, leveled, TRAIT_DEFAULTS, SPIN_CAP, CHARGE_RUN, TRAMPLE_RUN, BLAST_RADIUS, RAM_REACH, LEVEL_BONUS, MAX_LEVEL, CHARM_MAX, CONVERT_HP, CONVERT_SQUAD };
 })();
 if (typeof module !== 'undefined') module.exports = Engine;
