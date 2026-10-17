@@ -2967,10 +2967,14 @@ if (typeof module !== 'undefined') module.exports = Game;
   let drag = null, dragEndAt = 0; // dragging one of your squads to another tile
   let timerOn = true;       // vs AI: deploy countdown on or off
 
-  // ---------- menu music: a playlist on the start screen and in the lobby, fades out when a match starts ----------
+  // ---------- music: the menu playlist on the start screen and in the lobby, the deployment phase playlist
+  // while players deploy (round 1's starter pack choice included); silence during fights and results.
   // Volume goes through Web Audio because iPhones ignore audio.volume.
   const SOUND_STORE = 'phonebellum.sound.v1';
-  const TRACKS = ['audio/menu-jonah.mp3', 'audio/menu-long.mp3']; // mastered to the same loudness
+  const PLAYLISTS = { // all tracks mastered to the same loudness
+    menu: ['audio/menu-jonah.mp3', 'audio/menu-long.mp3'],
+    deploy: ['audio/deploy-fuck-it-2.mp3'],
+  };
   let snd = { vol: 60, muted: false };
   try {
     const p = JSON.parse(localStorage.getItem(SOUND_STORE) || 'null');
@@ -2978,34 +2982,49 @@ if (typeof module !== 'undefined') module.exports = Game;
     else if (localStorage.getItem('phonebellum.music.v1') === 'off') snd.muted = true; // the old On/Off switch
   } catch (e) {}
   const saveSound = () => { try { localStorage.setItem(SOUND_STORE, JSON.stringify(snd)); } catch (e) {} };
-  let track = Math.floor(Math.random() * TRACKS.length);
-  const music = new Audio(TRACKS[track]);
-  music.preload = 'auto';
-  let actx = null, gain = null, musicPlaying = false, musicStop = 0, musicUnlocked = false;
-  music.addEventListener('ended', () => { track = (track + 1) % TRACKS.length; music.src = TRACKS[track]; if (musicPlaying) music.play().catch(() => {}); });
   const musicLevel = () => snd.muted ? 0 : snd.vol / 100;
-  function rampMusic(v, secs) {
-    if (!gain) { music.volume = v; return; }
-    const t = actx.currentTime, g = gain.gain;
-    g.cancelScheduledValues(t); g.setValueAtTime(g.value, t); g.linearRampToValueAtTime(v, t + secs);
+  let actx = null, musicUnlocked = false;
+  // one player per playlist: starts on a random track, then plays the rest in order and loops;
+  // a paused playlist picks up where it stopped
+  function playlist(tracks) {
+    let track = Math.floor(Math.random() * tracks.length), gain = null, stopT = 0;
+    const el = new Audio(tracks[track]);
+    el.preload = 'none';
+    const pl = { el, playing: false };
+    el.addEventListener('ended', () => { track = (track + 1) % tracks.length; el.src = tracks[track]; if (pl.playing) el.play().catch(() => {}); });
+    pl.ramp = (v, secs) => {
+      if (!gain) { el.volume = v; return; }
+      const t = actx.currentTime, g = gain.gain;
+      g.cancelScheduledValues(t); g.setValueAtTime(g.value, t); g.linearRampToValueAtTime(v, t + secs);
+    };
+    pl.hook = () => {
+      if (!actx || gain) return;
+      gain = actx.createGain(); gain.gain.value = 0;
+      actx.createMediaElementSource(el).connect(gain).connect(actx.destination);
+    };
+    pl.set = (want) => {
+      if (want && !pl.playing) {
+        pl.playing = true; clearTimeout(stopT);
+        pl.ramp(musicLevel(), 0.3); el.play().catch(() => {});
+      } else if (!want && pl.playing) {
+        pl.playing = false; pl.ramp(0, 0.6);
+        stopT = setTimeout(() => el.pause(), 650);
+      }
+    };
+    return pl;
   }
+  const music = { menu: playlist(PLAYLISTS.menu), deploy: playlist(PLAYLISTS.deploy) };
   function syncMusic() {
-    const want = musicUnlocked && musicLevel() > 0 && (phase === 'start' || phase === 'lobby');
-    if (want && !musicPlaying) {
-      musicPlaying = true; clearTimeout(musicStop);
-      rampMusic(musicLevel(), 0.3); music.play().catch(() => {});
-    } else if (!want && musicPlaying) {
-      musicPlaying = false; rampMusic(0, 0.6);
-      musicStop = setTimeout(() => music.pause(), 650);
-    }
+    const on = musicUnlocked && musicLevel() > 0;
+    music.menu.set(on && (phase === 'start' || phase === 'lobby'));
+    music.deploy.set(on && phase === 'deploy');
   }
   // phones only allow sound after the player touches the page
   const unlockMusic = () => {
     if (!actx) try {
       actx = new (window.AudioContext || window.webkitAudioContext)();
-      gain = actx.createGain(); gain.gain.value = 0;
-      actx.createMediaElementSource(music).connect(gain).connect(actx.destination);
-    } catch (e) { actx = null; gain = null; }
+      Object.values(music).forEach(pl => pl.hook());
+    } catch (e) { actx = null; }
     if (actx && actx.state === 'suspended') actx.resume();
     musicUnlocked = true; syncMusic();
   };
@@ -3023,12 +3042,12 @@ if (typeof module !== 'undefined') module.exports = Game;
           <button data-mute="0" aria-pressed="${!snd.muted}">Sound on</button><button data-mute="1" aria-pressed="${snd.muted}">Muted</button>
         </div>
       </div>
-      <p class="hint" style="margin:0">Music plays on the main menu and in the lobby. Your settings are saved on this device.</p>`;
+      <p class="hint" style="margin:0">Menu music plays on the main menu and in the lobby, deployment music while you deploy. Your settings are saved on this device.</p>`;
     $('sheet-back').hidden = false;
     $('close').addEventListener('click', closeSheet);
     $('vol').addEventListener('input', (e) => {
       snd.vol = +e.target.value; $('vol-n').textContent = snd.vol; saveSound();
-      if (musicPlaying) rampMusic(musicLevel(), 0.05);
+      Object.values(music).forEach(pl => { if (pl.playing) pl.ramp(musicLevel(), 0.05); });
       syncMusic();
     });
     $('sheet').querySelectorAll('[data-mute]').forEach(b => b.addEventListener('click', () => {
