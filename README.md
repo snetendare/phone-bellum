@@ -16,6 +16,14 @@ A small auto-battler for the phone browser. Buy squads, place them, and watch th
 
 The source is in `src/`. After changing it, run `node src/build.js` from the repo root. This rebuilds `index.html` and `lab.html`.
 
+- `engine.js`: the battle engine. Plain arithmetic only, so both phones in a live match play the same fight. Draws nothing.
+- `game.js`: match rules (gold, rounds, maps, characters, the AI, what each player may see of the other). Draws nothing.
+- `shapes.js`: how a unit looks: its shape, colour and 3-letter tag.
+- `art.js`: the shared palette, coats of arms and tower icons, used on the board and in the panels.
+- `render2d.js`: draws the board and the battles on the canvas. It reads what to show only through the `view()` the page hands it, so another renderer (3D) can take its place.
+- `site-template.html` + `game.css`: the game page: panels, menus, live matches, music.
+- `template.html`: Counter Lab.
+
 ## Tools (`tools/`)
 
 - `tools/match-history.gs` saves two-player matches to a Google Sheet. Paste it into the sheet's Apps Script, deploy it as a web app (Execute as: Me, Who has access: Anyone) and put the `/exec` URL in `HISTORY_URL` in `src/site-template.html`. The hosting phone then saves every round, and a Match history button appears on the start screen. The URL is public, so anyone could add rows; delete junk rows in the sheet.
