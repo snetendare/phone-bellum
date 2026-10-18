@@ -201,6 +201,36 @@
         "pct": 10,
         "cap": 2
       }
+    },
+    {
+      "id": "spread",
+      "type": "spread",
+      "name": "Spread",
+      "cost": 300,
+      "params": {
+        "min": 1,
+        "max": 6
+      }
+    },
+    {
+      "id": "boneShield",
+      "type": "shield",
+      "name": "Bone shield",
+      "cost": 200,
+      "params": {
+        "hits": 1
+      }
+    },
+    {
+      "id": "emberMortar",
+      "type": "mortar",
+      "name": "Ember Mortar",
+      "cost": 300,
+      "params": {
+        "range": 15,
+        "min": 5,
+        "aps": 0.1
+      }
     }
   ],
   "units": [
@@ -232,17 +262,21 @@
       "color": "#9BD35A",
       "skills": [
         "swift",
-        "shrink"
+        "shrink",
+        "spread"
       ],
       "skillsOn": [
+        false,
         false,
         false
       ],
       "skillMods": [
         null,
+        null,
         null
       ],
       "skillsInnate": [
+        false,
         false,
         false
       ]
@@ -275,17 +309,21 @@
       "color": "#E9E3CF",
       "skills": [
         "range",
-        "rapid"
+        "rapid",
+        "boneShield"
       ],
       "skillsOn": [
+        false,
         false,
         false
       ],
       "skillMods": [
         null,
+        null,
         null
       ],
       "skillsInnate": [
+        false,
         false,
         false
       ]
@@ -318,17 +356,21 @@
       "color": "#FFA94D",
       "skills": [
         "swift",
-        "heavy"
+        "heavy",
+        "emberMortar"
       ],
       "skillsOn": [
+        false,
         false,
         false
       ],
       "skillMods": [
         null,
+        null,
         null
       ],
       "skillsInnate": [
+        false,
         false,
         false
       ]
@@ -449,7 +491,7 @@
       "windUp": 0,
       "flame": 0,
       "defense": "armor",
-      "defVal": 6,
+      "defVal": 3,
       "level": 0,
       "unlock": 50,
       "name": "Brute",
@@ -768,7 +810,7 @@
       "windUp": 0,
       "flame": 0,
       "defense": "armor",
-      "defVal": 15,
+      "defVal": 6,
       "level": 0,
       "unlock": 150,
       "splash": 3,
@@ -1062,7 +1104,12 @@
         false
       ],
       "skillMods": [
-        null,
+        {
+          "params": {
+            "m": 3
+          },
+          "cost": 150
+        },
         {
           "params": {
             "hit": 25,
@@ -1259,7 +1306,7 @@
       "bodies": 1,
       "hp": 750,
       "hit": 60,
-      "aps": 0.65,
+      "aps": 0.8,
       "range": 25,
       "speed": 3,
       "splash": 0,

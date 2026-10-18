@@ -53,6 +53,7 @@ const Engine = (() => {
   // charisma that kills an enemy body (not a structure) gives its squad one more stack, up to CHARM_MAX, and one
   // stack to a friendly squad without any (the one with a body nearest the killer). A squad at CHARM_MAX is a
   // Gentleman: the first enemy body it would kill in a fight switches sides instead, at CONVERT_HP % of its max health.
+  // A squad gains at most one stack per fight (a stack given to it counts) and gives away at most one.
   const CHARM_MAX = 5;
   const CONVERT_HP = 50;
   const CONVERT_SQUAD = -200;  // squad id of bodies that switched sides (not a squad in either army)
@@ -101,6 +102,8 @@ const Engine = (() => {
     lifesteal: { label: 'Lifesteal', params: [['pct', 'Heals itself for (% of damage dealt)', 10, 1]] },
     turret:  { label: 'Extra turret', params: [['turrets', 'Attacks at once (each with its own target and reload)', 2, 1]] },
     frenzy:  { label: 'Frenzy', params: [['pct', 'Attack speed per hit (+% of base)', 10, 1], ['cap', 'Most attacks per second', 2, 0.1]] },
+    spread:  { label: 'Spread', params: [['min', 'Least distance (m)', 1, 0.5], ['max', 'Most distance (m)', 6, 0.5]] },
+    mortar:  { label: 'Mortar', params: [['range', 'Range (+m)', 15, 1], ['min', 'Minimum range (m)', 5, 0.5], ['aps', 'Attack speed (+ attacks per second)', 0.1, 0.05]] },
   };
   const skillParam = (d, k) => {
     const v = d.params && d.params[k];
@@ -135,6 +138,8 @@ const Engine = (() => {
       case 'lifesteal': return `Each body heals itself for ${n('pct')}% of the damage it deals.`;
       case 'turret': return `Each body attacks ${n('turrets')} different enemies at once, each attack with its own target and its own reload, as if it carried ${n('turrets')} copies of its weapon. They never aim at the same enemy, so with only one enemy in reach just one fires.`;
       case 'frenzy': return `Each hit it lands gives that body +${n('pct')}% attack speed for the rest of the fight, up to ${n('cap')} attacks per second.`;
+      case 'spread': return `At the start of a fight the bodies scatter in all directions, ${n('min')} to ${n('max')} m from where they stand (some stay on the tile), then charge. Splash catches fewer of them.`;
+      case 'mortar': return `+${n('range')} m range and +${n('aps')} attacks per second, but it can’t attack enemies ${n('min')} m away or closer.`;
       case 'shield': return `Each body fully blocks the first ${n('hits')} ${+P('hits') === 1 ? 'hit' : 'hits'} it takes in a fight, however big. Poison already on it still ticks.`;
     }
     return '';
@@ -191,6 +196,8 @@ const Engine = (() => {
         case 'lifesteal': u.lifesteal = (u.lifesteal || 0) + Math.max(0, P('pct')); break;
         case 'turret': u.turrets = Math.max(u.turrets || 1, Math.min(6, Math.round(P('turrets')))); break;
         case 'shield': u.shield = (u.shield || 0) + Math.max(0, Math.round(P('hits'))); break;
+        case 'spread': u.spread = [Math.max(0, P('min')), Math.max(0, P('min'), P('max'))]; break;
+        case 'mortar': u.range = u.range + P('range'); u.minRange = Math.max(u.minRange || 0, P('min')); u.aps = u.aps + Math.max(0, P('aps')); break;
         case 'frenzy': u.frenzyPct = (u.frenzyPct || 0) + Math.max(0, P('pct')); u.frenzyCap = Math.max(u.frenzyCap || 0, Math.max(0.05, P('cap'))); break;
         case 'blast': u.blastR = Math.max(u.blastR || 0, Math.max(0, P('radius'))); u.blastPct = (u.blastPct || 0) + Math.max(0, P('pct')); break;
         case 'split':
@@ -286,12 +293,19 @@ const Engine = (() => {
       u, side, x, y, hp: u.hp, alive: true, squad, level: u.level || 0, xp: 0,
       cd: ((i * 7) % 11) / 11 * interval, // deterministic stagger
       moved: 0, firing: -1, burstLeft: 0, burstTimer: 0, burstDir: [0, 1], windTarget: null, windT: 0, setUp: false,
-      hidden: !!u.stealth, poison: null, shrinkM: 0, shrinkT: 0, slowT: 0, slowMove: 0, slowAtk: 0,
+      hidden: !!u.stealth || !!u.aloft, poison: null, shrinkM: 0, shrinkT: 0, slowT: 0, slowMove: 0, slowAtk: 0,
       spawnT: u.spawn ? u.spawn.every : 0, kids: null,
       shield: u.shield || 0, // hits left that the Shield skill blocks completely
       frenzy: 0, // hits landed so far (Frenzy skill)
       stunT: 0, lastAtk: 0, // seconds of stun left (chargeStun); fight time of its last attack (stealth returns)
+      spreadTo: u.spread ? spreadSpot(x, y, i, u.spread) : null, // Spread skill: where it runs to before anything else
     };
+  }
+  // Spread: a spot min..max metres from (x, y) in one of 12 directions, picked from the body's index (the same on every device)
+  const DIRS12 = [[1, 0], [0.866025, 0.5], [0.5, 0.866025], [0, 1], [-0.5, 0.866025], [-0.866025, 0.5], [-1, 0], [-0.866025, -0.5], [-0.5, -0.866025], [0, -1], [0.5, -0.866025], [0.866025, -0.5]];
+  function spreadSpot(x, y, i, [min, max]) {
+    const [dx, dy] = DIRS12[(i * 5) % 12], d = min + (max - min) * ((i * 7) % 12) / 11;
+    return { x: x + dx * d, y: y + dy * d };
   }
 
   // Bodies of one squad placed around a point on the board (footprint about `size` metres)
@@ -328,8 +342,8 @@ const Engine = (() => {
     const all = A.concat(B);
     const sides = [A, B];
     const stats = [
-      { dealt: 0, wasted: 0, blocked: 0, missed: 0, windLost: 0, winds: 0, totalHp: A.reduce((s, b) => s + (b.u.structure ? 0 : b.u.hp), 0) },
-      { dealt: 0, wasted: 0, blocked: 0, missed: 0, windLost: 0, winds: 0, totalHp: B.reduce((s, b) => s + (b.u.structure ? 0 : b.u.hp), 0) },
+      { dealt: 0, wasted: 0, blocked: 0, missed: 0, windLost: 0, winds: 0, totalHp: A.reduce((s, b) => s + (b.u.structure || b.u.aloft ? 0 : b.u.hp), 0) },
+      { dealt: 0, wasted: 0, blocked: 0, missed: 0, windLost: 0, winds: 0, totalHp: B.reduce((s, b) => s + (b.u.structure || b.u.aloft ? 0 : b.u.hp), 0) },
     ];
     const dt = g.dt;
     const stealthOn = ruleOn(g, 'stealth'), stealthBack = ruleOn(g, 'stealthBack'), knockOn = ruleOn(g, 'knockback');
@@ -385,6 +399,7 @@ const Engine = (() => {
     const pendingKids = [];
     const charm = [0, 1].map(k => opts.charm && opts.charm[k] ? { ...opts.charm[k] } : null);
     const charmUsed = [{}, {}]; // Gentleman squads that already won a body over this fight
+    const charmGained = [{}, {}], charmGave = [{}, {}]; // squads that already gained / gave a stack this fight
     const turning = [];          // bodies won over this tick: they switch sides at the end of it
     // owner is about to kill v: count the kill for charisma, or win v over instead (returns true; v lives on)
     function finishing(owner, v) {
@@ -396,14 +411,16 @@ const Engine = (() => {
         turning.push(v);
         return true;
       }
-      c[owner.squad] = Math.min(CHARM_MAX, c[owner.squad] + 1);
+      const gained = charmGained[owner.side], gave = charmGave[owner.side];
+      if (!gained[owner.squad]) { gained[owner.squad] = true; c[owner.squad] = Math.min(CHARM_MAX, c[owner.squad] + 1); }
+      if (gave[owner.squad]) return false;
       let to = null, td = Infinity;
       for (const f of sides[owner.side]) {
         if (f.squad < 0 || c[f.squad] > 0) continue;
         const d = f.alive ? dist(f, owner) : Infinity;
         if (to == null || d < td) { to = f.squad; td = d; }
       }
-      if (to != null) c[to] = 1;
+      if (to != null) { c[to] = 1; gained[to] = true; gave[owner.squad] = true; }
       return false;
     }
     // healing and regeneration strength (a map can make them stronger)
@@ -431,10 +448,15 @@ const Engine = (() => {
     let seed = (A.length * 7919 + B.length * 104729 + 1) >>> 0;
     const rnd = () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let x = Math.imul(seed ^ seed >>> 15, 1 | seed); x = x + Math.imul(x ^ x >>> 7, 61 | x) ^ x; return ((x ^ x >>> 14) >>> 0) / 4294967296; };
     let spawnIdx = A.length + B.length;
+    // g.bounds = { x0, x1, y0, y1 } (optional): the board; Spread never sends a body off it
+    if (g.bounds) for (const b of all) if (b.spreadTo) {
+      b.spreadTo.x = Math.max(g.bounds.x0, Math.min(g.bounds.x1, b.spreadTo.x));
+      b.spreadTo.y = Math.max(g.bounds.y0, Math.min(g.bounds.y1, b.spreadTo.y));
+    }
     const SPAWN_SPOTS = [[0.7, 0.7], [-0.7, 0.7], [0, 1], [1, 0], [-1, 0], [0.7, -0.7], [-0.7, -0.7], [0, -1]]; // (side, forward): front first
     // damage that skips armor and ward (poison)
     function direct(owner, v, amount) {
-      if (v.turning) return;
+      if (v.turning || v.u.aloft) return;
       const applied = Math.min(amount, v.hp);
       if (applied <= 0) return;
       stats[owner.side].dealt += applied;
@@ -447,7 +469,7 @@ const Engine = (() => {
     }
     // damage from the map itself (elf tower, toxic tiles): counts for neither side, earns no experience
     function neutralDamage(v, dmg) {
-      if (v.turning) return;
+      if (v.turning || v.u.aloft) return;
       if (cripple[v.side] > 0) dmg = dmg * (1 + towerDown.taken / 100);
       v.hp -= dmg;
       if (v.hp <= 1e-9) { v.hp = 0; v.alive = false; v.diedTick = tick; fell(v); }
@@ -465,11 +487,12 @@ const Engine = (() => {
         b.slowMove = Math.max(b.slowMove, tl.slowMove); b.slowAtk = Math.max(b.slowAtk, tl.slowAtk); b.slowT = Math.max(b.slowT, tl.slowDur);
       }
     }
-    // structures (towers) don't count: a side is beaten when its units are gone
-    const aliveCount = (arr) => { let c = 0; for (const b of arr) if (b.alive && !b.u.structure) c++; return c; };
+    // structures (towers) and airships don't count: a side is beaten when its units are gone
+    const aliveCount = (arr) => { let c = 0; for (const b of arr) if (b.alive && !b.u.structure && !b.u.aloft) c++; return c; };
 
     function hurt(owner, v, hit, fromX, fromY) {
       if (v.turning) return; // being won over: nothing hurts it until it has switched sides
+      if (v.u.aloft) return; // an airship can't be shot down
       const st = stats[owner.side];
       let pct = owner.u.pctHit > 0 && !v.u.structure ? v.u.hp * owner.u.pctHit / 100 : 0;
       if (cripple[owner.side] > 0) { hit = hit * (1 - towerDown.attack / 100); pct = pct * (1 - towerDown.attack / 100); }
@@ -576,6 +599,13 @@ const Engine = (() => {
       return valid.map(v => v[1]);
     }
 
+    // the enemy a body attacks: once it has picked one it stays on it until it dies, hides or leaves its reach,
+    // even if another enemy comes closer; then it picks the nearest
+    function locked(b, valid) {
+      if (!(b.lock && b.lock.alive && valid.includes(b.lock))) b.lock = valid[0];
+      return b.lock;
+    }
+
     // one shot, or a spread of shotgun pellets each at a different body in the cone
     function aim(b, primary, valid) {
       if (b.u.flame > 0) return flameTargets(b, primary);
@@ -625,7 +655,7 @@ const Engine = (() => {
     function fire(b, targets, canCharge) {
       const charged = canCharge && b.u.charge > 1 && b.moved >= CHARGE_RUN;
       b.moved = 0;
-      b.hidden = false; // attacking gives a stealth unit away (it hides again after STEALTH_BACK s without attacking)
+      if (!b.u.aloft) b.hidden = false; // attacking gives a stealth unit away (it hides again after STEALTH_BACK s without attacking); an airship stays out of reach
       b.lastAtk = t;
       if (b.u.healPct > 0) {
         // heal a random wounded ally (not itself)
@@ -731,7 +761,7 @@ const Engine = (() => {
       for (let k = 0; k < 2; k++) if (cripple[k] > 0) cripple[k] = Math.max(0, cripple[k] - dt);
       // map tiles under the units (checked before moving, so the tile a unit starts on always counts)
       if (tiles.length) for (const b of all) {
-        if (!b.alive || b.u.structure) continue;
+        if (!b.alive || b.u.structure || b.u.aloft) continue;
         for (const tl of tiles) if (b.alive && b.x >= tl.x0 && b.x < tl.x1 && b.y >= tl.y0 && b.y < tl.y1) onTile(b, tl);
       }
       // stealth: hidden until it attacks, and again after STEALTH_BACK s without attacking (roster rules can turn either off)
@@ -776,6 +806,13 @@ const Engine = (() => {
           continue;
         }
         if (b.u.ram) { ram(b, foes); continue; }
+        if (b.spreadTo) { // Spread: run out to its own spot first
+          const sx = b.spreadTo.x - b.x, sy = b.spreadTo.y - b.y, sd = hyp(sx, sy);
+          const mv = Math.min(sd, b.u.speed * (b.slowT > 0 ? 1 - b.slowMove / 100 : 1) * dt);
+          if (sd > 1e-6) { b.hx = sx / sd; b.hy = sy / sd; b.x += b.hx * mv; b.y += b.hy * mv; b.moved += mv; }
+          if (sd - mv <= 0.05) b.spreadTo = null;
+          continue;
+        }
         let near = null, nd = Infinity;
         for (const f of foes) {
           if (!f.alive || f.hidden) continue;
@@ -783,7 +820,7 @@ const Engine = (() => {
           if (d < nd) { nd = d; near = f; }
         }
         b.near = near;
-        const rg = R(b);
+        const rg = b.u.hover > 0 ? Math.min(R(b), b.u.hover) : R(b); // hover: an airship flies in closer than its range
         if (near && nd > (g.stopPct > 0 && g.stopPct < 1 && b.engaged ? stopAt(rg) : rg)) {
           const step = b.u.speed * (b.slowT > 0 ? 1 - b.slowMove / 100 : 1) * (cripple[b.side] > 0 ? 1 - towerDown.move / 100 : 1) * dt;
           let mv;
@@ -792,27 +829,28 @@ const Engine = (() => {
           // enemy for the rest of the fight. Each body decides for itself, so a squad can split up when its bodies spot different
           // enemies. A squad meets what stands in its own lane, an empty lane lets it walk around the side,
           // and nobody flips back and forth between marching and chasing.
-          const fwd = b.side === 0 ? 1 : -1;
+          // "Ahead" is toward the enemy's end of the board, or b.march = [x, y] (a squad on a flank marches in from the side).
+          const fwd = b.side === 0 ? 1 : -1, [mx, my] = b.march || [0, fwd];
           const aware = Math.max(rg + sight, minSight);
           if (!b.engaged) {
             let spotted = nd <= aware;
             if (!spotted) { // nothing left ahead to march toward: go for the nearest
               spotted = true;
-              for (const f of foes) if (f.alive && !f.hidden && (f.y - b.y) * fwd > 0) { spotted = false; break; }
+              for (const f of foes) if (f.alive && !f.hidden && (f.x - b.x) * mx + (f.y - b.y) * my > 0) { spotted = false; break; }
             }
             if (spotted) b.engaged = true;
           }
           // where it wants to go: straight ahead, or at the nearest enemy
-          let wx = 0, wy = fwd;
+          let wx = mx, wy = my;
           if (b.engaged) { wx = (near.x - b.x) / nd; wy = (near.y - b.y) / nd; }
-          else if (drift > 0 && nd < aware + drift && (near.y - b.y) * fwd > 0) {
+          else if (drift > 0 && nd < aware + drift && (near.x - b.x) * mx + (near.y - b.y) * my > 0) {
             // within DRIFT of its sight: lean toward the nearest enemy ahead, harder the closer it gets, so it
             // curves in on a diagonal instead of marching level with the enemy and then turning sharply
             const w = (aware + drift - nd) / drift;
-            wx = (near.x - b.x) / nd * w; wy = fwd * (1 - w) + (near.y - b.y) / nd * w;
+            wx = mx * (1 - w) + (near.x - b.x) / nd * w; wy = my * (1 - w) + (near.y - b.y) / nd * w;
           }
           // turn smoothly instead of snapping: the heading swings toward the wanted direction
-          if (b.hx === undefined) { b.hx = 0; b.hy = fwd; }
+          if (b.hx === undefined) { b.hx = mx; b.hy = my; }
           const k = Math.min(1, TURN * dt);
           let hx = b.hx + (wx - b.hx) * k, hy = b.hy + (wy - b.hy) * k, hl = hyp(hx, hy);
           if (hl < 1e-6) { hx = wx; hy = wy; hl = 1; }
@@ -834,9 +872,9 @@ const Engine = (() => {
       for (let s = 0; s < 2; s++) {
         const arr = sides[s];
         for (let i = 0; i < arr.length; i++) {
-          const a = arr[i]; if (!a.alive) continue;
+          const a = arr[i]; if (!a.alive || a.u.aloft) continue;
           for (let j = i + 1; j < arr.length; j++) {
-            const c = arr[j]; if (!c.alive) continue;
+            const c = arr[j]; if (!c.alive || c.u.aloft) continue;
             const dx = c.x - a.x, dy = c.y - a.y;
             const d = hyp(dx, dy);
             // structures and bodies still waiting to start (flank squads) don't budge: the other body moves the whole way
@@ -959,19 +997,19 @@ const Engine = (() => {
             b.cd = 0; // reload starts with the first shot
             valid = validTargets(b);
             if (!valid.length) continue;
-            primary = valid[0];
+            primary = locked(b, valid);
           } else {
             if (b.cd > 0) continue;
             valid = validTargets(b);
             if (!valid.length) continue;
-            b.windTarget = valid[0]; b.windT = b.u.windUp; stats[b.side].winds++;
+            b.windTarget = locked(b, valid); b.windT = b.u.windUp; stats[b.side].winds++;
             continue;
           }
         } else {
           if (b.cd > 0) continue;
           valid = validTargets(b);
           if (!valid.length) continue;
-          primary = valid[0];
+          primary = locked(b, valid);
         }
         // spin-up builds while the unit keeps hitting one target: it stays on that target while it can,
         // and the ramp starts over when it has to switch
@@ -1079,7 +1117,7 @@ const Engine = (() => {
         v.convert = { side: v.side, squad: v.squad, xp: v.xp, dealt: v.dealt || 0 }; // what it earned for its old squad
         v.side = 1 - v.side; v.squad = CONVERT_SQUAD; v.xp = 0; v.dealt = 0; v.turning = false;
         v.windTarget = null; v.windT = 0; v.setUp = false; v.firing = -1; v.burstLeft = 0; v.trampleLeft = 0; v.trampled = null;
-        v.spinTarget = null; v.aims = null; v.engaged = false; v.holdT = 0; v.delay = 0; v.band = null; v.hidden = false;
+        v.spinTarget = null; v.aims = null; v.lock = null; v.march = null; v.spreadTo = null; v.engaged = false; v.holdT = 0; v.delay = 0; v.band = null; v.hidden = false;
         v.slowT = 0; v.slowMove = 0; v.slowAtk = 0; v.shrinkT = 0; v.shrinkM = 0; v.kids = null; v.stunT = 0; v.frenzy = 0;
         sides[v.side].push(v); stats[v.side].totalHp += v.hp;
         for (const b of all) {
@@ -1105,7 +1143,7 @@ const Engine = (() => {
 
     function result() {
       const inside = (b) => b.boarded && b.carrier && b.carrier.alive; // still riding in a carrier that made it
-      const remHp = sides.map(arr => arr.reduce((s, b) => s + ((b.alive || inside(b)) && !b.u.structure ? b.hp : 0), 0));
+      const remHp = sides.map(arr => arr.reduce((s, b) => s + ((b.alive || inside(b)) && !b.u.structure && !b.u.aloft ? b.hp : 0), 0));
       const frac = [remHp[0] / stats[0].totalHp, remHp[1] / stats[1].totalHp];
       const aliveA = aliveCount(A), aliveB = aliveCount(B);
       let winner = -1, timeout = false;

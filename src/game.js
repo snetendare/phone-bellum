@@ -36,8 +36,9 @@ const Game = (() => {
     { id: 'keep', name: 'Keep', text: 'The standard tower: steady, light shots at short range.', unit: { ...TOWER, hp: 700 },
       skill: { name: 'Guards', text: 'Every fight, 4 guards (reskinned Wisps, without Wisp skills) stand by the keep for 5 s, shooting anything that comes close, then march on the enemy.' },
       skill2: { name: 'Brute guards', cost: 500, needs: true, text: 'Your guards are Brutes instead of Wisps: 4 of them, with every skill you have bought for Brutes. Needs Guards.' } },
-    { id: 'sniper', name: 'Sniper tower', text: 'Shoots across most of the board, slowly, for double damage.', unit: { ...TOWER, name: 'Sniper Tower', kind: 'sniper', hp: 500, hit: 60, aps: 0.4, range: 30, color: '#B9C7D6' },
-      skill: { name: 'Eagle eye', text: 'The sniper tower and all your Sniper squads get +3 m range and +10% attack speed.' } },
+    { id: 'sniper', name: 'Sniper tower', text: 'Shoots across most of the board, slowly, for double damage.', unit: { ...TOWER, name: 'Sniper Tower', kind: 'sniper', hp: 500, hit: 60, aps: 0.4, range: 32, color: '#B9C7D6' },
+      skill: { name: 'Eagle eye', text: 'The sniper tower and all your Sniper squads get +3 m range and +10% attack speed.' },
+      skill2: { name: 'Deploy airship', cost: 500, text: 'Every fight, an airship takes off from the tower. It can’t be shot down. It flies toward the enemy, shoots like the sniper tower (Eagle eye included) and drops a paratrooper (a guard, like the keep’s) every 5 s, up to 6 at once. Passive: your sniper tower, the airship and all your Sniper squads deal +30 damage per hit.' } },
     { id: 'bastion', name: 'Bastion', text: 'Much tougher, with a shorter, slower attack that splashes the units around its target.', unit: { ...TOWER, name: 'Bastion', kind: 'bastion', hp: 1000, aps: 0.8, range: 5, splash: 2, color: '#B79C8A' },
       skill: { name: 'Home ground', text: 'In fights, your units get +2 armor and +10% health while they stand in your own zone. They lose it in no man’s land and get it back if they return.' },
       skill2: { name: 'Moats', cost: 250, text: 'A ring of fire around the bastion: 12 damage 4 times a second to every enemy within 5 m, like a Flame Wizard’s flames.' } },
@@ -125,58 +126,90 @@ const Game = (() => {
   }
   const towerSkill2On = (m, side, id) => towerSkill2Of(m, side) && towerType(m, side).id === id && (!towerType(m, side).skill2.needs || towerSkillOf(m, side));
   const MOAT = { hit: 12, aps: 4, range: 5 };
+  // Deploy airship (sniper tower): squad id -4, can't be hit (Engine: aloft), stops hover m short of its target;
+  // drops one paratrooper every `every` s, up to `max` alive; +sniperHit damage per hit for the tower, the airship and Snipers
+  const AIRSHIP = { speed: 3, hover: 14, every: 5, max: 6, sniperHit: 30 };
   const INVEST = { gold: 1000 }; // Major investment (bank): paid back at the start of the next round
   // Mage tower: each round its owner may call one mage general, who swaps the tower's attack for that round's fight
-  // only. m.mageGen[side] = { round, id }; it counts only in the round it was bought. Hidden from the opponent until the fight.
+  // only, and/or the teleport general (extra: called on top of another general, or alone).
+  // m.mageGen[side] = { round, id, tp }: id = the general (or null), tp = teleport called; it counts only in the round
+  // it was bought. Hidden from the opponent until the fight.
   const MAGE_GENERALS = [
     { id: 'meteor', name: 'Meteor mage general', cost: 100, text: 'The tower calls down meteors like a Meteor Caller, with its range and minimum range, but at 25% of its damage and half its fire rate.' },
     { id: 'lightning', name: 'Lightning mage general', cost: 50, text: 'Lightning at the tower’s normal range: 100 damage to the first enemy, then it jumps up to 5 times to the nearest enemy not hit yet within 6 m, for 60 each.' },
     { id: 'water', name: 'Water mage general', cost: 50, text: 'The tower stops attacking and heals instead: 100 health to your most wounded unit within 40 m, 0.8 times a second.' },
-    { id: 'teleport', name: 'Teleport mage general', cost: 100, text: 'The tower keeps its normal beam. When it falls, your army isn’t crippled: instead the tower teleports to a random tile anywhere on the board with 1 health.' },
+    { id: 'teleport', name: 'Teleport mage general', cost: 100, extra: true, text: 'Can be called on top of another general. The tower keeps its attack. When it falls, your army isn’t crippled: instead the tower teleports to a random tile anywhere on the board with 1 health.' },
   ];
   const MAGE = { meteorHit: 25, meteorAps: 50, boltHit: 100, boltAps: 0.8, jumps: 5, jumpHit: 60, jumpReach: 6, waterHeal: 100, waterAps: 0.8, waterRange: 40 };
   const METEOR = { hit: 114, aps: 0.3, range: 50, minRange: 12, burst: 3, splash: 6, windUp: 2, projSpeed: 22 }; // used when the roster has no Meteor Caller
   const mageGenInfo = (id) => MAGE_GENERALS.find(x => x.id === id) || null;
-  const mageGenOf = (m, side) => { const g = m && m.mageGen && m.mageGen[side]; return g && g.round === m.round && towerType(m, side).id === 'mage' ? g.id : null; };
+  const isExtraGen = (id) => !!(mageGenInfo(id) || {}).extra;
+  // what the player called this round: { id, tp } or null (an old save's { id: 'teleport' } counts as tp)
+  const mageCalled = (m, side) => {
+    const g = m && m.mageGen && m.mageGen[side];
+    if (!g || g.round !== m.round || towerType(m, side).id !== 'mage') return null;
+    return isExtraGen(g.id) ? { id: null, tp: true } : { id: g.id || null, tp: !!g.tp };
+  };
+  const mageGenOf = (m, side) => (mageCalled(m, side) || {}).id || null; // the general called this round (not teleport)
+  const mageTpOf = (m, side) => !!(mageCalled(m, side) || {}).tp;       // the teleport general called this round
   const mageGenCost = (id) => (mageGenInfo(id) || {}).cost || 0;
-  // Blixten: a general can take the round's free purchase; swapping generals keeps it
+  const setMageGen = (m, side, id, tp) => { if (!m.mageGen) m.mageGen = [null, null]; m.mageGen[side] = id || tp ? { round: m.round, id: id || null, tp: !!tp } : null; };
+  // Blixten: a general can take the round's free purchase ({ kind: 'mgen' }, or { kind: 'mtp' } for teleport); swapping generals keeps it
   const mageGenFree = (m, side) => !!mageGenOf(m, side) && isMapFree(m, side, { kind: 'mgen' });
+  const mageTpFree = (m, side) => mageTpOf(m, side) && isMapFree(m, side, { kind: 'mtp' });
   // what calling id costs a player now (a free general swapped for another stays free)
-  const mageGenPrice = (m, side, id) => mageGenFree(m, side) || (!mageGenOf(m, side) && mapFreeLeft(m, side)) ? 0 : mageGenCost(id);
-  // what calling id costs right now: a general already called this round is swapped out and paid back
-  const canBuyMageGen = (m, side, id) => !!mageGenInfo(id) && towerPicked(m, side) && towerType(m, side).id === 'mage' && mageGenOf(m, side) !== id && m.gold[side] + (mageGenFree(m, side) ? 0 : mageGenCost(mageGenOf(m, side))) >= mageGenPrice(m, side, id);
+  const mageGenPrice = (m, side, id) => isExtraGen(id) ? (mageTpFree(m, side) || (!mageTpOf(m, side) && mapFreeLeft(m, side)) ? 0 : mageGenCost(id))
+    : mageGenFree(m, side) || (!mageGenOf(m, side) && mapFreeLeft(m, side)) ? 0 : mageGenCost(id);
+  // a general already called this round is swapped out and paid back
+  const canBuyMageGen = (m, side, id) => !!mageGenInfo(id) && towerPicked(m, side) && towerType(m, side).id === 'mage' && (isExtraGen(id)
+    ? !mageTpOf(m, side) && m.gold[side] >= mageGenPrice(m, side, id)
+    : mageGenOf(m, side) !== id && m.gold[side] + (mageGenFree(m, side) ? 0 : mageGenCost(mageGenOf(m, side))) >= mageGenPrice(m, side, id));
   function buyMageGen(m, side, id) {
     if (!canBuyMageGen(m, side, id)) return false;
+    if (isExtraGen(id)) {
+      const free = mapFreeLeft(m, side);
+      if (free) useMapFree(m, side, { kind: 'mtp' });
+      m.gold[side] -= free ? 0 : mageGenCost(id);
+      setMageGen(m, side, mageGenOf(m, side), true);
+      return true;
+    }
     const cur = mageGenOf(m, side), free = mageGenFree(m, side) || (!cur && mapFreeLeft(m, side));
     if (cur && !mageGenFree(m, side)) m.gold[side] += mageGenCost(cur);
-    if (!m.mageGen) m.mageGen = [null, null];
     if (free && !mageGenFree(m, side)) useMapFree(m, side, { kind: 'mgen' });
     m.gold[side] -= free ? 0 : mageGenCost(id);
-    m.mageGen[side] = { round: m.round, id };
+    setMageGen(m, side, id, mageTpOf(m, side));
     return true;
   }
-  function undoMageGen(m, side) {
-    const id = mageGenOf(m, side); if (!id) return false;
-    const wasFree = mageGenFree(m, side);
-    m.gold[side] += wasFree ? 0 : mageGenCost(id);
-    m.mageGen[side] = null;
+  // send back the general called this round (id: 'teleport' for the teleport general)
+  function undoMageGen(m, side, id) {
+    const tp = isExtraGen(id), cur = tp ? (mageTpOf(m, side) ? id : null) : mageGenOf(m, side);
+    if (!cur) return false;
+    const wasFree = tp ? mageTpFree(m, side) : mageGenFree(m, side);
+    m.gold[side] += wasFree ? 0 : mageGenCost(cur);
+    setMageGen(m, side, tp ? mageGenOf(m, side) : null, tp ? false : mageTpOf(m, side));
     if (wasFree) passMapFree(m, side);
     return true;
   }
-  // the tower's unit for this round's fight, with a mage general's attack if one was called
-  function mageTowerUnit(m, side, base) {
-    const id = mageGenOf(m, side), plain = { ...base, spinUp: 0, spinHit: 0 };
+  // the mage tower's unit with general id's attack (meteor, lightning or water; anything else: the tower's own)
+  function generalUnit(m, base, id) {
+    const plain = { ...base, spinUp: 0, spinHit: 0 };
     if (id === 'meteor') {
       const mc = (m.units || []).find(x => x && x.name === 'Meteor Caller') || METEOR;
       return { ...plain, hit: mc.hit * MAGE.meteorHit / 100, aps: mc.aps * MAGE.meteorAps / 100, range: mc.range, minRange: mc.minRange || 0, burst: mc.burst || 1, splash: mc.splash || 0, windUp: mc.windUp || 0, projSpeed: mc.projSpeed || 0, general: id };
     }
     if (id === 'lightning') return { ...plain, hit: MAGE.boltHit, aps: MAGE.boltAps, chain: { jumps: MAGE.jumps, hit: MAGE.jumpHit, reach: MAGE.jumpReach }, general: id };
     if (id === 'water') return { ...plain, hit: 0, mend: MAGE.waterHeal, aps: MAGE.waterAps, range: MAGE.waterRange, general: id };
-    if (id === 'teleport') { // a random tile anywhere on the board, the same on both phones
-      const r = rng(m.seed + m.round * 4931 + side * 811 + 7), w = tileToWorld(Math.floor(r() * COLS), Math.floor(r() * ROWS));
-      return { ...base, teleport: { x: w.x, y: w.y }, general: id };
-    }
     return base;
+  }
+  // the tower's unit for this round's fight, with a mage general's attack if one was called, and teleport on top
+  function mageTowerUnit(m, side, base) {
+    const id = mageGenOf(m, side);
+    let u = generalUnit(m, base, id);
+    if (mageTpOf(m, side)) { // a random tile anywhere on the board, the same on both phones
+      const r = rng(m.seed + m.round * 4931 + side * 811 + 7), w = tileToWorld(Math.floor(r() * COLS), Math.floor(r() * ROWS));
+      u = { ...u, teleport: { x: w.x, y: w.y }, general: id || 'teleport' };
+    }
+    return u;
   }
   // Bank tower: once a round, a loan of LOAN.gold right away; the next round's gold (income, loser bonus and
   // the rest) is LOAN.payback less, never below nothing. m.loan[side] = the round the last loan was taken in.
@@ -261,7 +294,7 @@ const Game = (() => {
   const charInfo = (id) => CHARACTERS.find(c => c.id === id) || null;
   // Blixten: the first map or tower purchase each round is free. m.mapFree[side][round] = the purchase that got it:
   // { kind: 'bribe' } (the round's first bribe), { kind: 'altar', type }, { kind: 'shroom', col, row }, { kind: 'elf' },
-  // { kind: 'tskill' }, { kind: 'tskill2' } (not Major investment) or { kind: 'mgen' } (a mage general)
+  // { kind: 'tskill' }, { kind: 'tskill2' } (not Major investment), { kind: 'mgen' } (a mage general) or { kind: 'mtp' } (the teleport general)
   const mapFreeOf = (m, side) => (m && m.mapFree && m.mapFree[side] && m.mapFree[side][m.round]) || null;
   const mapFreeLeft = (m, side) => side != null && charOf(m, side) === 'blixten' && !mapFreeOf(m, side);
   const isMapFree = (m, side, rec) => { const f = mapFreeOf(m, side); return !!f && f.kind === rec.kind && f.type === rec.type && f.col === rec.col && f.row === rec.row; };
@@ -283,6 +316,7 @@ const Game = (() => {
     else if (m.towerSkill && m.towerSkill[side] === m.round) { rec = { kind: 'tskill' }; back = TOWER_SKILL.cost; }
     else if (m.towerSkill2 && m.towerSkill2[side] === m.round && !(towerType(m, side).skill2 || {}).noFree) { rec = { kind: 'tskill2' }; back = towerType(m, side).skill2.cost; }
     else if (mageGenOf(m, side)) { rec = { kind: 'mgen' }; back = mageGenCost(mageGenOf(m, side)); }
+    else if (mageTpOf(m, side)) { rec = { kind: 'mtp' }; back = mageGenCost('teleport'); }
     if (rec) { useMapFree(m, side, rec); m.gold[side] += back; }
   }
   // ---------- maps ----------
@@ -307,7 +341,7 @@ const Game = (() => {
     { id: 'snowgre', name: 'Summon a Snowgre', text: 'A white golem made of snow joins your army for the rest of the match. It stands in your half of no man’s land at the start of every fight and doesn’t mind hail. The first is 25% as strong as an Ether Golem, and each one after is twice as strong as the last.' },
   ];
   // the Ether Golem a Snowgre is modelled on (taken from the roster when it has one)
-  const GOLEM = { name: 'Ether Golem', cost: 5, bodies: 1, hp: 3450, hit: 69, aps: 0.6, range: 5, speed: 2.5, splash: 3, defense: 'armor', defVal: 15 };
+  const GOLEM = { name: 'Ether Golem', cost: 5, bodies: 1, hp: 3450, hit: 69, aps: 0.6, range: 5, speed: 2.5, splash: 3, defense: 'armor', defVal: 6 };
   const isIce = (m) => !!(mapOf(m) && mapOf(m).ice);
   const hailRound = (m) => isIce(m) && m.round >= 2;
   const altarRound = (m) => isIce(m) && m.round % 2 === 0;
@@ -588,6 +622,7 @@ const Game = (() => {
   // riders follow their carrier's tile
   const syncRiders = (m, side) => { for (const s of m.armies[side]) if (isRider(s)) { const c = carrierOf(m, side, s); if (c) { s.col = c.col; s.row = c.row; } else delete s.in; } };
   const tileToWorld = (col, row) => ({ x: (col - (COLS - 1) / 2) * TILE, y: ((ROWS - 1) / 2 - row) * TILE });
+  const BOUNDS = { x0: -COLS * TILE / 2, x1: COLS * TILE / 2, y0: -ROWS * TILE / 2, y1: ROWS * TILE / 2 }; // the board in world metres
 
   function rng(seed) { // mulberry32
     let a = seed >>> 0;
@@ -696,7 +731,7 @@ const Game = (() => {
       towerSkill: [0, 0], // round each player bought their tower's skill in (0 = not bought)
       towerSkill2: [0, 0], // ...and its second skill (keep, bastion, bank)
       loan: [0, 0], // the round each player last took a bank loan in (Bank tower)
-      mageGen: [null, null], // the mage general each player called this round: { round, id } (Mage tower)
+      mageGen: [null, null], // the mage generals each player called this round: { round, id, tp } (Mage tower)
       mapFree: [{}, {}], // Blixten's free map purchase per round (see mapFreeOf)
     };
     m.towers = [towerSpot(m, 0), towerSpot(m, 1)];
@@ -936,7 +971,7 @@ const Game = (() => {
     const out = [];
     let idx = 0;
     // tower skills in force: Eagle eye (sniper tower), Home ground (bastion: a band across this side's zone)
-    const eagle = towerSkillOn(m, side, 'sniper');
+    const eagle = towerSkillOn(m, side, 'sniper'), airship = towerSkill2On(m, side, 'sniper');
     const home = towerSkillOn(m, side, 'bastion') ? (() => {
       const ys = zoneRows(side).map(r => tileToWorld(0, r).y);
       return { y0: Math.min(...ys) - TILE / 2, y1: Math.max(...ys) + TILE / 2, armor: TOWER_SKILL.homeArmor, hpPct: TOWER_SKILL.homeHp, on: false };
@@ -957,10 +992,12 @@ const Game = (() => {
       if (eagle && u.name === 'Sniper') u = { ...u, range: u.range + TOWER_SKILL.eagleRange, aps: u.aps * (1 + TOWER_SKILL.eagleAps / 100) };
       if (mp && mp.rangeCut && u.range > mp.rangeKeep) u = { ...u, range: Math.max(mp.rangeKeep, u.range * (1 - mp.rangeCut / 100)) }; // the map shortens reach (never below rangeKeep)
       const b = E.buildSquad(u, side, w.x, w.y, sq.id, TILE, idx, sq.level);
+      if (airship && u.name === 'Sniper') { const su = { ...b[0].u, hit: b[0].u.hit + AIRSHIP.sniperHit }; for (const x of b) x.u = su; } // flat, after levels
       if (home) for (const x of b) x.band = { ...home };
       if (zoe) for (const x of b) x.zoe = true; // for the rising-stars effect
       if (purple) for (const x of b) x.shroom = true; // for the drifting spores effect
       if (isFlank(side, sq.col, sq.row) && (sq.round === m.round || sq.movedRound === m.round)) for (const x of b) x.delay = FLANK.delay * (ch === 'wilhelm' ? CHAR.wilhelmDelay : 1); // only in its first fight
+      if (isFlank(side, sq.col, sq.row)) for (const x of b) x.march = [w.x < 0 ? 1 : -1, 0]; // a flank squad marches in toward the middle until it spots an enemy
       idx += b.length;
       out.push(...b);
     }
@@ -976,6 +1013,7 @@ const Game = (() => {
       if (towerType(m, side).id === 'slime') tu = { ...slimeTowerUnit(m, side, tu), slime: true };
       if (towerSkill2On(m, side, 'bastion')) tu = { ...tu, moat: { ...MOAT } };
       if (eagle) tu = { ...tu, range: tu.range + TOWER_SKILL.eagleRange, aps: tu.aps * (1 + TOWER_SKILL.eagleAps / 100) };
+      if (airship) tu = { ...tu, hit: tu.hit + AIRSHIP.sniperHit };
       const w = tileToWorld(t.col, t.row), tb = E.buildSquad(tu, side, w.x, w.y, -2, TILE, idx);
       if (altarBought(m, side, 'walls')) for (const x of tb) x.walls = [ICE.wallHits, ICE.wallHits, ICE.wallHits, ICE.wallHits];
       idx += tb.length; out.push(...tb);
@@ -990,6 +1028,15 @@ const Game = (() => {
         const gb = E.buildSquad(gu, side, w.x, w.y + (side === 0 ? 1 : -1) * TILE, -3, TILE, idx);
         for (const x of gb) x.holdT = TOWER_SKILL.guardHold;
         idx += gb.length; out.push(...gb);
+      }
+      // Deploy airship (sniper tower's second skill): flies from the tower, shoots like it, drops guards as paratroopers
+      if (airship) {
+        const { skills, skillDefs, skillsOn, skillsInnate, skillMods, ...plain } = (m.units || []).find(x => x && x.name === 'Wisps') || GUARD;
+        const para = E.withTraits({ ...plain, name: 'Paratrooper', level: 0, bodies: 1, shape: 'diamond', color: '#E2D3A6' });
+        const au = E.withTraits({ ...tu, name: 'Airship', kind: 'airship', structure: false, aloft: true, hp: 1, speed: AIRSHIP.speed, hover: AIRSHIP.hover,
+          spawn: { unit: para, count: 1, every: AIRSHIP.every, max: AIRSHIP.max, waves: 0 } });
+        const ab = E.buildSquad(au, side, w.x, w.y, -4, TILE, idx);
+        idx += ab.length; out.push(...ab);
       }
     }
     // Snowgres stand on their own tiles in no man's land; squad ids -10, -11, ... (not squads in the army)
@@ -1049,7 +1096,7 @@ const Game = (() => {
     ensurePack(m, 0); ensurePack(m, 1);
     ensureCharm(m, 0); ensureCharm(m, 1);
     const mp = mapOf(m), elf = elfSpot(m);
-    let g = mp && mp.healMul ? { ...SETTINGS, healMul: mp.healMul } : SETTINGS;
+    let g = { ...SETTINGS, bounds: BOUNDS, ...(mp && mp.healMul ? { healMul: mp.healMul } : {}) };
     if (m.rules) g = { ...g, rules: m.rules }; // the roster's rules (a Counter Lab roster can switch mechanics off)
     const T2 = TILE / 2, tiles = [];
     if (mp && mp.shrooms) for (const t of m.map.tiles || []) {
@@ -1347,7 +1394,7 @@ const Game = (() => {
     unlockCost, tierOf, startLevel, shopCost, mapFreeOf, mapFreeLeft, isUnlocked, unlockVisible, unlock, undoUnlock,
     skillDef, skillCost, isInnate, hasSkill, skillVisible, unitFor, canBuySkill, buySkill, undoSkill, sellValue, sell,
     isRider, hiddenFromFoe, isCarrier, riderOf, carrierOf, squadAt, boardable, unplaceSquad,
-    TOWER, TOWER_TYPES, OUTPOST, TOWER_PICK_ROUND, towerType, towerChoices, needsTowerPick, setTowerType, settleTowerPicks, TOWER_SKILL, towerSkillOf, towerSkillVisible, towerPicked, canBuyTowerSkill, buyTowerSkill, undoTowerSkill, towerSkillCost, towerSkill2Of, towerSkill2Visible, towerSkill2Cost, canBuyTowerSkill2, buyTowerSkill2, undoTowerSkill2, MOAT, INVEST, MAGE_GENERALS, mageGenPrice, MAGE, mageGenInfo, mageGenOf, mageGenCost, canBuyMageGen, buyMageGen, undoMageGen, mageTowerUnit, LOAN, loanNow, canTakeLoan, takeLoan, undoLoan, SLIME_UNITS, slimeTowerUnit, slimeSkillDefs, TOWER_MID, towerColOk, towerAt, needsTower, placeTower, ensureTower,
+    TOWER, TOWER_TYPES, OUTPOST, TOWER_PICK_ROUND, towerType, towerChoices, needsTowerPick, setTowerType, settleTowerPicks, TOWER_SKILL, towerSkillOf, towerSkillVisible, towerPicked, canBuyTowerSkill, buyTowerSkill, undoTowerSkill, towerSkillCost, towerSkill2Of, towerSkill2Visible, towerSkill2Cost, canBuyTowerSkill2, buyTowerSkill2, undoTowerSkill2, towerSkill2On, AIRSHIP, MOAT, INVEST, MAGE_GENERALS, mageGenPrice, MAGE, mageGenInfo, mageGenOf, mageTpOf, isExtraGen, mageGenCost, canBuyMageGen, buyMageGen, undoMageGen, mageTowerUnit, generalUnit, LOAN, loanNow, canTakeLoan, takeLoan, undoLoan, SLIME_UNITS, slimeTowerUnit, slimeSkillDefs, TOWER_MID, towerColOk, towerAt, needsTower, placeTower, ensureTower,
     FLANK, flankRows, flankOpen, isFlank, reserved, canPlaceAt, isOff, enemyHolds, inNoMans, hasSkillType,
     ICE, ALTAR, GOLEM, isIce, hailRound, altarRound, stormShift, stormRows, hailTiles, altarCost, altarRefund, altarCount, pushRoom, altarBought, addAltar, buyAltar, undoAltar, snowgres, snowgreUnit,
     MAPS, ELF_TOWER, SHROOM, SHROOM_SPLIT, shroomAt, shroomTileAt, shroomRemoval, SHROOM_REMOVE, shroomCost, removeShroom, undoRemoveShroom, mapOf, elfSpot, rollMap, BRIBE_COST, bribeList, bribeGold, bribeCount, bribeNow, bribeCost, bribeRefund, ELF_POWER, elfPowered, elfUnit, ELF_OWN, elfOwnCost, elfOwnOf, elfOwnAt, elfOwnUnlocked, elfOwnOffered, canBuyElfOwn, elfOwnSpotOk, buyElfOwn, undoElfOwn, bribeLeader, canBribe, bribe, undoBribe,
