@@ -41,6 +41,7 @@ a { color: var(--you); }
 .round-sub { display: flex; align-items: center; justify-content: center; gap: 6px; }
 .cog { width: 24px; height: 24px; padding: 0; border: 1px solid var(--line); border-radius: 50%; background: transparent; color: var(--muted); display: grid; place-items: center; cursor: pointer; }
 .cog:hover, .cog:focus-visible { color: var(--gold); border-color: var(--gold); }
+.sheet { max-height: 80dvh; } /* iPhones: vh counts the space under Safari's toolbars */
 .songs { display: grid; gap: 6px; }
 .songs button { text-align: left; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--ink); padding: 10px 12px; font: 500 14px var(--font-body); display: grid; gap: 2px; }
 .songs button span { font-size: 12px; color: var(--muted); }
@@ -140,7 +141,7 @@ a { color: var(--you); }
 <div class="app">
   <div class="hud" aria-label="Match status">
     <div class="side you"><div class="lbl"><span>You</span><span class="num" id="hp-you">50</span></div><div class="hp"><i id="hpbar-you" style="width:100%"></i></div></div>
-    <div class="round"><b class="num" id="round">1</b><div class="round-sub"><span id="phase">Deploy</span><button class="cog" id="cog" aria-label="Music settings"><svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M19.4 13a7.6 7.6 0 0 0 0-2l2.1-1.6-2-3.4-2.5 1a7.4 7.4 0 0 0-1.7-1L15 3.3h-4l-.4 2.7a7.4 7.4 0 0 0-1.7 1l-2.5-1-2 3.4L6.6 11a7.6 7.6 0 0 0 0 2l-2.1 1.6 2 3.4 2.5-1a7.4 7.4 0 0 0 1.7 1l.4 2.7h4l.4-2.7a7.4 7.4 0 0 0 1.7-1l2.5 1 2-3.4zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)"/></svg></button></div></div>
+    <div class="round"><b class="num" id="round">1</b><div class="round-sub"><span id="phase">Deploy</span><button class="cog" id="cog" aria-label="Settings"><svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M19.4 13a7.6 7.6 0 0 0 0-2l2.1-1.6-2-3.4-2.5 1a7.4 7.4 0 0 0-1.7-1L15 3.3h-4l-.4 2.7a7.4 7.4 0 0 0-1.7 1l-2.5-1-2 3.4L6.6 11a7.6 7.6 0 0 0 0 2l-2.1 1.6 2 3.4 2.5-1a7.4 7.4 0 0 0 1.7 1l.4 2.7h4l.4-2.7a7.4 7.4 0 0 0 1.7-1l2.5 1 2-3.4zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)"/></svg></button></div></div>
     <div class="side foe"><div class="lbl"><span id="foe-name">Enemy</span><span class="num" id="hp-foe">50</span></div><div class="hp"><i id="hpbar-foe" style="width:100%"></i></div></div>
   </div>
   <div class="net" id="net" hidden aria-live="polite"><i></i><span id="net-text"></span></div>
@@ -362,7 +363,8 @@ a { color: var(--you); }
     cavern: { deploy: ['sirski'] },
   };
   const FADE_IN = 1, FADE_OUT = 1; // seconds
-  let snd = { vol: 60, muted: false, song: '' }; // song: the one menu song the player picked ('' = the menu playlist)
+  const DEFAULT_VOL = 60;
+  let snd = { vol: DEFAULT_VOL, muted: false, song: '' }; // song: the one menu song the player picked ('' = the menu playlist)
   try {
     const p = JSON.parse(localStorage.getItem(SOUND_STORE) || 'null');
     if (p && isFinite(p.vol)) snd = { vol: Math.max(0, Math.min(100, +p.vol)), muted: !!p.muted, song: SONGS[p.song] ? p.song : '' };
@@ -394,6 +396,12 @@ a { color: var(--you); }
       gain = actx.createGain(); gain.gain.value = pl.playing ? musicLevel() : 0;
       actx.createMediaElementSource(el).connect(gain).connect(actx.destination);
     };
+    pl.wake = () => { // music turned back on in a tap: retry play() inside it, fade up from wherever the gain is
+      if (!pl.playing) return;
+      clearTimeout(stopT);
+      if (el.paused) el.play().catch(() => {});
+      pl.ramp(musicLevel(), FADE_IN);
+    };
     pl.set = (want) => {
       if (want && (!pl.playing || el.paused)) { // el.paused: an earlier play() was refused, try again
         pl.playing = true; clearTimeout(stopT);
@@ -419,38 +427,60 @@ a { color: var(--you); }
   // phones only allow sound after the player touches the page
   // (iPhones only count the end of a touch, so every tap retries until the sound is running)
   try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) {} // play even with the iPhone's silent switch on
-  const unlockMusic = () => {
+  // force: resume even if it says it runs (after an interruption, a call or the app in the background, an iPhone's
+  // context can sit 'suspended' or 'interrupted', and resume() only works inside a tap)
+  const wakeAudio = (force) => {
     if (!actx) try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
-    if (actx && actx.state !== 'running') actx.resume().then(() => Object.values(music).forEach(pl => pl.hook())).catch(() => {});
-    else if (actx) Object.values(music).forEach(pl => pl.hook());
-    musicUnlocked = true; syncMusic();
+    const hookAll = () => Object.values(music).forEach(pl => pl.hook());
+    if (actx && actx.state === 'running') hookAll();
+    if (actx && (force || actx.state !== 'running')) try { actx.resume().then(hookAll).catch(() => {}); } catch (e) {}
+    musicUnlocked = true;
   };
+  const unlockMusic = () => { wakeAudio(); syncMusic(); };
   ['touchend', 'click', 'keydown'].forEach(t => document.addEventListener(t, unlockMusic, { capture: true, passive: true }));
+  const musicOn = () => !snd.muted && snd.vol > 0;
+  // On or Off from a tap: iPhones only start sound inside one, so this wakes Web Audio and calls play() right here.
+  // A volume left at 0 comes back up, or On would stay silent.
+  function setMusic(on) {
+    snd.muted = !on;
+    if (on && !snd.vol) snd.vol = DEFAULT_VOL;
+    saveSound();
+    if (on) wakeAudio(true);
+    syncMusic();
+    if (on) Object.values(music).forEach(pl => pl.wake());
+  }
+  // the cog in a match opens it as Settings (music and Main menu), the menu's Music button as music only.
+  // data-keep: phase changes leave this sheet open (closeSheet)
   function openSoundSheet() {
+    const inMatch = !!m && phase !== 'start' && phase !== 'lobby';
     $('sheet').innerHTML = `
-      <div class="bar"><h3 id="sheet-h">Music</h3><button class="btn small" id="close">Close</button></div>
-      <div class="songs" role="group" aria-label="Menu music">
-        <span class="hint">Menu music</span>
-        <button data-song="" aria-pressed="${!snd.song}">All menu songs<span>${PLAYLISTS.menu.map(songName).join(', ')}</span></button>
-        ${Object.keys(SONGS).map(id => `<button data-song="${id}" aria-pressed="${snd.song === id}">${esc(songName(id))}</button>`).join('')}
+      <div class="bar" data-keep><h3 id="sheet-h">${inMatch ? 'Settings' : 'Music'}</h3><button class="btn small" id="close">Close</button></div>
+      <div class="bar">
+        <span class="hint">Music</span>
+        <div class="seg" role="group" aria-label="Music">
+          <button data-mute="0" aria-pressed="${musicOn()}">On</button><button data-mute="1" aria-pressed="${!musicOn()}">Off</button>
+        </div>
       </div>
       <div class="bar">
         <span class="hint">Music volume</span>
         <span class="volrow"><input type="range" id="vol" min="0" max="100" step="5" value="${snd.vol}" aria-label="Music volume"><span class="num" id="vol-n">${snd.vol}</span></span>
       </div>
-      <div class="bar">
-        <span class="hint">Mute</span>
-        <div class="seg" role="group" aria-label="Mute">
-          <button data-mute="0" aria-pressed="${!snd.muted}">Sound on</button><button data-mute="1" aria-pressed="${snd.muted}">Muted</button>
-        </div>
+      ${inMatch ? '<button class="btn" id="to-menu">Main menu</button>' : ''}
+      <div class="songs" role="group" aria-label="Menu music">
+        <span class="hint">Menu music</span>
+        <button data-song="" aria-pressed="${!snd.song}">All menu songs<span>${PLAYLISTS.menu.map(songName).join(', ')}</span></button>
+        ${Object.keys(SONGS).map(id => `<button data-song="${id}" aria-pressed="${snd.song === id}">${esc(songName(id))}</button>`).join('')}
       </div>
       <p class="hint" style="margin:0">Menu music plays on the main menu and in the lobby. While you deploy, ${PLAYLISTS.deploy.map(songName).join(', ')} plays, and during fights ${PLAYLISTS.battle.map(songName).join(', ')}. ${Object.keys(MAP_MUSIC).map(id => `${esc(Game.MAPS.find(mp => mp.id === id).name)} has its own: ${Object.values(MAP_MUSIC[id]).flat().map(songName).join(', ')}.`).join(' ')} Your settings are saved on this device.</p>`;
     $('sheet-back').hidden = false;
-    $('close').addEventListener('click', closeSheet);
+    $('close').addEventListener('click', () => closeSheet(true));
+    const showOn = () => $('sheet').querySelectorAll('[data-mute]').forEach(x => x.setAttribute('aria-pressed', String((x.dataset.mute === '0') === musicOn())));
     $('vol').addEventListener('input', (e) => {
-      snd.vol = +e.target.value; $('vol-n').textContent = snd.vol; saveSound();
+      snd.vol = +e.target.value; $('vol-n').textContent = snd.vol;
+      if (snd.vol && snd.muted) { snd.muted = false; wakeAudio(true); } // turning the volume up turns music on
+      saveSound();
       Object.values(music).forEach(pl => { if (pl.playing) pl.ramp(musicLevel(), 0.05); });
-      syncMusic();
+      syncMusic(); showOn();
     });
     $('sheet').querySelectorAll('[data-song]').forEach(b => b.addEventListener('click', () => {
       snd.song = b.dataset.song; saveSound();
@@ -458,10 +488,10 @@ a { color: var(--you); }
       music.menu.tracks(menuSongs());
     }));
     $('sheet').querySelectorAll('[data-mute]').forEach(b => b.addEventListener('click', () => {
-      snd.muted = b.dataset.mute === '1'; saveSound();
-      $('sheet').querySelectorAll('[data-mute]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
-      syncMusic();
+      setMusic(b.dataset.mute === '0');
+      $('vol').value = snd.vol; $('vol-n').textContent = snd.vol; showOn();
     }));
+    if ($('to-menu')) $('to-menu').addEventListener('click', askForfeit);
   }
   let mapPick = '';         // the map the host picked for the next match ('' = random)
   let pickFor = '', pickSel = null, pickPeek = false, pickHtml = ''; // the choose-one-of-3 cards over the board (syncPick)
@@ -1846,6 +1876,45 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
     });
   }
 
+  // ---------- Main menu from the in-match settings: leaving a match that is still on forfeits it ----------
+  function askForfeit() {
+    if (!m || phase === 'end') { quitToMenu(); return; }
+    $('sheet').innerHTML = `
+      <div class="bar" data-keep><h3 id="sheet-h">Main menu</h3></div>
+      <p class="big" style="margin:0">You will forfeit the match. Are you sure?</p>
+      <span class="btnrow"><button class="btn primary" id="forfeit-yes">Yes</button><button class="btn" id="forfeit-no">No</button></span>`;
+    $('forfeit-yes').addEventListener('click', forfeit);
+    $('forfeit-no').addEventListener('click', openSoundSheet);
+  }
+  function quitToMenu() { if (mode === 'host') clearHost(); closeSheet(true); showStart(); }
+  function forfeit() {
+    if (!m || phase === 'end') { quitToMenu(); return; }
+    if (!solo() && net.connected) {
+      send({ t: 'forfeit' });
+      // showStart drops the connection: keep it a moment longer so the message gets there
+      const c = net.conn, pr = net.peer;
+      net.conn = null; net.peer = null; net.connected = false;
+      setTimeout(() => { try { c.close(); } catch (e) {} try { pr.destroy(); } catch (e) {} }, 1500);
+    }
+    quitToMenu(); // the host's saved match goes too, so the link can't resume it
+  }
+  // the other player forfeited: this one wins
+  function foeForfeited() {
+    if (!m || phase === 'end') return;
+    if (mode === 'host') clearHost();
+    leaveNet(); cancelAnimationFrame(raf);
+    m.over = true; m.winner = me; phase = 'end'; bt = null; battlePre = null; deadline = 0; selected = null; resultShownAt = 0;
+    closeSheet(true); hud(); setNet(''); $('clock').textContent = ''; render();
+    overlay(`<div class="card">
+      <span class="eyebrow">Round ${m.round}</span>
+      <h2 class="you">Victory</h2>
+      <p class="big">Your opponent forfeited the match.</p>
+      <div class="btnrow"><button class="btn primary" id="menu">Main menu</button></div>
+    </div>`);
+    $('panel').innerHTML = '';
+    $('menu').addEventListener('click', showStart);
+  }
+
   // ---------- match reports ----------
   // Inside Claude, every match on this screen is saved to the artifact's own storage (only the owner and editors
   // can read it), so Claude can look back at how matches went when asked.
@@ -2751,7 +2820,11 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       if (editable() && Game.sell(m, me, sq.id)) { closeSheet(); changed(); }
     });
   }
-  function closeSheet() { $('sheet-back').hidden = true; loaderRun++; unlockAsk = null; }
+  // phase changes close sheets that would go stale, but not the settings sheet (data-keep): only its player closes it
+  function closeSheet(byPlayer) {
+    if (byPlayer !== true && !$('sheet-back').hidden && $('sheet').querySelector('[data-keep]')) return;
+    $('sheet-back').hidden = true; loaderRun++; unlockAsk = null;
+  }
 
   // ---------- load units from Counter Lab ----------
   let loaderRun = 0;
@@ -2845,9 +2918,9 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       load(p);
     });
   }
-  $('sheet-back').addEventListener('click', (e) => { if (e.target.id === 'sheet-back') closeSheet(); });
+  $('sheet-back').addEventListener('click', (e) => { if (e.target.id === 'sheet-back') closeSheet(true); });
   $('cog').addEventListener('click', openSoundSheet);
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSheet(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSheet(true); });
 
   // =====================================================================
   // Live matches: PeerJS (WebRTC). The host runs the match and decides results;
@@ -2876,7 +2949,9 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     try { if (net.conn) net.conn.close(); } catch (e) {}
     try { if (net.peer) net.peer.destroy(); } catch (e) {}
     net.peer = null; net.conn = null; net.connected = false; net.code = ''; net.tries = 0;
-    if (qs.has('join')) { qs.delete('join'); history.replaceState(null, '', location.pathname + (qs.toString() ? '?' + qs : '')); }
+    // the address bar, not qs: joinMatch puts join= back in it after the first leaveNet
+    const u = new URLSearchParams(location.search);
+    if (u.has('join')) { u.delete('join'); qs.delete('join'); history.replaceState(null, '', location.pathname + (u.toString() ? '?' + u : '')); }
   }
 
   // ----- host -----
@@ -2898,6 +2973,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     peer.on('open', () => { net.tries = 0; if (phase === 'lobby') drawLobby(); });
     peer.on('connection', (c) => {
       c.on('open', () => {
+        if (net.peer !== peer) { try { c.close(); } catch (e) {} return; } // this host has left (a forfeit closing down)
         if (net.conn && net.conn !== c) { const old = net.conn; net.conn = null; try { old.close(); } catch (e) {} }
         net.conn = c; net.connected = true;
         onFriendConnected();
@@ -3044,7 +3120,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     } else if (d.t === 'rematch') {
       rematch[1] = true; sendStatus();
       if (!checkRematch() && phase === 'end') showResult(lastSummary);
-    }
+    } else if (d.t === 'forfeit') foeForfeited();
   }
 
   function applySide(d) {
@@ -3317,7 +3393,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       if (d.rematch) rematch[0] = !!d.rematch[0];
       if (phase === 'deploy') panelDeploy();
       else if (phase === 'end') showResult(lastSummary);
-    }
+    } else if (d.t === 'forfeit') foeForfeited();
   }
 
   function overlayMsg(head, text) {
