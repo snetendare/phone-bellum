@@ -192,6 +192,12 @@ a { color: var(--you); }
 .chars-pick button { border: 1px solid var(--line); border-radius: 4px; background: transparent; padding: 4px; display: flex; align-items: center; justify-content: center; font-family: var(--font-data); font-size: 12px; min-width: 0; color: var(--muted); opacity: 0.45; text-decoration: line-through; }
 .chars-pick button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chars-pick button[aria-pressed="true"] { border-color: var(--gold); color: var(--ink); opacity: 1; text-decoration: none; }
+/* Leaders and Units in the match settings: a button each, with a small menu that folds out below */
+.picks { flex-wrap: wrap; }
+.pick-menu { width: 100%; display: grid; gap: 8px; padding: 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); max-height: 50vh; overflow-y: auto; }
+.pick-menu .units-tier { display: grid; gap: 4px; }
+.pick-menu .units-tier .chars-pick { grid-template-columns: repeat(2, 1fr); }
+.pick-menu .units-tier .chars-pick button { justify-content: flex-start; }
 .maps button[aria-pressed="true"] { border-color: var(--gold); color: var(--gold); box-shadow: inset 0 0 0 1px var(--gold); }
 /* folded match settings on the menu and in the lobby */
 .settings { border: 1px solid var(--line); border-radius: 6px; }
@@ -433,7 +439,7 @@ const Shapes = (() => {
 
 // ===== Battle engine (shared by headless tests and the page) =====
 const Engine = (() => {
-  const TRAIT_DEFAULTS = { burst: 1, pellets: 1, spinUp: 0, spinHit: 0, pierce: 0, projSpeed: 0, minRange: 0, charge: 1, knockback: 0, windUp: 0, flame: 0, trample: 0, deathBlast: 0, pctHit: 0, ram: 0, noFlank: 0, carrier: 0, noPack: 0 };
+  const TRAIT_DEFAULTS = { burst: 1, pellets: 1, spinUp: 0, spinHit: 0, pierce: 0, projSpeed: 0, minRange: 0, charge: 1, knockback: 0, windUp: 0, flame: 0, trample: 0, chargeStun: 0, deathBlast: 0, pctHit: 0, ram: 0, noFlank: 0, carrier: 0, noPack: 0 };
   const BURST_GAP = 0.15;      // seconds between shots in a burst
   const SHOTGUN_COS = Math.sqrt(3) / 2; // pellets spread 30 degrees to each side of the target (cos 30)
   // Only + - * / and sqrt from here on: those give identical results in every browser,
@@ -451,6 +457,21 @@ const Engine = (() => {
   const CHARGE_RUN = 5;        // metres a unit must run before its next attack counts as a charge
   const TRAMPLE_RUN = 8;       // after a charged hit, a trampler keeps running this far past its target
   const TRAMPLE_WIDTH = 1.5;   // bodies within this distance of a trampler's path get run over
+  // chargeStun: after a charged hit (and the trample run that follows it) the unit is stunned this many seconds:
+  // it can't move or attack
+  const STEALTH_BACK = 1.5;    // a stealth unit hides again after this many seconds without attacking
+  // Roster rules (g.rules): optional mechanics a roster can switch off. Missing or true = on.
+  //   vision: units march ahead until they spot an enemy (sight). Off: every unit knows where every enemy is from the start.
+  //   stealth: the Stealth skill hides units. Off: stealth units can be targeted like any other.
+  //   stealthBack: a stealth unit hides again after STEALTH_BACK s without attacking. Off: it stays seen once it attacks.
+  //   knockback: hits with knockback push bodies. Off: nothing is pushed.
+  const RULES = [
+    ['vision', 'Vision', 'Units march straight ahead until an enemy comes within sight (see Sight in Battle settings), then turn to it. Off: every unit knows where every enemy is from the start and heads straight for the nearest one.'],
+    ['stealth', 'Stealth', 'Units with the Stealth skill can’t be targeted while hidden. Off: the skill does nothing and they can be targeted like any other unit.'],
+    ['stealthBack', 'Stealth returns', `A stealth unit hides again after ${STEALTH_BACK} s without attacking. Off: once it has attacked it stays seen for the rest of the fight.`],
+    ['knockback', 'Knockback', 'Hits from units with knockback push the bodies they hit. Off: nothing is pushed.'],
+  ];
+  const ruleOn = (g, k) => !(g && g.rules && g.rules[k] === false);
   // ram: the unit never attacks; it heads straight for the enemy tower (the nearest enemy once the tower is down),
   // and on reaching it deals its hit to it once and is destroyed. carrier: a squad of another unit can ride inside
   // (see createBattle: bodies with `carrier` set stay out of the fight until that body dies). noFlank: can't be
@@ -518,6 +539,7 @@ const Engine = (() => {
     blast:   { label: 'Death burst', params: [['radius', 'Radius (m)', 7, 0.5], ['pct', 'Damage (% of hit)', 100, 10]] },
     lifesteal: { label: 'Lifesteal', params: [['pct', 'Heals itself for (% of damage dealt)', 10, 1]] },
     turret:  { label: 'Extra turret', params: [['turrets', 'Attacks at once (each with its own target and reload)', 2, 1]] },
+    frenzy:  { label: 'Frenzy', params: [['pct', 'Attack speed per hit (+% of base)', 10, 1], ['cap', 'Most attacks per second', 2, 0.1]] },
   };
   const skillParam = (d, k) => {
     const v = d.params && d.params[k];
@@ -534,7 +556,7 @@ const Engine = (() => {
     switch (d.type) {
       case 'regen': return `+${n('hp')}% health, and regains ${n('pct')}% of its max health every second.`;
       case 'poison': return `Hits poison the target for ${n('pct')}% of the hit over ${n('duration')} s, ignoring armor and ward. ${n('slow')}% more time between attacks.`;
-      case 'stealth': return 'Can’t be targeted until it attacks for the first time. Splash and piercing shots can still hit it.';
+      case 'stealth': return `Can’t be targeted until it attacks, and hides again after ${STEALTH_BACK} s without attacking. Splash and piercing shots can still hit it.`;
       case 'armorHp': return `+${n('armor')} armor and +${n('hp')}% health.`;
       case 'spawn': return `Every ${n('every')} s, spawns ${n('count')} ${String(P('unit'))} ${+P('count') === 1 ? 'body' : 'bodies'}, up to ${n('max')} alive at once${+P('waves') > 0 ? `, at most ${n('waves')} ${+P('waves') === 1 ? 'wave' : 'waves'} per fight` : ''}.`;
       case 'rapid': return `+${n('aps')}% attack speed, −${n('range')}% range.`;
@@ -551,6 +573,7 @@ const Engine = (() => {
       case 'blast': return `When a body dies it explodes, dealing ${+P('pct') === 100 ? 'the damage of its hit' : `${n('pct')}% of its hit`} (for a ram, what it deals to the tower) to every enemy within ${n('radius')} m.`;
       case 'lifesteal': return `Each body heals itself for ${n('pct')}% of the damage it deals.`;
       case 'turret': return `Each body attacks ${n('turrets')} different enemies at once, each attack with its own target and its own reload, as if it carried ${n('turrets')} copies of its weapon. They never aim at the same enemy, so with only one enemy in reach just one fires.`;
+      case 'frenzy': return `Each hit it lands gives that body +${n('pct')}% attack speed for the rest of the fight, up to ${n('cap')} attacks per second.`;
       case 'shield': return `Each body fully blocks the first ${n('hits')} ${+P('hits') === 1 ? 'hit' : 'hits'} it takes in a fight, however big. Poison already on it still ticks.`;
     }
     return '';
@@ -607,6 +630,7 @@ const Engine = (() => {
         case 'lifesteal': u.lifesteal = (u.lifesteal || 0) + Math.max(0, P('pct')); break;
         case 'turret': u.turrets = Math.max(u.turrets || 1, Math.min(6, Math.round(P('turrets')))); break;
         case 'shield': u.shield = (u.shield || 0) + Math.max(0, Math.round(P('hits'))); break;
+        case 'frenzy': u.frenzyPct = (u.frenzyPct || 0) + Math.max(0, P('pct')); u.frenzyCap = Math.max(u.frenzyCap || 0, Math.max(0.05, P('cap'))); break;
         case 'blast': u.blastR = Math.max(u.blastR || 0, Math.max(0, P('radius'))); u.blastPct = (u.blastPct || 0) + Math.max(0, P('pct')); break;
         case 'split':
           u.beams = Math.max(u.beams || 1, Math.round(P('beams')));
@@ -704,6 +728,8 @@ const Engine = (() => {
       hidden: !!u.stealth, poison: null, shrinkM: 0, shrinkT: 0, slowT: 0, slowMove: 0, slowAtk: 0,
       spawnT: u.spawn ? u.spawn.every : 0, kids: null,
       shield: u.shield || 0, // hits left that the Shield skill blocks completely
+      frenzy: 0, // hits landed so far (Frenzy skill)
+      stunT: 0, lastAtk: 0, // seconds of stun left (chargeStun); fight time of its last attack (stealth returns)
     };
   }
 
@@ -745,7 +771,9 @@ const Engine = (() => {
       { dealt: 0, wasted: 0, blocked: 0, missed: 0, windLost: 0, winds: 0, totalHp: B.reduce((s, b) => s + (b.u.structure ? 0 : b.u.hp), 0) },
     ];
     const dt = g.dt;
-    const sight = g.sight == null ? SIGHT : g.sight;
+    const stealthOn = ruleOn(g, 'stealth'), stealthBack = ruleOn(g, 'stealthBack'), knockOn = ruleOn(g, 'knockback');
+    // without vision every unit sees the whole field: it locks on to the nearest enemy from the first tick
+    const sight = !ruleOn(g, 'vision') ? 1e9 : g.sight == null ? SIGHT : g.sight;
     const minSight = g.minSight == null ? MIN_SIGHT : g.minSight;
     const drift = g.drift == null ? DRIFT : g.drift;
     const cripple = [0, 0];      // seconds left of the tower-down penalty for each side
@@ -894,6 +922,7 @@ const Engine = (() => {
         if (v.walls[w] > 0) { v.walls[w]--; st.blocked += hit + pct; return; }
       }
       let dmg = damageAfterDefense(hit, v, g);
+      if (owner.u.frenzyPct > 0) owner.frenzy++; // Frenzy: every hit that lands speeds up its next attacks
       // damage the target's armor turned away earns it a little experience (g.armorXp per point, default 0.5)
       const armor = (v.u.defense === 'armor' ? v.u.defVal : 0) + (v.u.bonusArmor || 0);
       if (armor > 0) v.xp += (hit - Math.max(hit - armor, hit * g.minDmgPct / 100)) * (g.armorXp == null ? 0.5 : g.armorXp);
@@ -934,7 +963,7 @@ const Engine = (() => {
         v.shrinkM = v.shrinkT > 0 ? Math.max(v.shrinkM, owner.u.shrinkM) : owner.u.shrinkM;
         v.shrinkT = Math.max(v.shrinkT, owner.u.shrinkDur);
       }
-      if (owner.u.knockback > 0 && !v.u.structure) {
+      if (owner.u.knockback > 0 && knockOn && !v.u.structure) {
         // big hits on small bodies push the full distance; on big bodies barely at all
         const push = owner.u.knockback * Math.min(1, hit / v.u.hp);
         const dx = v.x - fromX, dy = v.y - fromY, d = hyp(dx, dy) || 1;
@@ -1025,10 +1054,18 @@ const Engine = (() => {
       return out;
     }
 
+    // attacks per second right now: Frenzy speeds it up with every hit landed, up to its cap (never below the base rate)
+    function apsOf(b) {
+      const a = b.u.aps;
+      if (!(b.u.frenzyPct > 0) || !b.frenzy) return a;
+      return Math.max(a, Math.min(b.u.frenzyCap, a * (1 + b.frenzy * b.u.frenzyPct / 100)));
+    }
+
     function fire(b, targets, canCharge) {
       const charged = canCharge && b.u.charge > 1 && b.moved >= CHARGE_RUN;
       b.moved = 0;
-      b.hidden = false; // stealth ends with the first attack
+      b.hidden = false; // attacking gives a stealth unit away (it hides again after STEALTH_BACK s without attacking)
+      b.lastAtk = t;
       if (b.u.healPct > 0) {
         // heal a random wounded ally (not itself)
         const hurtAllies = sides[b.side].filter(a => a.alive && a !== b && a.hp < a.u.hp);
@@ -1044,6 +1081,8 @@ const Engine = (() => {
         const tgt = targets[0], dx = tgt.x - b.x, dy = tgt.y - b.y, d = hyp(dx, dy);
         if (d > 0) { b.trampleDir = [dx / d, dy / d]; b.trampleLeft = d + TRAMPLE_RUN; b.trampled = [tgt]; }
       }
+      // stunned after a charge (a trampler only once its run is over, see the movement loop)
+      if (charged && b.u.chargeStun > 0 && !(b.trampleLeft > 0)) b.stunT = b.u.chargeStun;
       for (const tgt of targets) {
         const dx = tgt.x - b.x, dy = tgt.y - b.y, d = hyp(dx, dy) || 1;
         const dirX = dx / d, dirY = dy / d;
@@ -1100,7 +1139,7 @@ const Engine = (() => {
         const taken = turretTaken(b, k), tgt = valid.find(f => !taken.includes(f));
         if (!tgt) { b.tcd[k] = Math.max(b.tcd[k], -dt); b.aims[k] = null; continue; }
         b.aims[k] = tgt;
-        b.tcd[k] = Math.max(b.tcd[k], -dt) + 1 / Math.max(0.01, b.u.aps);
+        b.tcd[k] = Math.max(b.tcd[k], -dt) + 1 / Math.max(0.01, apsOf(b));
         fire(b, aim(b, tgt, valid), false);
       }
     }
@@ -1134,6 +1173,12 @@ const Engine = (() => {
         if (!b.alive || b.u.structure) continue;
         for (const tl of tiles) if (b.alive && b.x >= tl.x0 && b.x < tl.x1 && b.y >= tl.y0 && b.y < tl.y1) onTile(b, tl);
       }
+      // stealth: hidden until it attacks, and again after STEALTH_BACK s without attacking (roster rules can turn either off)
+      for (const b of all) {
+        if (!b.alive || !b.u.stealth) continue;
+        if (!stealthOn) b.hidden = false;
+        else if (!b.hidden && stealthBack && t - b.lastAtk >= STEALTH_BACK - 1e-9) b.hidden = true;
+      }
       // a body with a start delay (deployed on a flank) can't move or attack until it runs out
       for (const b of all) if (b.delay > 0) b.delay = Math.max(0, b.delay - dt);
       // home ground (band = { y0, y1, armor, hpPct, on }): extra armor and health while the body stands between
@@ -1150,6 +1195,7 @@ const Engine = (() => {
       // movement + targeting
       for (const b of all) {
         if (!b.alive || b.delay > 0) continue;
+        if (b.stunT > 0) { b.stunT = Math.max(0, b.stunT - dt); continue; } // stunned: can't move (or attack, below)
         if (b.holdT > 0) { b.holdT -= dt; continue; } // holding its ground (it still shoots)
         const foes = sides[1 - b.side];
         if (b.trampleLeft > 0) {
@@ -1165,7 +1211,7 @@ const Engine = (() => {
             if (opts.record) shots.push([b.x, b.y, f.x, f.y, b.side, 1, 1, 0, 0]);
             hurt(b, f, tHit, b.x, b.y);
           }
-          if (b.trampleLeft <= 1e-9) { b.trampleLeft = 0; b.trampled = null; }
+          if (b.trampleLeft <= 1e-9) { b.trampleLeft = 0; b.trampled = null; if (b.u.chargeStun > 0) b.stunT = b.u.chargeStun; }
           continue;
         }
         if (b.u.ram) { ram(b, foes); continue; }
@@ -1299,6 +1345,7 @@ const Engine = (() => {
         if ((!b.alive && b.diedTick !== tick) || b.delay > 0 || b.u.ram || b.boarded || b.turning) continue;
         b.cd -= dt * (b.slowT > 0 ? 1 - b.slowAtk / 100 : 1); // slowed units reload slower
         if (b.firing >= 0) b.firing += dt;
+        if (b.stunT > 0) continue; // stunned after a charge
         if (b.u.mend > 0) { // a healer that never attacks: the most wounded ally in range gets b.u.mend
           if (!b.alive || b.cd > 0) continue;
           let tgt = null, most = 1e-9;
@@ -1381,7 +1428,7 @@ const Engine = (() => {
         const spin = b.u.spinUp > 0 ? Math.min(SPIN_CAP, 1 + b.u.spinUp / 100 * b.firing) : 1;
         b.spin = spin;
         // reload doesn't stack up while the unit has nothing to shoot: keep at most one step of carry-over
-        b.cd = Math.max(b.cd, -dt) + 1 / Math.max(0.01, b.u.aps * spin);
+        b.cd = Math.max(b.cd, -dt) + 1 / Math.max(0.01, apsOf(b) * spin);
         const n = Math.max(1, Math.round(b.u.burst));
         if (n > 1) {
           const dx = primary.x - b.x, dy = primary.y - b.y, d = hyp(dx, dy) || 1;
@@ -1472,7 +1519,7 @@ const Engine = (() => {
         v.side = 1 - v.side; v.squad = CONVERT_SQUAD; v.xp = 0; v.dealt = 0; v.turning = false;
         v.windTarget = null; v.windT = 0; v.setUp = false; v.firing = -1; v.burstLeft = 0; v.trampleLeft = 0; v.trampled = null;
         v.spinTarget = null; v.aims = null; v.engaged = false; v.holdT = 0; v.delay = 0; v.band = null; v.hidden = false;
-        v.slowT = 0; v.slowMove = 0; v.slowAtk = 0; v.shrinkT = 0; v.shrinkM = 0; v.kids = null;
+        v.slowT = 0; v.slowMove = 0; v.slowAtk = 0; v.shrinkT = 0; v.shrinkM = 0; v.kids = null; v.stunT = 0; v.frenzy = 0;
         sides[v.side].push(v); stats[v.side].totalHp += v.hp;
         for (const b of all) {
           if (b.windTarget === v) { b.windTarget = null; b.windT = 0; }
@@ -1491,7 +1538,7 @@ const Engine = (() => {
       return {
         t, shots: final ? [] : shots,
         p: final ? [] : projectiles.map(p => [p.x, p.y, p.owner.side]),
-        b: all.map(x => [x.x, x.y, x.alive ? x.hp / x.u.hp : 0, x.side, x.windTarget && x.u.windUp > 0 ? 1 - x.windT / x.u.windUp : 0, x.hidden ? 1 : 0, x.poison && x.poison.length ? 1 : 0, x.slowT > 0 ? 1 : 0]),
+        b: all.map(x => [x.x, x.y, x.alive ? x.hp / x.u.hp : 0, x.side, x.windTarget && x.u.windUp > 0 ? 1 - x.windT / x.u.windUp : 0, x.hidden ? 1 : 0, x.poison && x.poison.length ? 1 : 0, x.slowT > 0 ? 1 : 0, x.stunT > 0 ? 1 : 0]),
       };
     }
 
@@ -1548,7 +1595,7 @@ const Engine = (() => {
     return m;
   }
 
-  return { TOWER_DOWN, SKILL_SLOTS, SLOTS, SKILL_TYPES, skillParam, describeSkill, applySkills, innateUnit, fairBudget, battle, makeArmy, matrix, createBattle, buildSquad, rawStrength, squadsFor, withTraits, leveled, TRAIT_DEFAULTS, SPIN_CAP, CHARGE_RUN, TRAMPLE_RUN, BLAST_RADIUS, RAM_REACH, LEVEL_BONUS, MAX_LEVEL, CHARM_MAX, CONVERT_HP, CONVERT_SQUAD };
+  return { TOWER_DOWN, RULES, ruleOn, STEALTH_BACK, SKILL_SLOTS, SLOTS, SKILL_TYPES, skillParam, describeSkill, applySkills, innateUnit, fairBudget, battle, makeArmy, matrix, createBattle, buildSquad, rawStrength, squadsFor, withTraits, leveled, TRAIT_DEFAULTS, SPIN_CAP, CHARGE_RUN, TRAMPLE_RUN, BLAST_RADIUS, RAM_REACH, LEVEL_BONUS, MAX_LEVEL, CHARM_MAX, CONVERT_HP, CONVERT_SQUAD };
 })();
 if (typeof module !== 'undefined') module.exports = Engine;
 
@@ -2120,7 +2167,7 @@ const Game = (() => {
   const inNoMans = (row) => row >= ZONE && row < ROWS - ZONE;
   const hasSkillType = (m, side, ui, type) => !!m && ui != null && !!m.units[ui] && E.SLOTS.some(k => hasSkill(m, side, ui, k) && skillDef(m, ui, k).type === type);
   // ui (optional): the unit being placed, for unit-specific tiles
-  const canPlaceAt = (m, side, col, row, ui) => col >= 0 && col < COLS && !reserved(side, col, row) &&
+  const canPlaceAt = (m, side, col, row, ui) => col >= 0 && col < COLS && !reserved(side, col, row) && !(ui != null && isOff(m, ui)) &&
     !(ui != null && m && m.units[ui] && m.units[ui].noFlank && isFlank(side, col, row)) &&
     (inZone(side, row) || (flankOpen(m) && isFlank(side, col, row)) || (inNoMans(row) && hasSkillType(m, side, ui, 'forward'))) && !enemyHolds(m, side, col, row);
   // ---------- carriers (Just a horse) ----------
@@ -2154,8 +2201,9 @@ const Game = (() => {
   // Before round 1 each player picks one of 3 packages (their own, not mirrored): two tier 1-2 unit types,
   // both unlocked for free, plus free squads of them worth exactly PACKAGE.value gold. Units with noPack are never in one.
   const PACKAGE = { value: 300, maxPrice: 200, options: 3 };
-  function allPackages(units) {
-    const out = [], ok = units.map((u, i) => unitCostOf(u) <= PACKAGE.maxPrice && !u.noPack ? i : -1).filter(i => i >= 0);
+  // off (optional): indexes of units left out of the match
+  function allPackages(units, off) {
+    const out = [], ok = units.map((u, i) => unitCostOf(u) <= PACKAGE.maxPrice && !u.noPack && !(off || []).includes(i) ? i : -1).filter(i => i >= 0);
     for (const a of ok) for (const b of ok) {
       if (a === b) continue;
       const ca = unitCostOf(units[a]), cb = unitCostOf(units[b]);
@@ -2169,8 +2217,8 @@ const Game = (() => {
     }
     return out;
   }
-  function dealPackages(units, r, offChars) {
-    const all = allPackages(units), pick = [];
+  function dealPackages(units, r, offChars, off) {
+    const all = allPackages(units, off), pick = [];
     for (let guard = 0; pick.length < Math.min(PACKAGE.options, all.length) && guard < 200; guard++) {
       const p = all[Math.floor(r() * all.length)];
       // three different packages, and no unit type in more than one of them where possible
@@ -2224,8 +2272,12 @@ const Game = (() => {
   }
 
   // offChars (optional): character ids left out of the pool (at least one always stays in)
-  function createMatch(units, matrix, seed, mapId, lastMapId, offChars) {
+  // opts (optional): { offUnits: unit indexes left out of the match (at least two stay in), rules: roster rules for the fights (see Engine.RULES) }
+  function createMatch(units, matrix, seed, mapId, lastMapId, offChars, opts) {
     const r = rng((seed >>> 0) + 777);
+    let off = ((opts && opts.offUnits) || []).filter((ui, k, a) => Number.isInteger(ui) && ui >= 0 && ui < units.length && a.indexOf(ui) === k);
+    if (units.length - off.length < 2) off = [];
+    const rules = opts && opts.rules && typeof opts.rules === 'object' ? { ...opts.rules } : null;
     const m = {
       units, matrix, seed: seed >>> 0,
       round: 1, hp: [START_HP, START_HP], gold: [START_GOLD, START_GOLD],
@@ -2237,7 +2289,9 @@ const Game = (() => {
       chars: [null, null], // each player's character id (comes with the package)
       buff: [[], []], // Zoe's buff tiles for this round: [{ col, row }, ...]
       unlocks: [{}, {}], // units unlocked per player: unlocks[side][unitIdx] = round it was unlocked
-      packages: [dealPackages(units, r, offChars), dealPackages(units, r, offChars)], // each player's 3 starting package options, each with a different random character
+      off, // units left out of this match: they can't be unlocked, placed or dealt in a package
+      rules, // roster rules for the fights (null = all on)
+      packages: [dealPackages(units, r, offChars, off), dealPackages(units, r, offChars, off)], // each player's 3 starting package options, each with a different random character
       pack: [null, null], // which one each player picked
       map: rollMap(seed >>> 0, mapId, lastMapId), // { id, elfCol }: the map this match is fought on (mapId picks it; otherwise random)
       bribe: [[], []], // the round of each bribe each player paid the elves (see the bribe-off)
@@ -2251,6 +2305,9 @@ const Game = (() => {
     m.towers = [towerSpot(m, 0), towerSpot(m, 1)];
     return m;
   }
+
+  // a unit left out of this match (match settings on the menu)
+  const isOff = (m, ui) => !!(m && Array.isArray(m.off) && m.off.includes(ui));
 
   // ---------- skills (bought per unit type, for all squads of that type) ----------
   // m.units[i].skillDefs = [def or null, ...], one per skill slot (Engine.SKILL_SLOTS)
@@ -2304,7 +2361,7 @@ const Game = (() => {
   // an unlock bought this round is hidden from the opponent until the fight
   const unlockVisible = (m, side, ui) => unlockCost(m, ui, side) === 0 || (isUnlocked(m, side, ui) && m.unlocks[side][ui] < m.round);
   function unlock(m, side, ui) {
-    if (ui < 0 || ui >= m.units.length || isUnlocked(m, side, ui)) return false;
+    if (ui < 0 || ui >= m.units.length || isOff(m, ui) || isUnlocked(m, side, ui)) return false;
     const cost = unlockCost(m, ui, side);
     if (m.gold[side] < cost) return false;
     if (!m.unlocks) m.unlocks = [{}, {}];
@@ -2595,7 +2652,8 @@ const Game = (() => {
     ensurePack(m, 0); ensurePack(m, 1);
     ensureCharm(m, 0); ensureCharm(m, 1);
     const mp = mapOf(m), elf = elfSpot(m);
-    const g = mp && mp.healMul ? { ...SETTINGS, healMul: mp.healMul } : SETTINGS;
+    let g = mp && mp.healMul ? { ...SETTINGS, healMul: mp.healMul } : SETTINGS;
+    if (m.rules) g = { ...g, rules: m.rules }; // the roster's rules (a Counter Lab roster can switch mechanics off)
     const T2 = TILE / 2, tiles = [];
     if (mp && mp.shrooms) for (const t of m.map.tiles || []) {
       if (t.type === 'purple' || shroomRemoval(m, t.col, t.row)) continue; // purple only counts for squads that start there (see bodiesFor)
@@ -2785,7 +2843,7 @@ const Game = (() => {
         reserve += levelCost(m.units[sq.unit]);
       }
     }
-    const minCost = Math.min(...m.units.map((u, i) => shopCost(m, side, i)));
+    const minCost = Math.min(...m.units.map((u, i) => isOff(m, i) ? Infinity : shopCost(m, side, i)));
     // the elf tower: from round 2, sometimes bribe it while a squad is still affordable after; more often when not ahead
     if (m.round >= 2) for (let k = 0; k < 3; k++) {
       if (!canBribe(m, side) || m.gold[side] - reserve - bribeCost(m, side) < minCost || r() >= (bribeLeader(m, true) === side ? 0.2 : 0.5)) break;
@@ -2829,6 +2887,7 @@ const Game = (() => {
       const budget = m.gold[side] - reserve;
       let best = -1, bs = -Infinity;
       m.units.forEach((u, i) => {
+        if (isOff(m, i)) return;
         const extra = isUnlocked(m, side, i) ? 0 : unlockCost(m, i, side); // a locked unit costs its unlock on top
         if (shopCost(m, side, i) + extra > budget) return;
         let s = 0, tot = 0;
@@ -2892,7 +2951,7 @@ const Game = (() => {
     skillDef, skillCost, isInnate, hasSkill, skillVisible, unitFor, canBuySkill, buySkill, undoSkill, sellValue, sell,
     isRider, hiddenFromFoe, isCarrier, riderOf, carrierOf, squadAt, boardable, unplaceSquad,
     TOWER, TOWER_TYPES, OUTPOST, TOWER_PICK_ROUND, towerType, towerChoices, needsTowerPick, setTowerType, settleTowerPicks, TOWER_SKILL, towerSkillOf, towerSkillVisible, towerPicked, canBuyTowerSkill, buyTowerSkill, undoTowerSkill, towerSkillCost, towerSkill2Of, towerSkill2Visible, towerSkill2Cost, canBuyTowerSkill2, buyTowerSkill2, undoTowerSkill2, MOAT, INVEST, MAGE_GENERALS, mageGenPrice, MAGE, mageGenInfo, mageGenOf, mageGenCost, canBuyMageGen, buyMageGen, undoMageGen, mageTowerUnit, LOAN, loanNow, canTakeLoan, takeLoan, undoLoan, SLIME_UNITS, slimeTowerUnit, slimeSkillDefs, TOWER_MID, towerColOk, towerAt, needsTower, placeTower, ensureTower,
-    FLANK, flankRows, flankOpen, isFlank, reserved, canPlaceAt, enemyHolds, inNoMans, hasSkillType,
+    FLANK, flankRows, flankOpen, isFlank, reserved, canPlaceAt, isOff, enemyHolds, inNoMans, hasSkillType,
     ICE, ALTAR, GOLEM, isIce, hailRound, altarRound, stormShift, stormRows, hailTiles, altarCost, altarRefund, altarCount, pushRoom, altarBought, addAltar, buyAltar, undoAltar, snowgres, snowgreUnit,
     MAPS, ELF_TOWER, SHROOM, SHROOM_SPLIT, shroomAt, shroomTileAt, shroomRemoval, SHROOM_REMOVE, shroomCost, removeShroom, undoRemoveShroom, mapOf, elfSpot, rollMap, BRIBE_COST, bribeList, bribeGold, bribeCount, bribeNow, bribeCost, bribeRefund, ELF_POWER, elfPowered, elfUnit, ELF_OWN, elfOwnCost, elfOwnOf, elfOwnAt, elfOwnUnlocked, elfOwnOffered, canBuyElfOwn, elfOwnSpotOk, buyElfOwn, undoElfOwn, bribeLeader, canBribe, bribe, undoBribe,
     CHARACTERS, CHAR, charOf, charInfo, enzoSkill, charmOf, isGentleman, canGiveCharm, giveCharm, undoCharm, ensureCharm, felixGold, isTier1, rollBuffTiles, onBuffTile, yotImps, yotLevel, TOWER_SPOT, towerSpot,
@@ -2904,7 +2963,7 @@ if (typeof module !== 'undefined') module.exports = Game;
 </script>
 <script>
 (() => {
-  const DATA = {"units":[{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Goblin Swarm","cost":1,"bodies":12,"hp":26,"hit":17,"aps":1.2,"range":2,"speed":8,"splash":0,"shape":"triangle","color":"#9BD35A","skills":["swift","shrink"],"skillMods":[null,null],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Skeleton Archers","cost":1,"bodies":8,"hp":32,"hit":14,"aps":0.75,"range":19,"speed":2.1,"splash":0,"shape":"triangle","color":"#E9E3CF","skills":["range","rapid"],"skillMods":[null,null],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Ember Imps","cost":1,"bodies":4,"hp":110,"hit":20,"aps":0.8,"range":10,"speed":4,"splash":3,"shape":"imp","color":"#FFA94D","skills":["swift","heavy"],"skillMods":[null,null],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":35,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Fire Mage","cost":1,"bodies":1,"hp":155,"hit":33,"aps":0.75,"range":20,"speed":3,"splash":4,"shape":"hexagon","color":"#fb0022","skills":["range","armorHp","dualFlame"],"skillMods":[null,null,null],"skillsInnate":[false,false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":1,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Sniper","cost":1,"bodies":1,"hp":140,"hit":210,"aps":0.25,"range":29,"speed":2,"splash":0,"shape":"cross","color":"#F7D154","skills":["rapid","spawn","range"],"skillMods":[{"params":{"range":0,"aps":15},"cost":150},{"params":{"waves":3}},null],"skillsInnate":[false,false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"armor","defVal":6,"level":0,"unlock":50,"name":"Brute","cost":2,"bodies":1,"hp":1100,"hit":98,"aps":1.1,"range":2,"speed":5,"splash":0,"shape":"square","color":"#8D99AE","skills":["armorHp","swift"],"skillMods":[null,null],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":20,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":40,"level":0,"unlock":50,"name":"Wisps","cost":1,"bodies":2,"hp":80,"hit":75,"aps":0.8,"range":19,"speed":4,"splash":0,"shape":"ring","color":"#ff90ff","skills":["stealth","skmv5oxj501"],"skillMods":[null,{"params":{},"cost":200}],"skillsInnate":[false,false]},{"burst":6,"pellets":2,"spinUp":0,"pierce":0,"projSpeed":35,"minRange":0,"charge":1,"knockback":0,"windUp":0.2,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Leaf Wizard","cost":2,"bodies":1,"hp":240,"hit":21,"aps":0.45,"range":27,"speed":5,"splash":0,"shape":"hexagon","color":"#00d200","skills":["rapid","range"],"skillMods":[null,null],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":5,"projSpeed":35,"minRange":0,"charge":1,"knockback":0,"windUp":0.5,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Earth Wizard","cost":2,"bodies":1,"hp":650,"hit":440,"aps":0.2,"range":24,"speed":3,"splash":2,"shape":"circle","color":"#24590d","skills":["regen","range","heavy"],"skillMods":[null,null,{"params":{"hit":20,"slow":30},"cost":150}],"skillsInnate":[false,false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":30,"defense":"none","defVal":0,"level":0,"unlock":100,"name":"Flame Wizard","cost":3,"bodies":1,"hp":2000,"hit":12,"aps":4,"range":15,"speed":2,"splash":0,"shape":"flame","color":"#b95018","skills":["armorHp","range"],"skillMods":[null,null],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":100,"name":"Steel Wizard","cost":3,"bodies":1,"hp":1900,"hit":150,"aps":0.9,"range":15,"speed":2,"splash":2,"shape":"bar","color":"#57535a","skills":["range","heavy"],"skillMods":[null,{"params":{"slow":20,"hit":20}}],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":40,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":100,"name":"Slime Wizard","cost":3,"bodies":1,"hp":700,"hit":480,"aps":0.2,"range":22,"speed":2,"splash":6,"shape":"ring","color":"#81f038","skills":["skmv5oxpgk2","range"],"skillMods":[null,null],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"armor","defVal":15,"level":0,"unlock":150,"splash":3,"skillsInnate":[false,false],"skillMods":[null,null],"name":"Ether Golem","cost":5,"bodies":1,"hp":3450,"hit":69,"aps":0.6,"range":5,"speed":2.5,"shape":"square","color":"#51005c","skills":["regen","armorHp"]},{"burst":1,"pellets":1,"spinUp":50,"spinHit":50,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":150,"splash":0,"skillsInnate":[false,false],"skillMods":[null,null],"name":"Sun Priest","cost":5,"bodies":1,"hp":2800,"hit":38,"aps":2,"range":18,"speed":3,"shape":"sun","color":"#FFD23F","skills":["split","shrink"]},{"burst":3,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":22,"minRange":12,"charge":1,"knockback":0,"windUp":2,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":150,"splash":6,"skillsInnate":[false,false],"skillMods":[null,null],"name":"Meteor Caller","cost":5,"bodies":1,"hp":400,"hit":114,"aps":0.3,"range":50,"speed":2,"shape":"diamond","color":"#FF6B35","skills":["range","skmv5oxpgk2"]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":3,"knockback":4,"windUp":0,"flame":0,"defense":"armor","defVal":6,"level":0,"unlock":150,"splash":3,"skillsInnate":[false,false],"skillMods":[null,null],"name":"War Mammoth","cost":5,"bodies":1,"hp":2300,"hit":169,"aps":0.5,"range":3,"speed":9,"shape":"pentagon","color":"#A0785A","skills":["swift","armorHp"],"trample":50},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":150,"splash":0,"skillsInnate":[true,false],"skillMods":[null,null],"name":"Necromancer","cost":5,"bodies":1,"hp":2300,"hit":56,"aps":1,"range":20,"speed":2.2,"shape":"hexagon","color":"#9D4EDD","skills":["raiseDead","healer"]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":90,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Ent","cost":1,"bodies":2,"hp":400,"hit":25,"aps":1.1,"range":4,"speed":2,"splash":0,"shape":"square","color":"#0d3000","skills":["armorHp","forward"],"skillsInnate":[false,false],"skillMods":[{"params":{"armor":4,"hp":20}},null],"deathBlast":30},{"burst":1,"pellets":1,"spinUp":0.1,"pierce":0,"projSpeed":30,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"name":"Slimeshots","cost":2,"unlock":100,"bodies":10,"hp":95,"hit":7,"aps":0.8,"range":21,"speed":6,"splash":3,"shape":"diamond","color":"#20d300","skills":["range","heavy"],"skillsInnate":[false,false],"skillMods":[null,{"params":{"hit":25,"slow":0,"instant":0},"cost":150}]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Just a horse","cost":2,"bodies":1,"hp":500,"hit":200,"aps":1,"range":1,"speed":6,"splash":0,"shape":"horse","color":"#C8A27A","ram":1,"noFlank":1,"carrier":1,"noPack":1,"skills":["gallop","armorHp","deathBurst"],"skillMods":[null,{"params":{"armor":4,"hp":20},"cost":150},null],"skillsInnate":[false,false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":30,"minRange":0,"charge":4,"knockback":0,"windUp":0,"flame":0,"trample":0,"deathBlast":0,"defense":"none","defVal":0,"level":0,"unlock":100,"name":"Rogue","cost":3,"bodies":2,"hp":310,"hit":80,"aps":1.1,"range":4,"speed":6,"splash":0,"shape":"triangle","color":"#460000","skills":["forward","skmv5oxj501"],"skillsInnate":[true,false],"skillMods":[null,{"params":{"cap":200},"cost":159}]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"trample":0,"deathBlast":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Spiders","cost":2,"bodies":5,"hp":185,"hit":20,"aps":0.8,"range":2,"speed":6,"splash":0,"shape":"spider","color":"#000000","skills":["spiderlings","poison","stealth"],"skillsInnate":[false,false,false],"skillMods":[null,null,{"params":{},"cost":200}]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":35,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"trample":0,"deathBlast":0,"pctHit":20,"defense":"none","defVal":0,"level":0,"unlock":150,"name":"Truespear","cost":5,"bodies":1,"hp":750,"hit":60,"aps":0.65,"range":25,"speed":3,"splash":0,"shape":"spear","color":"#C9D1D9","skills":["lifesteal","armorHp","dualSpear"],"skillMods":[null,null,null],"skillsInnate":[false,false,false]}],"matrix":[[0,-1,-0.899,-0.993,0.847,0.275,0.214,0.259,0.514,-1,-0.414,-0.233,-0.938,0.481,-0.809,-0.504,0.523,-0.811,-0.755,0.958,0.675,0.558,0.911],[1,0,0.268,-0.514,0.521,0.429,0.679,-0.244,0.375,-0.804,0.35,-0.704,-0.783,-0.614,-0.959,0.55,-0.386,0.798,-0.504,0.946,0.917,0.814,0.821],[0.899,-0.268,0,-0.604,0.333,0.606,-0.192,0.415,0.1,-1,-0.531,-0.68,-0.667,0.457,-0.992,-0.345,0.274,0.19,0.101,0.875,0.786,0.845,0.86],[0.993,0.514,0.604,0,-1,-0.356,0.454,-0.443,-0.882,-0.724,-0.223,-0.915,-0.552,-0.491,-1,-0.728,-0.342,0.388,0.097,0.733,0.9,0.868,0.528],[-0.847,-0.521,-0.333,1,0,-0.098,0.598,0.397,-0.49,-0.363,-0.124,0.333,0.835,-0.163,-1,-0.434,-0.54,1,-0.567,0.8,0.833,0.8,0.858],[-0.275,-0.429,-0.606,0.356,0.098,0,-0.617,0.457,-0.799,0.317,-0.519,-1,0.051,-0.524,0.027,-0.487,0.374,-0.649,0.904,0.824,0.271,0.827,0.484],[-0.214,-0.679,0.192,-0.454,-0.598,0.617,0,-0.546,-0.413,-0.68,-0.188,-0.525,0.699,0.285,-0.906,-0.3,-0.47,0.968,-0.651,0.95,0.967,0.946,0.785],[-0.259,0.244,-0.415,0.443,-0.397,-0.457,0.546,0,-0.593,-0.434,-0.227,-0.547,-0.687,-0.36,-0.439,-0.776,-0.561,0.699,-0.514,0.778,0.8,0.578,0.663],[-0.514,-0.375,-0.1,0.882,0.49,0.799,0.413,0.593,0,0.046,0.713,-0.311,0.851,0.447,-0.833,-0.154,-0.259,1,0.41,1,1,0.867,0.777],[1,0.804,1,0.724,0.363,-0.317,0.68,0.434,-0.046,0,0.585,-0.722,-0.659,-0.218,-1,-0.647,0.745,1,0.848,0.98,1,1,0.262],[0.414,-0.35,0.531,0.223,0.124,0.519,0.188,0.227,-0.713,-0.585,0,-1,0.699,-0.533,-1,-0.218,-0.329,0.305,0.378,0.905,0.673,0.764,0.199],[0.233,0.704,0.68,0.915,-0.333,1,0.525,0.547,0.311,0.722,1,0,1,0.771,-1,0.828,0.844,1,0.591,1,1,0.974,0.686],[0.938,0.783,0.667,0.552,-0.835,-0.051,-0.699,0.687,-0.851,0.659,-0.699,-1,0,-0.901,-0.776,-0.753,0.134,-0.145,0.885,0.866,0.354,0.961,-1],[-0.481,0.614,-0.457,0.491,0.163,0.524,-0.285,0.36,-0.447,0.218,0.533,-0.771,0.901,0,-0.38,0.361,0.398,-0.294,-0.308,0.869,0.467,0.706,0.019],[0.809,0.959,0.992,1,1,-0.027,0.906,0.439,0.833,1,1,1,0.776,0.38,0,-0.601,0.559,1,0.489,1,1,0.992,0.942],[0.504,-0.55,0.345,0.728,0.434,0.487,0.3,0.776,0.154,0.647,0.218,-0.828,0.753,-0.361,0.601,0,0.211,-0.133,0.905,0.916,0.688,0.88,0.369],[-0.523,0.386,-0.274,0.342,0.54,-0.374,0.47,0.561,0.259,-0.745,0.329,-0.844,-0.134,-0.398,-0.559,-0.211,0,-0.075,-0.279,0.947,0.724,0.545,0.817],[0.811,-0.798,-0.19,-0.388,-1,0.649,-0.968,-0.699,-1,-1,-0.305,-1,0.145,0.294,-1,0.133,0.075,0,0.18,0.875,0.733,0.892,0.649],[0.755,0.504,-0.101,-0.097,0.567,-0.904,0.651,0.514,-0.41,-0.848,-0.378,-0.591,-0.885,0.308,-0.489,-0.905,0.279,-0.18,0,0.9,0.773,0.696,0.889],[-0.958,-0.946,-0.875,-0.733,-0.8,-0.824,-0.95,-0.778,-1,-0.98,-0.905,-1,-0.866,-0.869,-1,-0.916,-0.947,-0.875,-0.9,0,-0.668,-0.8,-0.489],[-0.675,-0.917,-0.786,-0.9,-0.833,-0.271,-0.967,-0.8,-1,-1,-0.673,-1,-0.354,-0.467,-1,-0.688,-0.724,-0.733,-0.773,0.668,0,0.415,0.621],[-0.558,-0.814,-0.845,-0.868,-0.8,-0.827,-0.946,-0.578,-0.867,-1,-0.764,-0.974,-0.961,-0.706,-0.992,-0.88,-0.545,-0.892,-0.696,0.8,-0.415,0,0.531],[-0.911,-0.821,-0.86,-0.528,-0.858,-0.484,-0.785,-0.663,-0.777,-0.262,-0.199,-0.686,1,-0.019,-0.942,-0.369,-0.817,-0.649,-0.889,0.489,-0.621,-0.531,0]],"skills":[{"id":"regen","type":"regen","name":"Regeneration","cost":100,"params":{}},{"id":"poison","type":"poison","name":"Poison shot","cost":100,"params":{"pct":150}},{"id":"stealth","type":"stealth","name":"Stealth","cost":100,"params":{}},{"id":"armorHp","type":"armorHp","name":"Armor and health","cost":200,"params":{}},{"id":"spawn","type":"spawn","name":"Spawn goblins","cost":200,"params":{"every":7}},{"id":"rapid","type":"rapid","name":"Rapid fire","cost":100,"params":{}},{"id":"swift","type":"swift","name":"Swift strikes","cost":100,"params":{}},{"id":"heavy","type":"heavy","name":"Heavy shot","cost":100,"params":{}},{"id":"healer","type":"healer","name":"Healing touch","cost":200,"params":{}},{"id":"range","type":"range","name":"Long reach","cost":200,"params":{}},{"id":"shrink","type":"shrink","name":"Shortsight","cost":100,"params":{}},{"id":"skmv5oxj501","type":"ward","name":"Ward","cost":100,"params":{}},{"id":"skmv5oxpgk2","type":"slow","name":"Slow","cost":100,"params":{}},{"id":"raiseDead","type":"spawn","name":"Raise dead","cost":0,"params":{"unit":"Skeleton Archers","count":3,"every":2,"max":12}},{"id":"spiderlings","type":"deathSpawn","name":"Spiderlings","cost":200,"params":{"unit":"Spiders","count":2,"strength":50}},{"id":"split","type":"split","name":"Split beam","cost":100,"params":{}},{"id":"forward","type":"forward","name":"Forward planting","cost":100,"params":{}},{"id":"gallop","type":"swift","name":"Gallop","cost":200,"params":{"speed":25,"hit":0}},{"id":"deathBurst","type":"blast","name":"Death burst","cost":200,"params":{"radius":7,"pct":100}},{"id":"dualFlame","type":"turret","name":"Dual Flame","cost":200,"params":{"turrets":2}},{"id":"lifesteal","type":"lifesteal","name":"Lifesteal","cost":150,"params":{"pct":10}},{"id":"dualSpear","type":"turret","name":"Dual Spear","cost":300,"params":{"turrets":2}}]};
+  const DATA = {"units":[{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Goblin Swarm","cost":1,"bodies":12,"hp":26,"hit":17,"aps":1.2,"range":2,"speed":8,"splash":0,"shape":"triangle","color":"#9BD35A","skills":["swift","shrink"],"skillMods":[null,null],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Skeleton Archers","cost":1,"bodies":8,"hp":32,"hit":14,"aps":0.75,"range":19,"speed":2.1,"splash":0,"shape":"triangle","color":"#E9E3CF","skills":["range","rapid"],"skillMods":[null,null],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Ember Imps","cost":1,"bodies":4,"hp":110,"hit":20,"aps":0.8,"range":10,"speed":4,"splash":3,"shape":"imp","color":"#FFA94D","skills":["swift","heavy"],"skillMods":[null,null],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":35,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Fire Mage","cost":1,"bodies":1,"hp":155,"hit":33,"aps":0.75,"range":20,"speed":3,"splash":4,"shape":"hexagon","color":"#fb0022","skills":["range","armorHp","dualFlame"],"skillMods":[null,null,null],"skillsInnate":[false,false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":1,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Sniper","cost":1,"bodies":1,"hp":140,"hit":210,"aps":0.25,"range":29,"speed":2,"splash":0,"shape":"cross","color":"#F7D154","skills":["rapid","spawn","range"],"skillMods":[{"params":{"range":0,"aps":15},"cost":150},{"params":{"waves":3}},null],"skillsInnate":[false,false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"armor","defVal":6,"level":0,"unlock":50,"name":"Brute","cost":2,"bodies":1,"hp":1100,"hit":98,"aps":1.1,"range":2,"speed":5,"splash":0,"shape":"square","color":"#8D99AE","skills":["armorHp","swift"],"skillMods":[null,null],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":20,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":40,"level":0,"unlock":50,"name":"Wisps","cost":1,"bodies":2,"hp":80,"hit":75,"aps":0.8,"range":19,"speed":4,"splash":0,"shape":"ring","color":"#ff90ff","skills":["stealth","skmv5oxj501"],"skillMods":[null,{"params":{},"cost":200}],"skillsInnate":[false,false]},{"burst":6,"pellets":2,"spinUp":0,"pierce":0,"projSpeed":35,"minRange":0,"charge":1,"knockback":0,"windUp":0.2,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Leaf Wizard","cost":2,"bodies":1,"hp":240,"hit":21,"aps":0.45,"range":27,"speed":5,"splash":0,"shape":"hexagon","color":"#00d200","skills":["rapid","range"],"skillMods":[null,null],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":5,"projSpeed":35,"minRange":0,"charge":1,"knockback":0,"windUp":0.5,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Earth Wizard","cost":2,"bodies":1,"hp":650,"hit":440,"aps":0.2,"range":24,"speed":3,"splash":2,"shape":"circle","color":"#24590d","skills":["regen","range","heavy"],"skillMods":[null,null,{"params":{"hit":20,"slow":30},"cost":150}],"skillsInnate":[false,false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":30,"defense":"none","defVal":0,"level":0,"unlock":100,"name":"Flame Wizard","cost":3,"bodies":1,"hp":2000,"hit":12,"aps":4,"range":15,"speed":2,"splash":0,"shape":"flame","color":"#b95018","skills":["armorHp","range"],"skillMods":[null,null],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":100,"name":"Steel Wizard","cost":3,"bodies":1,"hp":1900,"hit":150,"aps":0.9,"range":15,"speed":2,"splash":2,"shape":"bar","color":"#57535a","skills":["range","heavy"],"skillMods":[null,{"params":{"slow":20,"hit":20}}],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":40,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":100,"name":"Slime Wizard","cost":3,"bodies":1,"hp":700,"hit":480,"aps":0.2,"range":22,"speed":2,"splash":6,"shape":"ring","color":"#81f038","skills":["skmv5oxpgk2","range"],"skillMods":[null,null],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"armor","defVal":15,"level":0,"unlock":150,"splash":3,"skillsInnate":[false,false],"skillMods":[null,null],"name":"Ether Golem","cost":5,"bodies":1,"hp":3450,"hit":69,"aps":0.6,"range":5,"speed":2.5,"shape":"square","color":"#51005c","skills":["regen","armorHp"]},{"burst":1,"pellets":1,"spinUp":50,"spinHit":50,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":150,"splash":0,"skillsInnate":[false,false],"skillMods":[null,null],"name":"Sun Priest","cost":5,"bodies":1,"hp":2800,"hit":38,"aps":2,"range":18,"speed":3,"shape":"sun","color":"#FFD23F","skills":["split","shrink"]},{"burst":3,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":22,"minRange":12,"charge":1,"knockback":0,"windUp":2,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":150,"splash":6,"skillsInnate":[false,false],"skillMods":[null,null],"name":"Meteor Caller","cost":5,"bodies":1,"hp":400,"hit":114,"aps":0.3,"range":50,"speed":2,"shape":"diamond","color":"#FF6B35","skills":["range","skmv5oxpgk2"]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":3,"knockback":4,"windUp":0,"flame":0,"defense":"armor","defVal":6,"level":0,"unlock":150,"splash":3,"skillsInnate":[false,false],"skillMods":[null,null],"name":"War Mammoth","cost":5,"bodies":1,"hp":2300,"hit":169,"aps":0.5,"range":3,"speed":8,"shape":"pentagon","color":"#A0785A","skills":["swift","armorHp"],"trample":50,"chargeStun":1.5},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":150,"splash":0,"skillsInnate":[true,false],"skillMods":[null,null],"name":"Necromancer","cost":5,"bodies":1,"hp":2300,"hit":56,"aps":1,"range":20,"speed":2.2,"shape":"hexagon","color":"#9D4EDD","skills":["raiseDead","healer"]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":90,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Ent","cost":1,"bodies":2,"hp":400,"hit":25,"aps":1.1,"range":4,"speed":2,"splash":0,"shape":"square","color":"#0d3000","skills":["armorHp","forward"],"skillsInnate":[false,false],"skillMods":[{"params":{"armor":4,"hp":20}},null],"deathBlast":30},{"burst":1,"pellets":1,"spinUp":0.1,"pierce":0,"projSpeed":30,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"name":"Slimeshots","cost":2,"unlock":100,"bodies":10,"hp":95,"hit":7,"aps":0.8,"range":21,"speed":6,"splash":3,"shape":"diamond","color":"#20d300","skills":["range","heavy"],"skillsInnate":[false,false],"skillMods":[null,{"params":{"hit":25,"slow":0,"instant":0},"cost":150}]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Just a horse","cost":2,"bodies":1,"hp":500,"hit":200,"aps":1,"range":1,"speed":6,"splash":0,"shape":"horse","color":"#C8A27A","ram":1,"noFlank":1,"carrier":1,"noPack":1,"skills":["gallop","armorHp","deathBurst"],"skillMods":[null,{"params":{"armor":4,"hp":20},"cost":150},null],"skillsInnate":[false,false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":30,"minRange":0,"charge":4,"knockback":0,"windUp":0,"flame":0,"trample":0,"deathBlast":0,"defense":"none","defVal":0,"level":0,"unlock":100,"name":"Rogue","cost":3,"bodies":2,"hp":310,"hit":80,"aps":1.1,"range":4,"speed":6,"splash":0,"shape":"triangle","color":"#460000","skills":["stealth","skmv5oxj501","frenzy"],"skillsInnate":[true,false,false],"skillMods":[null,{"params":{"cap":200},"cost":150},null]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"trample":0,"deathBlast":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Spiders","cost":2,"bodies":5,"hp":185,"hit":20,"aps":0.8,"range":2,"speed":6,"splash":0,"shape":"spider","color":"#000000","skills":["spiderlings","poison","stealth"],"skillsInnate":[false,false,false],"skillMods":[null,null,{"params":{},"cost":200}]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":35,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"trample":0,"deathBlast":0,"pctHit":20,"defense":"none","defVal":0,"level":0,"unlock":150,"name":"Truespear","cost":5,"bodies":1,"hp":750,"hit":60,"aps":0.65,"range":25,"speed":3,"splash":0,"shape":"spear","color":"#C9D1D9","skills":["lifesteal","armorHp","dualSpear"],"skillMods":[null,null,null],"skillsInnate":[false,false,false]}],"matrix":[[0,-1,-0.899,-0.993,0.847,0.275,0.214,0.259,0.514,-1,-0.414,-0.233,-0.938,0.481,-0.809,-0.495,0.523,-0.811,-0.755,0.958,0.661,0.558,0.911],[1,0,0.268,-0.514,0.521,0.429,0.679,-0.244,0.375,-0.804,0.35,-0.704,-0.783,-0.614,-0.959,0.563,-0.386,0.798,-0.504,0.946,0.842,0.814,0.821],[0.899,-0.268,0,-0.604,0.333,0.606,-0.192,0.415,0.1,-1,-0.531,-0.68,-0.667,0.457,-0.992,-0.086,0.274,0.19,0.101,0.875,0.765,0.845,0.86],[0.993,0.514,0.604,0,-1,-0.356,0.454,-0.443,-0.882,-0.724,-0.223,-0.915,-0.552,-0.491,-1,-0.683,-0.342,0.388,0.097,0.733,-0.121,0.868,0.528],[-0.847,-0.521,-0.333,1,0,-0.098,0.598,0.397,-0.49,-0.363,-0.124,0.333,0.835,-0.163,-1,-0.249,-0.54,1,-0.567,0.8,-0.415,0.8,0.858],[-0.275,-0.429,-0.606,0.356,0.098,0,-0.617,0.457,-0.799,0.317,-0.519,-1,0.051,-0.524,0.027,-0.313,0.374,-0.649,0.904,0.824,0.269,0.827,0.484],[-0.214,-0.679,0.192,-0.454,-0.598,0.617,0,-0.546,-0.413,-0.68,-0.188,-0.525,0.699,0.285,-0.906,-0.123,-0.47,0.968,-0.651,0.95,0.517,0.946,0.785],[-0.259,0.244,-0.415,0.443,-0.397,-0.457,0.546,0,-0.593,-0.434,-0.227,-0.547,-0.687,-0.36,-0.439,-0.702,-0.561,0.699,-0.514,0.778,-0.676,0.578,0.663],[-0.514,-0.375,-0.1,0.882,0.49,0.799,0.413,0.593,0,0.046,0.713,-0.311,0.851,0.447,-0.833,-0.082,-0.259,1,0.41,1,0.603,0.867,0.777],[1,0.804,1,0.724,0.363,-0.317,0.68,0.434,-0.046,0,0.585,-0.722,-0.659,-0.218,-1,-0.536,0.745,1,0.848,0.98,0.676,1,0.262],[0.414,-0.35,0.531,0.223,0.124,0.519,0.188,0.227,-0.713,-0.585,0,-1,0.699,-0.533,-1,0.195,-0.329,0.305,0.378,0.905,0.416,0.764,0.199],[0.233,0.704,0.68,0.915,-0.333,1,0.525,0.547,0.311,0.722,1,0,1,0.771,-1,0.828,0.844,1,0.591,1,-0.05,0.974,0.686],[0.938,0.783,0.667,0.552,-0.835,-0.051,-0.699,0.687,-0.851,0.659,-0.699,-1,0,-0.901,-0.776,-0.543,0.134,-0.145,0.885,0.866,0.355,0.961,-1],[-0.481,0.614,-0.457,0.491,0.163,0.524,-0.285,0.36,-0.447,0.218,0.533,-0.771,0.901,0,-0.38,0.557,0.398,-0.294,-0.308,0.869,-0.124,0.706,0.019],[0.809,0.959,0.992,1,1,-0.027,0.906,0.439,0.833,1,1,1,0.776,0.38,0,-0.483,0.559,1,0.489,1,-1,0.992,0.942],[0.495,-0.563,0.086,0.683,0.249,0.313,0.123,0.702,0.082,0.536,-0.195,-0.828,0.543,-0.557,0.483,0,0.074,-0.24,0.889,0.888,0.409,0.864,0.239],[-0.523,0.386,-0.274,0.342,0.54,-0.374,0.47,0.561,0.259,-0.745,0.329,-0.844,-0.134,-0.398,-0.559,-0.074,0,-0.075,-0.279,0.947,0.594,0.545,0.817],[0.811,-0.798,-0.19,-0.388,-1,0.649,-0.968,-0.699,-1,-1,-0.305,-1,0.145,0.294,-1,0.24,0.075,0,0.18,0.875,0.73,0.892,0.649],[0.755,0.504,-0.101,-0.097,0.567,-0.904,0.651,0.514,-0.41,-0.848,-0.378,-0.591,-0.885,0.308,-0.489,-0.889,0.279,-0.18,0,0.9,0.682,0.696,0.889],[-0.958,-0.946,-0.875,-0.733,-0.8,-0.824,-0.95,-0.778,-1,-0.98,-0.905,-1,-0.866,-0.869,-1,-0.888,-0.947,-0.875,-0.9,0,-0.65,-0.8,-0.489],[-0.661,-0.842,-0.765,0.121,0.415,-0.269,-0.517,0.676,-0.603,-0.676,-0.416,0.05,-0.355,0.124,1,-0.409,-0.594,-0.73,-0.682,0.65,0,0.408,0.871],[-0.558,-0.814,-0.845,-0.868,-0.8,-0.827,-0.946,-0.578,-0.867,-1,-0.764,-0.974,-0.961,-0.706,-0.992,-0.864,-0.545,-0.892,-0.696,0.8,-0.408,0,0.531],[-0.911,-0.821,-0.86,-0.528,-0.858,-0.484,-0.785,-0.663,-0.777,-0.262,-0.199,-0.686,1,-0.019,-0.942,-0.239,-0.817,-0.649,-0.889,0.489,-0.871,-0.531,0]],"skills":[{"id":"regen","type":"regen","name":"Regeneration","cost":100,"params":{}},{"id":"poison","type":"poison","name":"Poison shot","cost":100,"params":{"pct":150}},{"id":"stealth","type":"stealth","name":"Stealth","cost":100,"params":{}},{"id":"armorHp","type":"armorHp","name":"Armor and health","cost":200,"params":{}},{"id":"spawn","type":"spawn","name":"Spawn goblins","cost":200,"params":{"every":7}},{"id":"rapid","type":"rapid","name":"Rapid fire","cost":100,"params":{}},{"id":"swift","type":"swift","name":"Swift strikes","cost":100,"params":{}},{"id":"heavy","type":"heavy","name":"Heavy shot","cost":100,"params":{}},{"id":"healer","type":"healer","name":"Healing touch","cost":200,"params":{}},{"id":"range","type":"range","name":"Long reach","cost":200,"params":{}},{"id":"shrink","type":"shrink","name":"Shortsight","cost":100,"params":{}},{"id":"skmv5oxj501","type":"ward","name":"Ward","cost":100,"params":{}},{"id":"skmv5oxpgk2","type":"slow","name":"Slow","cost":100,"params":{}},{"id":"raiseDead","type":"spawn","name":"Raise dead","cost":0,"params":{"unit":"Skeleton Archers","count":3,"every":2,"max":12}},{"id":"spiderlings","type":"deathSpawn","name":"Spiderlings","cost":200,"params":{"unit":"Spiders","count":2,"strength":50}},{"id":"split","type":"split","name":"Split beam","cost":100,"params":{}},{"id":"forward","type":"forward","name":"Forward planting","cost":100,"params":{}},{"id":"gallop","type":"swift","name":"Gallop","cost":200,"params":{"speed":25,"hit":0}},{"id":"deathBurst","type":"blast","name":"Death burst","cost":200,"params":{"radius":7,"pct":100}},{"id":"dualFlame","type":"turret","name":"Dual Flame","cost":200,"params":{"turrets":2}},{"id":"lifesteal","type":"lifesteal","name":"Lifesteal","cost":150,"params":{"pct":10}},{"id":"dualSpear","type":"turret","name":"Dual Spear","cost":300,"params":{"turrets":2}},{"id":"frenzy","type":"frenzy","name":"Frenzy","cost":250,"params":{"pct":10,"cap":2}}]};
   const ROLES = {
     'Goblin Swarm': 'Fast melee swarm. Soaks shots and overwhelms single-target units.',
     'Skeleton Archers': 'Cheap ranged squad that deals steady damage from behind.',
@@ -2922,13 +2981,13 @@ if (typeof module !== 'undefined') module.exports = Game;
     'Ent': 'Slow tree guardians sweeping a wide arc in front. Each one explodes when it falls, hurting everything around it.',
     'Sun Priest': 'Channels a beam that burns hotter the longer it holds one target. Melts giants.',
     'Meteor Caller': 'Drops slow meteors from far behind the lines. Helpless once something reaches it.',
-    'War Mammoth': 'Charges straight through the enemy line, trampling every body in its path, then turns to charge again.',
+    'War Mammoth': 'Charges straight through the enemy line, trampling every body in its path, then stands stunned for a moment before it turns to charge again.',
     'Necromancer': 'Keeps raising skeletons to screen its army from big hits.',
     'Wisps': 'Spirits firing slow, hard-hitting bolts from range. Fragile up close.',
     'Crossbow Volley': 'Fires 4-bolt bursts down one line. Lined-up targets take every bolt.',
     'Ballista': 'Slow piercing bolts from long range. Can’t hit anything close.',
     'Boar Riders': 'Fast chargers whose first hit doubles and knocks small bodies back.',
-    'Rogue': 'A pair of fast duelists whose first strike after a run lands four times as hard. Can be placed in no man’s land.',
+    'Rogue': 'A pair of hidden duelists whose first strike after a run lands four times as hard. They slip out of sight again when they stop attacking.',
     'Spiders': 'A fast pack of biters. Each spider that falls can split into two smaller spiderlings.',
     'Truespear': 'Hurls spears from long range. Each one cuts away a fifth of its target’s health, armor or not. Fells giants, wasted on swarms.',
     'Just a horse': 'Just a horse. Gallops past everything to ram the enemy tower, and might have something hiding inside: place a squad on its tile and it rides along unseen until the horse falls.',
@@ -3006,6 +3065,7 @@ if (typeof module !== 'undefined') module.exports = Game;
   const CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
   const HOST_STORE = 'phonebellum.host.v1';
   const LAB_STORE = 'counterlab.v1';
+  const LAB_ROSTERS = 'counterlab.rosters.v1'; // all of Counter Lab's rosters (LAB_STORE holds the one open there)
   const qs = new URLSearchParams(location.search);
   const TEST = qs.has('test'); // test-only settings show on the menu
 
@@ -3216,19 +3276,66 @@ if (typeof module !== 'undefined') module.exports = Game;
   // characters left out of the package draw (saved on this device; the host's list counts in a match with a friend)
   let offChars = [];
   try { offChars = JSON.parse(localStorage.getItem('pb-off-chars') || '[]').filter(id => Game.charInfo(id)); } catch (e) {}
-  const charSeg = () => `<div class="bar" style="flex-wrap:wrap">
-        <span class="hint">Characters in the draw (tap to leave one out)</span>
-        <div class="chars-pick" role="group" aria-label="Characters in the draw">
-          ${Game.CHARACTERS.map(c => `<button data-char="${c.id}" aria-pressed="${!offChars.includes(c.id)}" title="${esc(c.name)}">${armsImg(c.id)}<span>${esc(c.name.split(' - ')[0])}</span></button>`).join('')}
-        </div>
+  // units left out of the match, by name (saved on this device; the host's list counts in a match with a friend)
+  let offUnits = [];
+  try { offUnits = JSON.parse(localStorage.getItem('pb-off-units') || '[]').filter(n => typeof n === 'string'); } catch (e) {}
+  const offIdx = () => units.map((u, i) => offUnits.includes(u.name) ? i : -1).filter(i => i >= 0);
+  const unitsOn = () => units.length - offIdx().length;
+  // what a new match takes from the menu: units left out, and the rules of a Counter Lab roster
+  const matchOpts = () => ({ offUnits: offIdx(), rules: customSet && rawSet.rules && typeof rawSet.rules === 'object' ? rawSet.rules : null });
+  // Leaders and Units: a button each, opening a small menu to leave some out (one open at a time)
+  let pickOpen = '';
+  const charsOn = () => Game.CHARACTERS.length - offChars.length;
+  const charSeg = () => `<div class="bar picks">
+        <span class="btnrow">
+          <button class="btn small" id="pick-chars" aria-expanded="${pickOpen === 'chars'}" aria-controls="pick-menu">Leaders <span class="num" id="chars-n">${charsOn()}/${Game.CHARACTERS.length}</span> ${pickOpen === 'chars' ? '▴' : '▾'}</button>
+          <button class="btn small" id="pick-units" aria-expanded="${pickOpen === 'units'}" aria-controls="pick-menu">Units <span class="num" id="units-n">${unitsOn()}/${units.length}</span> ${pickOpen === 'units' ? '▴' : '▾'}</button>
+        </span>
+        <div class="pick-menu" id="pick-menu" ${pickOpen ? '' : 'hidden'}>${pickMenu()}</div>
       </div>`;
-  const wireCharSeg = () => $('panel').querySelectorAll('[data-char]').forEach(b => b.addEventListener('click', () => {
-    const id = b.dataset.char, off = offChars.includes(id);
-    if (!off && offChars.length >= Game.CHARACTERS.length - 1) return; // at least one stays in
-    offChars = off ? offChars.filter(x => x !== id) : offChars.concat(id);
-    try { localStorage.setItem('pb-off-chars', JSON.stringify(offChars)); } catch (e) {}
-    b.setAttribute('aria-pressed', String(off));
-  }));
+  const pickMenu = () => {
+    if (pickOpen === 'chars') return `<span class="hint">Leaders in the draw. Tap one to leave it out.</span>
+        <div class="chars-pick" role="group" aria-label="Leaders in the draw">
+          ${Game.CHARACTERS.map(c => `<button data-char="${c.id}" aria-pressed="${!offChars.includes(c.id)}" title="${esc(c.name)}">${armsImg(c.id)}<span>${esc(c.name.split(' - ')[0])}</span></button>`).join('')}
+        </div>`;
+    if (pickOpen === 'units') {
+      const tiers = [...new Set(units.map((u, i) => tierOf(i)))].sort((a, b) => a - b);
+      return `<span class="hint">Units in the match. Tap one to leave it out.</span>
+        ${tiers.map(t => `<div class="units-tier"><span class="hint" style="color:${tierColor(t)}">Tier ${t} · ${esc(tierName(t))}</span>
+          <div class="chars-pick" role="group" aria-label="Tier ${t} units in the match">
+            ${units.map((u, i) => tierOf(i) !== t ? '' : `<button data-unit="${esc(u.name)}" aria-pressed="${!offUnits.includes(u.name)}" title="${esc(u.name)}"><span style="color:${u.color};display:inline-flex;margin-right:4px">${Shapes.svg(u.shape, 12)}</span><span>${esc(u.name)}</span></button>`).join('')}
+          </div></div>`).join('')}`;
+    }
+    return '';
+  };
+  const wireCharSeg = () => {
+    const box = $('panel').querySelector('.picks');
+    if (!box) return;
+    const redraw = () => {
+      ['chars', 'units'].forEach(k => { const b = $('pick-' + k); b.setAttribute('aria-expanded', String(pickOpen === k)); b.lastChild.textContent = ' ' + (pickOpen === k ? '▴' : '▾'); });
+      const menu = $('pick-menu'); menu.hidden = !pickOpen; menu.innerHTML = pickMenu(); wireMenu();
+    };
+    const wireMenu = () => {
+      box.querySelectorAll('[data-char]').forEach(b => b.addEventListener('click', () => {
+        const id = b.dataset.char, off = offChars.includes(id);
+        if (!off && offChars.length >= Game.CHARACTERS.length - 1) return; // at least one stays in
+        offChars = off ? offChars.filter(x => x !== id) : offChars.concat(id);
+        try { localStorage.setItem('pb-off-chars', JSON.stringify(offChars)); } catch (e) {}
+        b.setAttribute('aria-pressed', String(off));
+        $('chars-n').textContent = `${charsOn()}/${Game.CHARACTERS.length}`;
+      }));
+      box.querySelectorAll('[data-unit]').forEach(b => b.addEventListener('click', () => {
+        const name = b.dataset.unit, off = offUnits.includes(name);
+        if (!off && unitsOn() <= 2) return; // at least two stay in
+        offUnits = off ? offUnits.filter(x => x !== name) : offUnits.concat(name);
+        try { localStorage.setItem('pb-off-units', JSON.stringify(offUnits)); } catch (e) {}
+        b.setAttribute('aria-pressed', String(off));
+        $('units-n').textContent = `${unitsOn()}/${units.length}`;
+      }));
+    };
+    ['chars', 'units'].forEach(k => $('pick-' + k).addEventListener('click', () => { pickOpen = pickOpen === k ? '' : k; redraw(); }));
+    wireMenu();
+  };
   // match settings (map, characters, timer, units) sit folded away on the menu and in the lobby
   let settingsOpen = false;
   const settingsBox = (inner) => `<details class="settings" id="settings"${settingsOpen ? ' open' : ''}><summary>Match settings<span>${esc(mapPick ? Game.MAPS.find(mp => mp.id === mapPick).name : 'Random map')}</span></summary><div class="settings-body">${inner}</div></details>`;
@@ -3945,7 +4052,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
     for (const b of bt.bodies) {
       if (!b.alive || b.u.structure) continue;
       const c = teamCol(b.side), r = radius(b.u), hpr = b.hp / b.u.hp;
-      if (b.hidden) { // stealthed: a dashed ghost until it attacks (fainter for the enemy's)
+      if (b.hidden) { // stealthed: a dashed ghost while hidden (fainter for the enemy's)
         ctx.globalAlpha = b.side === me ? 0.6 : 0.3; ctx.strokeStyle = c; ctx.lineWidth = 1.5; ctx.setLineDash([2, 2]);
         Shapes.outline(ctx, b.u.shape, PX(b.x), PY(b.y), r, upOf(b.side));
         ctx.setLineDash([]); ctx.globalAlpha = 1;
@@ -3958,6 +4065,10 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
       }
       if (b.poison && b.poison.length) { ctx.fillStyle = '#6FD08C'; ctx.beginPath(); ctx.arc(PX(b.x) + r * 0.9, PY(b.y) - r * 0.9, Math.max(2, r * 0.3), 0, Math.PI * 2); ctx.fill(); }
       if (b.slowT > 0) { ctx.fillStyle = '#9BD0FF'; ctx.beginPath(); ctx.arc(PX(b.x) - r * 0.9, PY(b.y) - r * 0.9, Math.max(2, r * 0.3), 0, Math.PI * 2); ctx.fill(); } // slowed
+      if (b.stunT > 0) { // stunned after a charge: three dots circling over its head
+        ctx.fillStyle = '#FFD23F';
+        for (let k = 0; k < 3; k++) { const a = bt.time() * 6 + k * 2.094; ctx.beginPath(); ctx.arc(PX(b.x) + Math.cos(a) * r * 0.8, PY(b.y) - r * 1.2 + Math.sin(a) * r * 0.3, Math.max(1.5, r * 0.2), 0, Math.PI * 2); ctx.fill(); }
+      }
       if (b.u.hp >= 500 && hpr < 1) {
         ctx.strokeStyle = c; ctx.lineWidth = 1.5;
         ctx.beginPath(); ctx.arc(PX(b.x), PY(b.y), r + 2.5, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * hpr); ctx.stroke();
@@ -4260,14 +4371,14 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
       <div class="bar"><span class="gold num">${g} gold</span><span class="deploys num">${Math.max(0, left)} of ${allowed} deployments left</span><span class="timer" id="timer">${deadline ? fmtClock(deadline - now()) : ''}</span></div>
       <div class="bar"><span class="hint">${hint}</span>${(choosingPack() || choosingTower()) && can ? '' : extraBtns}</div>
       ${(choosingPack() || choosingTower()) && can ? '' : (() => {
-        const tiers = [...new Set(units.map((u, i) => tierOf(i)))].sort((a, b) => a - b);
+        const tiers = [...new Set(units.map((u, i) => Game.isOff(m, i) ? 0 : tierOf(i)))].filter(t => t > 0).sort((a, b) => a - b); // units left out of the match aren't in the shop
         if (!tiers.includes(shopTier)) shopTier = tiers[0];
         return `<div class="tiers" role="tablist" aria-label="Unit tiers, higher is stronger" style="--n:${tiers.length}">${tiers.map(t => {
-          const idx = units.map((u, i) => i).filter(i => tierOf(i) === t), open = idx.filter(i => !locked(i)).length, free = idx.some(i => freeN(i) > 0);
+          const idx = units.map((u, i) => i).filter(i => tierOf(i) === t && !Game.isOff(m, i)), open = idx.filter(i => !locked(i)).length, free = idx.some(i => freeN(i) > 0);
           return `<button role="tab" data-tier="${t}" aria-selected="${t === shopTier}" aria-label="Tier ${t}, ${tierName(t)}, ${price(idx[0])} gold, ${open} of ${idx.length} unlocked${free ? ', has free squads' : ''}" style="--tier:${tierColor(t)}">Tier ${t}<em>${tierName(t)}</em><small>${price(idx[0])}g · ${open}/${idx.length}</small></button>`;
         }).join('')}</div>`;
       })()}
-      ${(choosingPack() || choosingTower()) && can ? '' : `<div class="shop" id="shop">${units.map((u, i) => tierOf(i) !== shopTier ? '' : `
+      ${(choosingPack() || choosingTower()) && can ? '' : `<div class="shop" id="shop">${units.map((u, i) => tierOf(i) !== shopTier || Game.isOff(m, i) ? '' : `
         <div class="uwrap" style="--tier:${tierColor(tierOf(i))}">
           <button class="ucard" data-i="${i}" aria-pressed="${selected === i}" aria-disabled="${!canBuy(i) && !(locked(i) && can)}" ${locked(i) ? `data-locked="1" style="border-style:dashed" aria-label="${esc(u.name)}, locked, unlock for ${Game.unlockCost(m, i, me)} gold"` : ''}>
             <span class="t"><span style="color:${u.color};display:inline-flex">${Shapes.svg(u.shape, 13)}</span> ${tag(u)} <span class="tier">T${tierOf(i)}</span></span><span class="n">${esc(u.name)}</span>
@@ -4624,7 +4735,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
     if (!sampleFn) { startAiMatch(); return; }
     leaveNet();
     mode = 'claude'; me = 0;
-    m = Game.createMatch(units, M, (now() ^ (Math.random() * 1e9)) >>> 0, mapPick, m && m.map ? m.map.id : null, offChars);
+    m = Game.createMatch(units, M, (now() ^ (Math.random() * 1e9)) >>> 0, mapPick, m && m.map ? m.map.id : null, offChars, matchOpts());
     nextReady = [false, false]; rematch = [false, false];
     claude.off = false; claude.history = [];
     startReport();
@@ -4693,6 +4804,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
       if (u.charge > 1) t.push(`charge x${u.charge}`);
       if (u.knockback > 0) t.push(`knockback ${u.knockback} m`);
       if (u.trample > 0) t.push(`tramples ${u.trample}%`);
+      if (u.chargeStun > 0) t.push(`stunned ${u.chargeStun} s after each charge (can't move or attack)`);
       if (u.pctHit > 0) t.push(`every hit also deals ${u.pctHit}% of the target's max health, ignoring armor (not to towers)`);
       if (u.deathBlast > 0) t.push(`explodes on death for ${u.deathBlast}% of max health within ${Engine.BLAST_RADIUS} m`);
       if (u.windUp > 0) t.push(`wind-up ${u.windUp} s`);
@@ -4758,7 +4870,7 @@ ${m.packages[1].map((p, k) => `  ${k}: ${p.squads.map(ui => units[ui].name).join
 - You may sell squads from earlier rounds for half their worth: the unit's price plus its level-ups (their tile becomes free).
 
 UNITS
-${units.map(unitLine).join('\n')}
+${units.map((u, i) => Game.isOff(m, i) ? null : unitLine(u, i)).filter(Boolean).join('\n')}
 
 COUNTER TABLE (each unit vs each other with equal gold; +100 = wins easily, -100 = loses badly)
 ${matrix}
@@ -4867,7 +4979,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   function startAiMatch() {
     leaveNet();
     mode = 'ai'; me = 0;
-    m = Game.createMatch(units, M, (now() ^ (Math.random() * 1e9)) >>> 0, mapPick, m && m.map ? m.map.id : null, offChars);
+    m = Game.createMatch(units, M, (now() ^ (Math.random() * 1e9)) >>> 0, mapPick, m && m.map ? m.map.id : null, offChars, matchOpts());
     nextReady = [false, false]; rematch = [false, false];
     startReport();
     beginAiRound();
@@ -5391,6 +5503,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (u.charge > 1) tr.push(`Charge ×${u.charge}`);
     if (u.knockback > 0) tr.push(`Knockback ${u.knockback} m`);
     if (u.trample > 0) tr.push(`Tramples (${u.trample}% hit)`);
+    if (u.chargeStun > 0) tr.push(`Stunned ${u.chargeStun} s after a charge`);
     if (u.pctHit > 0) tr.push(`Hits +${u.pctHit}% of target’s health, past armor`);
     if (u.deathBlast > 0) tr.push(`Death blast ${u.deathBlast}% health`);
     if (u.windUp > 0) tr.push(`Wind-up ${u.windUp} s`);
@@ -5437,12 +5550,12 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
 
   // ---------- load units from Counter Lab ----------
   let loaderRun = 0;
-  function* matrixGen(us) {
+  function* matrixGen(us, rules) {
     const n = us.length, out = us.map(() => Array(n).fill(0));
     const total = n * (n - 1) / 2;
     let done = 0;
     // enough gold per side that even the priciest unit fields a full squad
-    const g = { ...MATRIX_SETTINGS, budget: Engine.fairBudget(us.map(u => u.cost), MATRIX_SETTINGS.budget) };
+    const g = { ...MATRIX_SETTINGS, budget: Engine.fairBudget(us.map(u => u.cost), MATRIX_SETTINGS.budget), ...(rules ? { rules } : {}) };
     for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) {
       const r = Engine.battle(us[i], us[j], g);
       out[i][j] = +r.score.toFixed(3); out[j][i] = -out[i][j];
@@ -5453,11 +5566,26 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   function labRoster() {
     try { const p = JSON.parse(localStorage.getItem(LAB_STORE) || 'null'); return p && validUnits(p.units) ? p : null; } catch (e) { return null; }
   }
+  // every saved Counter Lab roster on this device, with the one open in Counter Lab first
+  function labRosters() {
+    try {
+      const st = JSON.parse(localStorage.getItem(LAB_ROSTERS) || 'null');
+      if (st && Array.isArray(st.rosters)) {
+        const list = st.rosters.filter(r => r && r.saved && validUnits(r.saved.units)).map(r => ({ id: String(r.id), name: String(r.name || 'Roster').slice(0, 40), data: r.saved }));
+        list.sort((a, b) => (b.id === String(st.active)) - (a.id === String(st.active)));
+        if (list.length) return list;
+      }
+    } catch (e) {}
+    const p = labRoster();
+    return p ? [{ id: 'lab', name: 'Counter Lab', data: p }] : [];
+  }
   function openLoader() {
-    const lab = labRoster();
+    const labs = labRosters(), lab = labs.length ? labs[0].data : null;
     $('sheet').innerHTML = `
       <div class="bar"><h3 id="sheet-h">Load units</h3><button class="btn small" id="close">Close</button></div>
-      ${lab ? `<p class="role" style="margin:0">Counter Lab on this device has ${lab.units.length} units.</p>
+      ${lab ? `${labs.length > 1 ? `<label class="role" style="margin:0;display:grid;gap:4px" for="lab-pick">Counter Lab on this device has ${labs.length} rosters. Play with:
+        <select id="lab-pick" style="font:14px var(--font-body);background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:4px;padding:6px">${labs.map((r, k) => `<option value="${k}">${esc(r.name)} · ${r.data.units.length} units</option>`).join('')}</select></label>`
+        : `<p class="role" style="margin:0">Counter Lab on this device has ${lab.units.length} units.</p>`}
       <div class="bar"><span></span><button class="btn primary" id="use-lab">Use my Counter Lab units</button></div>
       <p class="role" style="margin:0">Or paste a roster copied with Copy roster:</p>`
       : `<p class="role" style="margin:0">Open <a href="lab.html">Counter Lab</a> on this device and your units show up here. Or paste a roster copied with Copy roster:</p>`}
@@ -5484,7 +5612,9 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       const prepared = clean.map(u => ({ ...Engine.withTraits(u), level: 0, bodies: Math.max(1, Math.round(u.bodies)) }));
       const id = ++loaderRun;
       $('use-roster').disabled = true; if ($('use-lab')) $('use-lab').disabled = true;
-      const gen = matrixGen(prepared.map(u => Engine.innateUnit(u, (p && p.skills) || [], prepared))); // built-in skills count in the table
+      // the roster's rules (Counter Lab can switch mechanics off for a roster) count in the table and in the match
+      const rules = p && p.settings && p.settings.rules && typeof p.settings.rules === 'object' ? p.settings.rules : null;
+      const gen = matrixGen(prepared.map(u => Engine.innateUnit(u, (p && p.skills) || [], prepared)), rules); // built-in skills count in the table
       (function step() {
         if (id !== loaderRun) return;
         const t0 = performance.now();
@@ -5492,7 +5622,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
         while (performance.now() - t0 < 30) {
           r = gen.next();
           if (r.done) {
-            const set = { units: clean, matrix: r.value, skills: (p && Array.isArray(p.skills)) ? p.skills : [] };
+            const set = { units: clean, matrix: r.value, skills: (p && Array.isArray(p.skills)) ? p.skills : [], rules };
             try { localStorage.setItem(STORE, JSON.stringify(set)); } catch (e) {}
             useSet(set, true);
             closeSheet(); showStart();
@@ -5503,7 +5633,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
         setTimeout(step, 0);
       })();
     };
-    if ($('use-lab')) $('use-lab').addEventListener('click', () => load(lab));
+    if ($('use-lab')) $('use-lab').addEventListener('click', () => load($('lab-pick') ? labs[+$('lab-pick').value].data : lab));
     $('use-roster').addEventListener('click', () => {
       let p;
       try { p = JSON.parse($('roster-in').value); } catch (e) { msg.textContent = 'That text isn’t a roster. Copy it again with Copy roster in Counter Lab.'; return; }
@@ -5625,7 +5755,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
 
   function hostStartMatch() {
     if (!net.connected) return;
-    m = Game.createMatch(units, M, (now() ^ (Math.random() * 1e9)) >>> 0, mapPick, m && m.map ? m.map.id : null, offChars);
+    m = Game.createMatch(units, M, (now() ^ (Math.random() * 1e9)) >>> 0, mapPick, m && m.map ? m.map.id : null, offChars, matchOpts());
     lastSummary = null; nextReady = [false, false]; rematch = [false, false];
     startReport();
     hostBeginRound();
@@ -5686,7 +5816,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   }
   function sendSync() {
     if (!net.connected) return;
-    const base = { t: 'sync', proto: 1, set: { units: rawSet.units, matrix: rawSet.matrix, skills: rawSet.skills || [] }, custom: customSet, config: { levelCostPerTier: Game.CONFIG.levelCostPerTier } };
+    const base = { t: 'sync', proto: 1, set: { units: rawSet.units, matrix: rawSet.matrix, skills: rawSet.skills || [], rules: rawSet.rules || null }, custom: customSet, config: { levelCostPerTier: Game.CONFIG.levelCostPerTier } };
     if (!m) { send({ ...base, phase: 'lobby' }); return; }
     const ph = phase === 'battle' ? 'result' : phase;
     send({ ...base, phase: ph, m: syncState(), remaining: phase === 'deploy' && deadline ? deadline - now() : 0, ready, nextReady, rematch, summary: lastSummary });

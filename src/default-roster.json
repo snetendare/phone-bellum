@@ -191,6 +191,16 @@
       "params": {
         "turrets": 2
       }
+    },
+    {
+      "id": "frenzy",
+      "type": "frenzy",
+      "name": "Frenzy",
+      "cost": 250,
+      "params": {
+        "pct": 10,
+        "cap": 2
+      }
     }
   ],
   "units": [
@@ -911,14 +921,15 @@
       "hit": 169,
       "aps": 0.5,
       "range": 3,
-      "speed": 9,
+      "speed": 8,
       "shape": "pentagon",
       "color": "#A0785A",
       "skills": [
         "swift",
         "armorHp"
       ],
-      "trample": 50
+      "trample": 50,
+      "chargeStun": 1.5
     },
     {
       "burst": 1,
@@ -1148,15 +1159,18 @@
       "shape": "triangle",
       "color": "#460000",
       "skills": [
-        "forward",
-        "skmv5oxj501"
+        "stealth",
+        "skmv5oxj501",
+        "frenzy"
       ],
       "skillsOn": [
+        false,
         false,
         false
       ],
       "skillsInnate": [
         true,
+        false,
         false
       ],
       "skillMods": [
@@ -1165,8 +1179,9 @@
           "params": {
             "cap": 200
           },
-          "cost": 159
-        }
+          "cost": 150
+        },
+        null
       ]
     },
     {

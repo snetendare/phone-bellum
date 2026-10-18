@@ -1,6 +1,6 @@
 // ===== Battle engine (shared by headless tests and the page) =====
 const Engine = (() => {
-  const TRAIT_DEFAULTS = { burst: 1, pellets: 1, spinUp: 0, spinHit: 0, pierce: 0, projSpeed: 0, minRange: 0, charge: 1, knockback: 0, windUp: 0, flame: 0, trample: 0, deathBlast: 0, pctHit: 0, ram: 0, noFlank: 0, carrier: 0, noPack: 0 };
+  const TRAIT_DEFAULTS = { burst: 1, pellets: 1, spinUp: 0, spinHit: 0, pierce: 0, projSpeed: 0, minRange: 0, charge: 1, knockback: 0, windUp: 0, flame: 0, trample: 0, chargeStun: 0, deathBlast: 0, pctHit: 0, ram: 0, noFlank: 0, carrier: 0, noPack: 0 };
   const BURST_GAP = 0.15;      // seconds between shots in a burst
   const SHOTGUN_COS = Math.sqrt(3) / 2; // pellets spread 30 degrees to each side of the target (cos 30)
   // Only + - * / and sqrt from here on: those give identical results in every browser,
@@ -18,6 +18,21 @@ const Engine = (() => {
   const CHARGE_RUN = 5;        // metres a unit must run before its next attack counts as a charge
   const TRAMPLE_RUN = 8;       // after a charged hit, a trampler keeps running this far past its target
   const TRAMPLE_WIDTH = 1.5;   // bodies within this distance of a trampler's path get run over
+  // chargeStun: after a charged hit (and the trample run that follows it) the unit is stunned this many seconds:
+  // it can't move or attack
+  const STEALTH_BACK = 1.5;    // a stealth unit hides again after this many seconds without attacking
+  // Roster rules (g.rules): optional mechanics a roster can switch off. Missing or true = on.
+  //   vision: units march ahead until they spot an enemy (sight). Off: every unit knows where every enemy is from the start.
+  //   stealth: the Stealth skill hides units. Off: stealth units can be targeted like any other.
+  //   stealthBack: a stealth unit hides again after STEALTH_BACK s without attacking. Off: it stays seen once it attacks.
+  //   knockback: hits with knockback push bodies. Off: nothing is pushed.
+  const RULES = [
+    ['vision', 'Vision', 'Units march straight ahead until an enemy comes within sight (see Sight in Battle settings), then turn to it. Off: every unit knows where every enemy is from the start and heads straight for the nearest one.'],
+    ['stealth', 'Stealth', 'Units with the Stealth skill can’t be targeted while hidden. Off: the skill does nothing and they can be targeted like any other unit.'],
+    ['stealthBack', 'Stealth returns', `A stealth unit hides again after ${STEALTH_BACK} s without attacking. Off: once it has attacked it stays seen for the rest of the fight.`],
+    ['knockback', 'Knockback', 'Hits from units with knockback push the bodies they hit. Off: nothing is pushed.'],
+  ];
+  const ruleOn = (g, k) => !(g && g.rules && g.rules[k] === false);
   // ram: the unit never attacks; it heads straight for the enemy tower (the nearest enemy once the tower is down),
   // and on reaching it deals its hit to it once and is destroyed. carrier: a squad of another unit can ride inside
   // (see createBattle: bodies with `carrier` set stay out of the fight until that body dies). noFlank: can't be
@@ -85,6 +100,7 @@ const Engine = (() => {
     blast:   { label: 'Death burst', params: [['radius', 'Radius (m)', 7, 0.5], ['pct', 'Damage (% of hit)', 100, 10]] },
     lifesteal: { label: 'Lifesteal', params: [['pct', 'Heals itself for (% of damage dealt)', 10, 1]] },
     turret:  { label: 'Extra turret', params: [['turrets', 'Attacks at once (each with its own target and reload)', 2, 1]] },
+    frenzy:  { label: 'Frenzy', params: [['pct', 'Attack speed per hit (+% of base)', 10, 1], ['cap', 'Most attacks per second', 2, 0.1]] },
   };
   const skillParam = (d, k) => {
     const v = d.params && d.params[k];
@@ -101,7 +117,7 @@ const Engine = (() => {
     switch (d.type) {
       case 'regen': return `+${n('hp')}% health, and regains ${n('pct')}% of its max health every second.`;
       case 'poison': return `Hits poison the target for ${n('pct')}% of the hit over ${n('duration')} s, ignoring armor and ward. ${n('slow')}% more time between attacks.`;
-      case 'stealth': return 'Can’t be targeted until it attacks for the first time. Splash and piercing shots can still hit it.';
+      case 'stealth': return `Can’t be targeted until it attacks, and hides again after ${STEALTH_BACK} s without attacking. Splash and piercing shots can still hit it.`;
       case 'armorHp': return `+${n('armor')} armor and +${n('hp')}% health.`;
       case 'spawn': return `Every ${n('every')} s, spawns ${n('count')} ${String(P('unit'))} ${+P('count') === 1 ? 'body' : 'bodies'}, up to ${n('max')} alive at once${+P('waves') > 0 ? `, at most ${n('waves')} ${+P('waves') === 1 ? 'wave' : 'waves'} per fight` : ''}.`;
       case 'rapid': return `+${n('aps')}% attack speed, −${n('range')}% range.`;
@@ -118,6 +134,7 @@ const Engine = (() => {
       case 'blast': return `When a body dies it explodes, dealing ${+P('pct') === 100 ? 'the damage of its hit' : `${n('pct')}% of its hit`} (for a ram, what it deals to the tower) to every enemy within ${n('radius')} m.`;
       case 'lifesteal': return `Each body heals itself for ${n('pct')}% of the damage it deals.`;
       case 'turret': return `Each body attacks ${n('turrets')} different enemies at once, each attack with its own target and its own reload, as if it carried ${n('turrets')} copies of its weapon. They never aim at the same enemy, so with only one enemy in reach just one fires.`;
+      case 'frenzy': return `Each hit it lands gives that body +${n('pct')}% attack speed for the rest of the fight, up to ${n('cap')} attacks per second.`;
       case 'shield': return `Each body fully blocks the first ${n('hits')} ${+P('hits') === 1 ? 'hit' : 'hits'} it takes in a fight, however big. Poison already on it still ticks.`;
     }
     return '';
@@ -174,6 +191,7 @@ const Engine = (() => {
         case 'lifesteal': u.lifesteal = (u.lifesteal || 0) + Math.max(0, P('pct')); break;
         case 'turret': u.turrets = Math.max(u.turrets || 1, Math.min(6, Math.round(P('turrets')))); break;
         case 'shield': u.shield = (u.shield || 0) + Math.max(0, Math.round(P('hits'))); break;
+        case 'frenzy': u.frenzyPct = (u.frenzyPct || 0) + Math.max(0, P('pct')); u.frenzyCap = Math.max(u.frenzyCap || 0, Math.max(0.05, P('cap'))); break;
         case 'blast': u.blastR = Math.max(u.blastR || 0, Math.max(0, P('radius'))); u.blastPct = (u.blastPct || 0) + Math.max(0, P('pct')); break;
         case 'split':
           u.beams = Math.max(u.beams || 1, Math.round(P('beams')));
@@ -271,6 +289,8 @@ const Engine = (() => {
       hidden: !!u.stealth, poison: null, shrinkM: 0, shrinkT: 0, slowT: 0, slowMove: 0, slowAtk: 0,
       spawnT: u.spawn ? u.spawn.every : 0, kids: null,
       shield: u.shield || 0, // hits left that the Shield skill blocks completely
+      frenzy: 0, // hits landed so far (Frenzy skill)
+      stunT: 0, lastAtk: 0, // seconds of stun left (chargeStun); fight time of its last attack (stealth returns)
     };
   }
 
@@ -312,7 +332,9 @@ const Engine = (() => {
       { dealt: 0, wasted: 0, blocked: 0, missed: 0, windLost: 0, winds: 0, totalHp: B.reduce((s, b) => s + (b.u.structure ? 0 : b.u.hp), 0) },
     ];
     const dt = g.dt;
-    const sight = g.sight == null ? SIGHT : g.sight;
+    const stealthOn = ruleOn(g, 'stealth'), stealthBack = ruleOn(g, 'stealthBack'), knockOn = ruleOn(g, 'knockback');
+    // without vision every unit sees the whole field: it locks on to the nearest enemy from the first tick
+    const sight = !ruleOn(g, 'vision') ? 1e9 : g.sight == null ? SIGHT : g.sight;
     const minSight = g.minSight == null ? MIN_SIGHT : g.minSight;
     const drift = g.drift == null ? DRIFT : g.drift;
     const cripple = [0, 0];      // seconds left of the tower-down penalty for each side
@@ -461,6 +483,7 @@ const Engine = (() => {
         if (v.walls[w] > 0) { v.walls[w]--; st.blocked += hit + pct; return; }
       }
       let dmg = damageAfterDefense(hit, v, g);
+      if (owner.u.frenzyPct > 0) owner.frenzy++; // Frenzy: every hit that lands speeds up its next attacks
       // damage the target's armor turned away earns it a little experience (g.armorXp per point, default 0.5)
       const armor = (v.u.defense === 'armor' ? v.u.defVal : 0) + (v.u.bonusArmor || 0);
       if (armor > 0) v.xp += (hit - Math.max(hit - armor, hit * g.minDmgPct / 100)) * (g.armorXp == null ? 0.5 : g.armorXp);
@@ -501,7 +524,7 @@ const Engine = (() => {
         v.shrinkM = v.shrinkT > 0 ? Math.max(v.shrinkM, owner.u.shrinkM) : owner.u.shrinkM;
         v.shrinkT = Math.max(v.shrinkT, owner.u.shrinkDur);
       }
-      if (owner.u.knockback > 0 && !v.u.structure) {
+      if (owner.u.knockback > 0 && knockOn && !v.u.structure) {
         // big hits on small bodies push the full distance; on big bodies barely at all
         const push = owner.u.knockback * Math.min(1, hit / v.u.hp);
         const dx = v.x - fromX, dy = v.y - fromY, d = hyp(dx, dy) || 1;
@@ -592,10 +615,18 @@ const Engine = (() => {
       return out;
     }
 
+    // attacks per second right now: Frenzy speeds it up with every hit landed, up to its cap (never below the base rate)
+    function apsOf(b) {
+      const a = b.u.aps;
+      if (!(b.u.frenzyPct > 0) || !b.frenzy) return a;
+      return Math.max(a, Math.min(b.u.frenzyCap, a * (1 + b.frenzy * b.u.frenzyPct / 100)));
+    }
+
     function fire(b, targets, canCharge) {
       const charged = canCharge && b.u.charge > 1 && b.moved >= CHARGE_RUN;
       b.moved = 0;
-      b.hidden = false; // stealth ends with the first attack
+      b.hidden = false; // attacking gives a stealth unit away (it hides again after STEALTH_BACK s without attacking)
+      b.lastAtk = t;
       if (b.u.healPct > 0) {
         // heal a random wounded ally (not itself)
         const hurtAllies = sides[b.side].filter(a => a.alive && a !== b && a.hp < a.u.hp);
@@ -611,6 +642,8 @@ const Engine = (() => {
         const tgt = targets[0], dx = tgt.x - b.x, dy = tgt.y - b.y, d = hyp(dx, dy);
         if (d > 0) { b.trampleDir = [dx / d, dy / d]; b.trampleLeft = d + TRAMPLE_RUN; b.trampled = [tgt]; }
       }
+      // stunned after a charge (a trampler only once its run is over, see the movement loop)
+      if (charged && b.u.chargeStun > 0 && !(b.trampleLeft > 0)) b.stunT = b.u.chargeStun;
       for (const tgt of targets) {
         const dx = tgt.x - b.x, dy = tgt.y - b.y, d = hyp(dx, dy) || 1;
         const dirX = dx / d, dirY = dy / d;
@@ -667,7 +700,7 @@ const Engine = (() => {
         const taken = turretTaken(b, k), tgt = valid.find(f => !taken.includes(f));
         if (!tgt) { b.tcd[k] = Math.max(b.tcd[k], -dt); b.aims[k] = null; continue; }
         b.aims[k] = tgt;
-        b.tcd[k] = Math.max(b.tcd[k], -dt) + 1 / Math.max(0.01, b.u.aps);
+        b.tcd[k] = Math.max(b.tcd[k], -dt) + 1 / Math.max(0.01, apsOf(b));
         fire(b, aim(b, tgt, valid), false);
       }
     }
@@ -701,6 +734,12 @@ const Engine = (() => {
         if (!b.alive || b.u.structure) continue;
         for (const tl of tiles) if (b.alive && b.x >= tl.x0 && b.x < tl.x1 && b.y >= tl.y0 && b.y < tl.y1) onTile(b, tl);
       }
+      // stealth: hidden until it attacks, and again after STEALTH_BACK s without attacking (roster rules can turn either off)
+      for (const b of all) {
+        if (!b.alive || !b.u.stealth) continue;
+        if (!stealthOn) b.hidden = false;
+        else if (!b.hidden && stealthBack && t - b.lastAtk >= STEALTH_BACK - 1e-9) b.hidden = true;
+      }
       // a body with a start delay (deployed on a flank) can't move or attack until it runs out
       for (const b of all) if (b.delay > 0) b.delay = Math.max(0, b.delay - dt);
       // home ground (band = { y0, y1, armor, hpPct, on }): extra armor and health while the body stands between
@@ -717,6 +756,7 @@ const Engine = (() => {
       // movement + targeting
       for (const b of all) {
         if (!b.alive || b.delay > 0) continue;
+        if (b.stunT > 0) { b.stunT = Math.max(0, b.stunT - dt); continue; } // stunned: can't move (or attack, below)
         if (b.holdT > 0) { b.holdT -= dt; continue; } // holding its ground (it still shoots)
         const foes = sides[1 - b.side];
         if (b.trampleLeft > 0) {
@@ -732,7 +772,7 @@ const Engine = (() => {
             if (opts.record) shots.push([b.x, b.y, f.x, f.y, b.side, 1, 1, 0, 0]);
             hurt(b, f, tHit, b.x, b.y);
           }
-          if (b.trampleLeft <= 1e-9) { b.trampleLeft = 0; b.trampled = null; }
+          if (b.trampleLeft <= 1e-9) { b.trampleLeft = 0; b.trampled = null; if (b.u.chargeStun > 0) b.stunT = b.u.chargeStun; }
           continue;
         }
         if (b.u.ram) { ram(b, foes); continue; }
@@ -866,6 +906,7 @@ const Engine = (() => {
         if ((!b.alive && b.diedTick !== tick) || b.delay > 0 || b.u.ram || b.boarded || b.turning) continue;
         b.cd -= dt * (b.slowT > 0 ? 1 - b.slowAtk / 100 : 1); // slowed units reload slower
         if (b.firing >= 0) b.firing += dt;
+        if (b.stunT > 0) continue; // stunned after a charge
         if (b.u.mend > 0) { // a healer that never attacks: the most wounded ally in range gets b.u.mend
           if (!b.alive || b.cd > 0) continue;
           let tgt = null, most = 1e-9;
@@ -948,7 +989,7 @@ const Engine = (() => {
         const spin = b.u.spinUp > 0 ? Math.min(SPIN_CAP, 1 + b.u.spinUp / 100 * b.firing) : 1;
         b.spin = spin;
         // reload doesn't stack up while the unit has nothing to shoot: keep at most one step of carry-over
-        b.cd = Math.max(b.cd, -dt) + 1 / Math.max(0.01, b.u.aps * spin);
+        b.cd = Math.max(b.cd, -dt) + 1 / Math.max(0.01, apsOf(b) * spin);
         const n = Math.max(1, Math.round(b.u.burst));
         if (n > 1) {
           const dx = primary.x - b.x, dy = primary.y - b.y, d = hyp(dx, dy) || 1;
@@ -1039,7 +1080,7 @@ const Engine = (() => {
         v.side = 1 - v.side; v.squad = CONVERT_SQUAD; v.xp = 0; v.dealt = 0; v.turning = false;
         v.windTarget = null; v.windT = 0; v.setUp = false; v.firing = -1; v.burstLeft = 0; v.trampleLeft = 0; v.trampled = null;
         v.spinTarget = null; v.aims = null; v.engaged = false; v.holdT = 0; v.delay = 0; v.band = null; v.hidden = false;
-        v.slowT = 0; v.slowMove = 0; v.slowAtk = 0; v.shrinkT = 0; v.shrinkM = 0; v.kids = null;
+        v.slowT = 0; v.slowMove = 0; v.slowAtk = 0; v.shrinkT = 0; v.shrinkM = 0; v.kids = null; v.stunT = 0; v.frenzy = 0;
         sides[v.side].push(v); stats[v.side].totalHp += v.hp;
         for (const b of all) {
           if (b.windTarget === v) { b.windTarget = null; b.windT = 0; }
@@ -1058,7 +1099,7 @@ const Engine = (() => {
       return {
         t, shots: final ? [] : shots,
         p: final ? [] : projectiles.map(p => [p.x, p.y, p.owner.side]),
-        b: all.map(x => [x.x, x.y, x.alive ? x.hp / x.u.hp : 0, x.side, x.windTarget && x.u.windUp > 0 ? 1 - x.windT / x.u.windUp : 0, x.hidden ? 1 : 0, x.poison && x.poison.length ? 1 : 0, x.slowT > 0 ? 1 : 0]),
+        b: all.map(x => [x.x, x.y, x.alive ? x.hp / x.u.hp : 0, x.side, x.windTarget && x.u.windUp > 0 ? 1 - x.windT / x.u.windUp : 0, x.hidden ? 1 : 0, x.poison && x.poison.length ? 1 : 0, x.slowT > 0 ? 1 : 0, x.stunT > 0 ? 1 : 0]),
       };
     }
 
@@ -1115,6 +1156,6 @@ const Engine = (() => {
     return m;
   }
 
-  return { TOWER_DOWN, SKILL_SLOTS, SLOTS, SKILL_TYPES, skillParam, describeSkill, applySkills, innateUnit, fairBudget, battle, makeArmy, matrix, createBattle, buildSquad, rawStrength, squadsFor, withTraits, leveled, TRAIT_DEFAULTS, SPIN_CAP, CHARGE_RUN, TRAMPLE_RUN, BLAST_RADIUS, RAM_REACH, LEVEL_BONUS, MAX_LEVEL, CHARM_MAX, CONVERT_HP, CONVERT_SQUAD };
+  return { TOWER_DOWN, RULES, ruleOn, STEALTH_BACK, SKILL_SLOTS, SLOTS, SKILL_TYPES, skillParam, describeSkill, applySkills, innateUnit, fairBudget, battle, makeArmy, matrix, createBattle, buildSquad, rawStrength, squadsFor, withTraits, leveled, TRAIT_DEFAULTS, SPIN_CAP, CHARGE_RUN, TRAMPLE_RUN, BLAST_RADIUS, RAM_REACH, LEVEL_BONUS, MAX_LEVEL, CHARM_MAX, CONVERT_HP, CONVERT_SQUAD };
 })();
 if (typeof module !== 'undefined') module.exports = Engine;

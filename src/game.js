@@ -564,7 +564,7 @@ const Game = (() => {
   const inNoMans = (row) => row >= ZONE && row < ROWS - ZONE;
   const hasSkillType = (m, side, ui, type) => !!m && ui != null && !!m.units[ui] && E.SLOTS.some(k => hasSkill(m, side, ui, k) && skillDef(m, ui, k).type === type);
   // ui (optional): the unit being placed, for unit-specific tiles
-  const canPlaceAt = (m, side, col, row, ui) => col >= 0 && col < COLS && !reserved(side, col, row) &&
+  const canPlaceAt = (m, side, col, row, ui) => col >= 0 && col < COLS && !reserved(side, col, row) && !(ui != null && isOff(m, ui)) &&
     !(ui != null && m && m.units[ui] && m.units[ui].noFlank && isFlank(side, col, row)) &&
     (inZone(side, row) || (flankOpen(m) && isFlank(side, col, row)) || (inNoMans(row) && hasSkillType(m, side, ui, 'forward'))) && !enemyHolds(m, side, col, row);
   // ---------- carriers (Just a horse) ----------
@@ -598,8 +598,9 @@ const Game = (() => {
   // Before round 1 each player picks one of 3 packages (their own, not mirrored): two tier 1-2 unit types,
   // both unlocked for free, plus free squads of them worth exactly PACKAGE.value gold. Units with noPack are never in one.
   const PACKAGE = { value: 300, maxPrice: 200, options: 3 };
-  function allPackages(units) {
-    const out = [], ok = units.map((u, i) => unitCostOf(u) <= PACKAGE.maxPrice && !u.noPack ? i : -1).filter(i => i >= 0);
+  // off (optional): indexes of units left out of the match
+  function allPackages(units, off) {
+    const out = [], ok = units.map((u, i) => unitCostOf(u) <= PACKAGE.maxPrice && !u.noPack && !(off || []).includes(i) ? i : -1).filter(i => i >= 0);
     for (const a of ok) for (const b of ok) {
       if (a === b) continue;
       const ca = unitCostOf(units[a]), cb = unitCostOf(units[b]);
@@ -613,8 +614,8 @@ const Game = (() => {
     }
     return out;
   }
-  function dealPackages(units, r, offChars) {
-    const all = allPackages(units), pick = [];
+  function dealPackages(units, r, offChars, off) {
+    const all = allPackages(units, off), pick = [];
     for (let guard = 0; pick.length < Math.min(PACKAGE.options, all.length) && guard < 200; guard++) {
       const p = all[Math.floor(r() * all.length)];
       // three different packages, and no unit type in more than one of them where possible
@@ -668,8 +669,12 @@ const Game = (() => {
   }
 
   // offChars (optional): character ids left out of the pool (at least one always stays in)
-  function createMatch(units, matrix, seed, mapId, lastMapId, offChars) {
+  // opts (optional): { offUnits: unit indexes left out of the match (at least two stay in), rules: roster rules for the fights (see Engine.RULES) }
+  function createMatch(units, matrix, seed, mapId, lastMapId, offChars, opts) {
     const r = rng((seed >>> 0) + 777);
+    let off = ((opts && opts.offUnits) || []).filter((ui, k, a) => Number.isInteger(ui) && ui >= 0 && ui < units.length && a.indexOf(ui) === k);
+    if (units.length - off.length < 2) off = [];
+    const rules = opts && opts.rules && typeof opts.rules === 'object' ? { ...opts.rules } : null;
     const m = {
       units, matrix, seed: seed >>> 0,
       round: 1, hp: [START_HP, START_HP], gold: [START_GOLD, START_GOLD],
@@ -681,7 +686,9 @@ const Game = (() => {
       chars: [null, null], // each player's character id (comes with the package)
       buff: [[], []], // Zoe's buff tiles for this round: [{ col, row }, ...]
       unlocks: [{}, {}], // units unlocked per player: unlocks[side][unitIdx] = round it was unlocked
-      packages: [dealPackages(units, r, offChars), dealPackages(units, r, offChars)], // each player's 3 starting package options, each with a different random character
+      off, // units left out of this match: they can't be unlocked, placed or dealt in a package
+      rules, // roster rules for the fights (null = all on)
+      packages: [dealPackages(units, r, offChars, off), dealPackages(units, r, offChars, off)], // each player's 3 starting package options, each with a different random character
       pack: [null, null], // which one each player picked
       map: rollMap(seed >>> 0, mapId, lastMapId), // { id, elfCol }: the map this match is fought on (mapId picks it; otherwise random)
       bribe: [[], []], // the round of each bribe each player paid the elves (see the bribe-off)
@@ -695,6 +702,9 @@ const Game = (() => {
     m.towers = [towerSpot(m, 0), towerSpot(m, 1)];
     return m;
   }
+
+  // a unit left out of this match (match settings on the menu)
+  const isOff = (m, ui) => !!(m && Array.isArray(m.off) && m.off.includes(ui));
 
   // ---------- skills (bought per unit type, for all squads of that type) ----------
   // m.units[i].skillDefs = [def or null, ...], one per skill slot (Engine.SKILL_SLOTS)
@@ -748,7 +758,7 @@ const Game = (() => {
   // an unlock bought this round is hidden from the opponent until the fight
   const unlockVisible = (m, side, ui) => unlockCost(m, ui, side) === 0 || (isUnlocked(m, side, ui) && m.unlocks[side][ui] < m.round);
   function unlock(m, side, ui) {
-    if (ui < 0 || ui >= m.units.length || isUnlocked(m, side, ui)) return false;
+    if (ui < 0 || ui >= m.units.length || isOff(m, ui) || isUnlocked(m, side, ui)) return false;
     const cost = unlockCost(m, ui, side);
     if (m.gold[side] < cost) return false;
     if (!m.unlocks) m.unlocks = [{}, {}];
@@ -1039,7 +1049,8 @@ const Game = (() => {
     ensurePack(m, 0); ensurePack(m, 1);
     ensureCharm(m, 0); ensureCharm(m, 1);
     const mp = mapOf(m), elf = elfSpot(m);
-    const g = mp && mp.healMul ? { ...SETTINGS, healMul: mp.healMul } : SETTINGS;
+    let g = mp && mp.healMul ? { ...SETTINGS, healMul: mp.healMul } : SETTINGS;
+    if (m.rules) g = { ...g, rules: m.rules }; // the roster's rules (a Counter Lab roster can switch mechanics off)
     const T2 = TILE / 2, tiles = [];
     if (mp && mp.shrooms) for (const t of m.map.tiles || []) {
       if (t.type === 'purple' || shroomRemoval(m, t.col, t.row)) continue; // purple only counts for squads that start there (see bodiesFor)
@@ -1229,7 +1240,7 @@ const Game = (() => {
         reserve += levelCost(m.units[sq.unit]);
       }
     }
-    const minCost = Math.min(...m.units.map((u, i) => shopCost(m, side, i)));
+    const minCost = Math.min(...m.units.map((u, i) => isOff(m, i) ? Infinity : shopCost(m, side, i)));
     // the elf tower: from round 2, sometimes bribe it while a squad is still affordable after; more often when not ahead
     if (m.round >= 2) for (let k = 0; k < 3; k++) {
       if (!canBribe(m, side) || m.gold[side] - reserve - bribeCost(m, side) < minCost || r() >= (bribeLeader(m, true) === side ? 0.2 : 0.5)) break;
@@ -1273,6 +1284,7 @@ const Game = (() => {
       const budget = m.gold[side] - reserve;
       let best = -1, bs = -Infinity;
       m.units.forEach((u, i) => {
+        if (isOff(m, i)) return;
         const extra = isUnlocked(m, side, i) ? 0 : unlockCost(m, i, side); // a locked unit costs its unlock on top
         if (shopCost(m, side, i) + extra > budget) return;
         let s = 0, tot = 0;
@@ -1336,7 +1348,7 @@ const Game = (() => {
     skillDef, skillCost, isInnate, hasSkill, skillVisible, unitFor, canBuySkill, buySkill, undoSkill, sellValue, sell,
     isRider, hiddenFromFoe, isCarrier, riderOf, carrierOf, squadAt, boardable, unplaceSquad,
     TOWER, TOWER_TYPES, OUTPOST, TOWER_PICK_ROUND, towerType, towerChoices, needsTowerPick, setTowerType, settleTowerPicks, TOWER_SKILL, towerSkillOf, towerSkillVisible, towerPicked, canBuyTowerSkill, buyTowerSkill, undoTowerSkill, towerSkillCost, towerSkill2Of, towerSkill2Visible, towerSkill2Cost, canBuyTowerSkill2, buyTowerSkill2, undoTowerSkill2, MOAT, INVEST, MAGE_GENERALS, mageGenPrice, MAGE, mageGenInfo, mageGenOf, mageGenCost, canBuyMageGen, buyMageGen, undoMageGen, mageTowerUnit, LOAN, loanNow, canTakeLoan, takeLoan, undoLoan, SLIME_UNITS, slimeTowerUnit, slimeSkillDefs, TOWER_MID, towerColOk, towerAt, needsTower, placeTower, ensureTower,
-    FLANK, flankRows, flankOpen, isFlank, reserved, canPlaceAt, enemyHolds, inNoMans, hasSkillType,
+    FLANK, flankRows, flankOpen, isFlank, reserved, canPlaceAt, isOff, enemyHolds, inNoMans, hasSkillType,
     ICE, ALTAR, GOLEM, isIce, hailRound, altarRound, stormShift, stormRows, hailTiles, altarCost, altarRefund, altarCount, pushRoom, altarBought, addAltar, buyAltar, undoAltar, snowgres, snowgreUnit,
     MAPS, ELF_TOWER, SHROOM, SHROOM_SPLIT, shroomAt, shroomTileAt, shroomRemoval, SHROOM_REMOVE, shroomCost, removeShroom, undoRemoveShroom, mapOf, elfSpot, rollMap, BRIBE_COST, bribeList, bribeGold, bribeCount, bribeNow, bribeCost, bribeRefund, ELF_POWER, elfPowered, elfUnit, ELF_OWN, elfOwnCost, elfOwnOf, elfOwnAt, elfOwnUnlocked, elfOwnOffered, canBuyElfOwn, elfOwnSpotOk, buyElfOwn, undoElfOwn, bribeLeader, canBribe, bribe, undoBribe,
     CHARACTERS, CHAR, charOf, charInfo, enzoSkill, charmOf, isGentleman, canGiveCharm, giveCharm, undoCharm, ensureCharm, felixGold, isTier1, rollBuffTiles, onBuffTile, yotImps, yotLevel, TOWER_SPOT, towerSpot,

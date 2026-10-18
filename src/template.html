@@ -85,6 +85,8 @@ button { font: inherit; cursor: pointer; }
 .btn.danger { color: var(--loss); }
 .btn.small { padding: 5px 10px; font-size: 13px; }
 .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+[hidden] { display: none !important; }
+.btn:disabled { opacity: 0.45; cursor: default; }
 
 /* main grid */
 .duo { display: grid; gap: 28px; grid-template-columns: 1fr; }
@@ -196,6 +198,46 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
     <p class="muted">Every unit fights every other unit with the same gold. Change any lever and the whole table re-runs. Tap a cell to watch that fight.</p>
   </header>
 
+  <section class="panel" aria-labelledby="roster-h">
+    <div class="panel-head">
+      <h2 id="roster-h">Roster</h2>
+      <span class="status" id="roster-status">Saved</span>
+    </div>
+    <div class="row">
+      <select id="roster-pick" aria-label="Roster to work on" style="width:auto;min-width:180px;flex:1 1 180px"></select>
+      <button class="btn small" id="roster-new">New roster</button>
+      <button class="btn small" id="roster-rename">Rename</button>
+      <button class="btn small danger" id="roster-del">Delete</button>
+    </div>
+    <div class="row confirm" id="rename-row" hidden>
+      <label class="field" for="roster-name" style="flex:1 1 180px"><span class="hint">Roster name</span><input type="text" id="roster-name" maxlength="40"></label>
+      <button class="btn small primary" id="rename-ok">Rename</button>
+      <button class="btn small" id="rename-no">Cancel</button>
+    </div>
+    <div class="row confirm" id="del-confirm" hidden>
+      <span id="del-text"></span>
+      <button class="btn small danger" id="del-yes">Delete</button>
+      <button class="btn small" id="del-no">Keep it</button>
+    </div>
+    <div class="row">
+      <button class="btn small primary" id="save-one">Save changes for this roster</button>
+      <button class="btn small" id="save-all">Save changes for all rosters</button>
+      <button class="btn small" id="discard">Discard changes</button>
+    </div>
+    <div class="msg" id="roster-msg" aria-live="polite"></div>
+    <p class="muted" style="font-size:14px">Edits stay on this device as unsaved changes until you save them, so you can switch rosters without losing anything. The game’s Load units plays with the saved version of a roster.</p>
+    <h3 class="sub">Rules</h3>
+    <p class="muted" style="font-size:14px">The mechanics this roster plays with. A rule that is off doesn’t exist for this roster: not in the tables here, and not in the game when you play with it.</p>
+    <div class="levers" id="rules"></div>
+    <h3 class="sub">Import units</h3>
+    <div class="row">
+      <select id="imp-from" aria-label="Import units from" style="width:auto;flex:1 1 160px"></select>
+      <select id="imp-unit" aria-label="Unit to import" style="width:auto;flex:1 1 160px"></select>
+      <button class="btn small" id="imp-go">Import</button>
+    </div>
+    <div class="msg" id="imp-msg" aria-live="polite"></div>
+  </section>
+
   <section class="panel" aria-labelledby="set-h">
     <div class="panel-head">
       <h2 id="set-h">Battle settings</h2>
@@ -296,7 +338,7 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
 
   <section class="panel" aria-labelledby="data-h">
     <div class="panel-head"><h2 id="data-h">Save and share</h2></div>
-    <p class="muted" style="font-size:14px">Your changes are kept in this browser. To move a roster elsewhere, copy it as text and paste it back in here later. Send changes lists only what differs from the game’s current default roster, so Claude can put it into the game.</p>
+    <p class="muted" style="font-size:14px">To move a roster elsewhere, copy it as text and paste it back in here later. Loading a pasted roster replaces the units, skills and settings of the roster you have open. Send changes lists only what differs from the game’s current default roster, so Claude can put it into the game.</p>
     <div class="row">
       <button class="btn small" id="send">Send changes</button>
       <button class="btn small" id="copy">Copy roster</button>
@@ -304,7 +346,7 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
       <button class="btn small danger" id="reset">Reset to sample units</button>
     </div>
     <div class="row confirm" id="reset-confirm" hidden>
-      <span>Replace all units and settings with the sample roster?</span>
+      <span>Replace this roster’s units and settings with the sample roster?</span>
       <button class="btn small danger" id="reset-yes">Replace</button>
       <button class="btn small" id="reset-no">Keep mine</button>
     </div>
@@ -332,7 +374,8 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
       <div class="rule"><h3>Skills</h3><p>Upgrades a player buys during a match. Each unit has two. A skill changes the unit’s stats, gives it a new ability, or both. Poison ignores armor and ward. Spawned bodies fight like normal bodies but don’t count for damage after the round.</p></div>
       <div class="rule"><h3>Combos</h3><p>A pair fights as one army: the shorter-ranged unit in front, the other a short gap behind it, each with the gold per side. Its opponent gets twice the gold. Synergy compares the pair’s result with the average of its two units’ results against the same opponent.</p></div>
       <div class="rule"><h3>Fair price and tiers</h3><p>The price check finds how many squads of a unit tie against 6 squads of each 100-gold unit, and turns that into a fair price in gold. Under 140 gold is tier 1, 140–280 is tier 2, above 280 is tier 3. Raising one stat and measuring again shows what that stat is worth for that unit.</p></div>
-      <div class="rule"><h3>Minimum range, charge and knockback</h3><p>A unit can’t attack anything inside its minimum range. Charge multiplies the next hit after the unit has run 5 m. Knockback pushes a hit body away, fully for small bodies and barely for big ones. Trample: after a charged hit the unit runs on 8 m through its target, hitting every body it runs over once.</p></div>
+      <div class="rule"><h3>Minimum range, charge and knockback</h3><p>A unit can’t attack anything inside its minimum range. Charge multiplies the next hit after the unit has run 5 m. Knockback pushes a hit body away, fully for small bodies and barely for big ones. Trample: after a charged hit the unit runs on 8 m through its target, hitting every body it runs over once. Stun after charge: once the charge (and its trample run) is over, the unit can’t move or attack for a while.</p></div>
+      <div class="rule"><h3>Stealth</h3><p>A unit with Stealth can’t be targeted while it is hidden, though splash, flames and piercing shots still hit it. It is seen as soon as it attacks, and hides again after 1.5 s without attacking. A roster can switch both parts off under Rules.</p></div>
     </div>
   </section>
 </div>
@@ -344,7 +387,8 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
 (() => {
   const SAMPLE = /*SAMPLE*/;
   const EXAMPLES = /*EXAMPLES*/;
-  const KEY = 'counterlab.v1';
+  const KEY = 'counterlab.v1'; // the saved version of the roster open here (the game's Load units falls back to it)
+  const BOOK_KEY = 'counterlab.rosters.v1'; // every roster: { active, rosters: [{ id, name, saved, draft }] }
   const TRAITS = [
     ['burst', 'Burst shots', 1, 'Shots fired 0.15 s apart along one line; each hits the first body in its path. 1 = normal.'],
     ['pellets', 'Shotgun pellets', 1, 'Pellets fired at once into a 60° cone, each at a different body. 1 = normal.'],
@@ -356,6 +400,7 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
     ['charge', 'Charge (× damage)', 0.5, 'Next hit after running 5 m. 1 = off.'],
     ['knockback', 'Knockback (m)', 0.5, 'How far a big hit pushes a small body.'],
     ['trample', 'Trample (% of hit)', 10, 'After a charged hit the unit keeps running 8 m through its target, hitting each body it runs over for this share of its hit. 0 = off.'],
+    ['chargeStun', 'Stun after charge (s)', 0.5, 'After a charged hit (and its trample run) the unit stands stunned this long: it can’t move or attack. 0 = off.'],
     ['deathBlast', 'Death blast (% of max health)', 5, 'When a body dies it explodes, dealing this share of its max health to every enemy within 4 m. Grows with level. 0 = off.'],
     ['pctHit', 'Health cut (% of target max health)', 5, 'Every hit also deals this share of the target’s max health (leveled targets have more), on top of the hit. Not against towers. Armor doesn’t stop this part (it still stops the hit); a ward caps the whole hit. 0 = off.'],
     ['flame', 'Flame cone (°)', 5, 'Sprays fire this many degrees to each side, hitting every enemy inside the cone at once, out to the flame reach (Battle settings). Pellets, splash, pierce and projectile speed are ignored. 0 = off.'],
@@ -395,13 +440,33 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
       units: p.units.map(u => ({ ...u, cost: Math.round(u.cost * 100) })),
     };
   }
-  function load() {
+  // ---------- rosters ----------
+  // Each roster keeps the version saved last (what the game plays with) and, while you have edits it
+  // doesn't, a draft with them. Drafts are kept on this device too, so switching rosters loses nothing.
+  let book;
+  const cur = () => book.rosters.find(r => r.id === book.active) || book.rosters[0];
+  const dirty = () => book.rosters.filter(r => r.draft);
+  const newRosterId = () => { let id; do { id = 'r' + Date.now().toString(36) + (uid++); } while (book && book.rosters.some(r => r.id === id)); return id; };
+  // a roster with no units: the default settings and skill library, ready for units added or imported
+  const emptyRoster = () => ({ goldCosts: true, knownSkills: DEFAULT_SKILL_IDS, settings: clone(SAMPLE.settings), skills: clone(SAMPLE.skills), units: [] });
+  function loadBook() {
     try {
-      const raw = localStorage.getItem(KEY);
-      if (raw) { let p = JSON.parse(raw); if (valid(p)) { p = toGold(p); return fromRoster(withNewSkills(p)); } }
+      const b = JSON.parse(localStorage.getItem(BOOK_KEY) || 'null');
+      if (b && Array.isArray(b.rosters)) {
+        const rosters = b.rosters.filter(r => r && typeof r.id === 'string' && valid(r.saved, 0))
+          .map(r => ({ id: r.id, name: String(r.name || 'Roster').slice(0, 40), saved: r.saved, draft: valid(r.draft, 0) ? r.draft : null }));
+        if (rosters.length) return { active: rosters.some(r => r.id === b.active) ? b.active : rosters[0].id, rosters };
+      }
     } catch (e) {}
-    return fromRoster(clone(SAMPLE));
+    // first visit since rosters came in: the roster this browser had becomes Roster 1
+    let first = null;
+    try { const p = JSON.parse(localStorage.getItem(KEY) || 'null'); if (valid(p)) first = p; } catch (e) {}
+    return { active: 'r1', rosters: [{ id: 'r1', name: 'Roster 1', saved: first || exportOf(fromRoster(clone(SAMPLE))), draft: null }] };
   }
+  function persistBook() {
+    try { localStorage.setItem(BOOK_KEY, JSON.stringify(book)); localStorage.setItem(KEY, JSON.stringify(cur().saved)); } catch (e) {}
+  }
+  const stateOf = (r) => fromRoster(withNewSkills(toGold(clone(r.draft || r.saved))));
   const DEFAULT_SKILL_IDS = (SAMPLE.skills || []).map(sk => sk.id);
   // A save from before a skill joined the default library gets that skill too, and a unit of the same name as a
   // default unit with that skill gets it in the same slot when that slot is empty. Nothing already set changes.
@@ -420,12 +485,14 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
     });
     return { ...p, skills: [...p.skills, ...clone(fresh)], units };
   }
+  // an edit: keep it as this roster's draft (no draft once it matches the saved version again)
   function save() {
-    try { localStorage.setItem(KEY, JSON.stringify(exportData())); } catch (e) {}
+    const r = cur(), now = clone(exportData());
+    r.draft = JSON.stringify(now) === JSON.stringify(r.saved) ? null : now;
+    persistBook(); renderRosterBar();
   }
-  function exportData() {
-    return { goldCosts: true, knownSkills: DEFAULT_SKILL_IDS, settings: state.settings, skills: state.skills, units: state.units.map(({ id, ...u }) => u) };
-  }
+  const exportOf = (st) => ({ goldCosts: true, knownSkills: DEFAULT_SKILL_IDS, settings: st.settings, skills: st.skills, units: st.units.map(({ id, ...u }) => u) });
+  function exportData() { return exportOf(state); }
   // Rosters saved before skills existed get the default skill library, with no skills set on their units
   function fromRoster(p) {
     const skills = Array.isArray(p.skills) ? p.skills.filter(validSkill).map(sk => ({ ...sk, params: { ...(sk.params || {}) } })) : clone(SAMPLE.skills);
@@ -462,11 +529,12 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
     const defs = Engine.SLOTS.filter(k => u.skills && u.skills[k] && ((u.skillsOn && u.skillsOn[k]) || (u.skillsInnate && u.skillsInnate[k]))).map(k => slotDef(u, k)).filter(Boolean);
     return defs.length ? Engine.applySkills(u, defs, state.units) : u;
   }
-  function valid(p) {
-    return p && typeof p === 'object' && p.settings && Array.isArray(p.units) && p.units.length >= 2 &&
+  function valid(p, min = 2) {
+    return p && typeof p === 'object' && p.settings && Array.isArray(p.units) && p.units.length >= min &&
       p.units.every(u => u && typeof u.name === 'string' && ['cost','bodies','hp','hit','aps','range','speed','splash'].every(k => typeof u[k] === 'number'));
   }
-  state = load();
+  book = loadBook();
+  state = stateOf(cur());
 
   const $ = (id) => document.getElementById(id);
   const tagOf = (u) => (u.name.replace(/[^A-Za-z0-9]/g, '').slice(0, 3) || '???').toUpperCase();
@@ -580,7 +648,6 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
         save(); renderUnits(); scheduleRun();
       });
       d.querySelector('[data-act="del"]').addEventListener('click', () => {
-        if (state.units.length <= 2) { flash('Keep at least two units so there is something to fight.'); return; }
         state.units = state.units.filter(x => x !== u);
         if (sel && (sel.a === u.id || sel.b === u.id)) sel = null;
         save(); renderUnits(); scheduleRun();
@@ -616,6 +683,7 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
       if (u.charge > 1) tr.push(`charge ×${fmt(u.charge, 1)}`);
       if (u.knockback > 0) tr.push(`knockback ${fmt(u.knockback, 1)} m`);
       if (u.trample > 0) tr.push(`trample ${fmt(u.trample, 0)}%`);
+      if (u.chargeStun > 0) tr.push(`stunned ${fmt(u.chargeStun, 1)} s after a charge`);
       if (u.deathBlast > 0) tr.push(`death blast ${fmt(u.deathBlast, 0)}%`);
       if (u.pctHit > 0) tr.push(`health cut ${fmt(u.pctHit, 0)}%`);
       if (u.windUp > 0) tr.push(`wind-up ${fmt(u.windUp, 1)} s`);
@@ -918,11 +986,19 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
   }
   function runAll() {
     comboChanged();
+    if (state.units.length < 2) { // nothing to fight yet (a new roster starts empty)
+      result = null; sel = null; rep = null; playing = false;
+      $('status').textContent = state.units.length ? 'Add one more unit' : 'No units yet';
+      $('matrix').innerHTML = `<tbody><tr><td class="muted" style="text-align:left;padding:8px">${state.units.length ? 'Add one more unit' : 'This roster has no units yet. Add a unit, add the trait examples, or import units under Roster'} to fill the table.</td></tr></tbody>`;
+      $('vs').innerHTML = ''; $('rep-status').textContent = ''; $('verdict').textContent = ''; $('stats').innerHTML = ''; $('clock').textContent = '0.0 s';
+      sizeCanvas(); ctx.clearRect(0, 0, cv.clientWidth, cv.clientHeight);
+      return;
+    }
     const t0 = performance.now();
     result = Engine.matrix(state.units.map(prep), state.settings);
     const ms = performance.now() - t0;
     const n = state.units.length;
-    $('status').textContent = `${n * (n - 1) / 2} fights in ${Math.round(ms)} ms`;
+    $('status').textContent = `${n * (n - 1) / 2} ${n === 2 ? 'fight' : 'fights'} in ${Math.round(ms)} ms`;
     renderMatrix();
     if (!sel || !sideSpec(sel.a, sel.b) || !sideSpec(sel.b, sel.a)) {
       sel = pickInteresting();
@@ -1084,13 +1160,14 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
       const c = b[3] === 0 ? colA : colB;
       const shape = (rep.r.shapes && rep.r.shapes[bi]) || 'circle', up = b[3] === 0 ? 1 : -1;
       const fill = (rep.r.colors && rep.r.colors[bi]) || c;
-      if (b[5]) { // stealthed: a dashed ghost outline until it attacks
+      if (b[5]) { // stealthed: a dashed ghost outline while hidden
         ctx.globalAlpha = 0.5; ctx.strokeStyle = c; ctx.lineWidth = 1.5; ctx.setLineDash([2, 2]);
         Shapes.outline(ctx, shape, x, y, rad, up);
         ctx.setLineDash([]); ctx.globalAlpha = 1;
       } else Shapes.body(ctx, shape, x, y, rad, up, fill, c, 0.3 + 0.7 * b[2]);
       if (b[6]) { ctx.fillStyle = css('--win'); ctx.beginPath(); ctx.arc(x + rad * 0.9, y - rad * 0.9, Math.max(2, rad * 0.3), 0, Math.PI * 2); ctx.fill(); } // poisoned
       if (b[7]) { ctx.fillStyle = '#5FA8E8'; ctx.beginPath(); ctx.arc(x - rad * 0.9, y - rad * 0.9, Math.max(2, rad * 0.3), 0, Math.PI * 2); ctx.fill(); } // slowed
+      if (b[8]) { ctx.fillStyle = '#E0B23A'; for (let k = 0; k < 3; k++) { ctx.beginPath(); ctx.arc(x + (k - 1) * rad * 0.7, y - rad * 1.4, Math.max(1.5, rad * 0.22), 0, Math.PI * 2); ctx.fill(); } } // stunned
       ctx.strokeStyle = c;
       if (b[4] > 0) { // wind-up charging: ring fills clockwise
         ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc(x, y, rad + 3.5, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * b[4]); ctx.stroke();
@@ -1277,22 +1354,135 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
   $('load').addEventListener('click', () => {
     let p;
     try { p = JSON.parse($('io').value); } catch (e) { flash('That text is not a roster. Paste text copied with "Copy roster".'); return; }
-    if (!valid(p)) { flash('The roster needs settings and at least two units, each with a name and all eight levers.'); return; }
+    if (!valid(p, 1)) { flash('The roster needs settings and at least one unit, each with a name and all eight levers.'); return; }
     p = toGold(p);
     state = fromRoster(p);
-    sel = null; syncSettings(); save(); renderUnits(); renderSkills(); runAll();
-    flash(`Loaded ${state.units.length} units.`);
+    sel = null; syncSettings(); save(); renderUnits(); renderSkills(); renderRules(); renderImport(); runAll();
+    flash(`Loaded ${state.units.length} units into ${cur().name}. Save changes to keep them.`);
   });
   $('reset').addEventListener('click', () => { $('reset-confirm').hidden = false; });
   $('reset-no').addEventListener('click', () => { $('reset-confirm').hidden = true; });
   $('reset-yes').addEventListener('click', () => {
     state = fromRoster(clone(SAMPLE));
     $('reset-confirm').hidden = true; sel = null;
-    syncSettings(); save(); renderUnits(); renderSkills(); runAll();
-    flash('Sample units restored.');
+    syncSettings(); save(); renderUnits(); renderSkills(); renderRules(); renderImport(); runAll();
+    flash('Sample units restored. Save changes to keep them.');
   });
   function syncSettings() { document.querySelectorAll('[data-s]').forEach(inp => { inp.value = state.settings[inp.dataset.s]; }); }
 
+  // ---------- roster bar: switch, create, rename, delete, save ----------
+  function renderRosterBar() {
+    const d = dirty(), r = cur();
+    $('roster-pick').innerHTML = book.rosters.map(x => `<option value="${esc(x.id)}" ${x.id === r.id ? 'selected' : ''}>${esc(x.name)}${x.draft ? ' · unsaved' : ''}</option>`).join('');
+    $('roster-status').textContent = r.draft ? 'Unsaved changes' : 'Saved';
+    $('save-one').disabled = !r.draft;
+    $('discard').disabled = !r.draft;
+    // all rosters: for edits in more than one, or in a roster other than this one
+    $('save-all').disabled = !(d.length > 1 || (d.length === 1 && !r.draft));
+    $('save-all').textContent = d.length > 1 || (d.length === 1 && !r.draft) ? `Save changes for all rosters (${d.length})` : 'Save changes for all rosters';
+    $('roster-del').disabled = book.rosters.length < 2;
+  }
+  const rosterMsg = (t) => { $('roster-msg').textContent = t; };
+  function openRoster(id) {
+    book.active = id; persistBook();
+    state = stateOf(cur()); sel = null; combo = null; comboSel = null;
+    syncSettings(); renderUnits(); renderSkills(); renderRules(); renderImport(); renderCombo(); renderRosterBar(); runAll();
+  }
+  $('roster-pick').addEventListener('change', () => { openRoster($('roster-pick').value); rosterMsg(`Opened ${cur().name}.`); });
+  $('roster-new').addEventListener('click', () => {
+    const n = book.rosters.length + 1;
+    let name = `Roster ${n}`;
+    for (let k = n; book.rosters.some(r => r.name === name); k++) name = `Roster ${k + 1}`;
+    const r = { id: newRosterId(), name, saved: emptyRoster(), draft: null };
+    book.rosters.push(r);
+    openRoster(r.id);
+    rosterMsg(`Made ${name}. It has no units yet: add some under Units, or import them below.`);
+  });
+  $('roster-rename').addEventListener('click', () => { $('rename-row').hidden = false; $('roster-name').value = cur().name; $('roster-name').focus(); $('roster-name').select(); });
+  const rename = () => {
+    const v = $('roster-name').value.trim().slice(0, 40);
+    if (v) { cur().name = v; persistBook(); renderRosterBar(); renderImport(); rosterMsg(`Renamed to ${v}.`); }
+    $('rename-row').hidden = true;
+  };
+  $('rename-ok').addEventListener('click', rename);
+  $('roster-name').addEventListener('keydown', (e) => { if (e.key === 'Enter') rename(); if (e.key === 'Escape') $('rename-row').hidden = true; });
+  $('rename-no').addEventListener('click', () => { $('rename-row').hidden = true; });
+  $('roster-del').addEventListener('click', () => {
+    if (book.rosters.length < 2) return;
+    $('del-text').textContent = `Delete ${cur().name}${cur().draft ? ' and its unsaved changes' : ''}? This can’t be undone.`;
+    $('del-confirm').hidden = false;
+  });
+  $('del-no').addEventListener('click', () => { $('del-confirm').hidden = true; });
+  $('del-yes').addEventListener('click', () => {
+    const gone = cur();
+    book.rosters = book.rosters.filter(r => r !== gone);
+    $('del-confirm').hidden = true;
+    openRoster(book.rosters[0].id);
+    rosterMsg(`Deleted ${gone.name}.`);
+  });
+  const commit = (r) => { if (r.draft) { r.saved = r.draft; r.draft = null; } };
+  $('save-one').addEventListener('click', () => { const r = cur(); commit(r); persistBook(); renderRosterBar(); renderImport(); rosterMsg(`Saved ${r.name}.`); });
+  $('save-all').addEventListener('click', () => {
+    const d = dirty();
+    d.forEach(commit); persistBook(); renderRosterBar(); renderImport();
+    rosterMsg(`Saved ${d.map(r => r.name).join(', ')}.`);
+  });
+  $('discard').addEventListener('click', () => {
+    const r = cur(); r.draft = null; persistBook();
+    openRoster(r.id);
+    rosterMsg(`Went back to the saved version of ${r.name}.`);
+  });
+
+  // ---------- rules: the mechanics this roster plays with ----------
+  function renderRules() {
+    $('rules').innerHTML = Engine.RULES.map(([k, label, hint]) => `
+      <div class="field"><label style="display:flex;gap:8px;align-items:center"><input type="checkbox" data-rule="${k}" style="width:auto" ${Engine.ruleOn(state.settings, k) ? 'checked' : ''}> ${esc(label)}</label>
+        <span class="hint">${esc(hint)}</span></div>`).join('');
+    $('rules').querySelectorAll('[data-rule]').forEach(cb => cb.addEventListener('change', () => {
+      const rules = { ...(state.settings.rules || {}) };
+      if (cb.checked) delete rules[cb.dataset.rule]; else rules[cb.dataset.rule] = false;
+      if (Object.keys(rules).length) state.settings.rules = rules; else delete state.settings.rules;
+      save(); renderUnitSummaries(); scheduleRun();
+    }));
+  }
+
+  // ---------- import units from the sample roster or another roster ----------
+  const importSources = () => [{ id: '', name: 'Sample roster', data: SAMPLE }, ...book.rosters.filter(r => r !== cur()).map(r => ({ id: r.id, name: r.name, data: toGold(r.draft || r.saved) }))];
+  function renderImport() {
+    const srcs = importSources(), pick = $('imp-from').value;
+    $('imp-from').innerHTML = srcs.map(x => `<option value="${esc(x.id)}" ${x.id === pick ? 'selected' : ''}>From ${esc(x.name)}</option>`).join('');
+    const src = srcs.find(x => x.id === $('imp-from').value) || srcs[0];
+    const have = new Set(state.units.map(u => u.name));
+    const list = (src.data.units || []).filter(u => !have.has(u.name));
+    $('imp-unit').innerHTML = list.length
+      ? `<option value="*">All ${list.length} units not in this roster</option>` + list.map(u => `<option value="${esc(u.name)}">${esc(u.name)}</option>`).join('')
+      : '<option value="">All its units are in this roster</option>';
+    $('imp-go').disabled = !list.length;
+  }
+  $('imp-from').addEventListener('change', () => { renderImport(); $('imp-msg').textContent = ''; });
+  $('imp-go').addEventListener('click', () => {
+    const src = importSources().find(x => x.id === $('imp-from').value);
+    if (!src) return;
+    const have = new Set(state.units.map(u => u.name)), which = $('imp-unit').value;
+    const add = clone((src.data.units || []).filter(u => !have.has(u.name) && (which === '*' || u.name === which)));
+    if (!add.length) return;
+    // the skills these units use come along when this roster doesn't have them yet
+    const ids = new Set(state.skills.map(sk => sk.id)), newSkills = [];
+    add.forEach(u => (u.skills || []).forEach(id => {
+      if (!id || ids.has(id)) return;
+      const sk = (src.data.skills || []).find(x => x && x.id === id);
+      if (sk && validSkill(sk)) { ids.add(id); newSkills.push({ ...clone(sk), params: { ...(sk.params || {}) } }); }
+    }));
+    state.skills.push(...newSkills);
+    const merged = fromRoster({ settings: state.settings, skills: state.skills, units: add }).units;
+    state.units.push(...Shapes.assign([...state.units, ...merged]).slice(state.units.length));
+    save(); renderUnits(); renderSkills(); renderImport(); scheduleRun();
+    $('imp-msg').textContent = `Imported ${add.map(u => u.name).join(', ')}${newSkills.length ? ` with ${newSkills.map(sk => sk.name).join(', ')}` : ''}. Save changes to keep ${add.length === 1 ? 'it' : 'them'}.`;
+  });
+
+  renderRosterBar();
+  renderRules();
+  renderImport();
   renderUnits();
   renderSkills();
   runAll();

@@ -93,6 +93,12 @@ a { color: var(--you); }
 .chars-pick button { border: 1px solid var(--line); border-radius: 4px; background: transparent; padding: 4px; display: flex; align-items: center; justify-content: center; font-family: var(--font-data); font-size: 12px; min-width: 0; color: var(--muted); opacity: 0.45; text-decoration: line-through; }
 .chars-pick button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chars-pick button[aria-pressed="true"] { border-color: var(--gold); color: var(--ink); opacity: 1; text-decoration: none; }
+/* Leaders and Units in the match settings: a button each, with a small menu that folds out below */
+.picks { flex-wrap: wrap; }
+.pick-menu { width: 100%; display: grid; gap: 8px; padding: 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); max-height: 50vh; overflow-y: auto; }
+.pick-menu .units-tier { display: grid; gap: 4px; }
+.pick-menu .units-tier .chars-pick { grid-template-columns: repeat(2, 1fr); }
+.pick-menu .units-tier .chars-pick button { justify-content: flex-start; }
 .maps button[aria-pressed="true"] { border-color: var(--gold); color: var(--gold); box-shadow: inset 0 0 0 1px var(--gold); }
 /* folded match settings on the menu and in the lobby */
 .settings { border: 1px solid var(--line); border-radius: 6px; }
@@ -180,13 +186,13 @@ a { color: var(--you); }
     'Ent': 'Slow tree guardians sweeping a wide arc in front. Each one explodes when it falls, hurting everything around it.',
     'Sun Priest': 'Channels a beam that burns hotter the longer it holds one target. Melts giants.',
     'Meteor Caller': 'Drops slow meteors from far behind the lines. Helpless once something reaches it.',
-    'War Mammoth': 'Charges straight through the enemy line, trampling every body in its path, then turns to charge again.',
+    'War Mammoth': 'Charges straight through the enemy line, trampling every body in its path, then stands stunned for a moment before it turns to charge again.',
     'Necromancer': 'Keeps raising skeletons to screen its army from big hits.',
     'Wisps': 'Spirits firing slow, hard-hitting bolts from range. Fragile up close.',
     'Crossbow Volley': 'Fires 4-bolt bursts down one line. Lined-up targets take every bolt.',
     'Ballista': 'Slow piercing bolts from long range. Can’t hit anything close.',
     'Boar Riders': 'Fast chargers whose first hit doubles and knocks small bodies back.',
-    'Rogue': 'A pair of fast duelists whose first strike after a run lands four times as hard. Can be placed in no man’s land.',
+    'Rogue': 'A pair of hidden duelists whose first strike after a run lands four times as hard. They slip out of sight again when they stop attacking.',
     'Spiders': 'A fast pack of biters. Each spider that falls can split into two smaller spiderlings.',
     'Truespear': 'Hurls spears from long range. Each one cuts away a fifth of its target’s health, armor or not. Fells giants, wasted on swarms.',
     'Just a horse': 'Just a horse. Gallops past everything to ram the enemy tower, and might have something hiding inside: place a squad on its tile and it rides along unseen until the horse falls.',
@@ -264,6 +270,7 @@ a { color: var(--you); }
   const CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
   const HOST_STORE = 'phonebellum.host.v1';
   const LAB_STORE = 'counterlab.v1';
+  const LAB_ROSTERS = 'counterlab.rosters.v1'; // all of Counter Lab's rosters (LAB_STORE holds the one open there)
   const qs = new URLSearchParams(location.search);
   const TEST = qs.has('test'); // test-only settings show on the menu
 
@@ -474,19 +481,66 @@ a { color: var(--you); }
   // characters left out of the package draw (saved on this device; the host's list counts in a match with a friend)
   let offChars = [];
   try { offChars = JSON.parse(localStorage.getItem('pb-off-chars') || '[]').filter(id => Game.charInfo(id)); } catch (e) {}
-  const charSeg = () => `<div class="bar" style="flex-wrap:wrap">
-        <span class="hint">Characters in the draw (tap to leave one out)</span>
-        <div class="chars-pick" role="group" aria-label="Characters in the draw">
-          ${Game.CHARACTERS.map(c => `<button data-char="${c.id}" aria-pressed="${!offChars.includes(c.id)}" title="${esc(c.name)}">${armsImg(c.id)}<span>${esc(c.name.split(' - ')[0])}</span></button>`).join('')}
-        </div>
+  // units left out of the match, by name (saved on this device; the host's list counts in a match with a friend)
+  let offUnits = [];
+  try { offUnits = JSON.parse(localStorage.getItem('pb-off-units') || '[]').filter(n => typeof n === 'string'); } catch (e) {}
+  const offIdx = () => units.map((u, i) => offUnits.includes(u.name) ? i : -1).filter(i => i >= 0);
+  const unitsOn = () => units.length - offIdx().length;
+  // what a new match takes from the menu: units left out, and the rules of a Counter Lab roster
+  const matchOpts = () => ({ offUnits: offIdx(), rules: customSet && rawSet.rules && typeof rawSet.rules === 'object' ? rawSet.rules : null });
+  // Leaders and Units: a button each, opening a small menu to leave some out (one open at a time)
+  let pickOpen = '';
+  const charsOn = () => Game.CHARACTERS.length - offChars.length;
+  const charSeg = () => `<div class="bar picks">
+        <span class="btnrow">
+          <button class="btn small" id="pick-chars" aria-expanded="${pickOpen === 'chars'}" aria-controls="pick-menu">Leaders <span class="num" id="chars-n">${charsOn()}/${Game.CHARACTERS.length}</span> ${pickOpen === 'chars' ? '▴' : '▾'}</button>
+          <button class="btn small" id="pick-units" aria-expanded="${pickOpen === 'units'}" aria-controls="pick-menu">Units <span class="num" id="units-n">${unitsOn()}/${units.length}</span> ${pickOpen === 'units' ? '▴' : '▾'}</button>
+        </span>
+        <div class="pick-menu" id="pick-menu" ${pickOpen ? '' : 'hidden'}>${pickMenu()}</div>
       </div>`;
-  const wireCharSeg = () => $('panel').querySelectorAll('[data-char]').forEach(b => b.addEventListener('click', () => {
-    const id = b.dataset.char, off = offChars.includes(id);
-    if (!off && offChars.length >= Game.CHARACTERS.length - 1) return; // at least one stays in
-    offChars = off ? offChars.filter(x => x !== id) : offChars.concat(id);
-    try { localStorage.setItem('pb-off-chars', JSON.stringify(offChars)); } catch (e) {}
-    b.setAttribute('aria-pressed', String(off));
-  }));
+  const pickMenu = () => {
+    if (pickOpen === 'chars') return `<span class="hint">Leaders in the draw. Tap one to leave it out.</span>
+        <div class="chars-pick" role="group" aria-label="Leaders in the draw">
+          ${Game.CHARACTERS.map(c => `<button data-char="${c.id}" aria-pressed="${!offChars.includes(c.id)}" title="${esc(c.name)}">${armsImg(c.id)}<span>${esc(c.name.split(' - ')[0])}</span></button>`).join('')}
+        </div>`;
+    if (pickOpen === 'units') {
+      const tiers = [...new Set(units.map((u, i) => tierOf(i)))].sort((a, b) => a - b);
+      return `<span class="hint">Units in the match. Tap one to leave it out.</span>
+        ${tiers.map(t => `<div class="units-tier"><span class="hint" style="color:${tierColor(t)}">Tier ${t} · ${esc(tierName(t))}</span>
+          <div class="chars-pick" role="group" aria-label="Tier ${t} units in the match">
+            ${units.map((u, i) => tierOf(i) !== t ? '' : `<button data-unit="${esc(u.name)}" aria-pressed="${!offUnits.includes(u.name)}" title="${esc(u.name)}"><span style="color:${u.color};display:inline-flex;margin-right:4px">${Shapes.svg(u.shape, 12)}</span><span>${esc(u.name)}</span></button>`).join('')}
+          </div></div>`).join('')}`;
+    }
+    return '';
+  };
+  const wireCharSeg = () => {
+    const box = $('panel').querySelector('.picks');
+    if (!box) return;
+    const redraw = () => {
+      ['chars', 'units'].forEach(k => { const b = $('pick-' + k); b.setAttribute('aria-expanded', String(pickOpen === k)); b.lastChild.textContent = ' ' + (pickOpen === k ? '▴' : '▾'); });
+      const menu = $('pick-menu'); menu.hidden = !pickOpen; menu.innerHTML = pickMenu(); wireMenu();
+    };
+    const wireMenu = () => {
+      box.querySelectorAll('[data-char]').forEach(b => b.addEventListener('click', () => {
+        const id = b.dataset.char, off = offChars.includes(id);
+        if (!off && offChars.length >= Game.CHARACTERS.length - 1) return; // at least one stays in
+        offChars = off ? offChars.filter(x => x !== id) : offChars.concat(id);
+        try { localStorage.setItem('pb-off-chars', JSON.stringify(offChars)); } catch (e) {}
+        b.setAttribute('aria-pressed', String(off));
+        $('chars-n').textContent = `${charsOn()}/${Game.CHARACTERS.length}`;
+      }));
+      box.querySelectorAll('[data-unit]').forEach(b => b.addEventListener('click', () => {
+        const name = b.dataset.unit, off = offUnits.includes(name);
+        if (!off && unitsOn() <= 2) return; // at least two stay in
+        offUnits = off ? offUnits.filter(x => x !== name) : offUnits.concat(name);
+        try { localStorage.setItem('pb-off-units', JSON.stringify(offUnits)); } catch (e) {}
+        b.setAttribute('aria-pressed', String(off));
+        $('units-n').textContent = `${unitsOn()}/${units.length}`;
+      }));
+    };
+    ['chars', 'units'].forEach(k => $('pick-' + k).addEventListener('click', () => { pickOpen = pickOpen === k ? '' : k; redraw(); }));
+    wireMenu();
+  };
   // match settings (map, characters, timer, units) sit folded away on the menu and in the lobby
   let settingsOpen = false;
   const settingsBox = (inner) => `<details class="settings" id="settings"${settingsOpen ? ' open' : ''}><summary>Match settings<span>${esc(mapPick ? Game.MAPS.find(mp => mp.id === mapPick).name : 'Random map')}</span></summary><div class="settings-body">${inner}</div></details>`;
@@ -1203,7 +1257,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
     for (const b of bt.bodies) {
       if (!b.alive || b.u.structure) continue;
       const c = teamCol(b.side), r = radius(b.u), hpr = b.hp / b.u.hp;
-      if (b.hidden) { // stealthed: a dashed ghost until it attacks (fainter for the enemy's)
+      if (b.hidden) { // stealthed: a dashed ghost while hidden (fainter for the enemy's)
         ctx.globalAlpha = b.side === me ? 0.6 : 0.3; ctx.strokeStyle = c; ctx.lineWidth = 1.5; ctx.setLineDash([2, 2]);
         Shapes.outline(ctx, b.u.shape, PX(b.x), PY(b.y), r, upOf(b.side));
         ctx.setLineDash([]); ctx.globalAlpha = 1;
@@ -1216,6 +1270,10 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
       }
       if (b.poison && b.poison.length) { ctx.fillStyle = '#6FD08C'; ctx.beginPath(); ctx.arc(PX(b.x) + r * 0.9, PY(b.y) - r * 0.9, Math.max(2, r * 0.3), 0, Math.PI * 2); ctx.fill(); }
       if (b.slowT > 0) { ctx.fillStyle = '#9BD0FF'; ctx.beginPath(); ctx.arc(PX(b.x) - r * 0.9, PY(b.y) - r * 0.9, Math.max(2, r * 0.3), 0, Math.PI * 2); ctx.fill(); } // slowed
+      if (b.stunT > 0) { // stunned after a charge: three dots circling over its head
+        ctx.fillStyle = '#FFD23F';
+        for (let k = 0; k < 3; k++) { const a = bt.time() * 6 + k * 2.094; ctx.beginPath(); ctx.arc(PX(b.x) + Math.cos(a) * r * 0.8, PY(b.y) - r * 1.2 + Math.sin(a) * r * 0.3, Math.max(1.5, r * 0.2), 0, Math.PI * 2); ctx.fill(); }
+      }
       if (b.u.hp >= 500 && hpr < 1) {
         ctx.strokeStyle = c; ctx.lineWidth = 1.5;
         ctx.beginPath(); ctx.arc(PX(b.x), PY(b.y), r + 2.5, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * hpr); ctx.stroke();
@@ -1518,14 +1576,14 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
       <div class="bar"><span class="gold num">${g} gold</span><span class="deploys num">${Math.max(0, left)} of ${allowed} deployments left</span><span class="timer" id="timer">${deadline ? fmtClock(deadline - now()) : ''}</span></div>
       <div class="bar"><span class="hint">${hint}</span>${(choosingPack() || choosingTower()) && can ? '' : extraBtns}</div>
       ${(choosingPack() || choosingTower()) && can ? '' : (() => {
-        const tiers = [...new Set(units.map((u, i) => tierOf(i)))].sort((a, b) => a - b);
+        const tiers = [...new Set(units.map((u, i) => Game.isOff(m, i) ? 0 : tierOf(i)))].filter(t => t > 0).sort((a, b) => a - b); // units left out of the match aren't in the shop
         if (!tiers.includes(shopTier)) shopTier = tiers[0];
         return `<div class="tiers" role="tablist" aria-label="Unit tiers, higher is stronger" style="--n:${tiers.length}">${tiers.map(t => {
-          const idx = units.map((u, i) => i).filter(i => tierOf(i) === t), open = idx.filter(i => !locked(i)).length, free = idx.some(i => freeN(i) > 0);
+          const idx = units.map((u, i) => i).filter(i => tierOf(i) === t && !Game.isOff(m, i)), open = idx.filter(i => !locked(i)).length, free = idx.some(i => freeN(i) > 0);
           return `<button role="tab" data-tier="${t}" aria-selected="${t === shopTier}" aria-label="Tier ${t}, ${tierName(t)}, ${price(idx[0])} gold, ${open} of ${idx.length} unlocked${free ? ', has free squads' : ''}" style="--tier:${tierColor(t)}">Tier ${t}<em>${tierName(t)}</em><small>${price(idx[0])}g · ${open}/${idx.length}</small></button>`;
         }).join('')}</div>`;
       })()}
-      ${(choosingPack() || choosingTower()) && can ? '' : `<div class="shop" id="shop">${units.map((u, i) => tierOf(i) !== shopTier ? '' : `
+      ${(choosingPack() || choosingTower()) && can ? '' : `<div class="shop" id="shop">${units.map((u, i) => tierOf(i) !== shopTier || Game.isOff(m, i) ? '' : `
         <div class="uwrap" style="--tier:${tierColor(tierOf(i))}">
           <button class="ucard" data-i="${i}" aria-pressed="${selected === i}" aria-disabled="${!canBuy(i) && !(locked(i) && can)}" ${locked(i) ? `data-locked="1" style="border-style:dashed" aria-label="${esc(u.name)}, locked, unlock for ${Game.unlockCost(m, i, me)} gold"` : ''}>
             <span class="t"><span style="color:${u.color};display:inline-flex">${Shapes.svg(u.shape, 13)}</span> ${tag(u)} <span class="tier">T${tierOf(i)}</span></span><span class="n">${esc(u.name)}</span>
@@ -1882,7 +1940,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
     if (!sampleFn) { startAiMatch(); return; }
     leaveNet();
     mode = 'claude'; me = 0;
-    m = Game.createMatch(units, M, (now() ^ (Math.random() * 1e9)) >>> 0, mapPick, m && m.map ? m.map.id : null, offChars);
+    m = Game.createMatch(units, M, (now() ^ (Math.random() * 1e9)) >>> 0, mapPick, m && m.map ? m.map.id : null, offChars, matchOpts());
     nextReady = [false, false]; rematch = [false, false];
     claude.off = false; claude.history = [];
     startReport();
@@ -1951,6 +2009,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
       if (u.charge > 1) t.push(`charge x${u.charge}`);
       if (u.knockback > 0) t.push(`knockback ${u.knockback} m`);
       if (u.trample > 0) t.push(`tramples ${u.trample}%`);
+      if (u.chargeStun > 0) t.push(`stunned ${u.chargeStun} s after each charge (can't move or attack)`);
       if (u.pctHit > 0) t.push(`every hit also deals ${u.pctHit}% of the target's max health, ignoring armor (not to towers)`);
       if (u.deathBlast > 0) t.push(`explodes on death for ${u.deathBlast}% of max health within ${Engine.BLAST_RADIUS} m`);
       if (u.windUp > 0) t.push(`wind-up ${u.windUp} s`);
@@ -2016,7 +2075,7 @@ ${m.packages[1].map((p, k) => `  ${k}: ${p.squads.map(ui => units[ui].name).join
 - You may sell squads from earlier rounds for half their worth: the unit's price plus its level-ups (their tile becomes free).
 
 UNITS
-${units.map(unitLine).join('\n')}
+${units.map((u, i) => Game.isOff(m, i) ? null : unitLine(u, i)).filter(Boolean).join('\n')}
 
 COUNTER TABLE (each unit vs each other with equal gold; +100 = wins easily, -100 = loses badly)
 ${matrix}
@@ -2125,7 +2184,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   function startAiMatch() {
     leaveNet();
     mode = 'ai'; me = 0;
-    m = Game.createMatch(units, M, (now() ^ (Math.random() * 1e9)) >>> 0, mapPick, m && m.map ? m.map.id : null, offChars);
+    m = Game.createMatch(units, M, (now() ^ (Math.random() * 1e9)) >>> 0, mapPick, m && m.map ? m.map.id : null, offChars, matchOpts());
     nextReady = [false, false]; rematch = [false, false];
     startReport();
     beginAiRound();
@@ -2649,6 +2708,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (u.charge > 1) tr.push(`Charge ×${u.charge}`);
     if (u.knockback > 0) tr.push(`Knockback ${u.knockback} m`);
     if (u.trample > 0) tr.push(`Tramples (${u.trample}% hit)`);
+    if (u.chargeStun > 0) tr.push(`Stunned ${u.chargeStun} s after a charge`);
     if (u.pctHit > 0) tr.push(`Hits +${u.pctHit}% of target’s health, past armor`);
     if (u.deathBlast > 0) tr.push(`Death blast ${u.deathBlast}% health`);
     if (u.windUp > 0) tr.push(`Wind-up ${u.windUp} s`);
@@ -2695,12 +2755,12 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
 
   // ---------- load units from Counter Lab ----------
   let loaderRun = 0;
-  function* matrixGen(us) {
+  function* matrixGen(us, rules) {
     const n = us.length, out = us.map(() => Array(n).fill(0));
     const total = n * (n - 1) / 2;
     let done = 0;
     // enough gold per side that even the priciest unit fields a full squad
-    const g = { ...MATRIX_SETTINGS, budget: Engine.fairBudget(us.map(u => u.cost), MATRIX_SETTINGS.budget) };
+    const g = { ...MATRIX_SETTINGS, budget: Engine.fairBudget(us.map(u => u.cost), MATRIX_SETTINGS.budget), ...(rules ? { rules } : {}) };
     for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) {
       const r = Engine.battle(us[i], us[j], g);
       out[i][j] = +r.score.toFixed(3); out[j][i] = -out[i][j];
@@ -2711,11 +2771,26 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   function labRoster() {
     try { const p = JSON.parse(localStorage.getItem(LAB_STORE) || 'null'); return p && validUnits(p.units) ? p : null; } catch (e) { return null; }
   }
+  // every saved Counter Lab roster on this device, with the one open in Counter Lab first
+  function labRosters() {
+    try {
+      const st = JSON.parse(localStorage.getItem(LAB_ROSTERS) || 'null');
+      if (st && Array.isArray(st.rosters)) {
+        const list = st.rosters.filter(r => r && r.saved && validUnits(r.saved.units)).map(r => ({ id: String(r.id), name: String(r.name || 'Roster').slice(0, 40), data: r.saved }));
+        list.sort((a, b) => (b.id === String(st.active)) - (a.id === String(st.active)));
+        if (list.length) return list;
+      }
+    } catch (e) {}
+    const p = labRoster();
+    return p ? [{ id: 'lab', name: 'Counter Lab', data: p }] : [];
+  }
   function openLoader() {
-    const lab = labRoster();
+    const labs = labRosters(), lab = labs.length ? labs[0].data : null;
     $('sheet').innerHTML = `
       <div class="bar"><h3 id="sheet-h">Load units</h3><button class="btn small" id="close">Close</button></div>
-      ${lab ? `<p class="role" style="margin:0">Counter Lab on this device has ${lab.units.length} units.</p>
+      ${lab ? `${labs.length > 1 ? `<label class="role" style="margin:0;display:grid;gap:4px" for="lab-pick">Counter Lab on this device has ${labs.length} rosters. Play with:
+        <select id="lab-pick" style="font:14px var(--font-body);background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:4px;padding:6px">${labs.map((r, k) => `<option value="${k}">${esc(r.name)} · ${r.data.units.length} units</option>`).join('')}</select></label>`
+        : `<p class="role" style="margin:0">Counter Lab on this device has ${lab.units.length} units.</p>`}
       <div class="bar"><span></span><button class="btn primary" id="use-lab">Use my Counter Lab units</button></div>
       <p class="role" style="margin:0">Or paste a roster copied with Copy roster:</p>`
       : `<p class="role" style="margin:0">Open <a href="lab.html">Counter Lab</a> on this device and your units show up here. Or paste a roster copied with Copy roster:</p>`}
@@ -2742,7 +2817,9 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       const prepared = clean.map(u => ({ ...Engine.withTraits(u), level: 0, bodies: Math.max(1, Math.round(u.bodies)) }));
       const id = ++loaderRun;
       $('use-roster').disabled = true; if ($('use-lab')) $('use-lab').disabled = true;
-      const gen = matrixGen(prepared.map(u => Engine.innateUnit(u, (p && p.skills) || [], prepared))); // built-in skills count in the table
+      // the roster's rules (Counter Lab can switch mechanics off for a roster) count in the table and in the match
+      const rules = p && p.settings && p.settings.rules && typeof p.settings.rules === 'object' ? p.settings.rules : null;
+      const gen = matrixGen(prepared.map(u => Engine.innateUnit(u, (p && p.skills) || [], prepared)), rules); // built-in skills count in the table
       (function step() {
         if (id !== loaderRun) return;
         const t0 = performance.now();
@@ -2750,7 +2827,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
         while (performance.now() - t0 < 30) {
           r = gen.next();
           if (r.done) {
-            const set = { units: clean, matrix: r.value, skills: (p && Array.isArray(p.skills)) ? p.skills : [] };
+            const set = { units: clean, matrix: r.value, skills: (p && Array.isArray(p.skills)) ? p.skills : [], rules };
             try { localStorage.setItem(STORE, JSON.stringify(set)); } catch (e) {}
             useSet(set, true);
             closeSheet(); showStart();
@@ -2761,7 +2838,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
         setTimeout(step, 0);
       })();
     };
-    if ($('use-lab')) $('use-lab').addEventListener('click', () => load(lab));
+    if ($('use-lab')) $('use-lab').addEventListener('click', () => load($('lab-pick') ? labs[+$('lab-pick').value].data : lab));
     $('use-roster').addEventListener('click', () => {
       let p;
       try { p = JSON.parse($('roster-in').value); } catch (e) { msg.textContent = 'That text isn’t a roster. Copy it again with Copy roster in Counter Lab.'; return; }
@@ -2883,7 +2960,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
 
   function hostStartMatch() {
     if (!net.connected) return;
-    m = Game.createMatch(units, M, (now() ^ (Math.random() * 1e9)) >>> 0, mapPick, m && m.map ? m.map.id : null, offChars);
+    m = Game.createMatch(units, M, (now() ^ (Math.random() * 1e9)) >>> 0, mapPick, m && m.map ? m.map.id : null, offChars, matchOpts());
     lastSummary = null; nextReady = [false, false]; rematch = [false, false];
     startReport();
     hostBeginRound();
@@ -2944,7 +3021,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   }
   function sendSync() {
     if (!net.connected) return;
-    const base = { t: 'sync', proto: 1, set: { units: rawSet.units, matrix: rawSet.matrix, skills: rawSet.skills || [] }, custom: customSet, config: { levelCostPerTier: Game.CONFIG.levelCostPerTier } };
+    const base = { t: 'sync', proto: 1, set: { units: rawSet.units, matrix: rawSet.matrix, skills: rawSet.skills || [], rules: rawSet.rules || null }, custom: customSet, config: { levelCostPerTier: Game.CONFIG.levelCostPerTier } };
     if (!m) { send({ ...base, phase: 'lobby' }); return; }
     const ph = phase === 'battle' ? 'result' : phase;
     send({ ...base, phase: ph, m: syncState(), remaining: phase === 'deploy' && deadline ? deadline - now() : 0, ready, nextReady, rematch, summary: lastSummary });
