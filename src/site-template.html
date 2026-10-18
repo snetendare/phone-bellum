@@ -147,6 +147,17 @@ a { color: var(--you); }
 .pick-peek[hidden] { display: none; }
 @keyframes pick-in { from { opacity: 0; transform: translateY(18px) scale(0.94); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .pick .opt { animation: none; transition: none; } }
+/* Factions draft */
+.draft { margin: auto; display: grid; gap: 10px; width: 100%; max-width: 46ch; }
+.draft .sides { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 12px; color: var(--muted); text-align: left; }
+.draft .sides b { display: block; font-size: 13px; }
+.fgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.fgrid .fac { border: 1px solid var(--line); border-left: 4px solid var(--fc); border-radius: 6px; background: var(--panel); padding: 8px; text-align: left; display: grid; gap: 3px; min-width: 0; }
+.fgrid .fac .nm { font-family: var(--font-display); font-weight: 600; font-size: 14px; color: var(--fc); overflow-wrap: anywhere; }
+.fgrid .fac .sub { font-size: 11px; line-height: 1.3; color: var(--muted); overflow-wrap: anywhere; }
+.fgrid .fac .st { font-size: 11px; font-weight: 600; color: var(--gold); }
+.fgrid .fac[aria-pressed="true"] { border-color: var(--gold); border-left-color: var(--fc); box-shadow: 0 0 0 1px var(--gold); }
+.fgrid .fac:disabled { opacity: 0.45; cursor: default; }
 @media (prefers-reduced-motion: reduce) { .status.wait::after { animation: none; content: "…"; } }
 </style>
 </head>
@@ -184,6 +195,8 @@ a { color: var(--you); }
 <script>
 (() => {
   const DATA = /*DATA*/;
+  const FDATA = /*FACTIONS*/; // the Factions gamemode: { factions, units (each with its faction), matrix, skills } (tools/counter-table.js)
+  Game.setFactions(FDATA.factions);
   const ROLES = {
     'Goblin Swarm': 'Fast melee swarm. Soaks shots and overwhelms single-target units.',
     'Skeleton Archers': 'Cheap ranged squad that deals steady damage from behind.',
@@ -330,7 +343,7 @@ a { color: var(--you); }
   let me = 0;               // which side of the match this screen plays (the guest is side 1)
   const foe = () => 1 - me;
   let m = null;             // match state (on the guest: a copy kept in step by the host)
-  let phase = 'start';      // start | lobby | deploy | battle | result | end
+  let phase = 'start';      // start | lobby | draft | deploy | battle | result | end
   try { if (/[?&]test\b/.test(location.search)) window.__pb = () => ({ m, me }); } catch (e) {} // read-only peek for UI tests
   let selected = null;      // unit index chosen in the shop
   let bt = null;            // battle being played back
@@ -432,7 +445,7 @@ a { color: var(--you); }
   for (const id in MAP_MUSIC) for (const k in MAP_MUSIC[id]) music[k + '-' + id] = playlist(MAP_MUSIC[id][k]);
   function syncMusic() {
     const on = musicUnlocked && musicLevel() > 0;
-    music.menu.set(on && (phase === 'start' || phase === 'lobby'));
+    music.menu.set(on && (phase === 'start' || phase === 'lobby' || phase === 'draft'));
     const own = m && m.map && MAP_MUSIC[m.map.id] || {};
     const pick = (k) => own[k] ? k + '-' + m.map.id : k; // this map's player for that phase, or the general one
     const cur = phase === 'deploy' ? pick('deploy') : (phase === 'battle' || phase === 'result') ? pick('battle') : '';
@@ -1067,7 +1080,7 @@ a { color: var(--you); }
   }
   function drawKeep(x, y, s, side, hpr, kind, g, arms) {
     const ctx = g || cv.getContext('2d');
-    const c = teamCol(side), tt = [Game.OUTPOST, ...Game.TOWER_TYPES].find(k => k.id === kind) || Game.TOWER_TYPES[0];
+    const c = teamCol(side), tt = Game.towerTypeById(kind) || Game.TOWER_TYPES[0];
     ctx.globalAlpha = 0.35 + 0.65 * (hpr == null ? 1 : hpr);
     ctx.fillStyle = tt.unit.color; ctx.strokeStyle = c; ctx.lineWidth = Math.max(1.5, s * 0.08);
     const [w, h, n] = tt.id === 'sniper' ? [s * 0.36, s * 0.74, 3] : tt.id === 'bastion' ? [s * 0.86, s * 0.54, 7] : tt.id === 'outpost' ? [s * 0.46, s * 0.5, 5] : tt.id === 'mage' ? [s * 0.5, s * 0.5, 5] : tt.id === 'bank' ? [s * 0.74, s * 0.52, 7] : tt.id === 'slime' ? [s * 0.56, s * 0.56, 5] : [s * 0.62, s * 0.62, 5];
@@ -1441,9 +1454,9 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
     $('hpbar-you').style.width = (hpMe / Game.START_HP * 100) + '%';
     $('hpbar-foe').style.width = (hpFoe / Game.START_HP * 100) + '%';
     $('round').textContent = v ? v.round : 1;
-    $('phase').textContent = { start: 'Ready', lobby: 'Lobby', deploy: 'Deploy', battle: 'Battle', result: 'Result', end: 'Match over' }[phase];
+    $('phase').textContent = { start: 'Ready', lobby: 'Lobby', draft: 'Draft', deploy: 'Deploy', battle: 'Battle', result: 'Result', end: 'Match over' }[phase];
     $('foe-name').textContent = foeName();
-    document.querySelector('.hud').hidden = phase === 'start' || phase === 'lobby'; // no match yet: nothing to show
+    document.querySelector('.hud').hidden = phase === 'start' || phase === 'lobby' || phase === 'draft'; // no match yet: nothing to show
     syncPick(); syncMusic();
   }
 
@@ -1457,6 +1470,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
     if (solo()) { setNet(''); return; }
     if (net.connected) setNet(mode === 'host' ? `Match ${net.code} · opponent connected` : `Match ${net.code} · connected`, 'ok');
     else if (phase === 'lobby') setNet('');
+    else if (phase === 'draft' && mode === 'guest') setNet('Connection lost. Reconnecting…', 'bad');
     else setNet(mode === 'host' ? `Opponent disconnected. Waiting for them to come back…` : 'Connection lost. Reconnecting…', 'bad');
   }
 
@@ -1633,14 +1647,14 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
       <div class="bar"><span class="gold num">${g} gold</span><span class="deploys num">${Math.max(0, left)} of ${allowed} deployments left</span><span class="timer" id="timer">${deadline ? fmtClock(deadline - now()) : ''}</span></div>
       <div class="bar"><span class="hint">${hint}</span>${(choosingPack() || choosingTower()) && can ? '' : extraBtns}</div>
       ${(choosingPack() || choosingTower()) && can ? '' : (() => {
-        const tiers = [...new Set(units.map((u, i) => Game.isOff(m, i) ? 0 : tierOf(i)))].filter(t => t > 0).sort((a, b) => a - b); // units left out of the match aren't in the shop
+        const tiers = [...new Set(units.map((u, i) => Game.isOff(m, i, me) ? 0 : tierOf(i)))].filter(t => t > 0).sort((a, b) => a - b); // units left out of the match aren't in the shop
         if (!tiers.includes(shopTier)) shopTier = tiers[0];
         return `<div class="tiers" role="tablist" aria-label="Unit tiers, higher is stronger" style="--n:${tiers.length}">${tiers.map(t => {
-          const idx = units.map((u, i) => i).filter(i => tierOf(i) === t && !Game.isOff(m, i)), open = idx.filter(i => !locked(i)).length, free = idx.some(i => freeN(i) > 0);
+          const idx = units.map((u, i) => i).filter(i => tierOf(i) === t && !Game.isOff(m, i, me)), open = idx.filter(i => !locked(i)).length, free = idx.some(i => freeN(i) > 0);
           return `<button role="tab" data-tier="${t}" aria-selected="${t === shopTier}" aria-label="Tier ${t}, ${tierName(t)}, ${price(idx[0])} gold, ${open} of ${idx.length} unlocked${free ? ', has free squads' : ''}" style="--tier:${tierColor(t)}">Tier ${t}<em>${tierName(t)}</em><small>${price(idx[0])}g · ${open}/${idx.length}</small></button>`;
         }).join('')}</div>`;
       })()}
-      ${(choosingPack() || choosingTower()) && can ? '' : `<div class="shop" id="shop">${units.map((u, i) => tierOf(i) !== shopTier || Game.isOff(m, i) ? '' : `
+      ${(choosingPack() || choosingTower()) && can ? '' : `<div class="shop" id="shop">${units.map((u, i) => tierOf(i) !== shopTier || Game.isOff(m, i, me) ? '' : `
         <div class="uwrap" style="--tier:${tierColor(tierOf(i))}">
           <button class="ucard" data-i="${i}" aria-pressed="${selected === i}" aria-disabled="${!canBuy(i) && !(locked(i) && can)}" ${locked(i) ? `data-locked="1" style="border-style:dashed" aria-label="${esc(u.name)}, locked, unlock for ${Game.unlockCost(m, i, me)} gold"` : ''}>
             <span class="t"><span style="color:${u.color};display:inline-flex">${Shapes.svg(u.shape, 13)}</span> ${tag(u)} <span class="tier">T${tierOf(i)}</span></span><span class="n">${esc(u.name)}</span>
@@ -1729,6 +1743,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
     leaveNet();
     if (claude.ctl) { claude.ctl.abort(); claude.ctl = null; } claude.busy = false;
     mode = 'ai'; me = 0; phase = 'start'; m = null; bt = null; battlePre = null; deadline = 0; resultShownAt = 0;
+    draft = null; clearTimeout(draftTimer); restoreSet();
     hud(); netStatus(); $('clock').textContent = '';
     let resume = null;
     try { resume = JSON.parse(localStorage.getItem(HOST_STORE) || 'null'); } catch (e) {}
@@ -1747,6 +1762,10 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
         <button class="btn" id="go" style="flex:1">Play vs AI</button>
       </div>
       ${sampleFn ? `<button class="btn primary" id="vs-claude">Play vs Claude</button>` : ''}
+      <div class="bar">
+        <span class="hint">${factionsReady() ? 'Factions: draft two factions each, then fight with their units and towers.' : 'Factions mode: coming soon.'}</span>
+        <button class="btn small" id="factions-ai" ${factionsReady() ? '' : 'disabled'}>Factions vs AI</button>
+      </div>
       <div class="bar">
         <span class="hint">Have a code?</span>
         <span class="joinrow"><input id="code-in" maxlength="5" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-label="Match code" placeholder="CODE"><button class="btn" id="join">Join</button></span>
@@ -1773,7 +1792,8 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
         </div>`)}`;
     $('how').addEventListener('click', openHowTo);
     $('friend').addEventListener('click', hostLobby);
-    $('go').addEventListener('click', startAiMatch);
+    $('go').addEventListener('click', () => { matchKind = 'standard'; startAiMatch(); });
+    $('factions-ai').addEventListener('click', () => { matchKind = 'factions'; startAiMatch(); });
     if ($('vs-claude')) $('vs-claude').addEventListener('click', startClaudeMatch);
     if ($('resume')) $('resume').addEventListener('click', () => resumeHost(resume));
     $('load-units').addEventListener('click', openLoader);
@@ -2035,7 +2055,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
   function startClaudeMatch() {
     if (!sampleFn) { startAiMatch(); return; }
     leaveNet();
-    mode = 'claude'; me = 0;
+    mode = 'claude'; me = 0; restoreSet();
     m = Game.createMatch(units, M, (now() ^ (Math.random() * 1e9)) >>> 0, mapPick, m && m.map ? m.map.id : null, offChars, matchOpts());
     nextReady = [false, false]; rematch = [false, false];
     claude.off = false; claude.history = [];
@@ -2171,7 +2191,7 @@ ${m.packages[1].map((p, k) => `  ${k}: ${p.squads.map(ui => units[ui].name).join
 - You may sell squads from earlier rounds for half their worth: the unit's price plus its level-ups (their tile becomes free).
 
 UNITS
-${units.map((u, i) => Game.isOff(m, i) ? null : unitLine(u, i)).filter(Boolean).join('\n')}
+${units.map((u, i) => Game.isOff(m, i, 1) ? null : unitLine(u, i)).filter(Boolean).join('\n')}
 
 COUNTER TABLE (each unit vs each other with equal gold; +100 = wins easily, -100 = loses badly)
 ${matrix}
@@ -2276,10 +2296,95 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (claude.say) claude.history.push(claude.say);
   }
 
+  // ---------- Factions gamemode: the draft ----------
+  // Before a Factions match the players draft factions one at a time (Game.FACTION_MODE.order). The match is then
+  // played with the drafted factions' units only (useSet swaps them in; restoreSet puts the player's own units back),
+  // each player with their own two factions. Live: the host runs the draft; the guest sends its picks (dpick).
+  let matchKind = 'standard'; // standard | factions: what Play vs AI / Start match / Rematch starts
+  let draft = null, draftSel = null, draftTimer = 0, standardSet = null;
+  const FALL = { units: FDATA.units, matrix: FDATA.matrix, skills: FDATA.skills || [] };
+  const FSHAPES = Shapes.assign(FALL.units); // for showing each faction's units
+  const factionsReady = () => Game.draftPossible() && FALL.units.length >= 2;
+  function useFactionSet(picks) {
+    if (!standardSet) standardSet = { set: rawSet, custom: customSet };
+    useSet(Game.factionSet(FALL, [...picks[0], ...picks[1]]), false);
+  }
+  function restoreSet() { if (standardSet) { useSet(standardSet.set, standardSet.custom); standardSet = null; } }
+  function startDraft() {
+    restoreSet();
+    m = null; bt = null; battlePre = null; deadline = 0; draftSel = null;
+    draft = Game.createDraft(Math.random() < 0.5 ? 0 : 1);
+    phase = 'draft'; hud(); netStatus(); render();
+    draftChanged();
+  }
+  // after every pick or ban: the AI's turn, the guest's screen, or the match when the draft is done
+  function draftChanged() {
+    clearTimeout(draftTimer); draftSel = null;
+    if (Game.draftDone(draft)) { finishDraft(); return; }
+    const t = Game.draftTurn(draft);
+    if (mode === 'ai' && t.side === 1) draftTimer = setTimeout(() => {
+      if (mode !== 'ai' || phase !== 'draft' || !draft) return;
+      Game.draftAct(draft, 1, Game.aiDraftChoice(draft, 1, FALL, (now() ^ (Math.random() * 1e9)) >>> 0));
+      draftChanged();
+    }, 900);
+    if (mode === 'host') sendSync();
+    drawDraft();
+  }
+  function finishDraft() {
+    const picks = draft.picks; draft = null;
+    useFactionSet(picks);
+    m = Game.createMatch(units, M, (now() ^ (Math.random() * 1e9)) >>> 0, null, null, offChars, { factions: picks });
+    lastSummary = null; nextReady = [false, false]; rematch = [false, false];
+    startReport();
+    if (mode === 'host') hostBeginRound(); else beginAiRound();
+  }
+  function draftPick(id) {
+    const t = Game.draftTurn(draft);
+    if (!t || t.side !== me || !Game.draftOpen(draft).includes(id)) return;
+    if (mode === 'guest') { send({ t: 'dpick', id, step: draft.step }); draftSel = null; return; }
+    if (Game.draftAct(draft, me, id)) draftChanged();
+  }
+  function drawDraft() {
+    if (phase !== 'draft' || !draft) return;
+    const t = Game.draftTurn(draft), mine = t && t.side === me, open = Game.draftOpen(draft);
+    if (!open.includes(draftSel)) draftSel = null;
+    const who = mode === 'ai' ? 'The enemy' : 'Your opponent';
+    const owner = (id) => draft.picks[me].includes(id) ? 'Yours' : draft.picks[foe()].includes(id) ? (mode === 'ai' ? 'Enemy’s' : 'Theirs') : (draft.bans[0].includes(id) || draft.bans[1].includes(id)) ? 'Banned' : '';
+    const names = (ids) => ids.length ? ids.map(id => { const f = Game.factionInfo(id); return `<b style="color:${f.color}">${esc(f.name)}</b>`; }).join('') : '<b>–</b>';
+    overlay(`<div class="draft">
+      <span class="eyebrow">Factions · draft · ${Game.FACTION_MODE.picks} each</span>
+      <h2 style="font-size:clamp(20px,6vw,28px);margin:0">${!t ? 'Draft done' : mine ? (t.act === 'ban' ? 'Ban a faction' : 'Pick a faction') : `${who} is ${t.act === 'ban' ? 'banning' : 'picking'}…`}</h2>
+      <div class="sides"><span>You${names(draft.picks[me])}</span><span>${mode === 'ai' ? 'Enemy' : 'Opponent'}${names(draft.picks[foe()])}</span></div>
+      <div class="fgrid">${draft.pool.map(id => {
+        const f = Game.factionInfo(id); if (!f) return '';
+        const st = owner(id);
+        return `<button class="fac" data-fac="${esc(id)}" style="--fc:${f.color}" aria-pressed="${draftSel === id}" ${st ? 'disabled' : ''}>
+          <span class="nm">${esc(f.name)}</span>${f.theme ? `<span class="sub">${esc(f.theme)}</span>` : ''}${st ? `<span class="st">${st}</span>` : ''}</button>`;
+      }).join('')}</div>
+    </div>`);
+    $('overlay').querySelectorAll('[data-fac]').forEach(b => b.addEventListener('click', () => { draftSel = b.dataset.fac; drawDraft(); }));
+    const f = draftSel && Game.factionInfo(draftSel), T = f && f.tower.unit;
+    const fu = f ? FSHAPES.filter(u => u.faction === f.id) : [];
+    $('panel').innerHTML = `${f ? `<div style="display:grid;gap:6px;font-size:13px;line-height:1.4">
+        <b style="color:${f.color};font-family:var(--font-display);font-size:16px">${esc(f.name)}</b>
+        ${f.trait ? `<span><span style="color:var(--gold)">${esc(f.trait.name || 'Trait')}:</span> ${esc(f.trait.text || '')}</span>` : ''}
+        <span><span style="color:var(--gold)">Tower: ${esc(f.tower.name)}</span> · ${Math.round(T.hp)} hp · hit ${T.hit} × ${T.aps}/s · ${T.range} m${f.tower.text ? `. ${esc(f.tower.text)}` : ''}</span>
+        <span class="hint">${fu.map(u => `<span style="color:${u.color};display:inline-flex;vertical-align:middle;margin-right:3px">${Shapes.svg(u.shape, 12)}</span>${esc(u.name)} · ${Game.unitCostOf(u)} gold`).join('<br>') || 'No units yet.'}</span>
+      </div>` : `<span class="hint">${mine ? 'Tap a faction to see its units and tower.' : 'Tap a faction to see its units and tower while you wait.'}</span>`}
+      <div class="bar">
+        <button class="btn" id="draft-leave">${mode === 'ai' ? 'Main menu' : 'Leave'}</button>
+        ${mine ? `<button class="btn primary" id="draft-go" ${f && open.includes(f.id) ? '' : 'disabled'}>${f ? `${t.act === 'ban' ? 'Ban' : 'Pick'} ${esc(f.name)}` : (t.act === 'ban' ? 'Ban' : 'Pick')}</button>` : ''}
+      </div>`;
+    $('draft-leave').addEventListener('click', () => { if (mode === 'host') clearHost(); showStart(); });
+    if ($('draft-go')) $('draft-go').addEventListener('click', () => { if (draftSel) draftPick(draftSel); });
+  }
+
   // ---------- flow: vs AI ----------
   function startAiMatch() {
     leaveNet();
     mode = 'ai'; me = 0;
+    if (matchKind === 'factions' && factionsReady()) { startDraft(); return; }
+    restoreSet();
     m = Game.createMatch(units, M, (now() ^ (Math.random() * 1e9)) >>> 0, mapPick, m && m.map ? m.map.id : null, offChars, matchOpts());
     nextReady = [false, false]; rematch = [false, false];
     startReport();
@@ -3078,6 +3183,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       <span class="eyebrow">Match code</span>
       <span class="code" aria-label="Match code">${net.code}</span>
       <p class="status ${here ? '' : 'wait'}" id="lobby-status">${problem ? esc(problem) : here ? 'Your friend is here!' : (net.peer && net.peer.open ? 'Waiting for your friend to open the link' : 'Setting up the match')}</p>
+      ${factionsReady() ? `<div class="seg" role="group" aria-label="Gamemode"><button data-kind="standard" aria-pressed="${matchKind !== 'factions'}">Standard</button><button data-kind="factions" aria-pressed="${matchKind === 'factions'}">Factions</button></div>` : ''}
       <button class="btn primary" id="start" ${here ? '' : 'disabled'}>Start match</button>
     </div>`);
     $('panel').innerHTML = `
@@ -3102,12 +3208,15 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     });
     $('cancel').addEventListener('click', () => { clearHost(); showStart(); });
     $('start').addEventListener('click', hostStartMatch);
+    $('overlay').querySelectorAll('[data-kind]').forEach(b => b.addEventListener('click', () => { matchKind = b.dataset.kind; drawLobby(); }));
     wireMapSeg(); wireCharSeg(); wireSettings();
   }
   function selectLink() { const r = document.createRange(); r.selectNodeContents($('link')); const s = getSelection(); s.removeAllRanges(); s.addRange(r); }
 
   function hostStartMatch() {
     if (!net.connected) return;
+    if (matchKind === 'factions' && factionsReady()) { startDraft(); return; }
+    restoreSet();
     m = Game.createMatch(units, M, (now() ^ (Math.random() * 1e9)) >>> 0, mapPick, m && m.map ? m.map.id : null, offChars, matchOpts());
     lastSummary = null; nextReady = [false, false]; rematch = [false, false];
     startReport();
@@ -3127,6 +3236,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     sendSync();
     netStatus();
     if (phase === 'lobby') drawLobby();
+    else if (phase === 'draft') drawDraft();
     else if (phase === 'deploy') panelDeploy();
   }
   function onFriendLost() {
@@ -3170,6 +3280,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   function sendSync() {
     if (!net.connected) return;
     const base = { t: 'sync', proto: 1, set: { units: rawSet.units, matrix: rawSet.matrix, skills: rawSet.skills || [], rules: rawSet.rules || null }, custom: customSet, config: { levelCostPerTier: Game.CONFIG.levelCostPerTier } };
+    if (!m && phase === 'draft' && draft) { send({ t: 'draft', draft }); return; }
     if (!m) { send({ ...base, phase: 'lobby' }); return; }
     const ph = phase === 'battle' ? 'result' : phase;
     send({ ...base, phase: ph, m: syncState(), remaining: phase === 'deploy' && deadline ? deadline - now() : 0, ready, nextReady, rematch, summary: lastSummary });
@@ -3192,6 +3303,9 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     } else if (d.t === 'rematch') {
       rematch[1] = true; sendStatus();
       if (!checkRematch() && phase === 'end') showResult(lastSummary);
+    } else if (d.t === 'dpick') {
+      if (phase !== 'draft' || !draft || d.step !== draft.step || !Game.draftAct(draft, 1, String(d.id))) return;
+      draftChanged();
     } else if (d.t === 'forfeit') foeForfeited();
   }
 
@@ -3315,6 +3429,8 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (!peerAvailable()) { overlayMsg('Couldn’t load the multiplayer code', 'Check your connection and reload the page.'); return; }
     leaveNet();
     mode = 'host'; me = 0;
+    restoreSet();
+    if (s.m && s.m.factions) { standardSet = { set: rawSet, custom: customSet }; matchKind = 'factions'; } // a Factions match: the player's own units come back after it
     useSet(validSet(s.set) ? s.set : BUILTIN, !!s.custom);
     Game.CONFIG.levelCostPerTier = (s.config && s.config.levelCostPerTier) || Game.CONFIG.levelCostPerTier;
     net.code = s.code; mapPick = typeof s.mapPick === 'string' ? s.mapPick : '';
@@ -3403,9 +3519,17 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
 
   function guestRecv(d) {
     if (!d || typeof d !== 'object') return;
+    if (d.t === 'draft') {
+      const x = d.draft;
+      if (!x || !Array.isArray(x.pool) || !Array.isArray(x.picks) || !Array.isArray(x.bans) || !Number.isInteger(x.step)) return;
+      m = null; bt = null; battlePre = null; deadline = 0;
+      draft = x; phase = 'draft'; hud(); netStatus(); render(); drawDraft();
+      return;
+    }
     if (d.t === 'sync') {
       if (validSet(d.set)) useSet(d.set, !!d.custom);
       if (d.config && d.config.levelCostPerTier) Game.CONFIG.levelCostPerTier = d.config.levelCostPerTier;
+      if (d.m) draft = null;
       if (d.phase === 'lobby' || !d.m) { m = null; phase = 'lobby'; hud(); render(); guestWaiting('Connected. Waiting for your friend to start the match'); return; }
       const incoming = withUnits(d.m);
       const theirReady = d.ready ? !!d.ready[0] : false;
