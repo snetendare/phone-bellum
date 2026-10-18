@@ -1166,7 +1166,23 @@ const Game = (() => {
         if (!was && isGentleman(sq)) gentlemen[side].push({ id: sq.id, unit: sq.unit });
       }
     }
-    const summary = { round: m.round, winner: roundWinner, timeout: res.timeout, dmg, time: res.time, newlyReady, squads, towerFell, gentlemen, converted: res.converted || [0, 0] };
+    // damage each side dealt in the fight, by unit type ('u' + unit index) and by what isn't a squad: 'tower' (with its
+    // name, as it was in this fight), 'guards', 'airship', 'snowgre', 'yot' (Yot-Yot's imps), 'won' (bodies won over
+    // by a Gentleman) and 'spawn' (anything spawned in the fight). For the damage stats dropdown.
+    const dealtBy = [0, 1].map(sd => {
+      const by = {};
+      for (const k in res.squads) {
+        const q = res.squads[k];
+        if (q.side !== sd) continue;
+        const sq = q.squad >= 0 && m.armies[sd].find(x => x.id === q.squad);
+        const key = sq ? 'u' + sq.unit : q.squad === -2 ? 'tower' : q.squad === -3 ? 'guards' : q.squad === -4 ? 'airship' : q.squad === YOT_SQUAD ? 'yot'
+          : q.squad === E.CONVERT_SQUAD ? 'won' : q.squad <= -10 && q.squad > YOT_SQUAD ? 'snowgre' : q.squad < 0 ? 'spawn' : null;
+        if (!key || (!sq && !(q.dealt > 0))) continue; // squads always show; the rest only if they dealt damage
+        by[key] = (by[key] || 0) + (q.dealt || 0);
+      }
+      return Object.keys(by).map(key => ({ key, dealt: Math.round(by[key]), ...(key === 'tower' ? { name: towerType(m, sd).name } : {}) }));
+    });
+    const summary = { round: m.round, winner: roundWinner, timeout: res.timeout, dmg, time: res.time, newlyReady, squads, towerFell, gentlemen, converted: res.converted || [0, 0], dealtBy };
     m.history.push(summary);
     if (m.hp[0] <= 0 || m.hp[1] <= 0) {
       m.over = true;

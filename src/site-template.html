@@ -41,6 +41,18 @@ a { color: var(--you); }
 .round-sub { display: flex; align-items: center; justify-content: center; gap: 6px; }
 .cog { width: 24px; height: 24px; padding: 0; border: 1px solid var(--line); border-radius: 50%; background: transparent; color: var(--muted); display: grid; place-items: center; cursor: pointer; }
 .cog:hover, .cog:focus-visible { color: var(--gold); border-color: var(--gold); }
+.cog[aria-expanded="true"] { color: var(--gold); border-color: var(--gold); }
+.dd { position: fixed; z-index: 4; left: 50%; transform: translateX(-50%); width: min(360px, calc(100vw - 32px)); max-height: 70vh; max-height: 70dvh; overflow-y: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; display: grid; gap: 10px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45); }
+.dd .ticks { display: flex; gap: 14px; font-size: 13px; }
+.dd .ticks label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.dd h4 { margin: 0; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); display: flex; justify-content: space-between; }
+.dd .row { display: grid; grid-template-columns: 22px 1fr; align-items: end; gap: 0 8px; }
+.dd .row .ic { grid-row: span 2; display: grid; place-items: center; align-self: center; }
+.dd .row .top { display: flex; justify-content: space-between; font-size: 12px; gap: 8px; }
+.dd .row .top b { font: 600 12px var(--font-data); }
+.dd .row .top span { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dd .row .track { height: 8px; border-radius: 2px; background: color-mix(in srgb, var(--line) 60%, transparent); overflow: hidden; }
+.dd .row .track i { display: block; height: 100%; border-radius: 2px; }
 .sheet { max-height: 80dvh; } /* iPhones: vh counts the space under Safari's toolbars */
 .songs { display: grid; gap: 6px; }
 .songs button { text-align: left; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--ink); padding: 10px 12px; font: 500 14px var(--font-body); display: grid; gap: 2px; }
@@ -142,7 +154,7 @@ a { color: var(--you); }
 <div class="app">
   <div class="hud" aria-label="Match status">
     <div class="side you"><div class="lbl"><span>You</span><span class="num" id="hp-you">50</span></div><div class="hp"><i id="hpbar-you" style="width:100%"></i></div></div>
-    <div class="round"><b class="num" id="round">1</b><div class="round-sub"><span id="phase">Deploy</span><button class="cog" id="cog" aria-label="Settings"><svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M19.4 13a7.6 7.6 0 0 0 0-2l2.1-1.6-2-3.4-2.5 1a7.4 7.4 0 0 0-1.7-1L15 3.3h-4l-.4 2.7a7.4 7.4 0 0 0-1.7 1l-2.5-1-2 3.4L6.6 11a7.6 7.6 0 0 0 0 2l-2.1 1.6 2 3.4 2.5-1a7.4 7.4 0 0 0 1.7 1l.4 2.7h4l.4-2.7a7.4 7.4 0 0 0 1.7-1l2.5 1 2-3.4zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)"/></svg></button></div></div>
+    <div class="round"><b class="num" id="round">1</b><div class="round-sub"><span id="phase">Deploy</span><button class="cog" id="stats" aria-label="Damage last round" aria-expanded="false"><svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M4 5h9v3H4zM4 10.5h15v3H4zM4 16h6v3H4z"/></svg></button><button class="cog" id="cog" aria-label="Settings"><svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M19.4 13a7.6 7.6 0 0 0 0-2l2.1-1.6-2-3.4-2.5 1a7.4 7.4 0 0 0-1.7-1L15 3.3h-4l-.4 2.7a7.4 7.4 0 0 0-1.7 1l-2.5-1-2 3.4L6.6 11a7.6 7.6 0 0 0 0 2l-2.1 1.6 2 3.4 2.5-1a7.4 7.4 0 0 0 1.7 1l.4 2.7h4l.4-2.7a7.4 7.4 0 0 0 1.7-1l2.5 1 2-3.4zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)"/></svg></button></div></div>
     <div class="side foe"><div class="lbl"><span id="foe-name">Enemy</span><span class="num" id="hp-foe">50</span></div><div class="hp"><i id="hpbar-foe" style="width:100%"></i></div></div>
   </div>
   <div class="net" id="net" hidden aria-live="polite"><i></i><span id="net-text"></span></div>
@@ -158,6 +170,7 @@ a { color: var(--you); }
   <div class="panel" id="panel"></div>
 </div>
 
+<div class="dd" id="stats-dd" hidden role="dialog" aria-label="Damage last round"></div>
 <div class="sheet-back" id="sheet-back" hidden><div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-h"></div></div>
 
 <script src="peerjs.min.js"></script>
@@ -2943,7 +2956,43 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   }
   $('sheet-back').addEventListener('click', (e) => { if (e.target.id === 'sheet-back') closeSheet(true); });
   $('cog').addEventListener('click', openSoundSheet);
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSheet(true); });
+  // ---------- damage stats: a dropdown under the HUD with what each unit dealt in the last fight, as a share of its team's total ----------
+  const statsShow = { ally: true, foe: false }; // which teams to list (ticked boxes), for the rest of the visit
+  const STAT_EXTRA = { // what isn't a squad: [label, shape, colour]
+    tower: ['Tower', 'square', '#C9B79C'], guards: ['Guards', 'diamond', '#E2D3A6'], airship: ['Airship', 'ring', '#B9C7D6'], spawn: ['Spawned in the fight', 'triangle', '#9AA5A8'],
+    snowgre: ['Snowgres', 'square', '#DDEEFF'], yot: ['Yot-Yot’s imps', 'imp', '#FFA94D'], won: ['Won over (Charisma)', 'circle', CHARM_COL],
+  };
+  function statsHtml() {
+    const last = m && m.history && m.history[m.history.length - 1];
+    if (!last || !last.dealtBy) return `<h4>Damage last round</h4><p class="hint" style="margin:0">No fight yet. After each fight, this shows how much damage each unit dealt.</p>`;
+    const team = (side) => {
+      // the opponent's units that dealt nothing stay out (a squad hidden in a carrier that never got out isn't given away)
+      const rows = last.dealtBy[side].filter(r => side === me || r.dealt > 0).map(r => {
+        const u = r.key[0] === 'u' ? units[+r.key.slice(1)] : null, x = STAT_EXTRA[r.key] || ['?', 'circle', '#888'];
+        return { name: u ? u.name : r.name || x[0], shape: u ? u.shape : x[1], color: u ? u.color : x[2], dealt: r.dealt };
+      }).sort((a, b) => b.dealt - a.dealt);
+      const total = rows.reduce((t, r) => t + r.dealt, 0), col = teamCol(side);
+      return `<h4><span>${side === me ? 'Your units' : `${esc(foeName())}’s units`}</span><span>${total.toLocaleString('en-US')} total</span></h4>
+        ${rows.length ? rows.map(r => { const pct = total > 0 ? r.dealt / total * 100 : 0; return `<div class="row">
+          <span class="ic" style="color:${r.color}">${Shapes.svg(r.shape, 16)}</span>
+          <span class="top"><span>${esc(r.name)}</span><b>${r.dealt.toLocaleString('en-US')} · ${Math.round(pct)}%</b></span>
+          <span class="track"><i style="width:${pct.toFixed(1)}%;background:${col}"></i></span></div>`; }).join('') : '<p class="hint" style="margin:0">No damage dealt.</p>'}`;
+    };
+    return `<h4><span>Damage · round ${last.round}</span></h4>
+      <div class="ticks"><label><input type="checkbox" data-st="ally" ${statsShow.ally ? 'checked' : ''}> Ally units</label><label><input type="checkbox" data-st="foe" ${statsShow.foe ? 'checked' : ''}> Enemy units</label></div>
+      ${statsShow.ally ? team(me) : ''}${statsShow.foe ? team(1 - me) : ''}`;
+  }
+  function openStats(open) {
+    const dd = $('stats-dd');
+    dd.hidden = !open; $('stats').setAttribute('aria-expanded', String(open));
+    if (!open) return;
+    dd.innerHTML = statsHtml();
+    dd.style.top = ($('stats').getBoundingClientRect().bottom + 8) + 'px';
+    dd.querySelectorAll('[data-st]').forEach(c => c.addEventListener('change', () => { statsShow[c.dataset.st] = c.checked; openStats(true); }));
+  }
+  $('stats').addEventListener('click', (e) => { e.stopPropagation(); openStats($('stats-dd').hidden); });
+  document.addEventListener('click', (e) => { if (!$('stats-dd').hidden && !$('stats-dd').contains(e.target)) openStats(false); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeSheet(true); openStats(false); } });
 
   // =====================================================================
   // Live matches: PeerJS (WebRTC). The host runs the match and decides results;
