@@ -19,7 +19,11 @@
 /*BASECSS*/
 [hidden] { display: none !important; }
 .panel:empty { display: none; }
-body { padding-top: calc(12px + env(safe-area-inset-top, 0px)); padding-bottom: calc(28px + env(safe-area-inset-bottom, 0px)); margin: 0; }
+body { padding-top: calc(6px + env(safe-area-inset-top, 0px)); padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px)); margin: 0; }
+/* tight on purpose: the HUD, the board and the deploy panel should fit a phone screen with as little scrolling as possible */
+.app { gap: 8px; }
+.panel { padding: 10px; gap: 8px; }
+#panel .btn.small { padding: 5px 10px; }
 .net { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 8px; justify-content: center; min-height: 18px; }
 .net i { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); display: inline-block; }
 .net.ok i { background: #6FD08C; }
@@ -39,6 +43,8 @@ body { padding-top: calc(12px + env(safe-area-inset-top, 0px)); padding-bottom: 
 @keyframes dots { 0% { content: ""; } 25% { content: "."; } 50% { content: ".."; } 75% { content: "..."; } }
 a { color: var(--you); }
 .round-sub { display: flex; align-items: center; justify-content: center; gap: 6px; }
+.hud .round { display: flex; align-items: center; gap: 6px; } /* the round number beside its phase and buttons: one row, not two */
+.hud .round b { font-size: 20px; }
 .cog { width: 24px; height: 24px; padding: 0; border: 1px solid var(--line); border-radius: 50%; background: transparent; color: var(--muted); display: grid; place-items: center; cursor: pointer; }
 .cog:hover, .cog:focus-visible { color: var(--gold); border-color: var(--gold); }
 .cog[aria-expanded="true"] { color: var(--gold); border-color: var(--gold); }
@@ -65,12 +71,17 @@ a { color: var(--you); }
 .volrow input { flex: 1; max-width: 220px; accent-color: var(--gold); }
 .volrow .num { width: 3ch; text-align: right; font-family: var(--font-data); font-size: 13px; }
 /* unit shop: one tab per tier, rarity colours, locked units greyed out */
-.tiers { display: grid; grid-template-columns: repeat(var(--n, 4), minmax(0, 1fr)); gap: 6px; }
-.tiers button { min-width: 0; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--muted); padding: 6px 6px; font: 600 14px var(--font-display); display: grid; gap: 1px; text-align: left; border-top: 3px solid var(--tier); }
-.tiers button em { font: 600 11px var(--font-display); font-style: normal; color: var(--tier); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tiers { display: grid; grid-template-columns: repeat(var(--n, 4), minmax(0, 1fr)); gap: 4px; }
+.tiers button { min-width: 0; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--muted); padding: 4px 5px; font: 600 13px var(--font-display); display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: baseline; gap: 0 3px; text-align: left; border-top: 3px solid var(--tier); }
+.tiers button small { grid-column: 1 / -1; }
+.tiers button em { font: 600 clamp(8px, 2.45vw, 11px) var(--font-display); letter-spacing: -0.02em; font-style: normal; color: var(--tier); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tiers button small { font: 500 10px var(--font-data); letter-spacing: -0.03em; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tiers button[aria-selected="true"] { color: var(--ink); background: var(--panel); box-shadow: inset 0 0 0 1px var(--tier); }
 .ucard { border-top: 3px solid var(--tier, var(--line)) !important; }
+.shop .ucard { padding: 7px 8px 6px; gap: 2px; }
+.shop .ucard .t { padding-right: 24px; }
+.shop .ucard .n { font-size: 14px; }
+.shop .ucard .c { white-space: nowrap; }
 .ucard .tier { font: 600 10px var(--font-data); letter-spacing: 0.08em; color: var(--tier); text-transform: uppercase; }
 .ucard[data-locked] { opacity: 0.55; background: repeating-linear-gradient(135deg, transparent 0 8px, rgba(255,255,255,0.03) 8px 16px), var(--bg); }
 .ucard[data-locked] .t > span:first-child { filter: grayscale(1); }
@@ -82,7 +93,7 @@ a { color: var(--you); }
 .roles .is, .roles .ex { color: var(--ink); }
 .roles .beats { color: var(--you); }
 .roles .rng { color: var(--muted); margin-left: auto; }
-.ucard .roles { margin: 2px -26px 1px 0; }
+.ucard .roles { margin: 1px 0 0; }
 .ucard[data-locked] .roles { filter: grayscale(1); }
 .roleline { margin: 0; display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--muted); }
 .roleline .roles .rng { margin-left: 0; }
@@ -867,7 +878,7 @@ a { color: var(--you); }
         if (!tiers.includes(shopTier)) shopTier = tiers[0];
         return `<div class="tiers" role="tablist" aria-label="Unit tiers, higher is stronger" style="--n:${tiers.length}">${tiers.map(t => {
           const idx = units.map((u, i) => i).filter(i => tierOf(i) === t && !Game.isOff(m, i, me)), open = idx.filter(i => !locked(i)).length, free = idx.some(i => freeN(i) > 0);
-          return `<button role="tab" data-tier="${t}" aria-selected="${t === shopTier}" aria-label="Tier ${t}, ${tierName(t)}, ${price(idx[0])} gold, ${open} of ${idx.length} unlocked${free ? ', has free squads' : ''}" style="--tier:${tierColor(t)}">Tier ${t}<em>${tierName(t)}</em><small>${price(idx[0])}g · ${open}/${idx.length}</small></button>`;
+          return `<button role="tab" data-tier="${t}" aria-selected="${t === shopTier}" aria-label="Tier ${t}, ${tierName(t)}, ${price(idx[0])} gold, ${open} of ${idx.length} unlocked${free ? ', has free squads' : ''}" style="--tier:${tierColor(t)}">T${t}<em>${tierName(t)}</em><small>${price(idx[0])}g · ${open}/${idx.length}</small></button>`;
         }).join('')}</div>`;
       })()}
       ${(choosingPack() || choosingTower()) && can ? '' : `<div class="shop" id="shop">${units.map((u, i) => tierOf(i) !== shopTier || Game.isOff(m, i, me) ? '' : `
