@@ -387,6 +387,7 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
 (() => {
   const SAMPLE = /*SAMPLE*/;
   const EXAMPLES = /*EXAMPLES*/;
+  const FACTIONS = /*FACTIONS*/; // src/factions.json: { factions: [{ id, name, units, ... }], skills }
   const KEY = 'counterlab.v1'; // the saved version of the roster open here (the game's Load units falls back to it)
   const BOOK_KEY = 'counterlab.rosters.v1'; // every roster: { active, rosters: [{ id, name, saved, draft }] }
   const TRAITS = [
@@ -405,6 +406,7 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
     ['pctHit', 'Health cut (% of target max health)', 5, 'Every hit also deals this share of the target’s max health (leveled targets have more), on top of the hit. Not against towers. Armor doesn’t stop this part (it still stops the hit); a ward caps the whole hit. 0 = off.'],
     ['flame', 'Flame cone (°)', 5, 'Sprays fire this many degrees to each side, hitting every enemy inside the cone at once, out to the flame reach (Battle settings). Pellets, splash, pierce and projectile speed are ignored. 0 = off.'],
     ['windUp', 'Wind-up (s)', 0.1, 'Sets up this long when an enemy first comes in range, then fires normally. Has to set up again after moving.'],
+    ['roll', 'Rolling (s to top speed)', 0.5, 'Never stops to attack: rolls at its target from 1 m/s up to its move speed over this many seconds, hitting every enemy body it rolls over for its hit, carries on a tile past the target, stops and rolls back. Attacks per second and range are ignored. 0 = off.'],
   ];
   // on/off rules for how the game offers the unit (not part of the fight)
   const FLAGS = [
@@ -1447,7 +1449,11 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
   }
 
   // ---------- import units from the sample roster or another roster ----------
-  const importSources = () => [{ id: '', name: 'Sample roster', data: SAMPLE }, ...book.rosters.filter(r => r !== cur()).map(r => ({ id: r.id, name: r.name, data: toGold(r.draft || r.saved) }))];
+  // the Factions gamemode's factions (src/factions.json) can be imported too, to try their units here and, through
+  // Load units, in the game before there are enough factions for a draft
+  const importSources = () => [{ id: '', name: 'Sample roster', data: SAMPLE },
+    ...(FACTIONS.factions || []).map(f => ({ id: 'faction:' + f.id, name: `${f.name} (faction)`, data: { units: f.units || [], skills: (FACTIONS.skills || []).concat(SAMPLE.skills) } })),
+    ...book.rosters.filter(r => r !== cur()).map(r => ({ id: r.id, name: r.name, data: toGold(r.draft || r.saved) }))];
   function renderImport() {
     const srcs = importSources(), pick = $('imp-from').value;
     $('imp-from').innerHTML = srcs.map(x => `<option value="${esc(x.id)}" ${x.id === pick ? 'selected' : ''}>From ${esc(x.name)}</option>`).join('');

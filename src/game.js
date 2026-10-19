@@ -777,16 +777,20 @@ const Game = (() => {
     u = withFactionTrait(u, base && base.faction);
     if (base && SLIME_UNITS.includes(base.name)) u = { ...u, slime: true }; // poison heals slime units
     if (charOf(m, side) === 'noah' || charOf(m, side) === 'enzo') { // Noah and Enzo: 10% less health and damage, spawned ones too
-      const k = 1 - (charOf(m, side) === 'noah' ? CHAR.noahCut : CHAR.enzoCut) / 100;
-      u = { ...u, hp: u.hp * k, hit: u.hit * k };
-      if (u.spawn) u.spawn = { ...u.spawn, unit: { ...u.spawn.unit, hp: u.spawn.unit.hp * k, hit: u.spawn.unit.hit * k } };
+      const k = 1 - (charOf(m, side) === 'noah' ? CHAR.noahCut : CHAR.enzoCut) / 100, cut = (x) => ({ ...x, hp: x.hp * k, hit: x.hit * k });
+      u = withKids(cut(u), cut);
     }
     if (charOf(m, side) === 'cage') { // Frickolas Cage: +10% health for every unit, spawned ones too
-      const k = 1 + CHAR.cageHp / 100;
-      u = { ...u, hp: u.hp * k };
-      if (u.spawn) u.spawn = { ...u.spawn, unit: { ...u.spawn.unit, hp: u.spawn.unit.hp * k } };
+      const k = 1 + CHAR.cageHp / 100, tough = (x) => ({ ...x, hp: x.hp * k });
+      u = withKids(tough(u), tough);
     }
     return u;
+  }
+  // the unit with f applied to the units it brings into a fight: spawns, what it builds, its healbot
+  function withKids(u, f) {
+    let out = u;
+    for (const k of ['spawn', 'build', 'escort']) if (u[k] && u[k].unit) { if (out === u) out = { ...u }; out[k] = { ...u[k], unit: f(u[k].unit) }; }
+    return out;
   }
   // ---------- unlocks (like Mechabellum: some units start unlocked, the rest cost gold once per match) ----------
   // tier 1 = the cheapest price in the roster
@@ -822,11 +826,15 @@ const Game = (() => {
     return true;
   }
 
+  // A unit can make a skill wait for others: skillNeeds[k] = the slots that must be bought first (e.g. [0, 1])
+  const skillNeeds = (m, ui, k) => { const n = m.units[ui] && Array.isArray(m.units[ui].skillNeeds) ? m.units[ui].skillNeeds[k] : null; return Array.isArray(n) ? n.filter(j => j !== k && skillDef(m, ui, j)) : []; };
+  const skillNeedsMissing = (m, side, ui, k) => skillNeeds(m, ui, k).filter(j => !hasSkill(m, side, ui, j));
   function canBuySkill(m, side, ui, k) {
     const d = skillDef(m, ui, k);
     if (!d || hasSkill(m, side, ui, k)) return false;
     if (charOf(m, side) === 'enzo') return false; // Enzo's squads come with their skill instead
     if (!m.armies[side].some(s => s.unit === ui)) return false; // needs a squad of that type on the board
+    if (skillNeedsMissing(m, side, ui, k).length) return false;
     return m.gold[side] >= skillCost(m, ui, k);
   }
   function buySkill(m, side, ui, k) {
@@ -843,6 +851,7 @@ const Game = (() => {
     // Forward planting can't be taken back while a squad of that unit stands in no man's land
     const d = skillDef(m, ui, k);
     if (d && d.type === 'forward' && m.armies[side].some(s => s.unit === ui && inNoMans(s.row))) return false;
+    if (E.SLOTS.some(j => j !== k && hasSkill(m, side, ui, j) && skillNeeds(m, ui, j).includes(k))) return false; // a skill bought on top of it goes first
     t[k] = 0;
     m.gold[side] += skillCost(m, ui, k);
     return true;
@@ -1302,9 +1311,7 @@ const Game = (() => {
     const t = fid && factionInfo(fid) && factionInfo(fid).trait;
     if (!u || !t) return u;
     const mul = (x) => { const o = { ...x }; for (const k of TRAIT_STATS) if (isFinite(+t[k]) && +t[k]) o[k] = x[k] * (1 + t[k] / 100); return o; };
-    const out = mul(u);
-    if (u.spawn && u.spawn.unit) out.spawn = { ...u.spawn, unit: mul(u.spawn.unit) };
-    return out;
+    return withKids(mul(u), mul);
   }
   // the roster for a match between drafted factions: the faction units of `ids` (in that order) out of the full
   // faction set ({ units, matrix, skills } from faction-units.json), with the counter table cut to match
@@ -1507,7 +1514,7 @@ const Game = (() => {
     deploysAllowed, deploysLeft, deployedThisRound, canBuyDeploy, buyDeploy, refundDeploy,
     PACKAGE, allPackages, packOf, needsPack, freeLeft, choosePack, ensurePack,
     unlockCost, tierOf, startLevel, shopCost, mapFreeOf, mapFreeLeft, isUnlocked, unlockVisible, unlock, undoUnlock,
-    skillDef, skillCost, isInnate, hasSkill, skillVisible, unitFor, canBuySkill, buySkill, undoSkill, sellValue, sell,
+    skillDef, skillCost, isInnate, hasSkill, skillVisible, skillNeeds, skillNeedsMissing, unitFor, canBuySkill, buySkill, undoSkill, sellValue, sell,
     isRider, hiddenFromFoe, isCarrier, riderOf, carrierOf, squadAt, boardable, unplaceSquad,
     TOWER, TOWER_TYPES, OUTPOST, TOWER_PICK_ROUND, towerType, towerChoices, needsTowerPick, setTowerType, settleTowerPicks, TOWER_SKILL, towerSkillOf, towerSkillVisible, towerPicked, canBuyTowerSkill, buyTowerSkill, undoTowerSkill, towerSkillCost, towerSkill2Of, towerSkill2Visible, towerSkill2Cost, canBuyTowerSkill2, buyTowerSkill2, undoTowerSkill2, towerSkill2On, AIRSHIP, MOAT, INVEST, MAGE_GENERALS, mageGenPrice, MAGE, mageGenInfo, mageGenOf, mageTpOf, isExtraGen, mageGenCost, canBuyMageGen, buyMageGen, undoMageGen, mageTowerUnit, generalUnit, LOAN, loanNow, canTakeLoan, takeLoan, undoLoan, SLIME_UNITS, slimeTowerUnit, slimeSkillDefs, TOWER_MID, towerColOk, towerAt, needsTower, placeTower, ensureTower,
     FLANK, flankRows, flankOpen, isFlank, reserved, canPlaceAt, isOff, enemyHolds, inNoMans, hasSkillType,

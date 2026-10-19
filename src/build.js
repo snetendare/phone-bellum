@@ -12,7 +12,8 @@ const ex = JSON.parse(src('r9.json')).units.slice(7).map(u => ({ ...u, cost: Mat
 ex.push({ name: 'Ogre Smasher', cost: 100, bodies: 1, hp: 1100, hit: 260, aps: 0.5, range: 3, speed: 7, splash: 2.5, defense: 'none', defVal: 0, windUp: 1.0, knockback: 4 });
 ex.forEach((u, i) => { ex[i] = withSkills(u); });
 const lab = src('template.html').replace('/*SHAPES*/', () => shapes).replace('/*ENGINE*/', () => eng)
-  .replace('/*SAMPLE*/', () => JSON.stringify(sample)).replace('/*EXAMPLES*/', () => JSON.stringify(ex));
+  .replace('/*SAMPLE*/', () => JSON.stringify(sample)).replace('/*EXAMPLES*/', () => JSON.stringify(ex))
+  .replace('/*FACTIONS*/', () => src('factions.json'));
 const cut = lab.indexOf('</style>') + '</style>'.length;
 const labDoc = `<!doctype html>
 <html lang="en">

@@ -43,6 +43,18 @@ Factions go in `src/factions.json`, then run `node tools/counter-table.js` and r
 - Unit names must be unique across all factions.
 - The draft order, picks per player and the map are in `FACTION_MODE` in `src/game.js`. A ban phase later is a matter of adding `{ "who": "A", "act": "ban" }` steps to its order.
 - `node tools/tests/factions.js` checks the draft and faction matches headlessly with six throwaway test factions.
+- Until there are 4 factions the mode stays locked. To try a faction's units now: Counter Lab → Import units → "From <faction> (faction)", save, then Load units in the game.
+
+Fight mechanics added for factions (they work for any unit, in Counter Lab too):
+
+- `roll` (seconds): a roller. It never stops to attack; it rolls at its target from 1 m/s up to its `speed` over this many seconds, hits every enemy body it rolls over for its `hit`, carries on a tile past the target, stops and rolls back. `aps` and `range` only matter for the shop's numbers.
+- `build`: `{ "time": 1.5, "range": 25, "count": 1, "unit": { ...stats } }`. Once per fight the unit stops when an enemy is within `range` − 1 m, builds `count` copies of `unit` (a tile apart) in `time` seconds and fights on. Builders building next to each other speed each other up (1×, 1.5×, 1.75×, …). What it builds never moves, levels with its builder, earns the builder's squad its XP, and doesn't count as a unit left standing.
+- `skillNeeds`: `[null, null, [0, 1]]` = skill 3 can only be bought once skills 1 and 2 are owned (empty slots are skipped).
+- Skill types: `momentum` (a roller gets up to speed faster), `link` (a squad's bodies share one health pool and fall together), `healbot` (a construct follows each squad and heals it a share of max health per second), `builder` (more constructs per build, faster builds, better constructs).
+
+### Mechites (in progress)
+
+Rock elementals with clockwork hearts. Done: Rollers, Cog Builder (turrets, Twin turrets, Master engineering) and Mechite Guards (Oiled pumps, Linked cores, Healbot); `node tools/tests/mechites.js` checks them. Still to come: the Factory (Cog Builder skill 1: a building placed on your side, built over a round by your Cog Builders, kept between rounds, with one bought skill per round that builds Cogbot Fighters, Cogbot Machinegunners or the CogMech), the Altar of Build (tier 4 building), Core Awoken, the faction's trait and its own tower. The Cog Spire is the standard tower until then.
 
 ## Tools (`tools/`)
 

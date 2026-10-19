@@ -1323,6 +1323,14 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
       if (b.walls) drawWalls(b.x, b.y, b.walls);
     }
     drawElfTower(battlePre || m, false);
+    // a linked squad: a faint line joins its bodies (they share one health pool)
+    for (const b of bt.bodies) {
+      if (!b.alive || !b.link) continue;
+      const nx = b.link[(b.link.indexOf(b) + 1) % b.link.length];
+      if (nx === b || !nx.alive) continue;
+      ctx.strokeStyle = teamCol(b.side); ctx.globalAlpha = 0.35; ctx.lineWidth = 1; ctx.setLineDash([3, 3]);
+      ctx.beginPath(); ctx.moveTo(PX(b.x), PY(b.y)); ctx.lineTo(PX(nx.x), PY(nx.y)); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1;
+    }
     for (const b of bt.bodies) {
       if (!b.alive || b.u.structure || b.u.aloft) continue;
       const c = teamCol(b.side), r = radius(b.u), hpr = b.hp / b.u.hp;
@@ -1350,6 +1358,10 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
       if (b.windTarget && b.u.windUp > 0) {
         ctx.strokeStyle = c; ctx.lineWidth = 2.5;
         ctx.beginPath(); ctx.arc(PX(b.x), PY(b.y), r + 4, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * (1 - b.windT / b.u.windUp)); ctx.stroke();
+      }
+      if (b.buildT > 0 && b.buildFull > 0) { // a builder at work: a gold ring fills as it builds
+        ctx.strokeStyle = gold; ctx.lineWidth = 2.5; ctx.setLineDash([2, 2]);
+        ctx.beginPath(); ctx.arc(PX(b.x), PY(b.y), r + 4, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * (1 - b.buildT / b.buildFull)); ctx.stroke(); ctx.setLineDash([]);
       }
       const ch = bt.charm ? bt.charm(b.side, b.squad) : 0;
       if (ch >= Engine.CHARM_MAX) drawHat(PX(b.x), PY(b.y) - r * 0.8, Math.max(6, r * 1.3)); // a Gentleman
@@ -2132,7 +2144,12 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
       if (u.ram) t.push(`NEVER ATTACKS: runs straight at the enemy tower (the nearest enemy once it is down) and rams it once for its hit (${n1(u.hit)}), then is destroyed`);
       if (u.carrier) t.push('CARRIES ONE SQUAD of any other unit, hidden from the opponent until it is destroyed: place a squad on its tile (price and deployment as usual) and it rides inside, then jumps out where the carrier falls');
       if (u.noFlank) t.push('can\'t be placed on flank tiles');
-      const sk = (u.skillDefs || []).map((d, k) => d ? `skill ${k + 1} "${d.name}" (${Game.isInnate(m, i, k) ? 'BUILT IN: always on for both players, free' : `${Game.skillCost(m, i, k)} gold${Game.hasSkill(m, 1, i, k) ? ', YOU OWN IT' : ''}`}): ${Engine.describeSkill(d)}` : null).filter(Boolean);
+      if (u.roll > 0) t.push(`NEVER STOPS TO ATTACK: rolls at its target from ${Engine.ROLL_START} m/s up to its speed over ${n1(u.roll)} s, hits every enemy body it rolls over for its hit, carries on ${Engine.ROLL_PAST} m past the target, stops and rolls back (the faster it gets going, the more often it hits)`);
+      if (u.build && u.build.unit) { const c = u.build.unit; t.push(`BUILDS once per fight: when an enemy is within ${u.build.range} m it stops for ${n1(u.build.time)} s (faster with other builders next to it) and builds ${u.build.count} ${c.name}${u.build.count > 1 ? 's' : ''} (${n1(c.hp)} health, ${n1(c.hit)} hit, ${n1(c.aps)} attacks/s, ${c.range} m range, never moves, gone after the fight), then fights on`); }
+      if (u.link) t.push('linked health: its bodies share one health pool and fall together');
+      if (u.escort) t.push(`brings a healbot that heals the squad ${n1(u.escort.pct)}% of max health a second`);
+      const need = (k) => Game.skillNeeds(m, i, k).map(j => `"${u.skillDefs[j].name}"`).join(' and ');
+      const sk = (u.skillDefs || []).map((d, k) => d ? `skill ${k + 1} "${d.name}" (${Game.isInnate(m, i, k) ? 'BUILT IN: always on for both players, free' : `${Game.skillCost(m, i, k)} gold${Game.hasSkill(m, 1, i, k) ? ', YOU OWN IT' : need(k) ? `, needs ${need(k)} first` : ''}`}): ${Engine.describeSkill(d)}` : null).filter(Boolean);
       const lock = Game.isUnlocked(m, 1, i) ? (Game.unlockCost(m, i, 1) ? ' [unlocked]' : '') : ` [LOCKED: unlock once for ${Game.unlockCost(m, i, 1)} gold before you can place it]`;
       return `- ${u.name}${lock}: price ${Game.shopCost(m, 1, i)}${Game.startLevel(m, 1) ? ` (squads start at level ${Game.startLevel(m, 1) + 1})` : ''}, ${u.bodies} ${u.bodies === 1 ? 'body' : 'bodies'} x ${n1(u.hp, 0)} hp each, hit ${n1(u.hit)} x ${n1(u.aps, 2)}/s, range ${u.range} m, speed ${u.speed} m/s${t.length ? ', ' + t.join(', ') : ''}. Level-up cost ${Game.levelCost(u)}.${sk.length ? '\n    ' + sk.join('\n    ') : ''}`;
     };
@@ -2638,7 +2655,8 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
           act = `<span class="chip" style="color:var(--gold);border:1px solid currentColor;border-radius:99px;padding:1px 8px;font-size:12px">Owned</span>`;
           if (phase === 'deploy' && editable() && m.tech[me][i][k] === m.round) act += ` <button class="btn small" data-unskill="${k}">Undo</button>`;
         } else if (phase === 'deploy') {
-          const why = !m.armies[me].some(q => q.unit === i) ? 'Place a squad first' : m.gold[me] < cost ? `Need ${cost} gold` : '';
+          const needs = Game.skillNeedsMissing(m, me, i, k).map(j => defs[j].name);
+          const why = needs.length ? `Needs ${needs.join(' and ')}` : !m.armies[me].some(q => q.unit === i) ? 'Place a squad first' : m.gold[me] < cost ? `Need ${cost} gold` : '';
           act = why || !editable() ? `<button class="btn small" disabled>${why || `Buy · ${cost} gold`}</button>` : `<button class="btn small primary" data-skill="${k}">Buy · ${cost} gold</button>`;
         } else act = `<span class="hint">${cost} gold</span>`;
       } else {
@@ -2907,6 +2925,10 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (u.ram) tr.push(`Runs for the enemy tower and rams it for ${Math.round(u.hit)}`);
     if (u.carrier) tr.push('Carries one squad inside, hidden');
     if (u.noFlank) tr.push('Can’t deploy on flanks');
+    if (u.roll > 0) tr.push(`Rolls over enemies: ${Engine.ROLL_START}→${Math.round(u.speed * 100) / 100} m/s in ${Math.round(u.roll * 100) / 100} s`);
+    if (u.build && u.build.unit) tr.push(`Builds ${u.build.count > 1 ? u.build.count + ' ' : 'a '}${esc(u.build.unit.name)}${u.build.count > 1 ? 's' : ''} in ${Math.round(u.build.time * 100) / 100} s (${Math.round(u.build.unit.hp)} health, ${Math.round(u.build.unit.hit)} hit, ${Math.round(u.build.unit.aps * 100) / 100}/s, ${u.build.range} m)`);
+    if (u.link) tr.push('Linked health');
+    if (u.escort) tr.push(`Healbot: ${Math.round(u.escort.pct * 10) / 10}% health a second`);
     if (u.burst > 1) tr.push(`Burst ${u.burst}`);
     if (u.flame > 0) tr.push(`Flame cone ${u.flame}°, reaches ${Math.round(u.range * (Game.SETTINGS.flameReach || 1) * 10) / 10} m`);
     else if (u.pellets > 1) tr.push(`Shotgun ${u.pellets}`);
