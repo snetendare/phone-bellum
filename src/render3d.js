@@ -14,6 +14,7 @@
 // For a page that draws only when something changes: opts.onInput() on every pointer, wheel and key event, and
 // still() -> false while the camera moves on its own. quality('high' | 'medium' | 'low') trades sharpness and shadows
 // for speed: high is the screen's pixels up to 2 per CSS pixel with shadows, medium 1.5 with shadows, low 1 without.
+// dispose() when the page is done with the board: frees the WebGL context (the page removes el).
 //
 // The map floor (zones, flank tiles, mushrooms, buff tiles, the storm and the altar) is painted by the 2D renderer
 // onto a hidden canvas and laid on the ground. Everything else is drawn here, with the same rules for what this
@@ -647,6 +648,11 @@ const Render3D = (THREE, el, view, opts = {}) => {
     sun.castShadow = shadows;
     sizeTo();
   }
+  function dispose() {
+    cam.dispose();
+    renderer.dispose();
+    renderer.forceContextLoss();
+  }
   return { size: sizeTo, draw, tileAt, thumb: (match) => floor2d.thumb(match), camera: cam, info: () => renderer.info.render,
-    still: () => !cam.busy(), quality, pixelRatio: () => renderer.getPixelRatio() };
+    still: () => !cam.busy(), quality, pixelRatio: () => renderer.getPixelRatio(), dispose };
 };

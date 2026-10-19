@@ -17,6 +17,7 @@
 //
 // opts.onInput() on every pointer, wheel and key event and when the camera starts gliding to a level (setLevel too),
 // and busy() while it moves on its own, so a page that only draws when something changes knows when to draw.
+// dispose() when the page is done with it.
 //
 // The ground is the plane y = 0, the board is opts.width x opts.depth metres centred on the origin, and the player's
 // own side is toward +z (the bottom of the screen in the strategic view).
@@ -197,8 +198,12 @@ const Camera3D = (THREE, camera, el, opts) => {
 
   // ---------- keys: Q / E rotate, Escape goes back to the strategic view ----------
   const keys = new Set();
-  window.addEventListener('keydown', (e) => { woke(); keys.add(e.key.toLowerCase()); if (e.key === 'Escape') goStrategic(); });
-  window.addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
+  const keyDown = (e) => { woke(); keys.add(e.key.toLowerCase()); if (e.key === 'Escape') goStrategic(); };
+  const keyUp = (e) => keys.delete(e.key.toLowerCase());
+  window.addEventListener('keydown', keyDown);
+  window.addEventListener('keyup', keyUp);
+  // the page is done with this camera: let go of the window's keys (the element's listeners go with the element)
+  function dispose() { window.removeEventListener('keydown', keyDown); window.removeEventListener('keyup', keyUp); keys.clear(); }
 
   function update(dt) {
     if (settle) {
@@ -219,5 +224,5 @@ const Camera3D = (THREE, camera, el, opts) => {
 
   // moving on its own (gliding to a level, a gesture under way, a rotate key held), so the page should keep drawing
   const busy = () => !!settle || !!two || !!rotDrag || keys.has('q') || keys.has('e');
-  return { update, resize, groundAt, goStrategic, setLevel, strategic, handsOn, level, busy, zoom: () => z, LEVELS: MAX + 1 };
+  return { update, resize, groundAt, goStrategic, setLevel, strategic, handsOn, level, busy, dispose, zoom: () => z, LEVELS: MAX + 1 };
 };

@@ -494,7 +494,7 @@ a { color: var(--you); }
     syncMusic();
     if (on) Object.values(music).forEach(pl => pl.wake());
   }
-  // the cog in a match opens it as Settings (music and Main menu), the menu's Music button as music only.
+  // the cog in a match opens it as Settings (music, the 2D / 3D board and Main menu), the menu's Music button as music only.
   // data-keep: phase changes leave this sheet open (closeSheet)
   function openSoundSheet() {
     const inMatch = !!m && phase !== 'start' && phase !== 'lobby';
@@ -510,7 +510,19 @@ a { color: var(--you); }
         <span class="hint">Music volume</span>
         <span class="volrow"><input type="range" id="vol" min="0" max="100" step="5" value="${snd.vol}" aria-label="Music volume"><span class="num" id="vol-n">${snd.vol}</span></span>
       </div>
-      ${inMatch ? '<button class="btn" id="to-menu">Main menu</button>' : ''}
+      ${inMatch ? `<div class="bar">
+        <span class="hint">Board</span>
+        <div class="seg" role="group" aria-label="Board">
+          <button data-board="2d" aria-pressed="${!want3d}">2D</button><button data-board="3d" aria-pressed="${want3d}">3D</button>
+        </div>
+      </div>
+      <div class="bar" id="q3d-bar"${want3d ? '' : ' hidden'}>
+        <span class="hint">3D quality</span>
+        <div class="seg" role="group" aria-label="3D quality">
+          ${Q3D.map(q => `<button data-q3d="${q}" aria-pressed="${meter.q === q}">${q[0].toUpperCase() + q.slice(1)}</button>`).join('')}
+        </div>
+      </div>
+      <button class="btn" id="to-menu">Main menu</button>` : ''}
       <div class="songs" role="group" aria-label="Menu music">
         <span class="hint">Menu music</span>
         <button data-song="" aria-pressed="${!snd.song}">All menu songs<span>${PLAYLISTS.menu.map(songName).join(', ')}</span></button>
@@ -537,6 +549,15 @@ a { color: var(--you); }
       $('vol').value = snd.vol; $('vol-n').textContent = snd.vol; showOn();
     }));
     if ($('to-menu')) $('to-menu').addEventListener('click', askForfeit);
+    $('sheet').querySelectorAll('[data-board]').forEach(b => b.addEventListener('click', () => {
+      set3d(b.dataset.board === '3d');
+      $('sheet').querySelectorAll('[data-board]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+      $('q3d-bar').hidden = !want3d;
+    }));
+    $('sheet').querySelectorAll('[data-q3d]').forEach(b => b.addEventListener('click', () => {
+      setQuality(b.dataset.q3d);
+      $('sheet').querySelectorAll('[data-q3d]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+    }));
   }
   let mapPick = '';         // the map the host picked for the next match ('' = random)
   let pickFor = '', pickSel = null, pickPeek = false, pickHtml = ''; // the choose-one-of-3 cards over the board (syncPick)
@@ -1866,29 +1887,82 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     }
   }
 
-  // ---------- the 3D board (src/render3d.js): for now only with ?board=3d in the address, or in a build that has it inlined ----------
+  // ---------- the 3D board (src/render3d.js): a setting (Board: 2D / 3D in the in-match Settings), 2D by default ----------
   // It draws from the same view() as the 2D board and hands taps, drags and the mouse to the board input above, as
   // tiles; while deploying, the angled view takes them too. three.js (vendor/) and the 3D code (src/) load only then.
-  // If anything fails, the 2D board stays.
-  async function start3d() {
-    const load = (src) => new Promise((ok, no) => { const sc = document.createElement('script'); sc.src = src; sc.onload = ok; sc.onerror = () => no(new Error('could not load ' + src)); document.head.appendChild(sc); });
-    const el = document.createElement('div');
-    try {
-      const THREE = await import('./vendor/three.module.min.js');
-      if (typeof Render3D !== 'function') for (const f of ['camera3d', 'models3d', 'render3d']) await load(`src/${f}.js`);
-      el.className = 'board3d';
-      cv.after(el);
-      board3d = Render3D(THREE, el, boardView, { onTap: boardTap, onPress: boardPress, onDrag: boardDrag, onDrop: boardDrop, onHover: boardHover, placing: () => phase === 'deploy', onInput: wake3d });
-      el.querySelector('canvas').setAttribute('aria-label', cv.getAttribute('aria-label'));
-      cv.style.display = 'none';
-      startMeter(el);
-      size(); wake3d();
-    } catch (e) {
-      board3d = null; el.remove(); cv.style.display = ''; size(); render();
-      console.warn('No Mans Land: the 3D board could not start; staying on the 2D board.', e);
-    }
+  // ?board=3d in the address, or a build with the 3D code inlined (the phone-test artifact), forces it on for testing:
+  // that also shows the speed meter and skips the too-slow rule.
+  // It falls back to the 2D board when it can't start (no WebGL), when the phone drops the WebGL context, and when
+  // fights run under 20 fps at low quality (slower fights step the quality down first), with one line on the board.
+  const B3D_STORE = 'phone-bellum-board';
+  const force3d = /[?&]board=3d\b/.test(location.search) || typeof Render3D === 'function';
+  let want3d = force3d;
+  try { want3d = want3d || localStorage.getItem(B3D_STORE) === '3d'; } catch (e) {}
+  const save3d = (on) => { try { localStorage.setItem(B3D_STORE, on ? '3d' : '2d'); } catch (e) {} };
+  let starting3d = null;
+  function start3d() {
+    if (board3d || starting3d) return starting3d;
+    return (starting3d = (async () => {
+      const load = (src) => new Promise((ok, no) => { const sc = document.createElement('script'); sc.src = src; sc.onload = ok; sc.onerror = () => no(new Error('could not load ' + src)); document.head.appendChild(sc); });
+      const el = document.createElement('div');
+      let b = null;
+      try {
+        const THREE = await import('./vendor/three.module.min.js');
+        if (typeof Render3D !== 'function') for (const f of ['camera3d', 'models3d', 'render3d']) await load(`src/${f}.js`);
+        if (!want3d) return; // switched back to 2D while loading
+        el.className = 'board3d';
+        cv.after(el);
+        b = Render3D(THREE, el, boardView, { onTap: boardTap, onPress: boardPress, onDrag: boardDrag, onDrop: boardDrop, onHover: boardHover, placing: () => phase === 'deploy', onInput: wake3d });
+        const can = el.querySelector('canvas');
+        can.setAttribute('aria-label', cv.getAttribute('aria-label'));
+        can.addEventListener('webglcontextlost', () => { if (board3d === b) fallback2d('lost'); });
+        board3d = b;
+        cv.style.display = 'none';
+        startMeter(el);
+        size(); wake3d();
+      } catch (e) {
+        if (b) try { b.dispose(); } catch (e2) {}
+        board3d = null; el.remove(); cv.style.display = ''; size(); render();
+        console.warn('No Mans Land: the 3D board could not start; staying on the 2D board.', e);
+        if (want3d) fallback2d('failed');
+      } finally { starting3d = null; }
+    })());
   }
-  if (/[?&]board=3d\b/.test(location.search) || typeof Render3D === 'function') start3d();
+  // back to the 2D board: frees the WebGL context
+  function stop3d() {
+    const b = board3d;
+    if (!b) return;
+    board3d = null;
+    if (raf3d) { cancelAnimationFrame(raf3d); raf3d = 0; }
+    stopMeter();
+    try { b.dispose(); } catch (e) {}
+    const el = $('wrap').querySelector('.board3d');
+    if (el) el.remove();
+    cv.style.display = '';
+    size(); render();
+  }
+  // the Board setting (on: true for 3D); saved on this device
+  function set3d(on) {
+    want3d = on; save3d(on);
+    if (on) start3d(); else stop3d();
+  }
+  // 3D can't run here: back to 2D, and one line on the board to say so. When it failed to start or was too slow, the
+  // setting goes back to 2D; a lost context may come back next time, so the setting stays.
+  function fallback2d(why) {
+    want3d = false;
+    if (why !== 'lost' && !force3d) save3d(false);
+    stop3d();
+    note3d(why === 'slow' ? '3D was too slow here, so the board is back to 2D.'
+      : why === 'lost' ? 'The 3D board stopped, so it’s back to 2D.'
+      : '3D can’t run on this device, so the board is 2D.');
+  }
+  function note3d(text) {
+    let n = $('note3d');
+    if (!n) { n = document.createElement('button'); n.id = 'note3d'; n.type = 'button'; n.className = 'note3d'; n.setAttribute('role', 'status'); n.addEventListener('click', () => { n.hidden = true; }); $('wrap').appendChild(n); }
+    n.textContent = text; n.hidden = false;
+    clearTimeout(n.timer); n.timer = setTimeout(() => { n.hidden = true; }, 8000);
+  }
+  if (want3d) start3d();
   // Unlike the 2D board, which draws only when render() is called, the 3D board draws in frames. To spare the battery
   // it draws only during fights, while the camera moves on its own, and for a moment after a change (render()) or a
   // touch on the board, so squads finish gliding and the floor catches up.
@@ -1899,37 +1973,51 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   }
   function frame3d(ts) {
     raf3d = 0;
+    if (!board3d) return;
     board3d.draw();
     meterFrame(ts);
-    if (phase === 'battle' || !board3d.still() || performance.now() < wakeUntil) raf3d = requestAnimationFrame(frame3d);
+    if (board3d && (phase === 'battle' || !board3d.still() || performance.now() < wakeUntil)) raf3d = requestAnimationFrame(frame3d);
   }
-  // The meter, top right on the 3D board, for testing on phones: frames drawn in the last second (0 while the board
-  // idles), the slowest frame among frames drawn in a row, the quality and pixels per CSS pixel; during a fight the
-  // live bodies and draw calls, after it that fight's average, its slowest second and the most bodies at once.
-  // Tap it to step the quality (high, medium, low).
-  const meter = { el: null, n: 0, last: 0, worst: 0, fight: null, lastFight: '', q: 'high' };
+  // The speed meter counts frames and sums up each fight for the too-slow rule. When 3D is forced for testing, it
+  // shows top right on the 3D board: frames drawn in the last second (0 while the board idles), the slowest frame among
+  // frames drawn in a row, the quality and pixels per CSS pixel; during a fight the live bodies and draw calls, after
+  // it that fight's average, its slowest second and the most bodies at once. Tap it to step the quality.
+  // The quality (high, medium, low) is also in Settings while the 3D board is on.
+  const meter = { el: null, timer: 0, n: 0, last: 0, worst: 0, fight: null, lastFight: '', q: 'high' };
   const Q3D_STORE = 'phone-bellum-3d-quality';
+  const Q3D = ['high', 'medium', 'low'];
+  try { const q = localStorage.getItem(Q3D_STORE); if (Q3D.includes(q)) meter.q = q; } catch (e) {}
+  function setQuality(q) {
+    meter.q = Q3D.includes(q) ? q : 'high';
+    try { localStorage.setItem(Q3D_STORE, meter.q); } catch (e) {}
+    if (board3d) { board3d.quality(meter.q); wake3d(); }
+    showMeter();
+  }
   function startMeter(at) {
-    try { meter.q = localStorage.getItem(Q3D_STORE) || 'high'; } catch (e) {}
     board3d.quality(meter.q);
+    meter.fight = null; meter.last = 0;
+    if (!force3d) return;
     meter.el = document.createElement('button');
     meter.el.className = 'meter3d'; meter.el.type = 'button';
     meter.el.setAttribute('aria-label', '3D board speed. Tap to change the quality.');
-    meter.el.addEventListener('click', () => {
-      meter.q = { high: 'medium', medium: 'low', low: 'high' }[meter.q] || 'high';
-      try { localStorage.setItem(Q3D_STORE, meter.q); } catch (e) {}
-      board3d.quality(meter.q); wake3d(); showMeter();
-    });
+    meter.el.addEventListener('click', () => setQuality(Q3D[(Q3D.indexOf(meter.q) + 1) % Q3D.length]));
     at.after(meter.el);
-    setInterval(() => { showMeter(); meter.n = 0; meter.worst = 0; }, 1000);
+    meter.timer = setInterval(() => { showMeter(); meter.n = 0; meter.worst = 0; }, 1000);
+  }
+  function stopMeter() {
+    clearInterval(meter.timer); meter.timer = 0;
+    if (meter.el) { meter.el.remove(); meter.el = null; }
+    meter.fight = null; meter.last = 0;
   }
   function meterFrame(ts) {
-    if (meter.last && ts - meter.last < 250) meter.worst = Math.max(meter.worst, ts - meter.last);
+    const gap = meter.last ? ts - meter.last : 0;
+    if (meter.last && gap < 250) meter.worst = Math.max(meter.worst, gap);
     meter.last = ts; meter.n++;
     const live = phase === 'battle' && bt;
     if (live) {
-      const f = meter.fight || (meter.fight = { t0: ts, n: 0, sn: 0, st: ts, secs: [], bodies: 0 });
+      const f = meter.fight || (meter.fight = { t0: ts, n: 0, sn: 0, st: ts, secs: [], bodies: 0, paused: false });
       f.n++; f.sn++; f.end = ts;
+      if (gap > 1000) f.paused = true; // the page was hidden (rAF stops), so the average says nothing
       f.bodies = Math.max(f.bodies, bt.bodies.reduce((k, b) => k + (b.alive ? 1 : 0), 0));
       if (ts - f.st >= 1000) { f.secs.push(f.sn * 1000 / (ts - f.st)); f.sn = 0; f.st = ts; }
     } else if (meter.fight) {
@@ -1937,6 +2025,11 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       const avg = f.n * 1000 / Math.max(1, f.end - f.t0), low = f.secs.length ? Math.min(...f.secs) : avg;
       meter.lastFight = `last fight ${Math.round(avg)} fps · slowest second ${Math.round(low)} · ${f.bodies} bodies`;
       console.log('No Mans Land 3D:', meter.lastFight, '·', meter.q);
+      // too slow: a fight of 4 s or more, on screen the whole time, under 20 fps: a step down in quality, then 2D
+      if (!force3d && !f.paused && f.end - f.t0 >= 4000 && avg < 20) {
+        if (meter.q === 'low') fallback2d('slow');
+        else setQuality(Q3D[Q3D.indexOf(meter.q) + 1]);
+      }
     }
   }
   function showMeter() {
