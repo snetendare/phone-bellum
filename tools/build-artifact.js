@@ -1,4 +1,4 @@
-// Builds the claude.ai artifact version (phone-bellum.html) from index.html.
+// Builds the claude.ai artifact versions (phone-bellum.html, counter-lab.html, lab3d-artifact.html) from the built pages.
 // Run from the repo root after `node src/build.js`:  node tools/build-artifact.js
 const fs = require('fs');
 const game = fs.readFileSync('index.html', 'utf8');
@@ -11,6 +11,14 @@ if (art.includes('id="lab-link"') || !art.includes('jsdelivr')) throw new Error(
 fs.writeFileSync('phone-bellum.html', art);
 console.log('wrote phone-bellum.html', art.length);
 
+// 3D test artifact (lab3d-artifact.html) from lab3d.html. three.js stays at ./vendor/, published next to the page.
+const l3 = fs.readFileSync('lab3d.html', 'utf8');
+const l3a = l3.slice(l3.indexOf('<meta charset'), l3.indexOf('</head>')).replace(/<meta name="theme-color"[^>]*>\n|<link rel="icon"[^>]*>\n/g, '')
+  + '\n' + l3.slice(l3.indexOf('<body>') + 6, l3.lastIndexOf('</body>'));
+if (!l3a.includes("from './vendor/three.module.min.js'")) throw new Error('3D artifact build failed');
+fs.writeFileSync('lab3d-artifact.html', l3a);
+console.log('wrote lab3d-artifact.html', l3a.length);
+
 // Counter Lab artifact (counter-lab.html) from lab.html: no link back to the game, no note about Load units
 // (artifacts don't share browser storage with the game).
 const lab = fs.readFileSync('lab.html', 'utf8');
@@ -20,3 +28,4 @@ la = la.replace('<a href="./" style="color:inherit">No Mans Land</a>', 'No Mans 
 if (la.includes('href="./"') || la.includes('Load units')) throw new Error('lab artifact build failed');
 fs.writeFileSync('counter-lab.html', la);
 console.log('wrote counter-lab.html', la.length);
+
