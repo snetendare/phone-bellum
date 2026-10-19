@@ -4020,7 +4020,8 @@ import * as THREE from './vendor/three.module.min.js';
 // Models3D(THREE) -> { kindOf(u), parts(kind), height(kind) }.
 // kindOf picks a figure from a unit's stats (rosters are custom, so names can't be relied on): towers (one per tower
 // type), the elf spire, airships (aloft), the horse and spider shapes, fliers, then archers / casters for ranged
-// units and goblins / brutes / soldiers for melee ones. height(kind): the top of the model, for markers above it.
+// units and goblins / brutes / soldiers for melee ones. The default roster's tier 4 units have their own models, by
+// name (NAMED); a custom unit with one of those names gets that model too. height(kind): the top of the model, for markers above it.
 // parts(kind) gives up to three geometries, drawn as separate instanced meshes so each can be coloured per body:
 //   tint  - takes the unit's own colour (its clothes or hide), as the 2D board fills the shape with it
 //   team  - takes the side's colour (shields, banners, sashes)
@@ -4028,6 +4029,7 @@ import * as THREE from './vendor/three.module.min.js';
 // Sizes are for a body of radius 1 metre standing on y = 0 and facing -z; the renderer scales them like the 2D board.
 const Models3D = (THREE) => {
   const SKIN = '#D9A27A', DARK = '#2B2F33', METAL = '#B8C0C8', WOOD = '#8A5A32', BONE = '#E9E3CF', GLOW = '#FFE9A8';
+  const STONE = '#6E6A64', ETHER = '#8FE3FF', SUN = '#F7D154', FIRE = '#FF8A3D', EMBER = '#FFD27A', ROCK = '#5A4A42', GHOST = '#7CFF6B';
   const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), v = new THREE.Vector3(), s = new THREE.Vector3(1, 1, 1);
   const box = (w, h, d) => new THREE.BoxGeometry(w, h, d);
   const cyl = (rt, rb, h, n = 6) => new THREE.CylinderGeometry(rt, rb, h, n);
@@ -4128,6 +4130,91 @@ const Models3D = (THREE) => {
       P(cone(0.5, 0.9, 3), 'team', [0, 1.4, 1.75], [-Math.PI / 2, 0, 0], [1, 1, 0.2]),
       P(cone(0.5, 0.9, 3), 'team', [0, 1.4, 1.75], [-Math.PI / 2, 0, Math.PI / 2], [1, 1, 0.2]),
       P(box(0.45, 0.3, 0.9), DARK, [0, 0.55, 0])],
+    // ---------- the tier 4 units (NAMED) ----------
+    // Ether Golem: a hunched heap of boulders in the unit's colour, a glowing core and eye slit, rune shards floating
+    golem: () => [
+      P(box(0.42, 0.75, 0.42), STONE, [-0.32, 0.38, 0]), P(box(0.42, 0.75, 0.42), STONE, [0.32, 0.38, 0]),
+      P(ball(0.72), 'tint', [0, 1.45, 0], [0, 0.3, 0], [1.15, 0.95, 0.85]),
+      P(box(1.3, 0.14, 0.9), 'team', [0, 1.0, 0]),
+      P(ball(0.24), ETHER, [0, 1.5, -0.6]),
+      P(box(0.5, 0.4, 0.45), 'tint', [0, 2.2, -0.12], [0.1, 0, 0]),
+      P(box(0.34, 0.06, 0.04), ETHER, [0, 2.24, -0.36]),
+      ...[-1, 1].flatMap(sd => [
+        P(ball(0.32), 'tint', [sd * 0.95, 1.85, 0]),
+        P(box(0.38, 0.75, 0.38), 'tint', [sd * 1.05, 1.3, -0.1], [0.2, 0, sd * -0.15]),
+        P(ball(0.34), STONE, [sd * 1.1, 0.8, -0.25])]),
+      P(cone(0.12, 0.4, 4), ETHER, [-0.6, 2.7, 0.3]), P(cone(0.12, 0.4, 4), ETHER, [0.6, 2.55, 0.35], [Math.PI, 0, 0])],
+    // Sun Priest: a robe and a stole, a gold crown, a sun halo with rays behind the head, a staff with a bright orb
+    sunPriest: () => [
+      P(cone(0.62, 1.6, 8), 'tint', [0, 0.8, 0]),
+      P(cyl(0.2, 0.42, 0.5, 8), 'tint', [0, 1.45, 0]),
+      P(box(0.14, 1.3, 0.06), 'team', [0, 1.0, -0.42], [0.27, 0, 0]),
+      P(ball(0.24), SKIN, [0, 1.85, 0]),
+      P(cyl(0.18, 0.24, 0.3, 6), SUN, [0, 2.12, 0]),
+      P(new THREE.TorusGeometry(0.6, 0.06, 4, 16), SUN, [0, 2.0, 0.3]),
+      ...[...Array(10)].map((_, k) => { const a = k * Math.PI / 5; return P(cone(0.09, 0.35, 4), SUN, [Math.sin(a) * 0.82, 2.0 + Math.cos(a) * 0.82, 0.3], [0, 0, -a]); }),
+      P(cyl(0.045, 0.045, 2.3, 5), '#C9A13B', [0.55, 1.15, -0.15]),
+      P(ball(0.17), GLOW, [0.55, 2.35, -0.15])],
+    // Meteor Caller: a hooded robe, arms raised to a burning rock with a trail of fire, hanging over its head
+    meteor: () => [
+      P(cone(0.58, 1.55, 7), 'tint', [0, 0.78, 0]),
+      P(cyl(0.5, 0.5, 0.06, 8), 'team', [0, 1.3, 0]),
+      P(ball(0.24), SKIN, [0, 1.62, 0]),
+      P(cone(0.34, 0.7, 7), 'tint', [0, 1.85, 0.06], [0.25, 0, 0]),
+      P(cyl(0.08, 0.1, 0.8, 5), 'tint', [-0.38, 1.75, -0.1], [0, 0, 0.45]),
+      P(cyl(0.08, 0.1, 0.8, 5), 'tint', [0.38, 1.75, -0.1], [0, 0, -0.45]),
+      P(ball(0.42), ROCK, [0, 2.85, -0.15], [0.4, 0.6, 0]),
+      P(cone(0.36, 1.1, 6), FIRE, [0.31, 3.27, 0.02], [0.4, 0, -0.6]),
+      P(cone(0.2, 0.7, 6), EMBER, [0.22, 3.12, -0.02], [0.4, 0, -0.6]),
+      P(ball(0.06), GLOW, [-0.5, 2.4, -0.3]), P(ball(0.05), GLOW, [0.6, 2.2, -0.2]), P(ball(0.05), GLOW, [-0.3, 3.2, 0.1])],
+    // War Mammoth: a big shaggy body in the unit's colour, trunk and curved tusks, ears, a howdah in the team colour
+    mammoth: () => [
+      P(ball(1), 'tint', [0, 1.75, 0.1], [0, 0, 0], [0.95, 0.85, 1.3]),
+      P(ball(0.6), 'tint', [0, 2.1, -1.15]),
+      P(ball(0.42), 'tint', [0, 2.55, -0.85]),
+      ...[[-0.5, -0.65], [0.5, -0.65], [-0.5, 0.8], [0.5, 0.8]].map(([x, z]) => P(cyl(0.26, 0.3, 1.1, 6), 'tint', [x, 0.55, z])),
+      P(cyl(0.2, 0.24, 0.6, 6), 'tint', [0, 1.7, -1.6], [0.5, 0, 0]),
+      P(cyl(0.16, 0.2, 0.6, 6), 'tint', [0, 1.2, -1.78], [0.1, 0, 0]),
+      P(cyl(0.12, 0.16, 0.45, 6), 'tint', [0, 0.82, -1.72], [-0.5, 0, 0]),
+      ...[-1, 1].flatMap(sd => [
+        P(cyl(0.09, 0.11, 0.7, 5), BONE, [sd * 0.3, 1.54, -1.78], [-2.2, 0, 0]),
+        P(cone(0.09, 0.6, 5), BONE, [sd * 0.3, 1.55, -2.29], [-0.8, 0, 0]),
+        P(box(0.08, 0.6, 0.5), 'tint', [sd * 0.6, 2.15, -1.0], [0, 0, sd * 0.2])]),
+      P(ball(0.06), DARK, [-0.3, 2.25, -1.62]), P(ball(0.06), DARK, [0.3, 2.25, -1.62]),
+      P(box(1.3, 0.15, 1.4), 'team', [0, 2.65, 0.2]),
+      P(box(1.2, 0.5, 1.2), WOOD, [0, 2.95, 0.2]),
+      ...[[-1, -1], [1, -1], [-1, 1], [1, 1]].map(([x, z]) => P(cyl(0.04, 0.04, 0.6, 4), WOOD, [x * 0.55, 3.5, 0.2 + z * 0.55])),
+      P(cone(0.95, 0.6, 4), 'team', [0, 4.1, 0.2], [0, Math.PI / 4, 0]),
+      P(cyl(0.05, 0.05, 0.6, 4), 'tint', [0, 1.6, 1.4], [0.4, 0, 0])],
+    // Necromancer: a hooded robe in the unit's colour, a skull face with green eyes, bone shoulder spikes, a skull staff
+    // with green fire, and wisps
+    necro: () => [
+      P(cone(0.62, 1.6, 7), 'tint', [0, 0.8, 0]),
+      P(cyl(0.62, 0.66, 0.18, 7), DARK, [0, 0.09, 0]),
+      P(cyl(0.3, 0.45, 0.45, 7), 'tint', [0, 1.45, 0]),
+      P(box(0.1, 1.2, 0.06), 'team', [0, 1.0, -0.42], [0.27, 0, 0]),
+      P(cone(0.08, 0.35, 4), BONE, [-0.4, 1.75, 0], [0, 0, 0.5]), P(cone(0.08, 0.35, 4), BONE, [0.4, 1.75, 0], [0, 0, -0.5]),
+      P(cone(0.36, 0.85, 7), 'tint', [0, 2.0, 0.05], [0.1, 0, 0]),
+      P(ball(0.22), BONE, [0, 1.82, -0.08]),
+      P(ball(0.05), GHOST, [-0.08, 1.85, -0.28]), P(ball(0.05), GHOST, [0.08, 1.85, -0.28]),
+      P(cyl(0.045, 0.05, 2.3, 5), DARK, [0.58, 1.15, -0.15]),
+      P(ball(0.17), BONE, [0.58, 2.4, -0.15]),
+      P(cone(0.14, 0.4, 5), GHOST, [0.58, 2.72, -0.15]),
+      P(ball(0.09), GHOST, [-0.6, 1.4, -0.3]), P(ball(0.07), GHOST, [-0.75, 2.0, 0.2])],
+    // Truespear: armoured, a crested helm, a long spear raised in front, a second spear across the back, a small shield
+    truespear: () => [...legs(),
+      P(cyl(0.34, 0.4, 0.8, 6), 'tint', [0, 1.2, 0]),
+      P(cyl(0.42, 0.42, 0.12, 6), 'team', [0, 0.85, 0]),
+      P(box(0.8, 0.45, 0.5), METAL, [0, 1.45, 0]),
+      P(ball(0.26), SKIN, [0, 1.88, 0]),
+      P(cyl(0.27, 0.3, 0.32, 6), METAL, [0, 2.02, 0]),
+      P(box(0.3, 0.07, 0.05), DARK, [0, 1.94, -0.28]),
+      P(box(0.08, 0.35, 0.6), 'team', [0, 2.3, 0.05]),
+      P(cyl(0.04, 0.04, 3.0, 5), WOOD, [0.48, 1.6, -0.2], [-0.35, 0, 0]),
+      P(cone(0.1, 0.45, 4), METAL, [0.48, 3.2, -0.78], [-0.35, 0, 0]),
+      P(cyl(0.035, 0.035, 2.4, 5), WOOD, [0, 1.5, 0.38], [0, 0, 0.7]),
+      P(cone(0.08, 0.36, 4), METAL, [-0.89, 2.56, 0.38], [0, 0, 0.7]),
+      P(cyl(0.35, 0.35, 0.07, 8), 'team', [-0.5, 1.25, -0.1], [0, 0, Math.PI / 2])],
     // a thrown spear, flying toward -z: the shaft takes the unit's colour
     spear: () => [P(cyl(0.06, 0.06, 2.4, 4), 'tint', [0, 0, 0.3], [Math.PI / 2, 0, 0]), P(cone(0.14, 0.5, 4), METAL, [0, 0, -1.1], [-Math.PI / 2, 0, 0])],
     // a neutral elf spire: pale stone, a roof in its own colour (green, gilded once the elves grow strong), a flag
@@ -4162,11 +4249,13 @@ const Models3D = (THREE) => {
   };
   for (const [k, f] of Object.entries(TOWERS)) BUILD['tower:' + k] = f;
 
+  const NAMED = { 'Ether Golem': 'golem', 'Sun Priest': 'sunPriest', 'Meteor Caller': 'meteor', 'War Mammoth': 'mammoth', 'Necromancer': 'necro', 'Truespear': 'truespear' };
   const RANGED = 12; // metres: from this range on, a unit is drawn as an archer or a caster
   function kindOf(u) {
     if (u.spire) return 'spire';
     if (u.structure) return TOWERS[u.kind] ? 'tower:' + u.kind : 'tower:keep';
     if (u.aloft) return 'airship';
+    if (NAMED[u.name]) return NAMED[u.name];
     if (u.shape === 'horse') return 'horse';
     if (u.shape === 'spider') return 'spider';
     if (u.shape === 'imp' || u.shape === 'ring') return 'flier';
@@ -4847,6 +4936,7 @@ const touch = matchMedia('(pointer: coarse)').matches;
 let m = null, bt = null, phase = 'deploy', fx = [], acc = 0, result = null, hoverTile = null;
 let extra = {}; // for tests: view fields to set (selected, placingUnit, placingTower, ...)
 let player = true;  // you deploy blue; false: the AI deploys both sides
+const RICH = 1e6;   // blue's gold while you deploy: as good as unlimited, kept topped up (the AI plays red as usual)
 let selected = null, drag = null, dragEndAt = 0; // the shop pick, and a squad being dragged to another tile
 const DT = Game.SETTINGS.dt;
 function newMatch() {
@@ -4902,8 +4992,9 @@ function shop() {
   const on = player && phase === 'deploy';
   $('shop').hidden = !on; $('help').hidden = on && board.camera.strategic();
   if (!on) return;
+  m.gold[ME] = Math.max(m.gold[ME], RICH);
   const free = Game.freeLeft(m, ME), left = Game.deploysLeft(m, ME);
-  $('gold').textContent = `${m.gold[ME]} gold · ${left} deployment${left === 1 ? '' : 's'} left`;
+  $('gold').textContent = `Unlimited gold · ${left} deployment${left === 1 ? '' : 's'} left`;
   $('hint').textContent = placingTower() ? 'Place your tower first: tap a gold tile on the left or right of your zone.'
     : selected !== null ? `Tap a highlighted tile to place ${units[selected].name}.`
     : free.length ? 'Your package squads are on the board: drag them where you want them.'

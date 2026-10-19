@@ -11,6 +11,7 @@ const touch = matchMedia('(pointer: coarse)').matches;
 let m = null, bt = null, phase = 'deploy', fx = [], acc = 0, result = null, hoverTile = null;
 let extra = {}; // for tests: view fields to set (selected, placingUnit, placingTower, ...)
 let player = true;  // you deploy blue; false: the AI deploys both sides
+const RICH = 1e6;   // blue's gold while you deploy: as good as unlimited, kept topped up (the AI plays red as usual)
 let selected = null, drag = null, dragEndAt = 0; // the shop pick, and a squad being dragged to another tile
 const DT = Game.SETTINGS.dt;
 function newMatch() {
@@ -66,8 +67,9 @@ function shop() {
   const on = player && phase === 'deploy';
   $('shop').hidden = !on; $('help').hidden = on && board.camera.strategic();
   if (!on) return;
+  m.gold[ME] = Math.max(m.gold[ME], RICH);
   const free = Game.freeLeft(m, ME), left = Game.deploysLeft(m, ME);
-  $('gold').textContent = `${m.gold[ME]} gold · ${left} deployment${left === 1 ? '' : 's'} left`;
+  $('gold').textContent = `Unlimited gold · ${left} deployment${left === 1 ? '' : 's'} left`;
   $('hint').textContent = placingTower() ? 'Place your tower first: tap a gold tile on the left or right of your zone.'
     : selected !== null ? `Tap a highlighted tile to place ${units[selected].name}.`
     : free.length ? 'Your package squads are on the board: drag them where you want them.'
