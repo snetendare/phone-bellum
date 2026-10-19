@@ -64,11 +64,11 @@ const Render3D = (THREE, el, view, opts = {}) => {
     if (!v.m) return;
     // while deploying, the board changes with what the player buys (mushrooms, buff tiles, the altar): look again twice a second
     floorAge += dt;
-    const key = [idOf(v.m), idOf(v.battlePre), v.m.round, v.me, v.phase].join('|');
+    const key = [idOf(v.m), idOf(v.battlePre), v.m.round, v.me, v.phase, uiOff].join('|');
     if (key === floorKey && !(v.phase === 'deploy' && floorAge > 0.5)) return;
     floorKey = key; floorAge = 0;
     floorView = { ...v, bt: v.phase === 'battle' ? null : v.bt, fx: [], selected: null, moving: null, drag: null, hoverTile: null, placingElf: false, placingTower: false };
-    floor2d.size(); floor2d.floor();
+    floor2d.size(); floor2d.floor(uiOff); // the ground view gets the land alone, no zones or grid
     groundTex.needsUpdate = true;
   }
 
@@ -167,9 +167,13 @@ const Render3D = (THREE, el, view, opts = {}) => {
   const sprites = new THREE.Mesh(sprGeo, sprMat);
   sprites.frustumCulled = false; sprites.renderOrder = 10;
   scene.add(sprites);
+  // what the camera level shows: strategic (health as rings), angled (health as bars), ground (no markers at all,
+  // only what belongs to the scene: corpses, stun stars, buff sparkles; wrap those in scene())
+  let viewMode = 'strategic', uiOff = false;
+  const scene_ = (fn) => { const k = uiOff; uiOff = false; fn(); uiOff = k; };
   let ns = 0;
   function spr(mode, x, y, z, w, h, c, a, p0 = 0, p1 = 0, p2 = 0, p3 = 0) {
-    if (ns >= SPR_CAP || a <= 0.01) return;
+    if (ns >= SPR_CAP || a <= 0.01 || uiOff) return;
     const P = sprAttr.aPos.array, S = sprAttr.aSize.array, C = sprAttr.aCol.array, Q = sprAttr.aP.array, i3 = ns * 3, i2 = ns * 2, i4 = ns * 4;
     P[i3] = x; P[i3 + 1] = y; P[i3 + 2] = z; S[i2] = w; S[i2 + 1] = h;
     C[i4] = c.r; C[i4 + 1] = c.g; C[i4 + 2] = c.b; C[i4 + 3] = a;
@@ -323,7 +327,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
     const spire = (x, y, side, flagCol, crest, scale) => {
       bodies.push({ u: { spire: true, structure: true, color: roof }, side, x, y, look: 'solid', flag: color(flagCol), scale, crest, edge: flagCol });
       const [wx, wz] = world(f, x, y);
-      if (strong) disc(wx, wz, 4.5, color('#FFD65A'), 0.45, 1);
+      if (strong) scene_(() => disc(wx, wz, 4.5, color('#FFD65A'), 0.45, 1));
     };
     spire(e.x, e.y, 2, lead < 0 ? '#F4F1E6' : Art.teamCol(lead, v.me), lead < 0 ? null : arms(lead), 1);
     if (deploying) { const [wx, wz] = world(f, e.x, e.y); arc(wx, wz, Game.ELF_TOWER.range, color(ELF_COL), 0.3, 1, 0.012, 90); }
@@ -338,7 +342,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
     const { bt, me } = v, src = v.battlePre || v.m;
     const muted = color(css('--muted') || '#8DA1A1');
     for (const b of bt.bodies) {
-      if (!b.alive) { if (!b.boarded) { const [wx, wz] = world(f, b.x, b.y); disc(wx, wz, Math.max(0.3, size(b.u) * 0.45), muted, 0.18); } continue; }
+      if (!b.alive) { if (!b.boarded) { const [wx, wz] = world(f, b.x, b.y); scene_(() => disc(wx, wz, Math.max(0.3, size(b.u) * 0.45), muted, 0.18)); } continue; }
       if (b.boarded) continue;
       const p = glide(b, dt);
       const look = b.u.aloft ? 'glass' : b.hidden ? (b.side === me ? 'ghost' : 'ghostFoe') : b.delay > 0 ? 'ghost' : 'solid';
@@ -423,12 +427,17 @@ const Render3D = (THREE, el, view, opts = {}) => {
     const b = s.b, team = teamColor(s.side, me), u = s.u;
     const hpr = Math.max(0, b.hp / u.hp);
     let y = top + 0.45;
-    if (u.structure || (u.hp >= 500 && hpr < 1)) { const w = u.structure ? 4.2 : Math.max(1.6, r * 1.5); bar(wx, y, wz, w, u.structure ? 0.42 : 0.3, hpr, team); y += 0.55; }
+    if (u.structure || (u.hp >= 500 && hpr < 1)) {
+      if (viewMode === 'strategic') { // a ring around it, as on the 2D board (dark where the health is gone)
+        const rr = u.structure ? 3.1 : r * 1.42, th = u.structure ? 0.11 : 0.1;
+        arc(wx, wz, rr, color('#0B0F11'), 0.6, 1, th, 0, 0, 0.065); arc(wx, wz, rr, team, 1, hpr, th);
+      } else { const w = u.structure ? 4.2 : Math.max(1.6, r * 1.5); bar(wx, y, wz, w, u.structure ? 0.42 : 0.3, hpr, team); y += 0.55; }
+    }
     if (u.structure) return;
-    if (b.windTarget && u.windUp > 0) arc(wx, wz, r * 1.4, team, 0.95, 1 - b.windT / u.windUp, 0.14);
-    if (b.delay > 0) arc(wx, wz, r * 1.5, color(css('--gold') || '#E6B84A'), 1, b.delay / Game.FLANK.delay, 0.12);
-    if (b.level > 0) for (let k = 0; k < b.level; k++) arc(wx, wz, r * (1.32 + k * 0.14), color(css('--gold') || '#E6B84A'), 0.85, 1, 0.07);
-    if (b.convert) arc(wx, wz, r * 1.45, color(CHARM_COL), 0.9, 1, 0.08, 16);
+    if (b.windTarget && u.windUp > 0) arc(wx, wz, r * 1.58, team, 0.95, 1 - b.windT / u.windUp, 0.1);
+    if (b.delay > 0) arc(wx, wz, r * 1.58, color(css('--gold') || '#E6B84A'), 1, b.delay / Game.FLANK.delay, 0.1);
+    if (b.level > 0) for (let k = 0; k < b.level; k++) arc(wx, wz, r * (1.74 + k * 0.13), color(css('--gold') || '#E6B84A'), 0.85, 1, 0.06);
+    if (b.convert) arc(wx, wz, r * 1.66, color(CHARM_COL), 0.9, 1, 0.07, 16);
     // small dots over the head: poisoned (green), slowed (blue), charisma stacks (pink)
     const dots = [];
     if (b.poison && b.poison.length) dots.push(color('#6FD08C'));
@@ -437,6 +446,14 @@ const Render3D = (THREE, el, view, opts = {}) => {
     if (ch >= Engine.CHARM_MAX) { icon('hat', wx, top + 0.35, wz, Math.max(0.8, r * 0.9)); y += 0.5; }
     else if (ch > 0) dots.push(color(CHARM_COL));
     if (dots.length) iconRow(dots.map(() => 'dot'), wx, y + 0.1, wz, 0.4, dots);
+    scene_(() => sceneMarkers(b, wx, wz, r, top, t));
+    if (b.fast) { // yellow mushroom: speed streaks behind it
+      const hx = (b.hx || 0) * f, hz = -(b.hy || 0) * f;
+      for (const o of [-0.4, 0.4]) beam(wx - hx * r * 1.2 - hz * r * o, 0.6 * r, wz - hz * r * 1.2 + hx * r * o, wx - hx * r * 2.4 - hz * r * o, 0.6 * r, wz - hz * r * 2.4 + hx * r * o, 0.06, color(SHROOM_COL.yellow), 0.6);
+    }
+  }
+  // what belongs to the scene itself, shown in every view: stun, mushroom spores, Zoe's stars
+  function sceneMarkers(b, wx, wz, r, top, t) {
     if (b.stunT > 0) for (let k = 0; k < 3; k++) { // stunned: three dots circling over its head
       const a = t * 6 + k * 2.094; icon('dot', wx + Math.cos(a) * r * 0.7, top + 0.25, wz + Math.sin(a) * r * 0.7, 0.35, color('#FFD23F'));
     }
@@ -448,10 +465,6 @@ const Render3D = (THREE, el, view, opts = {}) => {
     if (b.zoe) for (let k = 0; k < 2; k++) { // Zoe's buff: stars drifting up
       const s0 = (seed * 1.3 + k * 0.5) % 1, p = (t * 0.7 + s0) % 1;
       icon('star', wx + (k ? 1 : -1) * r * (0.35 + 0.25 * Math.sin((p + s0) * 6)), top * (0.3 + 1.0 * p), wz, 0.5, color(css('--gold') || '#E6B84A'), 0.75 * Math.sin(p * Math.PI));
-    }
-    if (b.fast) { // yellow mushroom: speed streaks behind it
-      const hx = (b.hx || 0) * f, hz = -(b.hy || 0) * f;
-      for (const o of [-0.4, 0.4]) beam(wx - hx * r * 1.2 - hz * r * o, 0.6 * r, wz - hz * r * 1.2 + hx * r * o, wx - hx * r * 2.4 - hz * r * o, 0.6 * r, wz - hz * r * 2.4 + hx * r * o, 0.06, color(SHROOM_COL.yellow), 0.6);
     }
   }
 
@@ -484,7 +497,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
           if (look !== 'solid') g.setColorAt(i, team);
           else g.setColorAt(i, p === 'tint' ? tmpC.set(s.u.color || '#cccccc') : p === 'team' ? team : white);
         }
-        if (!s.u.spire) rings.push([wx, wz, r * (s.u.structure ? 2.6 : 1), s.side]);
+        if (!s.u.spire && !uiOff) rings.push([wx, wz, r * (s.u.structure ? 2.6 : 1), s.side]);
         const h = top * sc + lift;
         if (s.crest) icon(`arms|${s.crest}|${s.edge}`, wx, h + 1.2, wz, 1.5);
         if (s.b) bodyMarkers(s, f, me, wx, wz, r, h, clock);
@@ -524,6 +537,10 @@ const Render3D = (THREE, el, view, opts = {}) => {
   function drawFx(v) {
     const f = v.me === 1 ? -1 : 1;
     let nf = 0;
+    // a flamer breathes fire every tick: draw only its newest cone, so they don't stack into a solid blaze
+    const flames = new Map();
+    for (const e of v.fx || []) if (e.kind === 'flame') { const k = Math.round(e.x1 * 2) + ':' + Math.round(e.y1 * 2), o = flames.get(k); if (!o || e.age < o.age) flames.set(k, e); }
+    const newest = new Set(flames.values());
     const jag = (seed, k) => (Math.sin((seed * 97 + k) * 12.9898) * 43758.5453) % 1;
     for (const e of v.fx || []) {
       const a = Math.max(0, 1 - e.age / e.life), team = teamColor(e.side, v.me);
@@ -544,7 +561,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
           beam(...pts[k - 1], ...pts[k], 0.4, team, 0.4 * a);
           beam(...pts[k - 1], ...pts[k], 0.1, color('#E8F1FF'), a);
         }
-      } else if (e.kind === 'flame' && nf < FAN_CAP) { // a fire cone, bright at the mouth
+      } else if (e.kind === 'flame' && nf < FAN_CAP && newest.has(e)) { // a fire cone, bright at the mouth
         const ang = Math.atan2(z2 - z1, x2 - x1), half = (e.half || 30) * Math.PI / 180, rr = Math.hypot(x2 - x1, z2 - z1), k = 0.4 + 0.6 * a;
         for (let sgm = 0; sgm < FAN_SEG; sgm++) {
           const a0 = ang - half + 2 * half * sgm / FAN_SEG, a1 = ang - half + 2 * half * (sgm + 1) / FAN_SEG, o = (nf * FAN_SEG + sgm) * 9;
@@ -590,6 +607,8 @@ const Render3D = (THREE, el, view, opts = {}) => {
     v0 = v; lastMe = v.me;
     cam.update(dt);
     camRight.setFromMatrixColumn(camera.matrixWorld, 0); camRight.y = 0; camRight.normalize();
+    const z = cam.zoom();
+    viewMode = z < 0.5 ? 'strategic' : z < 1.5 ? 'angled' : 'ground'; uiOff = viewMode === 'ground';
     paintFloor(v, dt);
     used.clear(); ns = 0;
     placeBodies(v, dt);
@@ -599,7 +618,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
     for (const g of Object.values(groups)) if (!used.has(g)) g.count = 0;
     sprGeo.instanceCount = ns;
     for (const a of Object.values(sprAttr)) { a.clearUpdateRanges(); a.addUpdateRange(0, ns * a.itemSize); a.needsUpdate = true; }
-    showNote(v);
+    showNote(uiOff ? {} : v);
     const near = Math.min(1, cam.zoom() / 2); // fog only at the ground view: the strategic and angled views see the whole board
     scene.fog.near = 400 - 310 * near; scene.fog.far = 600 - 380 * near;
     renderer.render(scene, camera);

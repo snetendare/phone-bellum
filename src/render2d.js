@@ -6,7 +6,8 @@
 // fx: short-lived battle effects as plain data (shots, flames, bolts, heals, deaths), in board metres.
 // Calls: size() after the canvas changes size, draw(), tileAt(clientX, clientY) -> { col, row } or null,
 // thumb(match) -> a data URL of a small picture of that match's board (null: a plain board with a question mark),
-// floor(): only the board itself (map, zones, tiles), no squads or towers: the 3D renderer lays it on the ground.
+// floor(plain): only the board itself (map, zones, tiles), no squads or towers: the 3D renderer lays it on the ground;
+// plain leaves out the zones, grid and tile markers (for the 3D ground-level view).
 // A 3D renderer can take its place by offering the same calls.
 const Render2D = (cv, view) => {
   let ctx = cv.getContext('2d'); // swapped for a moment while drawing map thumbnails (thumb)
@@ -291,30 +292,34 @@ const Render2D = (cv, view) => {
     ctx.globalAlpha = 1;
   }
 
-  function drawBoard() {
+  // plain: only the land itself (the map, mushrooms, the storm), without zones, grid or tile markers
+  function drawBoard(plain = false) {
     const t = tilePx();
     const Z = Game.ZONE, mine = (Game.ROWS - Z) * t;
     const v = phase === 'battle' && battlePre ? battlePre : m; // during a fight: the board as it was when the fight began, not the next round's
     const mp = Game.mapOf(v);
     if (mp && BACKGROUNDS[mp.id]) ctx.drawImage(mapBackground(mp.id), 0, 0, W, H);
     else { ctx.fillStyle = css('--board'); ctx.fillRect(0, 0, W, H); }
-    ctx.globalAlpha = 0.08;
-    ctx.fillStyle = css('--foe'); ctx.fillRect(0, 0, W, t * Z);
-    ctx.fillStyle = css('--you'); ctx.fillRect(0, mine, W, t * Z);
-    if (v) for (const side of [0, 1]) { // flank tiles inside the other zone: reserved from the start, usable from round 3
-      ctx.fillStyle = side === me ? css('--you') : css('--foe'); ctx.globalAlpha = Game.flankOpen(v) ? 0.22 : 0.12;
-      for (const col of Game.FLANK.cols) for (const row of Game.flankRows(side)) ctx.fillRect(scol(col) * t, srow(row) * t, t, t);
+    if (!plain) {
+      ctx.globalAlpha = 0.08;
+      ctx.fillStyle = css('--foe'); ctx.fillRect(0, 0, W, t * Z);
+      ctx.fillStyle = css('--you'); ctx.fillRect(0, mine, W, t * Z);
+      if (v) for (const side of [0, 1]) { // flank tiles inside the other zone: reserved from the start, usable from round 3
+        ctx.fillStyle = side === me ? css('--you') : css('--foe'); ctx.globalAlpha = Game.flankOpen(v) ? 0.22 : 0.12;
+        for (const col of Game.FLANK.cols) for (const row of Game.flankRows(side)) ctx.fillRect(scol(col) * t, srow(row) * t, t, t);
+      }
     }
     ctx.globalAlpha = 1;
     if (mp && mp.ice) { drawStorm(v); if (phase === 'deploy' && Game.altarRound(v)) drawAltar(); } // the altar only stands while deploying
     if (mp && mp.shrooms) for (const tl of v.map.tiles || []) {
       if (shroomShown(v, tl.col, tl.row)) drawShroomTile(tl);
-      else if (myRemovalNow(tl.col, tl.row)) { // removed by you this round: a faint dashed outline until the fight
+      else if (!plain && myRemovalNow(tl.col, tl.row)) { // removed by you this round: a faint dashed outline until the fight
         const t = tilePx(), x = scol(tl.col) * t, y = srow(tl.row) * t;
         ctx.strokeStyle = SHROOM_COL[tl.type]; ctx.globalAlpha = 0.35; ctx.lineWidth = 1; ctx.setLineDash([3, 4]);
         ctx.strokeRect(x + 2.5, y + 2.5, t - 5, t - 5); ctx.setLineDash([]); ctx.globalAlpha = 1;
       }
     }
+    if (plain) return;
     if (v && v.buff) for (const side of [0, 1]) { // Zoe's buff tiles: a gold tile with a star
       if (!charVisible(side)) continue;
       for (const b of v.buff[side] || []) {
@@ -701,7 +706,7 @@ const Render2D = (cv, view) => {
     return { col: scol(c), row: srow(rw) };
   }
 
-  function floor() { pull(); drawBoard(); }
+  function floor(plain = false) { pull(); drawBoard(plain); }
 
   return { size, draw, tileAt, thumb, floor };
 };
