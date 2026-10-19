@@ -113,11 +113,13 @@ const Render3D = (THREE, el, view, opts = {}) => {
   // size in metres, from health, as on the 2D board
   const LEVEL_SIZE = [1, 0.8, 0.65], SWARM_SIZE = [1, 0.72, 0.56];
   const size = (u) => Math.max(0.6, Math.min(2.4, 0.55 + Math.sqrt(u.hp * ((u.bodies >= 5 ? SWARM_SIZE : LEVEL_SIZE)[u.level | 0] || 1)) / 30));
+  // unit models are drawn this much bigger than their 2D size, so they read from above
+  const MODEL_SCALE = 1.3;
   const cols = {};
   const color = (hex) => cols[hex] || (cols[hex] = new THREE.Color(hex));
   const teamColor = (side, me) => color(Art.teamCol(side, me));
   const tmpM = new THREE.Matrix4(), tmpQ = new THREE.Quaternion(), tmpP = new THREE.Vector3(), tmpS = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0), tmpC = new THREE.Color();
-  const zAxis = new THREE.Vector3(0, 0, 1), tmpD = new THREE.Vector3(), camRight = new THREE.Vector3();
+  const zAxis = new THREE.Vector3(0, 0, 1), tmpD = new THREE.Vector3(), camRight = new THREE.Vector3(), camDown = new THREE.Vector3();
 
   // ---------- sprites: every small marker, in one draw call ----------
   // Each is a quad: an icon or a bar facing the camera, or a ring arc, disc or tile square lying on the ground.
@@ -359,7 +361,8 @@ const Render3D = (THREE, el, view, opts = {}) => {
       const p = glide(b, dt);
       const look = b.u.aloft ? 'glass' : b.hidden ? (b.side === me ? 'ghost' : 'ghostFoe') : b.delay > 0 ? 'ghost' : 'solid';
       const crest = b.u.structure ? Game.charOf(src, b.side) : null;
-      bodies.push({ u: b.u, side: b.side, x: p.x, y: p.y, hx: b.hx, hy: b.hy, look, moving: p.moving, phase: p.phase, b, crest, edge: Art.teamCol(b.side, me) });
+      const tag = b.u.structure || b.u.aloft || (b.hidden && b.side !== me) ? null : `${b.side}|${b.squad}|${b.u.name}`;
+      bodies.push({ u: b.u, side: b.side, x: p.x, y: p.y, hx: b.hx, hy: b.hy, look, moving: p.moving, phase: p.phase, b, crest, edge: Art.teamCol(b.side, me), tag });
       if (b.u.structure && b.walls) addWalls(f, b.x, b.y, b.walls);
     }
     addSpires(v, src, false, f);
@@ -372,11 +375,11 @@ const Render3D = (THREE, el, view, opts = {}) => {
     const squad = (sq, side, fresh) => {
       const u = units[sq.unit], w = Game.tileToWorld(sq.col, sq.row), st = tileCenter(v, sq.col, sq.row);
       const list = Engine.buildSquad(u, side, w.x, w.y, sq.id, T);
-      for (const b of list) bodies.push({ u, side, x: b.x, y: b.y, look: 'solid' });
+      for (const b of list) bodies.push({ u, side, x: b.x, y: b.y, look: 'solid', tag: side + '|' + sq.id });
       if (fresh) tileSq(st.c, st.r, teamColor(side, me), 0.8, 0.05, 14);
-      // badges over the squad: its tag, level pips, charisma pips (or the Gentleman's hat), ready to level up
-      const [wx, wz] = world(f, w.x, w.y), top = models.height(models.kindOf(u)) * size(u) + 1.4;
-      icon('tag|' + Shapes.tag(u), wx, top, wz, 1.0, white, 0.9);
+      // badges over the squad: level pips, charisma pips (or the Gentleman's hat), ready to level up (its tag goes
+      // under it, see labels)
+      const [wx, wz] = world(f, w.x, w.y), top = models.height(models.kindOf(u)) * size(u) * MODEL_SCALE + 0.6;
       const pips = [];
       for (let k = 0; k < (sq.level || 0); k++) pips.push(gold);
       const ch = Game.charmOf(sq);
@@ -489,13 +492,13 @@ const Render3D = (THREE, el, view, opts = {}) => {
     if (battle) collectBattle(v, dt, f); else collectDeploy(v, f);
     const byKey = {};
     for (const s of bodies) { const k = models.kindOf(s.u) + '#' + s.look; (byKey[k] || (byKey[k] = [])).push(s); }
-    const rings = [];
+    const rings = [], labels = new Map();
     for (const [key, list] of Object.entries(byKey)) {
       const [kind, look] = key.split('#'), parts = models.parts(kind), top = models.height(kind);
       const gs = [['tint', tintMat], ['team', teamMat], ['fixed', fixedMat]].filter(([p]) => parts[p])
         .map(([p, mat]) => [p, group(key + ':' + p, parts[p], look === 'solid' ? mat : LOOKS[look], list.length)]);
       list.forEach((s, i) => {
-        const r = s.u.structure ? (s.scale || 1) : size(s.u), sc = r * (s.look === 'ghost' || s.look === 'ghostFoe' ? 0.85 : 1);
+        const r = s.u.structure ? (s.scale || 1) : size(s.u) * MODEL_SCALE, sc = r * (s.look === 'ghost' || s.look === 'ghostFoe' ? 0.85 : 1);
         const hx = s.hx || 0, hy = s.hy == null ? (s.side === 1 ? -1 : 1) : s.hy;
         const lift = s.u.aloft ? 6 + Math.sin(clock * 1.5 + (s.phase || 0)) * 0.3 : 0;
         const bob = s.moving ? Math.abs(Math.sin(clock * 9 + s.phase)) * 0.12 * r * s.moving : 0;
@@ -516,8 +519,17 @@ const Render3D = (THREE, el, view, opts = {}) => {
         const h = top * sc + lift;
         if (s.crest) icon(`arms|${s.crest}|${s.edge}`, wx, h + 1.2, wz, 1.5);
         if (s.b && !ghost) { bodyMarkers(s, f, me, wx, wz, r, h, clock); s.marked = true; }
+        if (s.tag) { const l = labels.get(s.tag) || { u: s.u, pts: [] }; l.pts.push([wx, wz, r]); labels.set(s.tag, l); }
       });
       for (const [, g] of gs) finish(g, list.length);
+    }
+    // each squad's tag, just below it on the screen and clear of its models, so it can be read from above
+    const tagS = viewMode === 'strategic' ? 2.8 : 1.6;
+    for (const { u, pts } of labels.values()) {
+      let cx = 0, cz = 0; for (const [x, z] of pts) { cx += x; cz += z; } cx /= pts.length; cz /= pts.length;
+      let reach = 0; for (const [x, z, r] of pts) reach = Math.max(reach, (x - cx) * camDown.x + (z - cz) * camDown.z + r * 0.8);
+      const d = reach + tagS * 0.3;
+      icon('tag|' + Shapes.tag(u), cx + camDown.x * d, 0.3, cz + camDown.z * d, tagS, white, 0.95);
     }
     const rg = group('rings', ringGeo, flatMat, rings.length);
     rings.forEach(([x, z, r, side], i) => { tmpP.set(x, 0, z); tmpS.set(r, 1, r); tmpQ.identity(); rg.setMatrixAt(i, tmpM.compose(tmpP, tmpQ, tmpS)); rg.setColorAt(i, teamColor(side, me)); });
@@ -527,7 +539,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
     const ps = v.phase === 'battle' ? v.bt.projectiles() : [];
     const spears = ps.filter(p => p.owner.u.shape === 'spear'), rest = ps.filter(p => p.owner.u.shape !== 'spear');
     const sg = group('projectiles', shotGeo, flatMat, rest.length);
-    rest.forEach((p, i) => { tmpP.set(p.x * f, 1.2, -p.y * f); tmpS.setScalar(1); tmpQ.identity(); sg.setMatrixAt(i, tmpM.compose(tmpP, tmpQ, tmpS)); sg.setColorAt(i, teamColor(p.owner.side, me)); });
+    rest.forEach((p, i) => { tmpP.set(p.x * f, 1.6, -p.y * f); tmpS.setScalar(fxWide() * 1.4); tmpQ.identity(); sg.setMatrixAt(i, tmpM.compose(tmpP, tmpQ, tmpS)); sg.setColorAt(i, tmpC.copy(teamColor(p.owner.side, me)).lerp(white, 0.45)); });
     finish(sg, rest.length);
     const sp = models.parts('spear'), spT = group('spear:tint', sp.tint, tintMat, spears.length), spF = group('spear:fixed', sp.fixed, fixedMat, spears.length);
     spears.forEach((p, i) => {
@@ -549,8 +561,10 @@ const Render3D = (THREE, el, view, opts = {}) => {
   }
 
   // ---------- effects from view().fx ----------
+  // shots and bolts are drawn wider the farther the camera is, so they show from above as on the 2D board
+  const fxWide = () => viewMode === 'strategic' ? 3 : viewMode === 'angled' ? 1.7 : 1;
   function drawFx(v) {
-    const f = v.me === 1 ? -1 : 1;
+    const f = v.me === 1 ? -1 : 1, k = fxWide();
     let nf = 0;
     // a flamer breathes fire every tick: draw only its newest cone, so they don't stack into a solid blaze
     const flames = new Map();
@@ -562,19 +576,19 @@ const Render3D = (THREE, el, view, opts = {}) => {
       if (e.kind === 'death') { arc(e.x * f, -e.y * f, size(e.u) * (1 + e.age / e.life), team, 0.6 * a, 1, 0.1); continue; }
       const x1 = e.x1 * f, z1 = -e.y1 * f, x2 = e.x2 * f, z2 = -e.y2 * f;
       if (e.kind === 'shot') {
-        beam(x1, 1.1, z1, x2, 0.9, z2, Math.max(e.charged ? 0.28 : 0.1, 0.1 + ((e.spin || 1) - 1) * 0.16), team, 0.85 * a);
+        beam(x1, 1.1, z1, x2, 0.9, z2, k * Math.max(e.charged ? 0.28 : 0.1, 0.1 + ((e.spin || 1) - 1) * 0.16), team, 0.85 * a);
         if (e.splash > 0) arc(x2, z2, e.splash, team, 0.55 * a, 1, 0.08);
       } else if (e.kind === 'heal') { // a dashed green line
         const L = Math.hypot(x2 - x1, z2 - z1), n = Math.max(1, Math.floor(L / 1.2)), heal = color('#6FD08C');
-        for (let k = 0; k < n; k++) { const p0 = k / n, p1 = (k + 0.5) / n; beam(x1 + (x2 - x1) * p0, 1.0, z1 + (z2 - z1) * p0, x1 + (x2 - x1) * p1, 1.0, z1 + (z2 - z1) * p1, 0.12, heal, 0.9 * a); }
+        for (let k = 0; k < n; k++) { const p0 = k / n, p1 = (k + 0.5) / n; beam(x1 + (x2 - x1) * p0, 1.0, z1 + (z2 - z1) * p0, x1 + (x2 - x1) * p1, 1.0, z1 + (z2 - z1) * p1, 0.12 * k, heal, 0.9 * a); }
         if (e.splash > 0) arc(x2, z2, e.splash, heal, 0.6 * a, 1, 0.08);
       } else if (e.kind === 'bolt') { // lightning: a jagged white-blue line with a glow in the team colour
         const dx = x2 - x1, dz = z2 - z1, L = Math.hypot(dx, dz) || 1, n = Math.max(3, Math.round(L / 2.5)), pts = [[x1, 1.2, z1]];
         for (let k = 1; k < n; k++) { const o = jag(e.seed || 0, k) * Math.min(1.5, L * 0.12); pts.push([x1 + dx * k / n - dz / L * o, 1.2 + Math.abs(o) * 0.6, z1 + dz * k / n + dx / L * o]); }
         pts.push([x2, 1.0, z2]);
-        for (let k = 1; k < pts.length; k++) {
-          beam(...pts[k - 1], ...pts[k], 0.4, team, 0.4 * a);
-          beam(...pts[k - 1], ...pts[k], 0.1, color('#E8F1FF'), a);
+        for (let j = 1; j < pts.length; j++) {
+          beam(...pts[j - 1], ...pts[j], 0.4 * k, team, 0.4 * a);
+          beam(...pts[j - 1], ...pts[j], 0.1 * k, color('#E8F1FF'), a);
         }
       } else if (e.kind === 'flame' && nf < FAN_CAP && newest.has(e)) { // a fire cone, bright at the mouth
         const ang = Math.atan2(z2 - z1, x2 - x1), half = (e.half || 30) * Math.PI / 180, rr = Math.hypot(x2 - x1, z2 - z1), k = 0.4 + 0.6 * a;
@@ -628,6 +642,9 @@ const Render3D = (THREE, el, view, opts = {}) => {
     v0 = v; lastMe = v.me;
     cam.update(dt);
     camRight.setFromMatrixColumn(camera.matrixWorld, 0); camRight.y = 0; camRight.normalize();
+    // down the screen, along the ground (toward the camera in the angled view, toward your side from above)
+    camDown.setFromMatrixColumn(camera.matrixWorld, 1).negate(); camDown.y = 0;
+    if (camDown.lengthSq() < 1e-6) camDown.set(0, 0, 1); camDown.normalize();
     const z = cam.zoom();
     viewMode = z < 0.5 ? 'strategic' : z < 1.5 ? 'angled' : 'ground'; uiOff = viewMode === 'ground';
     paintFloor(v, dt);
