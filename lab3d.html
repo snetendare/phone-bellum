@@ -4431,7 +4431,8 @@ const Models3D = (THREE) => {
 // For a page that draws only when something changes: opts.onInput() on every pointer, wheel and key event, and
 // still() -> false while the camera moves on its own. quality('high' | 'medium' | 'low') trades sharpness and shadows
 // for speed: high is the screen's pixels up to 2 per CSS pixel with shadows, medium 1.5 with shadows, low 1 without.
-// dispose() when the page is done with the board: frees the WebGL context (the page removes el).
+// dispose() when the page is done with the board: frees the WebGL context (the page removes el). drawn(): what the
+// last frame drew, for checks.
 //
 // The map floor (zones, flank tiles, mushrooms, buff tiles, the storm and the altar) is painted by the 2D renderer
 // onto a hidden canvas and laid on the ground. Everything else is drawn here, with the same rules for what this
@@ -4925,10 +4926,13 @@ const Render3D = (THREE, el, view, opts = {}) => {
           if (look !== 'solid') g.setColorAt(i, team);
           else g.setColorAt(i, p === 'tint' ? tmpC.set(s.u.color || '#cccccc') : p === 'team' ? team : white);
         }
-        if (!s.u.spire && !uiOff) rings.push([wx, wz, r * (s.u.structure ? 2.6 : 1), s.side]);
+        // a stealthed body is only its see-through model, as the dashed ghost on the 2D board: no markers, and no
+        // ring under the opponent's
+        const ghost = !!(s.b && s.b.hidden && !s.u.aloft);
+        if (!s.u.spire && !uiOff && !(ghost && s.side !== me)) rings.push([wx, wz, r * (s.u.structure ? 2.6 : 1), s.side]);
         const h = top * sc + lift;
         if (s.crest) icon(`arms|${s.crest}|${s.edge}`, wx, h + 1.2, wz, 1.5);
-        if (s.b) bodyMarkers(s, f, me, wx, wz, r, h, clock);
+        if (s.b && !ghost) { bodyMarkers(s, f, me, wx, wz, r, h, clock); s.marked = true; }
       });
       for (const [, g] of gs) finish(g, list.length);
     }
@@ -5065,13 +5069,17 @@ const Render3D = (THREE, el, view, opts = {}) => {
     sun.castShadow = shadows;
     sizeTo();
   }
+  // for checks: what the last frame drew of each body (its unit's name, kind, shape and colour, side, look, coat of
+  // arms and its edge, whether it got markers)
+  const drawn = () => bodies.map(s => ({ name: s.u.name || null, kind: s.u.kind || null, shape: s.u.shape || null, color: s.u.color || null,
+    side: s.side, look: s.look, crest: s.crest || null, edge: s.edge || null, structure: !!s.u.structure, spire: !!s.u.spire, aloft: !!s.u.aloft, marked: !!s.marked }));
   function dispose() {
     cam.dispose();
     renderer.dispose();
     renderer.forceContextLoss();
   }
   return { size: sizeTo, draw, tileAt, thumb: (match) => floor2d.thumb(match), camera: cam, info: () => renderer.info.render,
-    still: () => !cam.busy(), quality, pixelRatio: () => renderer.getPixelRatio(), dispose };
+    still: () => !cam.busy(), quality, pixelRatio: () => renderer.getPixelRatio(), dispose, drawn };
 };
 
 // ===== 3D test page: real battles from the engine on the 3D board, to try the camera, the models and the renderer =====

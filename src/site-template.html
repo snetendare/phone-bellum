@@ -362,7 +362,7 @@ a { color: var(--you); }
   const foe = () => 1 - me;
   let m = null;             // match state (on the guest: a copy kept in step by the host)
   let phase = 'start';      // start | lobby | draft | deploy | battle | result | end
-  try { if (/[?&]test\b/.test(location.search)) window.__pb = () => ({ m, me, board3d }); } catch (e) {} // read-only peek for UI tests
+  try { if (/[?&]test\b/.test(location.search)) window.__pb = () => ({ m, me, board3d, board }); } catch (e) {} // read-only peek for UI tests
   let selected = null;      // unit index chosen in the shop
   let bt = null;            // battle being played back
   let battlePre = null;     // match as it stood when the running battle began (for the HUD)
