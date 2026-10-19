@@ -8,7 +8,8 @@
 // opts.onTap(tile | null): a tap in the strategic view, as a tile in model columns / rows (like tileAt).
 // opts.onPress(tile) -> true to take a one-finger drag in the strategic view, then opts.onDrag(tile) and
 // opts.onDrop(tile | null, ended): ended is false when a second finger or a cancel stopped it. opts.onHover(tile | null):
-// the mouse over the strategic view. All as in Camera3D, with tiles for ground points.
+// the mouse over the strategic view. opts.placing() -> true: the angled view takes them too. All as in Camera3D, with
+// tiles for ground points.
 // opts.onLevel(level): the camera is settling on a level (0 strategic, 1 angled, 2 ground).
 //
 // The map floor (zones, flank tiles, mushrooms, buff tiles, the storm and the altar) is painted by the 2D renderer
@@ -597,6 +598,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
     onDrag: (p) => { if (opts.onDrag) opts.onDrag(tileOfGround(p, lastMe)); },
     onDrop: (p) => { if (opts.onDrop) opts.onDrop(tileOfGround(p, lastMe), !!p); },
     onHover: (p) => { if (opts.onHover) opts.onHover(tileOfGround(p, lastMe)); },
+    placing: () => !!(opts.placing && opts.placing()),
     onLevel: (lv) => { if (opts.onLevel) opts.onLevel(lv); },
   });
 
@@ -620,7 +622,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
     used.clear(); ns = 0;
     placeBodies(v, dt);
     drawFx(v);
-    if (v.hoverTile && cam.strategic() && !(v.selected !== null || v.moving != null)) { const s = screenTile(v.me, v.hoverTile.col, v.hoverTile.row); tileSq(s.col, s.row, color(css('--you') || '#5CC6DF'), 0.35, 1, 0, 0.03); }
+    if (v.hoverTile && cam.handsOn() && !(v.selected !== null || v.moving != null)) { const s = screenTile(v.me, v.hoverTile.col, v.hoverTile.row); tileSq(s.col, s.row, color(css('--you') || '#5CC6DF'), 0.35, 1, 0, 0.03); }
     drawBeams(); drawWalls();
     for (const g of Object.values(groups)) if (!used.has(g)) g.count = 0;
     sprGeo.instanceCount = ns;

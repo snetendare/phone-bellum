@@ -17,7 +17,7 @@ body { display: flex; flex-direction: column; }
 .top { padding-top: calc(8px + env(safe-area-inset-top, 0px)); justify-content: space-between; }
 .bottom { padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px)); flex-direction: column; gap: 6px; }
 .row { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
-.chip { font: 500 12px var(--font-data); padding: 4px 8px; border: 1px solid var(--line); border-radius: 999px; background: rgba(13,19,21,0.75); color: var(--muted); }
+.chip { font: 500 12px var(--font-data); padding: 6px 10px; cursor: pointer; border: 1px solid var(--line); border-radius: 999px; background: rgba(13,19,21,0.75); color: var(--muted); }
 .chip.on { color: var(--bg); background: var(--gold); border-color: var(--gold); }
 .levels { display: flex; gap: 4px; }
 .stats { font: 400 11px var(--font-data); color: var(--muted); background: rgba(13,19,21,0.75); padding: 4px 8px; border-radius: 4px; }
@@ -37,7 +37,7 @@ body { display: flex; flex-direction: column; }
 </head>
 <body>
 <div class="hud top">
-  <div class="levels" id="levels"><span class="chip on">Strategic</span><span class="chip">Angled</span><span class="chip">Ground</span></div>
+  <div class="levels" id="levels"><button class="chip on">Strategic</button><button class="chip">Angled</button><button class="chip">Ground</button></div>
   <span class="stats" id="stats"></span>
 </div>
 <div id="view"><div id="msg"></div><div id="help"></div></div>

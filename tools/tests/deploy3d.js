@@ -35,6 +35,21 @@ const { chromium } = require('playwright-core');
   await p.evaluate(() => { window.__lab3d.selected = null; });
   await tap(...c);
   s = await st(); console.log('taken back:', !s.army.some(q => q.id === placed.id), 'gold', s.gold);
+  // the angled view: placing, dragging and taking back work there too; the Strategic chip goes back
+  await p.click('#levels .chip:nth-child(2)'); await p.waitForFunction(() => window.__lab3d.board.camera.handsOn()); await p.waitForTimeout(300);
+  const lv = () => p.evaluate(() => window.__lab3d.board.camera.level());
+  console.log('angled: level', await lv(), '| help:', await p.locator('#help').textContent());
+  await p.evaluate(() => { window.__lab3d.selected = null; });
+  await p.locator('#cards .ucard[aria-disabled="false"]:not([data-locked])').first().click();
+  const ft = []; for (const t of await freeTiles()) { if (ft.length < 2 && await at(...t)) ft.push(t); }
+  await tap(...ft[0]);
+  s = await st(); const pa = s.army.find(q => q.col === ft[0][0] && q.row === ft[0][1]); console.log('angled placed at', ft[0], ':', !!pa, '| level', await lv());
+  await p.screenshot({ path: 'deploy3d-5-angled.png' });
+  await dragT(...ft[0], ...ft[1]);
+  s = await st(); console.log('angled dragged to', ft[1], '->', JSON.stringify(s.army.find(q => q.id === pa.id)), '| level', await lv());
+  await p.evaluate(() => { window.__lab3d.selected = null; });
+  await tap(...ft[1]); s = await st(); console.log('angled taken back:', !s.army.some(q => q.id === pa.id), '| level', await lv());
+  await p.click('#levels .chip:nth-child(1)'); await p.waitForTimeout(1500); console.log('Strategic chip -> level', await lv());
   await p.click('#auto'); s = await st(); console.log('auto deploy -> squads', s.army.length, 'gold', s.gold);
   await p.click('#fight'); await p.waitForTimeout(300);
   console.log('phase', await p.evaluate(() => window.__lab3d.phase), '| shop hidden', await p.locator('#shop').isHidden());

@@ -65,7 +65,7 @@ function placingUnit() {
 }
 function shop() {
   const on = player && phase === 'deploy';
-  $('shop').hidden = !on; $('help').hidden = on && board.camera.strategic();
+  $('shop').hidden = !on; help();
   if (!on) return;
   m.gold[ME] = Math.max(m.gold[ME], RICH);
   const free = Game.freeLeft(m, ME), left = Game.deploysLeft(m, ME);
@@ -130,12 +130,22 @@ const board = Render3D(THREE, $('view'), () => ({ m, me: ME, phase, units, mode:
   onTap: (t) => { if (tapTile(t)) return; hoverTile = t; if (t && !(player && phase === 'deploy')) msg(`Tapped tile: column ${t.col + 1}, row ${t.row + 1}`); },
   onPress: press, onDrag: dragTo, onDrop: drop,
   onHover: (t) => { hoverTile = t; },
-  onLevel: (lv) => { if (lv) hoverTile = null; $('help').hidden = !lv && player && phase === 'deploy'; },
+  placing: () => player && phase === 'deploy', // you can place in the angled view too
+  onLevel: (lv) => { if (lv > 1 || !(player && phase === 'deploy')) hoverTile = null; help(lv); },
 });
+// the level chips switch views (in the angled view a tap places, so it no longer goes back)
+[...$('levels').children].forEach((c, k) => c.addEventListener('click', () => board.camera.setLevel(k)));
 function showLevel() { [...$('levels').children].forEach((c, k) => c.classList.toggle('on', k === board.camera.level())); }
-$('help').textContent = touch
-  ? 'Spread two fingers to go in · drag to look around · twist two fingers to rotate · tap to go back'
-  : 'Scroll to go in or out · drag to look around · hold the right or middle button and drag to rotate (or Q / E) · click or Esc to go back';
+// the help line for a view: none in the strategic view while deploying (the shop says what to do)
+function help(lv = board.camera.level()) {
+  const deploying = player && phase === 'deploy';
+  $('help').hidden = deploying && lv === 0;
+  $('help').textContent = deploying && lv === 1
+    ? (touch ? 'Tap a tile to place · drag a new squad to move it · drag elsewhere to look around · pinch or tap Strategic to go back'
+      : 'Click a tile to place · drag a new squad to move it · drag elsewhere to look around · scroll, Esc or Strategic to go back')
+    : touch ? 'Spread two fingers to go in · drag to look around · twist two fingers to rotate · tap to go back'
+    : 'Scroll to go in or out · drag to look around · hold the right or middle button and drag to rotate (or Q / E) · click or Esc to go back';
+}
 let msgTimer = 0;
 function msg(t) { $('msg').textContent = t; $('msg').hidden = !t; clearTimeout(msgTimer); if (t && t.startsWith('Tapped')) msgTimer = setTimeout(() => msg(''), 1800); }
 new ResizeObserver(() => board.size()).observe($('view')); // the bars change height as the shop comes and goes

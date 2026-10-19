@@ -6,7 +6,9 @@
 // point, so the game can place squads). There the page can also take a one-finger drag for itself (to move a squad):
 // opts.onPress(point) on the press returns true to take it, then opts.onDrag(point) as it moves and opts.onDrop(point)
 // when it lifts (null when a second finger or a cancel ends it); a short press still counts as a tap after the drop.
-// A mouse moving over the strategic view with no button down goes to opts.onHover(point), null when it leaves. Levels 1 and 2 are cinematic: angled, then close to the ground. In a
+// A mouse moving over the strategic view with no button down goes to opts.onHover(point), null when it leaves.
+// While opts.placing() is true (the player is deploying), the angled view takes taps, drags and hover the same way;
+// a drag that the page doesn't take still looks around, and setLevel(k) (or a pinch, the wheel, Esc) changes view. Levels 1 and 2 are cinematic: angled, then close to the ground. In a
 // cinematic view you can only look around: drag to move, twist (or right/middle drag, Q/E) to rotate, and a tap
 // goes back to the strategic view.
 //   Touch: spread two fingers to go in, pinch to come back out. The camera follows the fingers, then settles on
@@ -59,6 +61,8 @@ const Camera3D = (THREE, camera, el, opts) => {
   }
   const level = () => Math.round(z);
   const strategic = () => z < 0.01 && !settle;
+  // the views where taps, drags and hover go to the page: strategic, and angled while the player is placing
+  const handsOn = () => strategic() || (!settle && Math.abs(z - 1) < 0.01 && !!(opts.placing && opts.placing()));
   function settleTo(to) {
     to = Math.max(0, Math.min(MAX, to));
     settle = { from: z, to, t: 0 };
@@ -120,14 +124,14 @@ const Camera3D = (THREE, camera, el, opts) => {
     try { el.setPointerCapture(e.pointerId); } catch (err) {}
     if (pts.size === 1) {
       tap = { x: e.clientX, y: e.clientY, t: performance.now(), id: e.pointerId };
-      if (strategic() && opts.onPress && opts.onPress(groundAt(e.clientX, e.clientY))) grab = e.pointerId;
+      if (handsOn() && opts.onPress && opts.onPress(groundAt(e.clientX, e.clientY))) grab = e.pointerId;
     }
     else if (pts.size === 2) startTwo();
   });
   el.addEventListener('pointermove', (e) => {
     if (rotDrag) { yaw -= (e.clientX - rotDrag.x) * 0.008; rotDrag.x = e.clientX; return; }
     const p0 = pts.get(e.pointerId);
-    if (!p0) { if (e.pointerType === 'mouse' && !e.buttons && strategic() && opts.onHover) opts.onHover(groundAt(e.clientX, e.clientY)); return; }
+    if (!p0) { if (e.pointerType === 'mouse' && !e.buttons && handsOn() && opts.onHover) opts.onHover(groundAt(e.clientX, e.clientY)); return; }
     const dx = e.clientX - p0.x, dy = e.clientY - p0.y;
     p0.x = e.clientX; p0.y = e.clientY;
     if (tap && Math.hypot(e.clientX - tap.x, e.clientY - tap.y) > TAP_MOVE) tap = null;
@@ -149,7 +153,7 @@ const Camera3D = (THREE, camera, el, opts) => {
     pts.delete(e.pointerId);
     if (grab === e.pointerId) dropGrab(e.type === 'pointerup' ? groundAt(e.clientX, e.clientY) : null);
     if (tap && tap.id === e.pointerId && e.type === 'pointerup' && performance.now() - tap.t < TAP_MS) {
-      if (strategic()) { if (opts.onTap) opts.onTap(groundAt(e.clientX, e.clientY)); }
+      if (handsOn()) { if (opts.onTap) opts.onTap(groundAt(e.clientX, e.clientY)); }
       else goStrategic();
     }
     tap = null;
@@ -198,7 +202,12 @@ const Camera3D = (THREE, camera, el, opts) => {
     if (!strategic()) { if (keys.has('q')) yaw += dt * 1.6; if (keys.has('e')) yaw -= dt * 1.6; }
     apply();
   }
+  // go to a level; into the angled view from the strategic one, it looks at your own half of the board
+  function setLevel(k) {
+    if (k > 0 && z < 0.01) { target.set(0, 0, D / 4); yaw = 0; }
+    settleTo(k);
+  }
   function resize(width, height) { aspect = width / height; viewH = height; camera.aspect = aspect; apply(); }
 
-  return { update, resize, groundAt, goStrategic, strategic, level, zoom: () => z, LEVELS: MAX + 1 };
+  return { update, resize, groundAt, goStrategic, setLevel, strategic, handsOn, level, zoom: () => z, LEVELS: MAX + 1 };
 };
