@@ -26,7 +26,7 @@ The source is in `src/`. After changing it, run `node src/build.js` from the rep
 - `models3d.js`: the low-poly models: units (soldier, archer, caster, goblin, brute, flier, horse, spider, airship), picked from each unit's stats, and their own models for the tier 4 units (Ether Golem, Sun Priest, Meteor Caller, War Mammoth, Necromancer, Truespear), a tower for each tower type, the elf spire and the thrown spear.
 - `lab3d.js` + `lab3d-template.html`: the 3D test page: runs matches against the AI, with blue's deploy in the 3D view, and shows them with `render3d.js`.
 - `render2d.js`: draws the board and the battles on the canvas. It reads what to show only through the `view()` the page hands it, so another renderer (3D) can take its place.
-- `site-template.html` + `game.css`: the game page: panels, menus, live matches, music.
+- `site-template.html` + `game.css`: the game page: panels, menus, live matches, music. Its board input works on tiles, so the 2D and the 3D board share it. With `?board=3d` in the address the game uses the 3D board instead (for trying it out: it loads three.js from `vendor/` and the 3D code from `src/`, and falls back to the 2D board if that fails).
 - `template.html`: Counter Lab.
 
 `vendor/` holds three.js (0.180.0, MIT licence), used by the 3D test page.
@@ -65,4 +65,5 @@ Factions go in `src/factions.json`, then run `node tools/counter-table.js` and r
 - `node tools/build-artifact.js` turns `index.html` into `phone-bellum.html`, the version published as the claude.ai artifact (PeerJS from a CDN, no Counter Lab link). It also makes `lab3d-artifact.html` from `lab3d.html`, for the 3D test artifact (publish `vendor/` next to it).
 - `node tools/counter-table.js` recomputes `src/demo-units.json` (the counter table) after editing `src/default-roster.json`, and `src/faction-units.json` after editing `src/factions.json`. Rebuild afterwards.
 - `node tools/tests/snapshots.js before` (before a change), then `node tools/tests/snapshots.js after before` (after it): draws the board at about 70 fixed moments, exactly the same every run, and lists any that changed. Use it when a change shouldn't alter what players see, like moving code between files. Only compare runs from the same machine. Needs the same servers as the other checks below.
+- `tools/tests/game3d.js` plays the game on the 3D board (`?board=3d`): dragging, placing and taking back, the tower and unit sheets, the Move ability and placing in the angled view. Like `deploy3d.js` it needs Chromium's software WebGL (set in the script).
 - `tools/tests/` holds Playwright checks. They expect the game served on port 8766 (`python3 -m http.server 8766`) and, for two-player tests, `node tools/peer-server.js` on port 9000. Install with `cd tools && npm i`.

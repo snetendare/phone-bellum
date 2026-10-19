@@ -49,7 +49,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
   floorCv.setAttribute('aria-hidden', 'true');
   floorCv.style.cssText = 'position:fixed;left:-10000px;top:0;width:720px';
   document.body.appendChild(floorCv);
-  let floorView = null, floorKey = null, floorAge = 0;
+  let floorView = null, floorKey = null, floorAge = 0, floorDims = '';
   const floor2d = Render2D(floorCv, () => floorView);
   const groundTex = new THREE.CanvasTexture(floorCv);
   groundTex.colorSpace = THREE.SRGBColorSpace;
@@ -73,6 +73,9 @@ const Render3D = (THREE, el, view, opts = {}) => {
     floorKey = key; floorAge = 0;
     floorView = { ...v, bt: v.phase === 'battle' ? null : v.bt, fx: [], selected: null, moving: null, drag: null, hoverTile: null, placingElf: false, placingTower: false };
     floor2d.size(); floor2d.floor(uiOff); // the ground view gets the land alone, no zones or grid
+    // a texture can't grow in place: when the canvas changed size (the first floor, or after a resize), start a new one
+    const dims = floorCv.width + 'x' + floorCv.height;
+    if (dims !== floorDims) { groundTex.dispose(); floorDims = dims; }
     groundTex.needsUpdate = true;
   }
 

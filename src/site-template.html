@@ -348,7 +348,7 @@ a { color: var(--you); }
   const foe = () => 1 - me;
   let m = null;             // match state (on the guest: a copy kept in step by the host)
   let phase = 'start';      // start | lobby | draft | deploy | battle | result | end
-  try { if (/[?&]test\b/.test(location.search)) window.__pb = () => ({ m, me }); } catch (e) {} // read-only peek for UI tests
+  try { if (/[?&]test\b/.test(location.search)) window.__pb = () => ({ m, me, board3d }); } catch (e) {} // read-only peek for UI tests
   let selected = null;      // unit index chosen in the shop
   let bt = null;            // battle being played back
   let battlePre = null;     // match as it stood when the running battle began (for the HUD)
@@ -618,13 +618,15 @@ a { color: var(--you); }
 
   // ---------- board: drawn by the renderer (src/render2d.js), which reads what to show from view() ----------
   const cv = $('board');
-  const board = Render2D(cv, () => ({ m, me, phase, units, mode, bt, battlePre, fx, selected, moving, drag, hoverTile,
-    editable: editable(), placingUnit: placingUnit(), placingElf: placingElf(), placingTower: placingTower() }));
-  const size = board.size;
+  const boardView = () => ({ m, me, phase, units, mode, bt, battlePre, fx, selected, moving, drag, hoverTile,
+    editable: editable(), placingUnit: placingUnit(), placingElf: placingElf(), placingTower: placingTower() });
+  const board = Render2D(cv, boardView);
+  let board3d = null; // the 3D board when it's on (see "the 3D board" below): it draws itself every frame
+  const size = () => (board3d || board).size();
   function render() {
     syncMusic();
     cv.style.touchAction = phase === 'deploy' ? 'none' : ''; // so a finger can drag squads without scrolling the page
-    board.draw();
+    if (!board3d) board.draw();
   }
   const teamCol = (side) => Art.teamCol(side, me);
   const { SHROOM_COL, CHARM_COL, armsImg } = Art;
@@ -1724,40 +1726,50 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   }
 
   // ---------- board input ----------
+  // The rules work on tiles (model columns / rows), so the 2D canvas below and the 3D board (opts of Render3D) share
+  // them: boardPress / boardDrag / boardDrop for dragging a squad, boardHover for the mouse, boardTap for a tap.
   const tileAt = (ev) => board.tileAt(ev.clientX, ev.clientY);
-  // drag one of your squads: this round's squads move for free; an older one only with the Move ability
-  cv.addEventListener('pointerdown', (ev) => {
-    if (phase !== 'deploy' || !m || !editable() || choosingPack() || placingTower()) return;
-    const t = tileAt(ev); if (!t) return;
+  // drag one of your squads: this round's squads move for free; an older one only with the Move ability.
+  // Returns true when a drag starts.
+  function boardPress(t) {
+    if (!t || phase !== 'deploy' || !m || !editable() || choosingPack() || placingTower()) return false;
     const sq = Game.squadAt(m, me, t.col, t.row);
-    if (!sq) return;
-    if (sq.round < m.round && !(moveMode || Game.movedId(m, me) === sq.id)) return;
-    if (!Game.canMove(m, me, sq)) return;
+    if (!sq) return false;
+    if (sq.round < m.round && !(moveMode || Game.movedId(m, me) === sq.id)) return false;
+    if (!Game.canMove(m, me, sq)) return false;
     drag = { id: sq.id, from: t, over: t, moved: false };
-    try { cv.setPointerCapture(ev.pointerId); } catch (e) {}
-  });
-  cv.addEventListener('pointerup', () => {
+    return true;
+  }
+  function boardDrag(t) {
+    if (drag && t && (t.col !== drag.over.col || t.row !== drag.over.row)) { drag.over = t; drag.moved = true; render(); }
+  }
+  // the drag ends on tile t (null: the last tile it was over); ended is false when it was cancelled
+  function boardDrop(t, ended) {
     if (!drag) return;
+    if (ended) boardDrag(t);
     const d = drag; drag = null;
-    if (!d.moved || (d.over.col === d.from.col && d.over.row === d.from.row)) { render(); return; }
+    if (!ended || !d.moved || (d.over.col === d.from.col && d.over.row === d.from.row)) { render(); return; }
     dragEndAt = performance.now(); // the click that follows a drag is not a tap
     if (Game.moveSquad(m, me, d.id, d.over.col, d.over.row) && m.armies[me].find(s => s.id === d.id).round < m.round) { moveMode = false; moving = null; }
     changed();
-  });
-  cv.addEventListener('pointercancel', () => { if (drag) { drag = null; render(); } });
+  }
+  // the mouse over a tile (null: off the board), for the placement preview while deploying
+  function boardHover(t) {
+    if (t && phase !== 'deploy') return;
+    hoverTile = t; if (phase === 'deploy') render();
+  }
+  cv.addEventListener('pointerdown', (ev) => { if (boardPress(tileAt(ev))) try { cv.setPointerCapture(ev.pointerId); } catch (e) {} });
+  cv.addEventListener('pointerup', () => boardDrop(null, true));
+  cv.addEventListener('pointercancel', () => boardDrop(null, false));
   cv.addEventListener('pointermove', (ev) => {
-    if (drag) {
-      const t = tileAt(ev);
-      if (t && (t.col !== drag.over.col || t.row !== drag.over.row)) { drag.over = t; drag.moved = true; render(); }
-      return;
-    }
-    if (phase !== 'deploy' || ev.pointerType !== 'mouse') return;
-    hoverTile = tileAt(ev); render();
+    if (drag) { boardDrag(tileAt(ev)); return; }
+    if (ev.pointerType === 'mouse') boardHover(tileAt(ev));
   });
-  cv.addEventListener('pointerleave', () => { hoverTile = null; if (phase === 'deploy') render(); });
-  cv.addEventListener('click', (ev) => {
-    if (phase !== 'deploy') return;
-    const t = tileAt(ev); if (!t) return;
+  cv.addEventListener('pointerleave', () => boardHover(null));
+  cv.addEventListener('click', (ev) => boardTap(tileAt(ev)));
+  // a tap on a tile: place, take back, the abilities (Move, Charisma), the elf tower, and the unit, tower, altar and map sheets
+  function boardTap(t) {
+    if (phase !== 'deploy' || !t) return;
     if (choosingPack() || choosingTower()) return; // the package (and in round 3 the tower) comes first
     if (performance.now() - dragEndAt < 400) return;
     if (placingTower()) { if (editable() && Game.placeTower(m, me, t.col, t.row)) changed(); return; }
@@ -1808,7 +1820,31 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
         changed();
       }
     }
-  });
+  }
+
+  // ---------- the 3D board (src/render3d.js): for now only with ?board=3d in the address ----------
+  // It draws from the same view() as the 2D board and hands taps, drags and the mouse to the board input above, as
+  // tiles; while deploying, the angled view takes them too. three.js (vendor/) and the 3D code (src/) load only then,
+  // so the artifact, a single page, stays on the 2D board. If anything fails, the 2D board stays.
+  async function start3d() {
+    const load = (src) => new Promise((ok, no) => { const sc = document.createElement('script'); sc.src = src; sc.onload = ok; sc.onerror = () => no(new Error('could not load ' + src)); document.head.appendChild(sc); });
+    const el = document.createElement('div');
+    try {
+      const THREE = await import('./vendor/three.module.min.js');
+      for (const f of ['camera3d', 'models3d', 'render3d']) await load(`src/${f}.js`);
+      el.className = 'board3d';
+      cv.after(el);
+      board3d = Render3D(THREE, el, boardView, { onTap: boardTap, onPress: boardPress, onDrag: boardDrag, onDrop: boardDrop, onHover: boardHover, placing: () => phase === 'deploy' });
+      el.querySelector('canvas').setAttribute('aria-label', cv.getAttribute('aria-label'));
+      cv.style.display = 'none'; size();
+      const frame = () => { board3d.draw(); requestAnimationFrame(frame); };
+      requestAnimationFrame(frame);
+    } catch (e) {
+      board3d = null; el.remove(); cv.style.display = ''; size(); render();
+      console.warn('No Mans Land: the 3D board could not start; staying on the 2D board.', e);
+    }
+  }
+  if (/[?&]board=3d\b/.test(location.search)) start3d();
 
   // ---------- unit sheet ----------
   function unlockBlock(i, side) {
