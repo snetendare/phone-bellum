@@ -3,7 +3,10 @@
 // on the element el.
 //
 // Views: level 0 is the strategic view, straight down at the whole board (taps there go to opts.onTap as a ground
-// point, so the game can place squads). Levels 1 and 2 are cinematic: angled, then close to the ground. In a
+// point, so the game can place squads). There the page can also take a one-finger drag for itself (to move a squad):
+// opts.onPress(point) on the press returns true to take it, then opts.onDrag(point) as it moves and opts.onDrop(point)
+// when it lifts (null when a second finger or a cancel ends it); a short press still counts as a tap after the drop.
+// A mouse moving over the strategic view with no button down goes to opts.onHover(point), null when it leaves. Levels 1 and 2 are cinematic: angled, then close to the ground. In a
 // cinematic view you can only look around: drag to move, twist (or right/middle drag, Q/E) to rotate, and a tap
 // goes back to the strategic view.
 //   Touch: spread two fingers to go in, pinch to come back out. The camera follows the fingers, then settles on
@@ -95,10 +98,13 @@ const Camera3D = (THREE, camera, el, opts) => {
   let tap = null;             // a press that may still turn out to be a tap
   let two = null;             // the two-finger gesture under way
   let rotDrag = null;         // a right / middle button drag that rotates
+  let grab = null;            // pointerId of a one-finger drag the page took (opts.onPress)
+  function dropGrab(p) { if (grab == null) return; grab = null; if (opts.onDrop) opts.onDrop(p); }
   const pair = () => { const [a, b] = [...pts.values()]; return { d: Math.hypot(b.x - a.x, b.y - a.y), ang: Math.atan2(b.y - a.y, b.x - a.x), mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2 }; };
   function startTwo() {
     const p = pair();
     settle = null;
+    dropGrab(null);
     if (z < 0.01) { aimAt(p.mx, p.my); z = 0; }
     two = { d0: p.d, a0: p.ang, z0: z, yaw0: yaw, mx: p.mx, my: p.my, zooming: false, turning: false };
     tap = null;
@@ -112,15 +118,20 @@ const Camera3D = (THREE, camera, el, opts) => {
     }
     pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
     try { el.setPointerCapture(e.pointerId); } catch (err) {}
-    if (pts.size === 1) tap = { x: e.clientX, y: e.clientY, t: performance.now(), id: e.pointerId };
+    if (pts.size === 1) {
+      tap = { x: e.clientX, y: e.clientY, t: performance.now(), id: e.pointerId };
+      if (strategic() && opts.onPress && opts.onPress(groundAt(e.clientX, e.clientY))) grab = e.pointerId;
+    }
     else if (pts.size === 2) startTwo();
   });
   el.addEventListener('pointermove', (e) => {
     if (rotDrag) { yaw -= (e.clientX - rotDrag.x) * 0.008; rotDrag.x = e.clientX; return; }
-    const p0 = pts.get(e.pointerId); if (!p0) return;
+    const p0 = pts.get(e.pointerId);
+    if (!p0) { if (e.pointerType === 'mouse' && !e.buttons && strategic() && opts.onHover) opts.onHover(groundAt(e.clientX, e.clientY)); return; }
     const dx = e.clientX - p0.x, dy = e.clientY - p0.y;
     p0.x = e.clientX; p0.y = e.clientY;
     if (tap && Math.hypot(e.clientX - tap.x, e.clientY - tap.y) > TAP_MOVE) tap = null;
+    if (grab === e.pointerId) { if (opts.onDrag) opts.onDrag(groundAt(e.clientX, e.clientY)); return; }
     if (pts.size === 1 && !tap && z > 0.01) pan(dx, dy);
     if (pts.size === 2 && two) {
       const p = pair(), s = Math.log(p.d / two.d0), turn = Math.atan2(Math.sin(p.ang - two.a0), Math.cos(p.ang - two.a0));
@@ -136,6 +147,7 @@ const Camera3D = (THREE, camera, el, opts) => {
     if (rotDrag && e.pointerType === 'mouse' && e.button !== 0) { rotDrag = null; return; }
     if (!pts.has(e.pointerId)) return;
     pts.delete(e.pointerId);
+    if (grab === e.pointerId) dropGrab(e.type === 'pointerup' ? groundAt(e.clientX, e.clientY) : null);
     if (tap && tap.id === e.pointerId && e.type === 'pointerup' && performance.now() - tap.t < TAP_MS) {
       if (strategic()) { if (opts.onTap) opts.onTap(groundAt(e.clientX, e.clientY)); }
       else goStrategic();
@@ -145,6 +157,7 @@ const Camera3D = (THREE, camera, el, opts) => {
   }
   el.addEventListener('pointerup', lift);
   el.addEventListener('pointercancel', lift);
+  el.addEventListener('pointerleave', (e) => { if (e.pointerType === 'mouse' && opts.onHover) opts.onHover(null); });
   el.addEventListener('contextmenu', (e) => e.preventDefault());
 
   // ---------- wheel: a notch steps a level (toward the pointer from the strategic view); ctrl + wheel is a touchpad pinch ----------

@@ -6,6 +6,9 @@
 // Calls: size() after el changes size, draw() once per frame, tileAt(clientX, clientY) -> { col, row } or null,
 // thumb(match) (from the 2D renderer). Also camera: the Camera3D driving the view.
 // opts.onTap(tile | null): a tap in the strategic view, as a tile in model columns / rows (like tileAt).
+// opts.onPress(tile) -> true to take a one-finger drag in the strategic view, then opts.onDrag(tile) and
+// opts.onDrop(tile | null, ended): ended is false when a second finger or a cancel stopped it. opts.onHover(tile | null):
+// the mouse over the strategic view. All as in Camera3D, with tiles for ground points.
 // opts.onLevel(level): the camera is settling on a level (0 strategic, 1 angled, 2 ground).
 //
 // The map floor (zones, flank tiles, mushrooms, buff tiles, the storm and the altar) is painted by the 2D renderer
@@ -590,6 +593,10 @@ const Render3D = (THREE, el, view, opts = {}) => {
   const cam = Camera3D(THREE, camera, renderer.domElement, {
     width: BW, depth: BD,
     onTap: (p) => { if (opts.onTap) opts.onTap(tileOfGround(p, lastMe)); },
+    onPress: (p) => !!(opts.onPress && opts.onPress(tileOfGround(p, lastMe))),
+    onDrag: (p) => { if (opts.onDrag) opts.onDrag(tileOfGround(p, lastMe)); },
+    onDrop: (p) => { if (opts.onDrop) opts.onDrop(tileOfGround(p, lastMe), !!p); },
+    onHover: (p) => { if (opts.onHover) opts.onHover(tileOfGround(p, lastMe)); },
     onLevel: (lv) => { if (opts.onLevel) opts.onLevel(lv); },
   });
 

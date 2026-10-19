@@ -107,37 +107,47 @@ canvas { display: block; width: 100%; height: 100%; }
 @media (prefers-reduced-motion: reduce) { .hp i { transition: none; } }
 
 html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; background: var(--bg); color: var(--ink); }
-#view { position: fixed; inset: 0; touch-action: none; display: block; }
-#view canvas { display: block; width: 100%; height: 100%; touch-action: none; }
-.hud { position: fixed; left: 0; right: 0; display: flex; gap: 8px; align-items: center; padding: 10px 12px; pointer-events: none; flex-wrap: wrap; }
-.hud > * { pointer-events: auto; }
-.top { top: env(safe-area-inset-top, 0px); justify-content: space-between; }
-.bottom { bottom: env(safe-area-inset-bottom, 0px); flex-direction: column; gap: 6px; }
-.row { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+/* the bars sit above and below the board, so the strategic view fits the board between them and nothing covers your zone */
+body { display: flex; flex-direction: column; }
+#view { position: relative; flex: 1; min-height: 0; touch-action: none; }
+#view canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; touch-action: none; }
+.hud { display: flex; gap: 8px; align-items: center; padding: 8px 12px; flex-wrap: wrap; }
+.top { padding-top: calc(8px + env(safe-area-inset-top, 0px)); justify-content: space-between; }
+.bottom { padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px)); flex-direction: column; gap: 6px; }
+.row { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
 .chip { font: 500 12px var(--font-data); padding: 4px 8px; border: 1px solid var(--line); border-radius: 999px; background: rgba(13,19,21,0.75); color: var(--muted); }
 .chip.on { color: var(--bg); background: var(--gold); border-color: var(--gold); }
 .levels { display: flex; gap: 4px; }
 .stats { font: 400 11px var(--font-data); color: var(--muted); background: rgba(13,19,21,0.75); padding: 4px 8px; border-radius: 4px; }
-.hud .btn { min-height: 40px; }
-.hud select { min-height: 40px; background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 4px; padding: 0 8px; font: inherit; }
-#msg { position: fixed; left: 50%; top: calc(80px + env(safe-area-inset-top, 0px)); transform: translateX(-50%); font: 600 13px var(--font-data); color: var(--ink); background: rgba(13,19,21,0.8); padding: 6px 12px; border-radius: 4px; pointer-events: none; text-align: center; max-width: calc(100% - 32px); }
-#help { font: 400 12px var(--font-body); color: var(--muted); background: rgba(13,19,21,0.8); padding: 6px 10px; border-radius: 4px; pointer-events: none; text-align: center; max-width: 520px; }
+.hud .btn { min-height: 36px; padding: 6px 12px; font-size: 14px; }
+.hud select { min-height: 36px; background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 4px; padding: 0 8px; font: inherit; }
+#msg { position: absolute; left: 50%; top: 8px; transform: translateX(-50%); font: 600 13px var(--font-data); color: var(--ink); background: rgba(13,19,21,0.8); padding: 6px 12px; border-radius: 4px; pointer-events: none; text-align: center; max-width: calc(100% - 32px); }
+#shop { width: 100%; max-width: 640px; display: grid; gap: 4px; }
+#shop[hidden], #help[hidden], #msg[hidden] { display: none; }
+#msg, #help { z-index: 1; }
+#shop .line { display: flex; justify-content: space-between; gap: 8px; font: 400 12px var(--font-body); color: var(--muted); }
+#gold { font: 500 12px var(--font-data); color: var(--gold); white-space: nowrap; }
+#cards { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
+#cards .ucard { flex: 0 0 auto; min-width: 84px; padding: 6px 8px; }
+#cards .ucard .n { font-size: 13px; }
+#help { position: absolute; left: 50%; bottom: 8px; transform: translateX(-50%); width: max-content; font: 400 12px var(--font-body); color: var(--muted); background: rgba(13,19,21,0.8); padding: 6px 10px; border-radius: 4px; pointer-events: none; text-align: center; max-width: min(520px, calc(100% - 24px)); box-sizing: border-box; }
 </style>
 </head>
 <body>
-<div id="view"></div>
 <div class="hud top">
   <div class="levels" id="levels"><span class="chip on">Strategic</span><span class="chip">Angled</span><span class="chip">Ground</span></div>
   <span class="stats" id="stats"></span>
 </div>
-<div id="msg"></div>
+<div id="view"><div id="msg"></div><div id="help"></div></div>
 <div class="hud bottom">
-  <div id="help"></div>
+  <div id="shop" hidden><div class="line"><span id="hint"></span><span id="gold"></span></div><div id="cards"></div></div>
   <div class="row">
   <select id="map" aria-label="Map"><option value="standard">Standard</option><option value="forest">Forest Clearing</option><option value="cavern">Mushroom Cavern</option><option value="ice">Frozen Peak</option></select>
+  <select id="who" aria-label="Who deploys blue"><option value="you">Blue: you</option><option value="ai">Blue: AI</option></select>
+  <button class="btn" id="auto">Auto</button>
   <button class="btn primary" id="fight">Fight</button>
-  <button class="btn" id="next">Next round</button>
-  <button class="btn" id="new">New armies</button>
+  <button class="btn" id="next">Next</button>
+  <button class="btn" id="new">New</button>
   </div>
 </div>
 <script>
@@ -3802,7 +3812,10 @@ const Render2D = (cv, view) => {
 // on the element el.
 //
 // Views: level 0 is the strategic view, straight down at the whole board (taps there go to opts.onTap as a ground
-// point, so the game can place squads). Levels 1 and 2 are cinematic: angled, then close to the ground. In a
+// point, so the game can place squads). There the page can also take a one-finger drag for itself (to move a squad):
+// opts.onPress(point) on the press returns true to take it, then opts.onDrag(point) as it moves and opts.onDrop(point)
+// when it lifts (null when a second finger or a cancel ends it); a short press still counts as a tap after the drop.
+// A mouse moving over the strategic view with no button down goes to opts.onHover(point), null when it leaves. Levels 1 and 2 are cinematic: angled, then close to the ground. In a
 // cinematic view you can only look around: drag to move, twist (or right/middle drag, Q/E) to rotate, and a tap
 // goes back to the strategic view.
 //   Touch: spread two fingers to go in, pinch to come back out. The camera follows the fingers, then settles on
@@ -3894,10 +3907,13 @@ const Camera3D = (THREE, camera, el, opts) => {
   let tap = null;             // a press that may still turn out to be a tap
   let two = null;             // the two-finger gesture under way
   let rotDrag = null;         // a right / middle button drag that rotates
+  let grab = null;            // pointerId of a one-finger drag the page took (opts.onPress)
+  function dropGrab(p) { if (grab == null) return; grab = null; if (opts.onDrop) opts.onDrop(p); }
   const pair = () => { const [a, b] = [...pts.values()]; return { d: Math.hypot(b.x - a.x, b.y - a.y), ang: Math.atan2(b.y - a.y, b.x - a.x), mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2 }; };
   function startTwo() {
     const p = pair();
     settle = null;
+    dropGrab(null);
     if (z < 0.01) { aimAt(p.mx, p.my); z = 0; }
     two = { d0: p.d, a0: p.ang, z0: z, yaw0: yaw, mx: p.mx, my: p.my, zooming: false, turning: false };
     tap = null;
@@ -3911,15 +3927,20 @@ const Camera3D = (THREE, camera, el, opts) => {
     }
     pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
     try { el.setPointerCapture(e.pointerId); } catch (err) {}
-    if (pts.size === 1) tap = { x: e.clientX, y: e.clientY, t: performance.now(), id: e.pointerId };
+    if (pts.size === 1) {
+      tap = { x: e.clientX, y: e.clientY, t: performance.now(), id: e.pointerId };
+      if (strategic() && opts.onPress && opts.onPress(groundAt(e.clientX, e.clientY))) grab = e.pointerId;
+    }
     else if (pts.size === 2) startTwo();
   });
   el.addEventListener('pointermove', (e) => {
     if (rotDrag) { yaw -= (e.clientX - rotDrag.x) * 0.008; rotDrag.x = e.clientX; return; }
-    const p0 = pts.get(e.pointerId); if (!p0) return;
+    const p0 = pts.get(e.pointerId);
+    if (!p0) { if (e.pointerType === 'mouse' && !e.buttons && strategic() && opts.onHover) opts.onHover(groundAt(e.clientX, e.clientY)); return; }
     const dx = e.clientX - p0.x, dy = e.clientY - p0.y;
     p0.x = e.clientX; p0.y = e.clientY;
     if (tap && Math.hypot(e.clientX - tap.x, e.clientY - tap.y) > TAP_MOVE) tap = null;
+    if (grab === e.pointerId) { if (opts.onDrag) opts.onDrag(groundAt(e.clientX, e.clientY)); return; }
     if (pts.size === 1 && !tap && z > 0.01) pan(dx, dy);
     if (pts.size === 2 && two) {
       const p = pair(), s = Math.log(p.d / two.d0), turn = Math.atan2(Math.sin(p.ang - two.a0), Math.cos(p.ang - two.a0));
@@ -3935,6 +3956,7 @@ const Camera3D = (THREE, camera, el, opts) => {
     if (rotDrag && e.pointerType === 'mouse' && e.button !== 0) { rotDrag = null; return; }
     if (!pts.has(e.pointerId)) return;
     pts.delete(e.pointerId);
+    if (grab === e.pointerId) dropGrab(e.type === 'pointerup' ? groundAt(e.clientX, e.clientY) : null);
     if (tap && tap.id === e.pointerId && e.type === 'pointerup' && performance.now() - tap.t < TAP_MS) {
       if (strategic()) { if (opts.onTap) opts.onTap(groundAt(e.clientX, e.clientY)); }
       else goStrategic();
@@ -3944,6 +3966,7 @@ const Camera3D = (THREE, camera, el, opts) => {
   }
   el.addEventListener('pointerup', lift);
   el.addEventListener('pointercancel', lift);
+  el.addEventListener('pointerleave', (e) => { if (e.pointerType === 'mouse' && opts.onHover) opts.onHover(null); });
   el.addEventListener('contextmenu', (e) => e.preventDefault());
 
   // ---------- wheel: a notch steps a level (toward the pointer from the strategic view); ctrl + wheel is a touchpad pinch ----------
@@ -4183,6 +4206,9 @@ const Models3D = (THREE) => {
 // Calls: size() after el changes size, draw() once per frame, tileAt(clientX, clientY) -> { col, row } or null,
 // thumb(match) (from the 2D renderer). Also camera: the Camera3D driving the view.
 // opts.onTap(tile | null): a tap in the strategic view, as a tile in model columns / rows (like tileAt).
+// opts.onPress(tile) -> true to take a one-finger drag in the strategic view, then opts.onDrag(tile) and
+// opts.onDrop(tile | null, ended): ended is false when a second finger or a cancel stopped it. opts.onHover(tile | null):
+// the mouse over the strategic view. All as in Camera3D, with tiles for ground points.
 // opts.onLevel(level): the camera is settling on a level (0 strategic, 1 angled, 2 ground).
 //
 // The map floor (zones, flank tiles, mushrooms, buff tiles, the storm and the altar) is painted by the 2D renderer
@@ -4767,6 +4793,10 @@ const Render3D = (THREE, el, view, opts = {}) => {
   const cam = Camera3D(THREE, camera, renderer.domElement, {
     width: BW, depth: BD,
     onTap: (p) => { if (opts.onTap) opts.onTap(tileOfGround(p, lastMe)); },
+    onPress: (p) => !!(opts.onPress && opts.onPress(tileOfGround(p, lastMe))),
+    onDrag: (p) => { if (opts.onDrag) opts.onDrag(tileOfGround(p, lastMe)); },
+    onDrop: (p) => { if (opts.onDrop) opts.onDrop(tileOfGround(p, lastMe), !!p); },
+    onHover: (p) => { if (opts.onHover) opts.onHover(tileOfGround(p, lastMe)); },
     onLevel: (lv) => { if (opts.onLevel) opts.onLevel(lv); },
   });
 
@@ -4807,6 +4837,8 @@ const Render3D = (THREE, el, view, opts = {}) => {
 // ===== 3D test page: real battles from the engine on the 3D board, to try the camera, the models and the renderer =====
 // The page only runs the match; the drawing is src/render3d.js, which sees it through view() just as the game's 2D
 // board does. Battle effects (fx) are made the same way as in the game.
+// You deploy blue (or leave it to the AI): pick a unit in the shop and tap a tile in the strategic view, tap a squad
+// from this round to take it back, drag it to move it, and in round 1 place the tower first. Red is always the AI.
 const $ = (id) => document.getElementById(id);
 const units = Shapes.assign(DATA.units).map(u => ({ ...Engine.withTraits(u), level: 0, bodies: Math.max(1, Math.round(u.bodies)), skillDefs: Engine.SLOTS.map(() => null) }));
 const touch = matchMedia('(pointer: coarse)').matches;
@@ -4814,16 +4846,27 @@ const touch = matchMedia('(pointer: coarse)').matches;
 // ---------- the match: AI armies on both sides; a fight is the engine's real battle ----------
 let m = null, bt = null, phase = 'deploy', fx = [], acc = 0, result = null, hoverTile = null;
 let extra = {}; // for tests: view fields to set (selected, placingUnit, placingTower, ...)
+let player = true;  // you deploy blue; false: the AI deploys both sides
+let selected = null, drag = null, dragEndAt = 0; // the shop pick, and a squad being dragged to another tile
 const DT = Game.SETTINGS.dt;
 function newMatch() {
   m = Game.createMatch(units, DATA.matrix, (Math.random() * 1e9) >>> 0, $('map').value);
   deploy();
 }
 function deploy() {
-  for (const s of [0, 1]) { Game.aiDeploy(m, s); Game.ensureTower(m, s); Game.ensurePack(m, s); }
-  Game.settleTowerPicks(m);
-  phase = 'deploy'; bt = null; fx = []; result = null;
+  for (const s of player ? [1] : [0, 1]) aiSide(s);
+  if (player && Game.needsPack(m, 0)) Game.choosePack(m, 0, 0); // the first package: its squads go straight on the board
+  phase = 'deploy'; bt = null; fx = []; result = null; selected = null; drag = null;
   msg(`Round ${m.round} · deploy`);
+  shop();
+}
+function aiSide(s) { Game.aiDeploy(m, s); Game.ensureTower(m, s); Game.ensurePack(m, s); }
+// before a fight: whatever blue left undone (the tower, package squads) is filled in, and tower types settle
+function fight() {
+  if (phase !== 'deploy') deploy();
+  Game.ensureTower(m, 0); Game.ensurePack(m, 0); Game.settleTowerPicks(m);
+  selected = null; drag = null;
+  bt = Game.startBattle(m);
 }
 // as the game's absorb(): this tick's shots and deaths become effects
 function absorb() {
@@ -4833,11 +4876,10 @@ function absorb() {
   for (const b of bt.bodies) if (!b.alive && !b._gone) { b._gone = true; fx.push({ kind: 'death', x: b.x, y: b.y, u: b.u, side: b.side, age: 0, life: 0.5 }); }
 }
 $('fight').addEventListener('click', () => {
-  if (phase !== 'deploy') deploy();
-  bt = Game.startBattle(m); phase = 'battle'; acc = 0; fx = []; msg('');
+  fight(); phase = 'battle'; acc = 0; fx = []; msg(''); shop();
 });
 $('next').addEventListener('click', () => {
-  if (phase === 'deploy') bt = Game.startBattle(m);
+  if (phase === 'deploy') fight();
   if (!result) { while (bt.step()) {} result = bt.result(); }
   Game.resolve(m, result);
   if (m.over) { newMatch(); return; }
@@ -4845,13 +4887,84 @@ $('next').addEventListener('click', () => {
 });
 $('new').addEventListener('click', newMatch);
 $('map').addEventListener('change', newMatch);
+$('who').addEventListener('change', () => { player = $('who').value === 'you'; newMatch(); });
+$('auto').addEventListener('click', () => { if (phase === 'deploy') { aiSide(0); selected = null; shop(); } });
 
+// ---------- deploying blue: the shop and the board input (as the game's, without its sheets and abilities) ----------
+const ME = 0;
+const placingTower = () => player && phase === 'deploy' && Game.needsTower(m, ME);
+function placingUnit() {
+  if (selected !== null) return selected;
+  const sq = drag && drag.moved && m.armies[ME].find(s => s.id === drag.id);
+  return sq ? sq.unit : null;
+}
+function shop() {
+  const on = player && phase === 'deploy';
+  $('shop').hidden = !on; $('help').hidden = on && board.camera.strategic();
+  if (!on) return;
+  const free = Game.freeLeft(m, ME), left = Game.deploysLeft(m, ME);
+  $('gold').textContent = `${m.gold[ME]} gold · ${left} deployment${left === 1 ? '' : 's'} left`;
+  $('hint').textContent = placingTower() ? 'Place your tower first: tap a gold tile on the left or right of your zone.'
+    : selected !== null ? `Tap a highlighted tile to place ${units[selected].name}.`
+    : free.length ? 'Your package squads are on the board: drag them where you want them.'
+    : 'Pick a unit, then tap a tile. Tap a new squad to take it back, drag to move it.';
+  $('cards').innerHTML = units.map((u, i) => {
+    if (Game.isOff(m, i)) return '';
+    const locked = !Game.isUnlocked(m, ME, i), n = free.filter(x => x === i).length, cost = Game.shopCost(m, ME, i);
+    const can = !placingTower() && (n > 0 || (!locked && m.gold[ME] >= cost && left > 0)) || (locked && m.gold[ME] >= Game.unlockCost(m, i, ME));
+    return `<button class="ucard" data-i="${i}" aria-pressed="${selected === i}" aria-disabled="${!can}"${locked ? ' data-locked="1"' : ''}>
+      <span class="t"><span style="color:${u.color};display:inline-flex">${Shapes.svg(u.shape, 13)}</span> ${Shapes.tag(u)}</span><span class="n">${u.name}</span>
+      <span class="c">${locked ? `Unlock ${Game.unlockCost(m, i, ME)}` : n ? `Free ×${n}` : cost}</span></button>`;
+  }).join('');
+}
+$('cards').addEventListener('click', (e) => {
+  const b = e.target.closest('.ucard'); if (!b || phase !== 'deploy') return;
+  const i = +b.dataset.i;
+  if (b.dataset.locked) { if (Game.unlock(m, ME, i)) selected = i; }
+  else if (b.getAttribute('aria-disabled') === 'false') selected = selected === i ? null : i;
+  shop();
+});
+// a tap on the board: as the game's click on its canvas
+function tapTile(t) {
+  if (!player || phase !== 'deploy' || !t || performance.now() - dragEndAt < 400) return false;
+  if (placingTower()) { Game.placeTower(m, ME, t.col, t.row); shop(); return true; }
+  const own = Game.squadAt(m, ME, t.col, t.row);
+  if (own && selected !== null && Game.boardable(m, ME, t.col, t.row, selected)) placeSel(t); // into a carrier with room
+  else if (own) { if (own.round === m.round) Game.unplace(m, ME, t.col, t.row); }
+  else if (selected !== null && Game.canPlaceAt(m, ME, t.col, t.row, selected)) placeSel(t);
+  else return false;
+  shop();
+  return true;
+}
+function placeSel(t) {
+  if (!Game.place(m, ME, selected, t.col, t.row)) return;
+  if (!Game.freeLeft(m, ME).includes(selected) && (m.gold[ME] < Game.shopCost(m, ME, selected) || Game.deploysLeft(m, ME) <= 0)) selected = null;
+}
+// a squad from this round can be dragged to another tile
+function press(t) {
+  if (!player || phase !== 'deploy' || !t || placingTower()) return false;
+  const sq = Game.squadAt(m, ME, t.col, t.row);
+  if (!sq || sq.round !== m.round || !Game.canMove(m, ME, sq)) return false;
+  drag = { id: sq.id, from: t, over: t, moved: false };
+  return true;
+}
+function dragTo(t) { if (drag && t && (t.col !== drag.over.col || t.row !== drag.over.row)) { drag.over = t; drag.moved = true; } }
+function drop(t, ended) {
+  const d = drag; drag = null;
+  if (!d || !ended || !d.moved) return;
+  dragEndAt = performance.now(); // the tap that follows a drag is not a tap
+  const to = t || d.over;
+  if (to.col !== d.from.col || to.row !== d.from.row) Game.moveSquad(m, ME, d.id, to.col, to.row);
+  shop();
+}
 // ---------- the board ----------
-const board = Render3D(THREE, $('view'), () => ({ m, me: 0, phase, units, mode: 'ai', bt, battlePre: m, fx, selected: null, moving: null, drag: null, hoverTile,
-  editable: false, placingUnit: null, placingElf: false, placingTower: false, ...extra }), {
-  // a tap in the strategic view marks a tile, in the game's own column / row numbers
-  onTap: (t) => { hoverTile = t; if (t) msg(`Tapped tile: column ${t.col + 1}, row ${t.row + 1}`); },
-  onLevel: (lv) => { if (lv) hoverTile = null; },
+const board = Render3D(THREE, $('view'), () => ({ m, me: ME, phase, units, mode: 'ai', bt, battlePre: m, fx, selected, moving: null, drag, hoverTile,
+  editable: player && phase === 'deploy', placingUnit: placingUnit(), placingElf: false, placingTower: placingTower(), ...extra }), {
+  // a tap in the strategic view deploys; anywhere else it marks a tile, in the game's own column / row numbers
+  onTap: (t) => { if (tapTile(t)) return; hoverTile = t; if (t && !(player && phase === 'deploy')) msg(`Tapped tile: column ${t.col + 1}, row ${t.row + 1}`); },
+  onPress: press, onDrag: dragTo, onDrop: drop,
+  onHover: (t) => { hoverTile = t; },
+  onLevel: (lv) => { if (lv) hoverTile = null; $('help').hidden = !lv && player && phase === 'deploy'; },
 });
 function showLevel() { [...$('levels').children].forEach((c, k) => c.classList.toggle('on', k === board.camera.level())); }
 $('help').textContent = touch
@@ -4859,7 +4972,7 @@ $('help').textContent = touch
   : 'Scroll to go in or out · drag to look around · hold the right or middle button and drag to rotate (or Q / E) · click or Esc to go back';
 let msgTimer = 0;
 function msg(t) { $('msg').textContent = t; $('msg').hidden = !t; clearTimeout(msgTimer); if (t && t.startsWith('Tapped')) msgTimer = setTimeout(() => msg(''), 1800); }
-window.addEventListener('resize', () => board.size());
+new ResizeObserver(() => board.size()).observe($('view')); // the bars change height as the shop comes and goes
 
 // ---------- the loop ----------
 let last = 0, fpsT = 0, fpsN = 0;
@@ -4872,7 +4985,7 @@ function frame(ts) {
     for (const e of fx) e.age += dt * speed;
     fx = fx.filter(e => e.age < e.life);
     if (bt.isOver()) {
-      result = bt.result(); phase = 'result'; fx = [];
+      result = bt.result(); phase = 'result'; fx = []; shop();
       msg(result.winner === 0 ? `Round ${m.round}: blue wins` : result.winner === 1 ? `Round ${m.round}: red wins` : `Round ${m.round}: draw`);
     }
   }
@@ -4888,7 +5001,8 @@ function frame(ts) {
 board.size();
 newMatch();
 requestAnimationFrame(frame);
-window.__lab3d = { board, get m() { return m; }, get bt() { return bt; }, get phase() { return phase; }, view(x) { extra = x || {}; } }; // for tests
+window.__lab3d = { board, get m() { return m; }, get bt() { return bt; }, get phase() { return phase; }, view(x) { extra = x || {}; },
+  get selected() { return selected; }, set selected(i) { selected = i; shop(); } }; // for tests
 
 </script>
 </body>
