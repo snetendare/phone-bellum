@@ -3809,12 +3809,13 @@ const Camera3D = (THREE, camera, el, opts) => {
   const W = opts.width, D = opts.depth;
   const FOV = camera.fov;
   // cinematic levels: pitch (degrees above the horizon) and distance from the point looked at (metres)
-  const LEVELS = [null, { pitch: 48, dist: 62 }, { pitch: 20, dist: 24 }];
+  const LEVELS = [null, { pitch: 20, dist: 70 }, { pitch: 20, dist: 24 }]; // angled: low like the ground view, far back to see the enemy side
   const MAX = LEVELS.length - 1;
   const TAP_MOVE = 10, TAP_MS = 350;   // a touch that moves less than this many px and lifts this fast is a tap
   const PINCH_DEAD = Math.log(1.06);   // the fingers must spread or close by 6% before the view zooms
   const TWIST_DEAD = 10 * Math.PI / 180; // and twist by 10 degrees before it rotates
   const PINCH_PER_LEVEL = Math.log(2.1); // spreading the fingers 2.1x apart goes in one level
+  const PAN_SPEED = 2;                 // a drag moves the view this many times as far as the finger
 
   let z = 0;                  // zoom: 0 strategic .. MAX, fractional while pinching or settling
   let target = new THREE.Vector3(); // the point a cinematic view looks at (on the ground)
@@ -3874,7 +3875,7 @@ const Camera3D = (THREE, camera, el, opts) => {
   }
   // move the look point so the ground follows a drag of dx, dy px
   function pan(dx, dy) {
-    const { pitch, dist } = pose(z), k = 2 * dist * Math.tan(FOV * Math.PI / 360) / viewH;
+    const { pitch, dist } = pose(z), k = PAN_SPEED * 2 * dist * Math.tan(FOV * Math.PI / 360) / viewH;
     const s = Math.sin(pitch * Math.PI / 180);
     const fx = -Math.sin(yaw), fz = -Math.cos(yaw), rx = Math.cos(yaw), rz = -Math.sin(yaw);
     target.x += -rx * dx * k + fx * dy * k / s;
@@ -3919,7 +3920,7 @@ const Camera3D = (THREE, camera, el, opts) => {
       if (!two.zooming && Math.abs(s) > PINCH_DEAD) { two.zooming = true; two.sOff = Math.sign(s) * PINCH_DEAD; }
       if (!two.turning && Math.abs(turn) > TWIST_DEAD && z > 0.3) { two.turning = true; two.aOff = Math.sign(turn) * TWIST_DEAD; }
       if (two.zooming) z = Math.max(0, Math.min(MAX, two.z0 + (s - two.sOff) / PINCH_PER_LEVEL));
-      if (two.turning) yaw = two.yaw0 - (turn - two.aOff);
+      if (two.turning) yaw = two.yaw0 + (turn - two.aOff); // the view turns the way the fingers twist
       if (z > 0.3) pan(p.mx - two.mx, p.my - two.my); // the two fingers moving together drag the view too
       two.mx = p.mx; two.my = p.my;
     }
@@ -4221,7 +4222,7 @@ function frame(ts) {
   placeBodies(fighting ? Math.min(1, acc / DT) : 1);
   drawShots(fighting ? dt * 1.5 : dt);
   cam.update(dt);
-  const near = Math.min(1, cam.zoom()); // fog only closer to the ground: from the strategic view the whole board stays clear
+  const near = Math.min(1, cam.zoom() / 2); // fog only at the ground view: the strategic and angled views see the whole board
   scene.fog.near = 400 - 310 * near; scene.fog.far = 600 - 380 * near;
   showLevel();
   renderer.render(scene, camera);

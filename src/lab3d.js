@@ -233,7 +233,7 @@ function frame(ts) {
   placeBodies(fighting ? Math.min(1, acc / DT) : 1);
   drawShots(fighting ? dt * 1.5 : dt);
   cam.update(dt);
-  const near = Math.min(1, cam.zoom()); // fog only closer to the ground: from the strategic view the whole board stays clear
+  const near = Math.min(1, cam.zoom() / 2); // fog only at the ground view: the strategic and angled views see the whole board
   scene.fog.near = 400 - 310 * near; scene.fog.far = 600 - 380 * near;
   showLevel();
   renderer.render(scene, camera);
