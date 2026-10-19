@@ -42,6 +42,7 @@ fs.writeFileSync('index.html', game);
 const lab3d = src('lab3d-template.html').replace('/*BASECSS*/', () => src('game.css'))
   .replace('/*SHAPES*/', () => shapes).replace('/*ENGINE*/', () => eng).replace('/*GAME*/', () => src('game.js'))
   .replace('/*ART*/', () => src('art.js')).replace('/*RENDER2D*/', () => src('render2d.js')).replace('/*CAMERA3D*/', () => src('camera3d.js'))
+  .replace('/*MODELS3D*/', () => src('models3d.js')).replace('/*RENDER3D*/', () => src('render3d.js'))
   .replace('/*DATA*/', () => src('demo-units.json')).replace('/*LAB3D*/', () => src('lab3d.js'));
 fs.writeFileSync('lab3d.html', lab3d);
 console.log('built index.html, lab.html and lab3d.html');

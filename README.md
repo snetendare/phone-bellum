@@ -4,7 +4,7 @@ A small auto-battler for the phone browser. Buy squads, place them, and watch th
 
 - **Play:** open the site and tap Challenge a friend. Send the link, and your friend opens it in any browser. No accounts needed.
 - **Counter Lab** (`lab.html`): a balance sandbox for designing units. Units saved there show up in the game under Load units on the same device.
-- **3D test** (`lab3d.html`): AI armies fighting real battles on a three.js board, with stand-in units, to try the 3D camera. Strategic view straight down (a tap picks a tile); spread two fingers (or scroll) for the angled and ground-level views, drag to look around, twist (or right/middle drag, Q/E) to rotate, tap (or Esc) to go back. Fight, Next round and New armies drive the match.
+- **3D test** (`lab3d.html`): AI armies fighting real battles on the 3D board, with low-poly units, to try the 3D renderer and camera. Strategic view straight down (a tap picks a tile); spread two fingers (or scroll) for the angled and ground-level views, drag to look around, twist (or right/middle drag, Q/E) to rotate, tap (or Esc) to go back. Fight, Next round and New armies drive the match.
 
 ## How live matches work
 
@@ -22,7 +22,9 @@ The source is in `src/`. After changing it, run `node src/build.js` from the rep
 - `shapes.js`: how a unit looks: its shape, colour and 3-letter tag.
 - `art.js`: the shared palette, coats of arms and tower icons, used on the board and in the panels.
 - `camera3d.js`: the 3D camera and its touch, mouse and key controls (strategic, angled and ground views).
-- `lab3d.js` + `lab3d-template.html`: the 3D test page.
+- `render3d.js`: draws the board and the battles in 3D (three.js), through the same `view()` and calls as `render2d.js`. The map floor is painted by `render2d.js` and laid on the ground.
+- `models3d.js`: the low-poly unit models (soldier, archer, caster, goblin, brute, flier, horse, spider, tower), picked from each unit's stats.
+- `lab3d.js` + `lab3d-template.html`: the 3D test page: runs AI matches and shows them with `render3d.js`.
 - `render2d.js`: draws the board and the battles on the canvas. It reads what to show only through the `view()` the page hands it, so another renderer (3D) can take its place.
 - `site-template.html` + `game.css`: the game page: panels, menus, live matches, music.
 - `template.html`: Counter Lab.

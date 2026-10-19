@@ -24,7 +24,6 @@ html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; background: 
 .hud select { min-height: 40px; background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 4px; padding: 0 8px; font: inherit; }
 #msg { position: fixed; left: 50%; top: calc(80px + env(safe-area-inset-top, 0px)); transform: translateX(-50%); font: 600 13px var(--font-data); color: var(--ink); background: rgba(13,19,21,0.8); padding: 6px 12px; border-radius: 4px; pointer-events: none; text-align: center; max-width: calc(100% - 32px); }
 #help { font: 400 12px var(--font-body); color: var(--muted); background: rgba(13,19,21,0.8); padding: 6px 10px; border-radius: 4px; pointer-events: none; text-align: center; max-width: 520px; }
-#board2d { position: fixed; left: -10000px; top: 0; width: 720px; }
 </style>
 </head>
 <body>
@@ -43,7 +42,6 @@ html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; background: 
   <button class="btn" id="new">New armies</button>
   </div>
 </div>
-<canvas id="board2d" aria-hidden="true"></canvas>
 <script>
 /*SHAPES*/
 /*ENGINE*/
@@ -59,6 +57,8 @@ const DATA = /*DATA*/;
 </script>
 <script type="module">
 import * as THREE from './vendor/three.module.min.js';
+/*MODELS3D*/
+/*RENDER3D*/
 /*LAB3D*/
 </script>
 </body>
