@@ -2,7 +2,7 @@
 
 Repo `snetendare/phone-bellum`, branch `refactor/render-split`. `main` (with the factions game mode) is merged in. The branch isn't merged into `main`, and there's no PR yet.
 
-**Next: finish step 5 on real phones** (a two-player match, one phone on 2D and the other on 3D), **then step 7**. Steps 1–4 and 6 are done; step 5's automated check is done.
+**Next: finish step 5 on real phones** (a two-player match, one phone on 2D and the other on 3D), **then step 9: make 3D the default** (the owner's decision). Steps 1–4, 6 and 7 are done; step 5's automated check is done.
 
 ## Where things stand
 
@@ -42,6 +42,7 @@ Repo `snetendare/phone-bellum`, branch `refactor/render-split`. `main` (with the
 - **Board setting:** `node tools/tests/board-switch.js`: 2D by default; 3D on and off mid-match from Settings (the WebGL context is freed, the 2D board takes input again); the 3D quality; saved 3D starts at load; a lost context, two slow fights (medium steps to low, then 2D; headless runs about 25 fps at low, so the check makes each frame 60 ms slower) and no WebGL each fall back with their line; `?board=3d` forces 3D with the meter.
 - **Artifact builds:** `artifact3d.js` (run `node tools/build-artifact.js` first): `phone-bellum.html` opens on 2D without fetching three.js, Settings → 3D imports it from jsDelivr 0.180.0, and a failed download leaves 2D with its line and the setting on 3D; `game3d-artifact.html` starts on 3D with the meter, three.js from `./vendor/`. The container can't reach jsDelivr, so the check answers that address from `vendor/` (the same files), and serves the artifact pages as UTF-8 (claude.ai's wrapper page adds the charset).
 - **Two players, 2D against 3D:** `foe3d-mp.js` (needs the peer server). Two live matches, a 3D guest against a 2D host and then the other way round. At each moment the 3D phone's two boards draw the same view (the 2D one on its hidden canvas; the check spies on `Shapes.body`, `Shapes.outline`, `Art.keep` and `Art.armsFlag`, and reads Render3D's `drawn()`), and it compares what each drew of the opponent's side: squad bodies by colour, stealthed ghosts by shape, the tower type and every coat of arms. Moments: round 1 while deploying (new squads and the leader hidden) and in the fight (a stealthed Rogue), round 2, round 3 (the tower pick: the opponent's type hidden while deploying, shown in the fight). Then the guest leaves and opens the invite link again: same round, each phone on its own board, countdowns within 2 s. The window peek (`?test`) now also has `board` (the 2D board).
+- **3D flows:** `game3d-maps.js` (solo, `?board=3d`): Forest Clearing's elf tower (a tap on it opens its sheet; 10 bribes; the next round an elf tower of your own bought from the sheet and placed with a tap, drawn as your spire; a tap on it opens the sheet), Frozen Peak's altar in round 2 (a tap on the middle opens it; ice walls and a Snowgre bought, the Snowgre drawn on your side), Matteo's Give Charisma (then a tap on a squad). `game3d-mp.js` (needs the peer server): both phones on 3D, each takes a package, drags a package squad and places a shop unit with taps; the host has the guest's squads where the guest put them; the fight ends the same on both phones (health, gold, squads; the guest takes the host's result, so this mostly checks the round trip) and both reach round 2.
 - **3D:** `game3d.js` plays the game on the 3D board. It covers drag, place and take back, the tower, unit and enemy sheets, Move by tap, undo and drag, placing in the angled view, idling in the shop, the quality steps and the fight summary. `deploy3d.js` covers the 3D test page. Both need Chromium's software WebGL (set in the scripts), where one frame can take up to half a second. Headless frame rates say nothing about phones.
 - **Factions:** `node tools/tests/factions.js` (headless).
 - **Problems in older tests:**
@@ -53,7 +54,7 @@ Repo `snetendare/phone-bellum`, branch `refactor/render-split`. `main` (with the
 
 ## Steps to get the 3D board into the live game
 
-Ship it as an opt-in setting first. Keep the 2D board as the default until 3D has held up in real matches.
+Ship it as an opt-in setting first. Keep the 2D board as the default until 3D has held up in real matches. **The owner has decided: once they've done step 5's phone test, 3D becomes the default (step 9).**
 
 1. **Merge `main` into the branch.** Done. The only drawing change on `main` (tower types looked up with `Game.towerTypeById`, so faction towers are found) moved into `src/art.js`. Faction towers still use the plain keep in 3D. `src/factions.json` is still empty, so the Factions mode can't be played yet.
 2. **Wire the game's board input to the 3D board.** Done (see "One set of board rules"). Also fixed: the 3D floor stayed black when the board started before a match existed. A texture can't grow in place, so `paintFloor` now starts a new one when the floor canvas changes size.
@@ -72,10 +73,19 @@ Ship it as an opt-in setting first. Keep the 2D board as the default until 3D ha
    - `phone-bellum.html` (the game artifact) now has the 3D code inlined (about 75 KB; it only defines functions) and imports three.js from `https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.min.js` (it pulls `three.core.min.js` from the same folder) only when 3D is on. `tools/build-artifact.js` does both (`with3d()`), replacing the `THREE_URL` line. The page grew from 521 KB to 597 KB; opening it on 2D took the same time before and after (median of 8 loads, about 0.78 s headless).
    - `game3d-artifact.html` is the same page plus `window.PB_FORCE3D = true`, with three.js from `./vendor/`. Before, any page with the 3D code inlined was forced onto 3D; now only that flag (or `?board=3d`) forces it.
    - Not tried on claude.ai yet: jsDelivr is an allowed script source for artifacts and the page already loads PeerJS from it, but a module `import()` from it hasn't been seen working there. Publishing `phone-bellum.html` to "Phone Bellum" would show it; if the import is blocked, the game stays on 2D with "The 3D board couldn't load", and the fix is to publish `vendor/` next to it and build it with `./vendor/` instead.
-7. **Tests.** Start here after step 5's phone test.
-   The existing Playwright tests tap the 2D board by grid position, so keeping 2D as the default keeps them valid. Add 3D versions of the remaining key flows on top of `game3d.js`: a full round in a two-player match, the elf tower, the altar, Charisma.
+7. **Tests.** Done. 3D versions of the remaining key flows, all through the 3D board's taps and drags (see "Checks"):
+   - `game3d-maps.js`: the elf tower (Forest Clearing: bribing from its sheet, then an elf tower of your own bought and placed with a tap), the ice altar (Frozen Peak, round 2: walls and a Snowgre), and Matteo's Give Charisma.
+   - `game3d-mp.js`: a full round of a live match with both phones on 3D.
+   - The 2D tests still tap the 2D board by grid position (see step 9).
 8. **Smaller gaps.**
    - Models for units that still use the general figures, and for faction towers, if wanted.
    - Fix the Counter Lab artifact build: its check rejects any page that mentions "Load units", and the Counter Lab help text now does.
    - Decide what the start screen and map picker look like in 3D; the map thumbnails can stay 2D.
    - View buttons (Strategic / Angled) in the game, if pinch and scroll aren't enough.
+9. **Make 3D the default** (after step 5's phone test; the owner's decision).
+   - In `src/site-template.html`, `want3d` starts from `force3d || saved === '3d'`; make it `saved !== '2d'` (anyone who never chose gets 3D; a saved 2D stays 2D) and add `?board=2d` to force 2D.
+   - The fallbacks stay: no WebGL, a lost context or a slow phone still drop to 2D with their line, and failing to start or being too slow saves 2D.
+   - The 2D checks tap `#board` by grid position and `snapshots.js` hashes the 2D canvas, so they must ask for 2D: add `board=2d` to their addresses (`snapshots.js`, `charm-ui.js`, `move-ui.js`, `timer-mp.js`, the other `*-ui.js` / `*-mp.js`, and `board-switch.js`'s "2D by default" part changes meaning). Then `snapshots.js` against `main` should still be identical.
+   - The phone-test artifact can then simply be `phone-bellum.html` with the meter behind a flag, or stay as it is.
+   - Update the README's "Play" and the help text if they describe the board.
+
