@@ -1,6 +1,6 @@
 # Handoff: getting the 3D board into the live game
 
-Repo `snetendare/phone-bellum`, branch `refactor/render-split` (12 commits ahead of `main`, 1 behind). Not merged, no PR yet.
+Repo `snetendare/phone-bellum`, branch `refactor/render-split`. `main` (with the factions game mode) is merged in. Not merged into `main`, no PR yet.
 
 ## Where things stand
 
@@ -16,7 +16,7 @@ Repo `snetendare/phone-bellum`, branch `refactor/render-split` (12 commits ahead
 
 Ship it as an opt-in setting first. Keep the 2D board as the default until 3D has held up in real matches.
 
-1. **Merge `main` into the branch first.** `main` has the factions game mode (`deb5f15`: faction draft, per-player faction rosters, faction towers). A trial merge conflicts in `src/site-template.html`, `src/build.js`, `README.md` and `index.html`. `game.js` merges cleanly. The conflict is because the branch moved about 850 lines out of the game page while factions added about 150 to it. Resolve it, rebuild with `node src/build.js` (never hand-merge `index.html`), and rerun the snapshot check and `tools/tests/factions.js`. Faction towers need 3D models; for now they fall back to the plain keep.
+1. **Merge `main` into the branch first.** Done. `main`'s factions game mode (`deb5f15`) is merged in. The only drawing change on `main` (looking up tower types with `Game.towerTypeById`, so faction towers are found) is now in `src/art.js`. Checks after the merge: the snapshot check run on `main` and on the merged branch gives 71 identical moments, `tools/tests/factions.js` passes and so does `tools/tests/deploy3d.js`. Faction towers still need 3D models; for now they use the plain keep. `src/factions.json` is still empty, so the Factions mode can't be played in the live game yet.
 2. **Wire the game's board input to the 3D board.** The game's click and drag handlers (`src/site-template.html`, the "board input" section, about lines 1620–1700) cover more than the test page: the paid Move ability, Matteo's Charisma, elf towers, the altar and map pop-ups, and the unit and tower info sheets. Route them through `render3d.js`'s `onTap` / `onPress` / `onDrag` / `onDrop` / `onHover` so both boards share one set of rules. Don't copy the logic a second time.
 3. **Test on real phones (the most important step).** Measure frame rate in big late-game fights on a mid-range Android and an older iPhone, plus battery use and heat. The 2D board only redraws when something changes; the 3D board redraws every frame, even in the shop, so make it idle when the camera and board are still. Check touch: tile size in the angled view (the zone's outer columns are partly off-screen on a phone), and dragging squads compared with moving the camera.
 4. **Fall back to 2D when 3D can't run.** If WebGL is missing or crashes, or the phone is too slow, switch to the 2D board on its own. Add a 2D / 3D switch in settings.

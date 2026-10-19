@@ -35,7 +35,8 @@ fs.writeFileSync('lab.html', labDoc);
 const game = src('site-template.html').replace('/*BASECSS*/', () => src('game.css'))
   .replace('/*SHAPES*/', () => shapes).replace('/*ENGINE*/', () => eng)
   .replace('/*GAME*/', () => src('game.js'))
-  .replace('/*ART*/', () => src('art.js')).replace('/*RENDER2D*/', () => src('render2d.js')).replace('/*DATA*/', () => src('demo-units.json'));
+  .replace('/*ART*/', () => src('art.js')).replace('/*RENDER2D*/', () => src('render2d.js')).replace('/*DATA*/', () => src('demo-units.json'))
+  .replace('/*FACTIONS*/', () => src('faction-units.json'));
 game.split('<script>').slice(1).map(s => s.split('</script>')[0]).forEach(s => new Function(s));
 fs.writeFileSync('index.html', game);
 // 3D test page

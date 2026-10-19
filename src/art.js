@@ -80,7 +80,7 @@ const Art = (() => {
   // and skinny, a yellow stripe), 'bastion' (wide and squat, a shield on the front), 'bank', 'slime' or 'mage'.
   // hpr: health left (fades it), crest: the owner's character id, drawn on a small shield on the tower's corner
   function keep(ctx, x, y, s, c, hpr, kind, crest) {
-    const tt = [Game.OUTPOST, ...Game.TOWER_TYPES].find(k => k.id === kind) || Game.TOWER_TYPES[0];
+    const tt = Game.towerTypeById(kind) || Game.TOWER_TYPES[0];
     ctx.globalAlpha = 0.35 + 0.65 * (hpr == null ? 1 : hpr);
     ctx.fillStyle = tt.unit.color; ctx.strokeStyle = c; ctx.lineWidth = Math.max(1.5, s * 0.08);
     const [w, h, n] = tt.id === 'sniper' ? [s * 0.36, s * 0.74, 3] : tt.id === 'bastion' ? [s * 0.86, s * 0.54, 7] : tt.id === 'outpost' ? [s * 0.46, s * 0.5, 5] : tt.id === 'mage' ? [s * 0.5, s * 0.5, 5] : tt.id === 'bank' ? [s * 0.74, s * 0.52, 7] : tt.id === 'slime' ? [s * 0.56, s * 0.56, 5] : [s * 0.62, s * 0.62, 5];

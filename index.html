@@ -245,6 +245,17 @@ a { color: var(--you); }
 .pick-peek[hidden] { display: none; }
 @keyframes pick-in { from { opacity: 0; transform: translateY(18px) scale(0.94); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .pick .opt { animation: none; transition: none; } }
+/* Factions draft */
+.draft { margin: auto; display: grid; gap: 10px; width: 100%; max-width: 46ch; }
+.draft .sides { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 12px; color: var(--muted); text-align: left; }
+.draft .sides b { display: block; font-size: 13px; }
+.fgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.fgrid .fac { border: 1px solid var(--line); border-left: 4px solid var(--fc); border-radius: 6px; background: var(--panel); padding: 8px; text-align: left; display: grid; gap: 3px; min-width: 0; }
+.fgrid .fac .nm { font-family: var(--font-display); font-weight: 600; font-size: 14px; color: var(--fc); overflow-wrap: anywhere; }
+.fgrid .fac .sub { font-size: 11px; line-height: 1.3; color: var(--muted); overflow-wrap: anywhere; }
+.fgrid .fac .st { font-size: 11px; font-weight: 600; color: var(--gold); }
+.fgrid .fac[aria-pressed="true"] { border-color: var(--gold); border-left-color: var(--fc); box-shadow: 0 0 0 1px var(--gold); }
+.fgrid .fac:disabled { opacity: 0.45; cursor: default; }
 @media (prefers-reduced-motion: reduce) { .status.wait::after { animation: none; content: "…"; } }
 </style>
 </head>
@@ -1711,10 +1722,13 @@ const Game = (() => {
   const towerType = (m, side) => {
     const t = m && m.towers && m.towers[side];
     if (!m || m.round < TOWER_PICK_ROUND || needsTowerPick(m, side)) return OUTPOST;
-    return TOWER_TYPES.find(x => x.id === (t && t.type)) || TOWER_TYPES[0];
+    return towerTypeById(t && t.type) || (m.factions ? factionTowers(m, side)[0] : null) || TOWER_TYPES[0];
   };
+  // any tower type by id: the Outpost, the standard types, or a faction's tower (Factions mode); null if unknown
+  const towerTypeById = (id) => [OUTPOST, ...TOWER_TYPES].find(x => x.id === id) || factionTowerById(id);
   // the types a player is offered: all of them while there are TOWER_OFFER or fewer, else a seeded draw
   function towerChoices(m, side) {
+    if (m && m.factions) return factionTowers(m, side); // Factions mode: the towers of the player's own factions
     if (TOWER_TYPES.length <= TOWER_OFFER) return TOWER_TYPES.slice();
     const r = rng(m.seed + side * 4241 + 17), pool = TOWER_TYPES.slice(), out = [];
     while (out.length < TOWER_OFFER) out.push(pool.splice(Math.floor(r() * pool.length), 1)[0]);
@@ -2270,7 +2284,7 @@ const Game = (() => {
   const inNoMans = (row) => row >= ZONE && row < ROWS - ZONE;
   const hasSkillType = (m, side, ui, type) => !!m && ui != null && !!m.units[ui] && E.SLOTS.some(k => hasSkill(m, side, ui, k) && skillDef(m, ui, k).type === type);
   // ui (optional): the unit being placed, for unit-specific tiles
-  const canPlaceAt = (m, side, col, row, ui) => col >= 0 && col < COLS && !reserved(side, col, row) && !(ui != null && isOff(m, ui)) &&
+  const canPlaceAt = (m, side, col, row, ui) => col >= 0 && col < COLS && !reserved(side, col, row) && !(ui != null && isOff(m, ui, side)) &&
     !(ui != null && m && m.units[ui] && m.units[ui].noFlank && isFlank(side, col, row)) &&
     (inZone(side, row) || (flankOpen(m) && isFlank(side, col, row)) || (inNoMans(row) && hasSkillType(m, side, ui, 'forward'))) && !enemyHolds(m, side, col, row);
   // ---------- carriers (Just a horse) ----------
@@ -2376,11 +2390,16 @@ const Game = (() => {
   }
 
   // offChars (optional): character ids left out of the pool (at least one always stays in)
-  // opts (optional): { offUnits: unit indexes left out of the match (at least two stay in), rules: roster rules for the fights (see Engine.RULES) }
+  // opts (optional): { offUnits: unit indexes left out of the match (at least two stay in), rules: roster rules for the fights (see Engine.RULES),
+  //   factions: [[ids of player 0's factions], [player 1's]] for a Factions match (units: factionSet's, each with its `faction`) }
   function createMatch(units, matrix, seed, mapId, lastMapId, offChars, opts) {
     const r = rng((seed >>> 0) + 777);
-    let off = ((opts && opts.offUnits) || []).filter((ui, k, a) => Number.isInteger(ui) && ui >= 0 && ui < units.length && a.indexOf(ui) === k);
+    const factions = opts && Array.isArray(opts.factions) && opts.factions.length === 2 && opts.factions.every(Array.isArray) ? opts.factions.map(f => f.map(String)) : null;
+    if (factions) mapId = FACTION_MODE.map;
+    let off = factions ? [] : ((opts && opts.offUnits) || []).filter((ui, k, a) => Number.isInteger(ui) && ui >= 0 && ui < units.length && a.indexOf(ui) === k);
     if (units.length - off.length < 2) off = [];
+    // a player's packages only hold units of their own factions
+    const packOff = (sd) => factions ? off.concat(units.map((u, i) => factions[sd].includes(u.faction) ? -1 : i).filter(i => i >= 0)) : off;
     const rules = opts && opts.rules && typeof opts.rules === 'object' ? { ...opts.rules } : null;
     const m = {
       units, matrix, seed: seed >>> 0,
@@ -2395,7 +2414,7 @@ const Game = (() => {
       unlocks: [{}, {}], // units unlocked per player: unlocks[side][unitIdx] = round it was unlocked
       off, // units left out of this match: they can't be unlocked, placed or dealt in a package
       rules, // roster rules for the fights (null = all on)
-      packages: [dealPackages(units, r, offChars, off), dealPackages(units, r, offChars, off)], // each player's 3 starting package options, each with a different random character
+      packages: [dealPackages(units, r, offChars, packOff(0)), dealPackages(units, r, offChars, packOff(1))], // each player's 3 starting package options, each with a different random character
       pack: [null, null], // which one each player picked
       map: rollMap(seed >>> 0, mapId, lastMapId), // { id, elfCol }: the map this match is fought on (mapId picks it; otherwise random)
       bribe: [[], []], // the round of each bribe each player paid the elves (see the bribe-off)
@@ -2405,13 +2424,15 @@ const Game = (() => {
       loan: [0, 0], // the round each player last took a bank loan in (Bank tower)
       mageGen: [null, null], // the mage generals each player called this round: { round, id, tp } (Mage tower)
       mapFree: [{}, {}], // Blixten's free map purchase per round (see mapFreeOf)
+      factions, // Factions mode: each player's drafted faction ids (null = a normal match)
     };
     m.towers = [towerSpot(m, 0), towerSpot(m, 1)];
     return m;
   }
 
-  // a unit left out of this match (match settings on the menu)
-  const isOff = (m, ui) => !!(m && Array.isArray(m.off) && m.off.includes(ui));
+  // a unit left out of this match (match settings on the menu). side (optional): also a unit of a faction that
+  // player didn't draft (Factions mode)
+  const isOff = (m, ui, side) => !!(m && ((Array.isArray(m.off) && m.off.includes(ui)) || (side != null && !ownsUnit(m, side, ui))));
 
   // ---------- skills (bought per unit type, for all squads of that type) ----------
   // m.units[i].skillDefs = [def or null, ...], one per skill slot (Engine.SKILL_SLOTS)
@@ -2436,6 +2457,7 @@ const Game = (() => {
     // Mubarak: a slime unit also gets the skills bought for the other slime units
     if (charOf(m, side) === 'mubarak' && base && SLIME_UNITS.includes(base.name)) defs.push(...slimeSkillDefs(m, side, ui));
     let u = defs.length ? E.applySkills(base, defs, m.units) : base;
+    u = withFactionTrait(u, base && base.faction);
     if (base && SLIME_UNITS.includes(base.name)) u = { ...u, slime: true }; // poison heals slime units
     if (charOf(m, side) === 'noah' || charOf(m, side) === 'enzo') { // Noah and Enzo: 10% less health and damage, spawned ones too
       const k = 1 - (charOf(m, side) === 'noah' ? CHAR.noahCut : CHAR.enzoCut) / 100;
@@ -2465,7 +2487,7 @@ const Game = (() => {
   // an unlock bought this round is hidden from the opponent until the fight
   const unlockVisible = (m, side, ui) => unlockCost(m, ui, side) === 0 || (isUnlocked(m, side, ui) && m.unlocks[side][ui] < m.round);
   function unlock(m, side, ui) {
-    if (ui < 0 || ui >= m.units.length || isOff(m, ui) || isUnlocked(m, side, ui)) return false;
+    if (ui < 0 || ui >= m.units.length || isOff(m, ui, side) || isUnlocked(m, side, ui)) return false;
     const cost = unlockCost(m, ui, side);
     if (m.gold[side] < cost) return false;
     if (!m.unlocks) m.unlocks = [{}, {}];
@@ -2930,6 +2952,94 @@ const Game = (() => {
     return done;
   }
 
+  // ---------- factions (the Factions gamemode) ----------
+  // Each faction is a small roster of its own units with a theme, a trait (stat changes for all its units) and its
+  // own tower. Before the match the players draft factions one at a time (FACTION_MODE.order), two each; the units
+  // of the four drafted factions make up the match's roster, and each player can only unlock, buy and place units of
+  // their own two. At TOWER_PICK_ROUND a player picks between their factions' towers instead of the usual offer.
+  // Factions live in src/factions.json; tools/counter-table.js turns them into src/faction-units.json (units with
+  // their `faction`, counter table, skills) and setFactions loads the faction list from it.
+  // order: the draft, one act at a time: 'A'/'B' = the player who drafts first/second; bans (later) go in the same list.
+  const FACTION_MODE = { map: 'standard', picks: 2, order: [{ who: 'A', act: 'pick' }, { who: 'B', act: 'pick' }, { who: 'B', act: 'pick' }, { who: 'A', act: 'pick' }] };
+  const TRAIT_STATS = ['hp', 'hit', 'aps', 'range', 'speed']; // a trait changes these by a percentage
+  let FACTIONS = [];
+  // list: [{ id, name, color, theme, trait: { name, text, hp, hit, ... (percent) }, tower: { name, text, unit: { stats } }, units: [unit names] }]
+  function setFactions(list) {
+    FACTIONS = (Array.isArray(list) ? list : []).filter(f => f && typeof f.id === 'string' && f.id).map(f => ({
+      id: f.id, name: String(f.name || f.id), color: f.color || '#C9B79C', theme: String(f.theme || ''),
+      trait: f.trait && typeof f.trait === 'object' ? f.trait : null, units: Array.isArray(f.units) ? f.units.slice() : [],
+      tower: { id: 'f-' + f.id, faction: f.id, name: (f.tower && f.tower.name) || f.name + ' tower', text: (f.tower && f.tower.text) || '',
+        unit: { ...TOWER, color: f.color || TOWER.color, ...((f.tower && f.tower.unit) || {}), name: (f.tower && f.tower.name) || f.name + ' Tower', kind: 'f-' + f.id } },
+    }));
+    return FACTIONS;
+  }
+  const factionInfo = (id) => FACTIONS.find(f => f.id === id) || null;
+  const factionTowerById = (id) => { const f = FACTIONS.find(x => x.tower.id === id); return f ? f.tower : null; };
+  const factionsOf = (m, side) => (m && m.factions && m.factions[side]) || [];
+  // the tower types a player can pick in a Factions match: one per drafted faction
+  const factionTowers = (m, side) => factionsOf(m, side).map(id => factionInfo(id)).filter(Boolean).map(f => f.tower);
+  // whether a player may use unit ui: always in a normal match; in a Factions match only units of their factions
+  const ownsUnit = (m, side, ui) => !(m && m.factions) || !!(m.units[ui] && factionsOf(m, side).includes(m.units[ui].faction));
+  // a faction's trait on one of its units (spawned units too)
+  function withFactionTrait(u, fid) {
+    const t = fid && factionInfo(fid) && factionInfo(fid).trait;
+    if (!u || !t) return u;
+    const mul = (x) => { const o = { ...x }; for (const k of TRAIT_STATS) if (isFinite(+t[k]) && +t[k]) o[k] = x[k] * (1 + t[k] / 100); return o; };
+    const out = mul(u);
+    if (u.spawn && u.spawn.unit) out.spawn = { ...u.spawn, unit: mul(u.spawn.unit) };
+    return out;
+  }
+  // the roster for a match between drafted factions: the faction units of `ids` (in that order) out of the full
+  // faction set ({ units, matrix, skills } from faction-units.json), with the counter table cut to match
+  function factionSet(all, ids) {
+    const idx = [];
+    for (const id of ids) all.units.forEach((u, i) => { if (u.faction === id) idx.push(i); });
+    return { units: idx.map(i => all.units[i]), matrix: idx.map(i => idx.map(j => all.matrix[i][j])), skills: all.skills || [] };
+  }
+  // ---- the draft ----
+  // first: the player who drafts first (0 or 1). pool (optional): faction ids that can be drafted (default: all)
+  function createDraft(first, pool) {
+    return { first: first ? 1 : 0, pool: (pool || FACTIONS.map(f => f.id)).slice(), step: 0, picks: [[], []], bans: [[], []] };
+  }
+  const draftDone = (d) => !d || d.step >= FACTION_MODE.order.length;
+  // whose turn it is and what they do, or null when the draft is over
+  function draftTurn(d) {
+    if (draftDone(d)) return null;
+    const o = FACTION_MODE.order[d.step];
+    return { side: o.who === 'A' ? d.first : 1 - d.first, act: o.act };
+  }
+  const draftTaken = (d) => [...d.picks[0], ...d.picks[1], ...d.bans[0], ...d.bans[1]];
+  const draftOpen = (d) => d.pool.filter(id => !draftTaken(d).includes(id));
+  // enough factions for a draft: every pick and ban needs its own
+  const draftPossible = (pool) => (pool || FACTIONS).length >= FACTION_MODE.order.length;
+  function draftAct(d, side, id) {
+    const t = draftTurn(d);
+    if (!t || t.side !== side || !draftOpen(d).includes(id)) return false;
+    (t.act === 'ban' ? d.bans : d.picks)[side].push(id);
+    d.step++;
+    return true;
+  }
+  // the AI's draft choice: all: the full faction set (for the counter table). It bans the faction that does best
+  // against its own picks, and picks the one that does best against the opponent's picks (or the whole field),
+  // with a nudge toward a faction that covers what its first pick lacks, and a little randomness.
+  function aiDraftChoice(d, side, all, seed) {
+    const t = draftTurn(d), open = draftOpen(d);
+    if (!t || !open.length) return null;
+    const r = rng((seed >>> 0) + d.step * 977 + side * 31);
+    const idx = (id) => all.units.map((u, i) => u.faction === id ? i : -1).filter(i => i >= 0);
+    const vs = (a, b) => { const A = idx(a), B = idx(b); let s = 0; for (const i of A) for (const j of B) s += all.matrix[i][j] || 0; return A.length && B.length ? s / (A.length * B.length) : 0; };
+    const score = (id) => {
+      if (t.act === 'ban') { const mine = d.picks[side]; return mine.length ? mine.reduce((s, x) => s + vs(id, x), 0) / mine.length : open.reduce((s, x) => s + vs(id, x), 0) / open.length; }
+      const foes = d.picks[1 - side].length ? d.picks[1 - side] : open.filter(x => x !== id);
+      let s = foes.length ? foes.reduce((a, x) => a + vs(id, x), 0) / foes.length : 0;
+      // complement: fill what the first pick loses to
+      for (const mine of d.picks[side]) for (const foe of open) if (foe !== id && vs(mine, foe) < 0) s += Math.max(0, vs(id, foe)) * 0.3;
+      return s + (r() - 0.5) * 0.1;
+    };
+    const sc = open.map(score);
+    return open[sc.indexOf(Math.max(...sc))];
+  }
+
   // ---------- AI ----------
   // Buys units that counter the opponent's army as it stood at the start of the round,
   // using the counter table, with a nudge toward variety and a little randomness.
@@ -2975,7 +3085,7 @@ const Game = (() => {
         reserve += levelCost(m.units[sq.unit]);
       }
     }
-    const minCost = Math.min(...m.units.map((u, i) => isOff(m, i) ? Infinity : shopCost(m, side, i)));
+    const minCost = Math.min(...m.units.map((u, i) => isOff(m, i, side) ? Infinity : shopCost(m, side, i)));
     // the elf tower: from round 2, sometimes bribe it while a squad is still affordable after; more often when not ahead
     if (m.round >= 2) for (let k = 0; k < 3; k++) {
       if (!canBribe(m, side) || m.gold[side] - reserve - bribeCost(m, side) < minCost || r() >= (bribeLeader(m, true) === side ? 0.2 : 0.5)) break;
@@ -3019,7 +3129,7 @@ const Game = (() => {
       const budget = m.gold[side] - reserve;
       let best = -1, bs = -Infinity;
       m.units.forEach((u, i) => {
-        if (isOff(m, i)) return;
+        if (isOff(m, i, side)) return;
         const extra = isUnlocked(m, side, i) ? 0 : unlockCost(m, i, side); // a locked unit costs its unlock on top
         if (shopCost(m, side, i) + extra > budget) return;
         let s = 0, tot = 0;
@@ -3087,6 +3197,8 @@ const Game = (() => {
     ICE, ALTAR, GOLEM, isIce, hailRound, altarRound, stormShift, stormRows, hailTiles, altarCost, altarRefund, altarCount, pushRoom, altarBought, addAltar, buyAltar, undoAltar, snowgres, snowgreUnit,
     MAPS, ELF_TOWER, SHROOM, SHROOM_SPLIT, shroomAt, shroomTileAt, shroomRemoval, SHROOM_REMOVE, shroomCost, removeShroom, undoRemoveShroom, mapOf, elfSpot, rollMap, BRIBE_COST, bribeList, bribeGold, bribeCount, bribeNow, bribeCost, bribeRefund, ELF_POWER, elfPowered, elfUnit, ELF_OWN, elfOwnCost, elfOwnOf, elfOwnAt, elfOwnUnlocked, elfOwnOffered, canBuyElfOwn, elfOwnSpotOk, buyElfOwn, undoElfOwn, bribeLeader, canBribe, bribe, undoBribe,
     CHARACTERS, CHAR, charOf, charInfo, enzoSkill, charmOf, isGentleman, canGiveCharm, giveCharm, undoCharm, ensureCharm, felixGold, isTier1, rollBuffTiles, onBuffTile, yotImps, yotLevel, TOWER_SPOT, towerSpot,
+    FACTION_MODE, FACTIONS: () => FACTIONS, setFactions, factionInfo, factionsOf, factionTowers, towerTypeById, ownsUnit, withFactionTrait, factionSet,
+    createDraft, draftTurn, draftOpen, draftAct, draftDone, draftPossible, aiDraftChoice,
     zoneRows, inZone, tileToWorld, createMatch, place, unplace, bodiesFor, startBattle, resolve, aiDeploy, occupied,
   };
 })();
@@ -3176,7 +3288,7 @@ const Art = (() => {
   // and skinny, a yellow stripe), 'bastion' (wide and squat, a shield on the front), 'bank', 'slime' or 'mage'.
   // hpr: health left (fades it), crest: the owner's character id, drawn on a small shield on the tower's corner
   function keep(ctx, x, y, s, c, hpr, kind, crest) {
-    const tt = [Game.OUTPOST, ...Game.TOWER_TYPES].find(k => k.id === kind) || Game.TOWER_TYPES[0];
+    const tt = Game.towerTypeById(kind) || Game.TOWER_TYPES[0];
     ctx.globalAlpha = 0.35 + 0.65 * (hpr == null ? 1 : hpr);
     ctx.fillStyle = tt.unit.color; ctx.strokeStyle = c; ctx.lineWidth = Math.max(1.5, s * 0.08);
     const [w, h, n] = tt.id === 'sniper' ? [s * 0.36, s * 0.74, 3] : tt.id === 'bastion' ? [s * 0.86, s * 0.54, 7] : tt.id === 'outpost' ? [s * 0.46, s * 0.5, 5] : tt.id === 'mage' ? [s * 0.5, s * 0.5, 5] : tt.id === 'bank' ? [s * 0.74, s * 0.52, 7] : tt.id === 'slime' ? [s * 0.56, s * 0.56, 5] : [s * 0.62, s * 0.62, 5];
@@ -3933,6 +4045,8 @@ const Render2D = (cv, view) => {
 <script>
 (() => {
   const DATA = {"units":[{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Goblin Swarm","cost":1,"bodies":12,"hp":26,"hit":17,"aps":1.2,"range":2,"speed":8,"splash":0,"shape":"triangle","color":"#9BD35A","skills":["swift","shrink","spread"],"skillMods":[null,null,null],"skillsInnate":[false,false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Skeleton Archers","cost":1,"bodies":8,"hp":32,"hit":14,"aps":0.75,"range":19,"speed":2.1,"splash":0,"shape":"triangle","color":"#E9E3CF","skills":["range","rapid","boneShield"],"skillMods":[null,null,null],"skillsInnate":[false,false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Ember Imps","cost":1,"bodies":4,"hp":110,"hit":20,"aps":0.8,"range":10,"speed":4,"splash":3,"shape":"imp","color":"#FFA94D","skills":["swift","heavy","emberMortar"],"skillMods":[null,null,null],"skillsInnate":[false,false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":35,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Fire Mage","cost":1,"bodies":1,"hp":155,"hit":33,"aps":0.75,"range":20,"speed":3,"splash":4,"shape":"hexagon","color":"#fb0022","skills":["range","armorHp","dualFlame"],"skillMods":[null,null,null],"skillsInnate":[false,false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":1,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Sniper","cost":1,"bodies":1,"hp":140,"hit":210,"aps":0.25,"range":29,"speed":2,"splash":0,"shape":"cross","color":"#F7D154","skills":["rapid","spawn","range"],"skillMods":[{"params":{"range":0,"aps":15},"cost":150},{"params":{"waves":3}},null],"skillsInnate":[false,false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"armor","defVal":3,"level":0,"unlock":50,"name":"Brute","cost":2,"bodies":1,"hp":1100,"hit":98,"aps":1.1,"range":2,"speed":5,"splash":0,"shape":"square","color":"#8D99AE","skills":["armorHp","swift"],"skillMods":[null,null],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":20,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":40,"level":0,"unlock":50,"name":"Wisps","cost":1,"bodies":2,"hp":80,"hit":75,"aps":0.8,"range":19,"speed":4,"splash":0,"shape":"ring","color":"#ff90ff","skills":["stealth","skmv5oxj501"],"skillMods":[null,{"params":{},"cost":200}],"skillsInnate":[false,false]},{"burst":6,"pellets":2,"spinUp":0,"pierce":0,"projSpeed":35,"minRange":0,"charge":1,"knockback":0,"windUp":0.2,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Leaf Wizard","cost":2,"bodies":1,"hp":240,"hit":21,"aps":0.45,"range":27,"speed":5,"splash":0,"shape":"hexagon","color":"#00d200","skills":["rapid","range"],"skillMods":[null,null],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":5,"projSpeed":35,"minRange":0,"charge":1,"knockback":0,"windUp":0.5,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Earth Wizard","cost":2,"bodies":1,"hp":650,"hit":440,"aps":0.2,"range":24,"speed":3,"splash":2,"shape":"circle","color":"#24590d","skills":["regen","range","heavy"],"skillMods":[null,null,{"params":{"hit":20,"slow":30},"cost":150}],"skillsInnate":[false,false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":30,"defense":"none","defVal":0,"level":0,"unlock":100,"name":"Flame Wizard","cost":3,"bodies":1,"hp":2000,"hit":12,"aps":4,"range":15,"speed":2,"splash":0,"shape":"flame","color":"#b95018","skills":["armorHp","range"],"skillMods":[null,null],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":100,"name":"Steel Wizard","cost":3,"bodies":1,"hp":1900,"hit":150,"aps":0.9,"range":15,"speed":2,"splash":2,"shape":"bar","color":"#57535a","skills":["range","heavy"],"skillMods":[null,{"params":{"slow":20,"hit":20}}],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":40,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":100,"name":"Slime Wizard","cost":3,"bodies":1,"hp":700,"hit":480,"aps":0.2,"range":22,"speed":2,"splash":6,"shape":"ring","color":"#81f038","skills":["skmv5oxpgk2","range"],"skillMods":[null,null],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"armor","defVal":6,"level":0,"unlock":150,"splash":3,"skillsInnate":[false,false],"skillMods":[null,null],"name":"Ether Golem","cost":5,"bodies":1,"hp":3450,"hit":69,"aps":0.6,"range":5,"speed":2.5,"shape":"square","color":"#51005c","skills":["regen","armorHp"]},{"burst":1,"pellets":1,"spinUp":50,"spinHit":50,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":150,"splash":0,"skillsInnate":[false,false],"skillMods":[null,null],"name":"Sun Priest","cost":5,"bodies":1,"hp":2800,"hit":38,"aps":2,"range":18,"speed":3,"shape":"sun","color":"#FFD23F","skills":["split","shrink"]},{"burst":3,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":22,"minRange":12,"charge":1,"knockback":0,"windUp":2,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":150,"splash":6,"skillsInnate":[false,false],"skillMods":[null,null],"name":"Meteor Caller","cost":5,"bodies":1,"hp":400,"hit":114,"aps":0.3,"range":50,"speed":2,"shape":"diamond","color":"#FF6B35","skills":["range","skmv5oxpgk2"]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":3,"knockback":4,"windUp":0,"flame":0,"defense":"armor","defVal":6,"level":0,"unlock":150,"splash":3,"skillsInnate":[false,false],"skillMods":[null,null],"name":"War Mammoth","cost":5,"bodies":1,"hp":2300,"hit":169,"aps":0.5,"range":3,"speed":8,"shape":"pentagon","color":"#A0785A","skills":["swift","armorHp"],"trample":50,"chargeStun":1.5},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":150,"splash":0,"skillsInnate":[true,false],"skillMods":[null,null],"name":"Necromancer","cost":5,"bodies":1,"hp":2300,"hit":56,"aps":1,"range":20,"speed":2.2,"shape":"hexagon","color":"#9D4EDD","skills":["raiseDead","healer"]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":90,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Ent","cost":1,"bodies":2,"hp":400,"hit":25,"aps":1.1,"range":4,"speed":2,"splash":0,"shape":"square","color":"#0d3000","skills":["armorHp","forward"],"skillsInnate":[false,false],"skillMods":[{"params":{"armor":4,"hp":20}},null],"deathBlast":30},{"burst":1,"pellets":1,"spinUp":0.1,"pierce":0,"projSpeed":30,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"name":"Slimeshots","cost":2,"unlock":100,"bodies":10,"hp":95,"hit":7,"aps":0.8,"range":21,"speed":6,"splash":3,"shape":"diamond","color":"#20d300","skills":["range","heavy"],"skillsInnate":[false,false],"skillMods":[{"params":{"m":3},"cost":150},{"params":{"hit":25,"slow":0,"instant":0},"cost":150}]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Just a horse","cost":2,"bodies":1,"hp":500,"hit":200,"aps":1,"range":1,"speed":6,"splash":0,"shape":"horse","color":"#C8A27A","ram":1,"noFlank":1,"carrier":1,"noPack":1,"skills":["gallop","armorHp","deathBurst"],"skillMods":[null,{"params":{"armor":4,"hp":20},"cost":150},null],"skillsInnate":[false,false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":30,"minRange":0,"charge":4,"knockback":0,"windUp":0,"flame":0,"trample":0,"deathBlast":0,"defense":"none","defVal":0,"level":0,"unlock":100,"name":"Rogue","cost":3,"bodies":2,"hp":310,"hit":80,"aps":1.1,"range":4,"speed":6,"splash":0,"shape":"triangle","color":"#460000","skills":["stealth","skmv5oxj501","frenzy"],"skillsInnate":[true,false,false],"skillMods":[null,{"params":{"cap":200},"cost":150},null]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"trample":0,"deathBlast":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Spiders","cost":2,"bodies":5,"hp":185,"hit":20,"aps":0.8,"range":2,"speed":6,"splash":0,"shape":"spider","color":"#000000","skills":["spiderlings","poison","stealth"],"skillsInnate":[false,false,false],"skillMods":[null,null,{"params":{},"cost":200}]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":35,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"trample":0,"deathBlast":0,"pctHit":20,"defense":"none","defVal":0,"level":0,"unlock":150,"name":"Truespear","cost":5,"bodies":1,"hp":750,"hit":60,"aps":0.8,"range":25,"speed":3,"splash":0,"shape":"spear","color":"#C9D1D9","skills":["lifesteal","armorHp","dualSpear"],"skillMods":[null,null,null],"skillsInnate":[false,false,false]}],"matrix":[[0,-1,-0.899,-0.993,0.847,0.453,0.222,0.248,0.472,-1,-0.414,-0.236,-0.734,0.481,-0.809,-0.495,0.522,-0.812,-0.755,0.958,0.667,0.563,0.889],[1,0,0.268,-0.514,0.521,0.658,0.692,-0.189,0.383,-0.804,0.362,-0.704,0.158,-0.614,-0.959,0.625,-0.352,0.803,-0.524,0.946,0.842,0.819,0.825],[0.899,-0.268,0,-0.604,0.333,0.663,-0.225,0.415,0.125,-1,-0.528,-0.68,0.099,0.464,-0.992,-0.086,0.229,0.242,0.117,0.875,0.753,0.848,0.817],[0.993,0.514,0.604,0,-1,-0.25,0.454,-0.443,-0.882,-0.72,-0.216,-0.915,-0.331,-0.487,-1,-0.683,-0.331,0.394,0.097,0.733,-0.121,0.86,0.428],[-0.847,-0.521,-0.333,1,0,-0.095,0.598,0.397,-0.49,-0.363,-0.135,0.333,0.836,0.033,-1,-0.249,-0.578,1,-0.567,0.8,-0.415,0.8,0.858],[-0.453,-0.658,-0.663,0.25,0.095,0,-0.6,0.298,-0.799,-0.535,-0.527,-1,0.223,-0.542,0.04,-0.28,-0.197,-0.702,0.63,0.821,0.264,0.798,0.216],[-0.222,-0.692,0.225,-0.454,-0.598,0.6,0,-0.546,-0.413,-0.688,-0.22,-0.55,0.754,0.318,-0.906,-0.18,-0.49,0.968,-0.64,0.95,0.517,0.946,0.767],[-0.248,0.189,-0.415,0.443,-0.397,-0.298,0.546,0,-0.593,-0.434,-0.227,-0.547,-0.164,-0.36,-0.439,-0.702,-0.573,0.699,-0.518,0.778,-0.683,0.567,0.673],[-0.472,-0.383,-0.125,0.882,0.49,0.799,0.413,0.593,0,0.053,0.779,-0.311,0.915,0.577,-0.833,-0.082,-0.074,1,0.474,1,0.47,0.867,0.777],[1,0.804,1,0.72,0.363,0.535,0.688,0.434,-0.053,0,0.59,-0.722,-0.092,-0.225,-1,-0.508,0.753,1,0.847,0.98,0.688,1,0.116],[0.414,-0.362,0.528,0.216,0.135,0.527,0.22,0.227,-0.779,-0.59,0,-1,0.753,-0.533,-1,0.331,-0.286,0.301,0.378,0.905,0.444,0.771,0.015],[0.236,0.704,0.68,0.915,-0.333,1,0.55,0.547,0.311,0.722,1,0,1,0.771,-1,0.828,0.844,1,0.591,1,-0.05,0.974,0.671],[0.734,-0.158,-0.099,0.331,-0.836,-0.223,-0.754,0.164,-0.915,0.092,-0.753,-1,0,-0.918,-0.885,-0.607,-0.518,-0.368,0.885,0.859,0.301,0.882,-1],[-0.481,0.614,-0.464,0.487,-0.033,0.542,-0.318,0.36,-0.577,0.225,0.533,-0.771,0.918,0,-0.38,0.557,0.412,-0.3,-0.308,0.869,-0.164,0.706,-0.635],[0.809,0.959,0.992,1,1,-0.04,0.906,0.439,0.833,1,1,1,0.885,0.38,0,-0.483,0.796,1,0.489,1,-1,0.992,0.942],[0.495,-0.625,0.086,0.683,0.249,0.28,0.18,0.702,0.082,0.508,-0.331,-0.828,0.607,-0.557,0.483,0,-0.109,-0.283,0.889,0.888,0.393,0.855,-0.251],[-0.522,0.352,-0.229,0.331,0.578,0.197,0.49,0.573,0.074,-0.753,0.286,-0.844,0.518,-0.412,-0.796,0.109,0,-0.03,0.028,0.947,0.607,0.591,0.784],[0.812,-0.803,-0.242,-0.394,-1,0.702,-0.968,-0.699,-1,-1,-0.301,-1,0.368,0.3,-1,0.283,0.03,0,0.18,0.875,0.73,0.892,0.611],[0.755,0.524,-0.117,-0.097,0.567,-0.63,0.64,0.518,-0.474,-0.847,-0.378,-0.591,-0.885,0.308,-0.489,-0.889,-0.028,-0.18,0,0.9,0.682,0.684,0.861],[-0.958,-0.946,-0.875,-0.733,-0.8,-0.821,-0.95,-0.778,-1,-0.98,-0.905,-1,-0.859,-0.869,-1,-0.888,-0.947,-0.875,-0.9,0,-0.65,-0.8,-0.567],[-0.667,-0.842,-0.753,0.121,0.415,-0.264,-0.517,0.683,-0.47,-0.688,-0.444,0.05,-0.301,0.164,1,-0.393,-0.607,-0.73,-0.682,0.65,0,0.419,0.871],[-0.563,-0.819,-0.848,-0.86,-0.8,-0.798,-0.946,-0.567,-0.867,-1,-0.771,-0.974,-0.882,-0.706,-0.992,-0.855,-0.591,-0.892,-0.684,0.8,-0.419,0,0.392],[-0.889,-0.825,-0.817,-0.428,-0.858,-0.216,-0.767,-0.673,-0.777,-0.116,-0.015,-0.671,1,0.635,-0.942,0.251,-0.784,-0.611,-0.861,0.567,-0.871,-0.392,0]],"skills":[{"id":"regen","type":"regen","name":"Regeneration","cost":100,"params":{}},{"id":"poison","type":"poison","name":"Poison shot","cost":100,"params":{"pct":150}},{"id":"stealth","type":"stealth","name":"Stealth","cost":100,"params":{}},{"id":"armorHp","type":"armorHp","name":"Armor and health","cost":200,"params":{}},{"id":"spawn","type":"spawn","name":"Spawn goblins","cost":200,"params":{"every":7}},{"id":"rapid","type":"rapid","name":"Rapid fire","cost":100,"params":{}},{"id":"swift","type":"swift","name":"Swift strikes","cost":100,"params":{}},{"id":"heavy","type":"heavy","name":"Heavy shot","cost":100,"params":{}},{"id":"healer","type":"healer","name":"Healing touch","cost":200,"params":{}},{"id":"range","type":"range","name":"Long reach","cost":200,"params":{}},{"id":"shrink","type":"shrink","name":"Shortsight","cost":100,"params":{}},{"id":"skmv5oxj501","type":"ward","name":"Ward","cost":100,"params":{}},{"id":"skmv5oxpgk2","type":"slow","name":"Slow","cost":100,"params":{}},{"id":"raiseDead","type":"spawn","name":"Raise dead","cost":0,"params":{"unit":"Skeleton Archers","count":3,"every":2,"max":12}},{"id":"spiderlings","type":"deathSpawn","name":"Spiderlings","cost":200,"params":{"unit":"Spiders","count":2,"strength":50}},{"id":"split","type":"split","name":"Split beam","cost":100,"params":{}},{"id":"forward","type":"forward","name":"Forward planting","cost":100,"params":{}},{"id":"gallop","type":"swift","name":"Gallop","cost":200,"params":{"speed":25,"hit":0}},{"id":"deathBurst","type":"blast","name":"Death burst","cost":200,"params":{"radius":7,"pct":100}},{"id":"dualFlame","type":"turret","name":"Dual Flame","cost":200,"params":{"turrets":2}},{"id":"lifesteal","type":"lifesteal","name":"Lifesteal","cost":150,"params":{"pct":10}},{"id":"dualSpear","type":"turret","name":"Dual Spear","cost":300,"params":{"turrets":2}},{"id":"frenzy","type":"frenzy","name":"Frenzy","cost":250,"params":{"pct":10,"cap":2}},{"id":"spread","type":"spread","name":"Spread","cost":300,"params":{"min":1,"max":6}},{"id":"boneShield","type":"shield","name":"Bone shield","cost":200,"params":{"hits":1}},{"id":"emberMortar","type":"mortar","name":"Ember Mortar","cost":300,"params":{"range":15,"min":5,"aps":0.1}}]};
+  const FDATA = {"factions":[],"units":[],"matrix":[],"skills":[{"id":"regen","type":"regen","name":"Regeneration","cost":100,"params":{}},{"id":"poison","type":"poison","name":"Poison shot","cost":100,"params":{"pct":150}},{"id":"stealth","type":"stealth","name":"Stealth","cost":100,"params":{}},{"id":"armorHp","type":"armorHp","name":"Armor and health","cost":200,"params":{}},{"id":"spawn","type":"spawn","name":"Spawn goblins","cost":200,"params":{"every":7}},{"id":"rapid","type":"rapid","name":"Rapid fire","cost":100,"params":{}},{"id":"swift","type":"swift","name":"Swift strikes","cost":100,"params":{}},{"id":"heavy","type":"heavy","name":"Heavy shot","cost":100,"params":{}},{"id":"healer","type":"healer","name":"Healing touch","cost":200,"params":{}},{"id":"range","type":"range","name":"Long reach","cost":200,"params":{}},{"id":"shrink","type":"shrink","name":"Shortsight","cost":100,"params":{}},{"id":"skmv5oxj501","type":"ward","name":"Ward","cost":100,"params":{}},{"id":"skmv5oxpgk2","type":"slow","name":"Slow","cost":100,"params":{}},{"id":"raiseDead","type":"spawn","name":"Raise dead","cost":0,"params":{"unit":"Skeleton Archers","count":3,"every":2,"max":12}},{"id":"spiderlings","type":"deathSpawn","name":"Spiderlings","cost":200,"params":{"unit":"Spiders","count":2,"strength":50}},{"id":"split","type":"split","name":"Split beam","cost":100,"params":{}},{"id":"forward","type":"forward","name":"Forward planting","cost":100,"params":{}},{"id":"gallop","type":"swift","name":"Gallop","cost":200,"params":{"speed":25,"hit":0}},{"id":"deathBurst","type":"blast","name":"Death burst","cost":200,"params":{"radius":7,"pct":100}},{"id":"dualFlame","type":"turret","name":"Dual Flame","cost":200,"params":{"turrets":2}},{"id":"lifesteal","type":"lifesteal","name":"Lifesteal","cost":150,"params":{"pct":10}},{"id":"dualSpear","type":"turret","name":"Dual Spear","cost":300,"params":{"turrets":2}},{"id":"frenzy","type":"frenzy","name":"Frenzy","cost":250,"params":{"pct":10,"cap":2}},{"id":"spread","type":"spread","name":"Spread","cost":300,"params":{"min":1,"max":6}},{"id":"boneShield","type":"shield","name":"Bone shield","cost":200,"params":{"hits":1}},{"id":"emberMortar","type":"mortar","name":"Ember Mortar","cost":300,"params":{"range":15,"min":5,"aps":0.1}}]}; // the Factions gamemode: { factions, units (each with its faction), matrix, skills } (tools/counter-table.js)
+  Game.setFactions(FDATA.factions);
   const ROLES = {
     'Goblin Swarm': 'Fast melee swarm. Soaks shots and overwhelms single-target units.',
     'Skeleton Archers': 'Cheap ranged squad that deals steady damage from behind.',
@@ -4079,7 +4193,7 @@ const Render2D = (cv, view) => {
   let me = 0;               // which side of the match this screen plays (the guest is side 1)
   const foe = () => 1 - me;
   let m = null;             // match state (on the guest: a copy kept in step by the host)
-  let phase = 'start';      // start | lobby | deploy | battle | result | end
+  let phase = 'start';      // start | lobby | draft | deploy | battle | result | end
   try { if (/[?&]test\b/.test(location.search)) window.__pb = () => ({ m, me }); } catch (e) {} // read-only peek for UI tests
   let selected = null;      // unit index chosen in the shop
   let bt = null;            // battle being played back
@@ -4181,7 +4295,7 @@ const Render2D = (cv, view) => {
   for (const id in MAP_MUSIC) for (const k in MAP_MUSIC[id]) music[k + '-' + id] = playlist(MAP_MUSIC[id][k]);
   function syncMusic() {
     const on = musicUnlocked && musicLevel() > 0;
-    music.menu.set(on && (phase === 'start' || phase === 'lobby'));
+    music.menu.set(on && (phase === 'start' || phase === 'lobby' || phase === 'draft'));
     const own = m && m.map && MAP_MUSIC[m.map.id] || {};
     const pick = (k) => own[k] ? k + '-' + m.map.id : k; // this map's player for that phase, or the general one
     const cur = phase === 'deploy' ? pick('deploy') : (phase === 'battle' || phase === 'result') ? pick('battle') : '';
@@ -4400,9 +4514,9 @@ const Render2D = (cv, view) => {
     $('hpbar-you').style.width = (hpMe / Game.START_HP * 100) + '%';
     $('hpbar-foe').style.width = (hpFoe / Game.START_HP * 100) + '%';
     $('round').textContent = v ? v.round : 1;
-    $('phase').textContent = { start: 'Ready', lobby: 'Lobby', deploy: 'Deploy', battle: 'Battle', result: 'Result', end: 'Match over' }[phase];
+    $('phase').textContent = { start: 'Ready', lobby: 'Lobby', draft: 'Draft', deploy: 'Deploy', battle: 'Battle', result: 'Result', end: 'Match over' }[phase];
     $('foe-name').textContent = foeName();
-    document.querySelector('.hud').hidden = phase === 'start' || phase === 'lobby'; // no match yet: nothing to show
+    document.querySelector('.hud').hidden = phase === 'start' || phase === 'lobby' || phase === 'draft'; // no match yet: nothing to show
     syncPick(); syncMusic();
   }
 
@@ -4416,6 +4530,7 @@ const Render2D = (cv, view) => {
     if (solo()) { setNet(''); return; }
     if (net.connected) setNet(mode === 'host' ? `Match ${net.code} · opponent connected` : `Match ${net.code} · connected`, 'ok');
     else if (phase === 'lobby') setNet('');
+    else if (phase === 'draft' && mode === 'guest') setNet('Connection lost. Reconnecting…', 'bad');
     else setNet(mode === 'host' ? `Opponent disconnected. Waiting for them to come back…` : 'Connection lost. Reconnecting…', 'bad');
   }
 
@@ -4592,14 +4707,14 @@ const Render2D = (cv, view) => {
       <div class="bar"><span class="gold num">${g} gold</span><span class="deploys num">${Math.max(0, left)} of ${allowed} deployments left</span><span class="timer" id="timer">${deadline ? fmtClock(deadline - now()) : ''}</span></div>
       <div class="bar"><span class="hint">${hint}</span>${(choosingPack() || choosingTower()) && can ? '' : extraBtns}</div>
       ${(choosingPack() || choosingTower()) && can ? '' : (() => {
-        const tiers = [...new Set(units.map((u, i) => Game.isOff(m, i) ? 0 : tierOf(i)))].filter(t => t > 0).sort((a, b) => a - b); // units left out of the match aren't in the shop
+        const tiers = [...new Set(units.map((u, i) => Game.isOff(m, i, me) ? 0 : tierOf(i)))].filter(t => t > 0).sort((a, b) => a - b); // units left out of the match aren't in the shop
         if (!tiers.includes(shopTier)) shopTier = tiers[0];
         return `<div class="tiers" role="tablist" aria-label="Unit tiers, higher is stronger" style="--n:${tiers.length}">${tiers.map(t => {
-          const idx = units.map((u, i) => i).filter(i => tierOf(i) === t && !Game.isOff(m, i)), open = idx.filter(i => !locked(i)).length, free = idx.some(i => freeN(i) > 0);
+          const idx = units.map((u, i) => i).filter(i => tierOf(i) === t && !Game.isOff(m, i, me)), open = idx.filter(i => !locked(i)).length, free = idx.some(i => freeN(i) > 0);
           return `<button role="tab" data-tier="${t}" aria-selected="${t === shopTier}" aria-label="Tier ${t}, ${tierName(t)}, ${price(idx[0])} gold, ${open} of ${idx.length} unlocked${free ? ', has free squads' : ''}" style="--tier:${tierColor(t)}">Tier ${t}<em>${tierName(t)}</em><small>${price(idx[0])}g · ${open}/${idx.length}</small></button>`;
         }).join('')}</div>`;
       })()}
-      ${(choosingPack() || choosingTower()) && can ? '' : `<div class="shop" id="shop">${units.map((u, i) => tierOf(i) !== shopTier || Game.isOff(m, i) ? '' : `
+      ${(choosingPack() || choosingTower()) && can ? '' : `<div class="shop" id="shop">${units.map((u, i) => tierOf(i) !== shopTier || Game.isOff(m, i, me) ? '' : `
         <div class="uwrap" style="--tier:${tierColor(tierOf(i))}">
           <button class="ucard" data-i="${i}" aria-pressed="${selected === i}" aria-disabled="${!canBuy(i) && !(locked(i) && can)}" ${locked(i) ? `data-locked="1" style="border-style:dashed" aria-label="${esc(u.name)}, locked, unlock for ${Game.unlockCost(m, i, me)} gold"` : ''}>
             <span class="t"><span style="color:${u.color};display:inline-flex">${Shapes.svg(u.shape, 13)}</span> ${tag(u)} <span class="tier">T${tierOf(i)}</span></span><span class="n">${esc(u.name)}</span>
@@ -4688,6 +4803,7 @@ const Render2D = (cv, view) => {
     leaveNet();
     if (claude.ctl) { claude.ctl.abort(); claude.ctl = null; } claude.busy = false;
     mode = 'ai'; me = 0; phase = 'start'; m = null; bt = null; battlePre = null; deadline = 0; resultShownAt = 0;
+    draft = null; clearTimeout(draftTimer); restoreSet();
     hud(); netStatus(); $('clock').textContent = '';
     let resume = null;
     try { resume = JSON.parse(localStorage.getItem(HOST_STORE) || 'null'); } catch (e) {}
@@ -4706,6 +4822,10 @@ const Render2D = (cv, view) => {
         <button class="btn" id="go" style="flex:1">Play vs AI</button>
       </div>
       ${sampleFn ? `<button class="btn primary" id="vs-claude">Play vs Claude</button>` : ''}
+      <div class="bar">
+        <span class="hint">${factionsReady() ? 'Factions: draft two factions each, then fight with their units and towers.' : 'Factions mode: coming soon.'}</span>
+        <button class="btn small" id="factions-ai" ${factionsReady() ? '' : 'disabled'}>Factions vs AI</button>
+      </div>
       <div class="bar">
         <span class="hint">Have a code?</span>
         <span class="joinrow"><input id="code-in" maxlength="5" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-label="Match code" placeholder="CODE"><button class="btn" id="join">Join</button></span>
@@ -4732,7 +4852,8 @@ const Render2D = (cv, view) => {
         </div>`)}`;
     $('how').addEventListener('click', openHowTo);
     $('friend').addEventListener('click', hostLobby);
-    $('go').addEventListener('click', startAiMatch);
+    $('go').addEventListener('click', () => { matchKind = 'standard'; startAiMatch(); });
+    $('factions-ai').addEventListener('click', () => { matchKind = 'factions'; startAiMatch(); });
     if ($('vs-claude')) $('vs-claude').addEventListener('click', startClaudeMatch);
     if ($('resume')) $('resume').addEventListener('click', () => resumeHost(resume));
     $('load-units').addEventListener('click', openLoader);
@@ -4994,7 +5115,7 @@ const Render2D = (cv, view) => {
   function startClaudeMatch() {
     if (!sampleFn) { startAiMatch(); return; }
     leaveNet();
-    mode = 'claude'; me = 0;
+    mode = 'claude'; me = 0; restoreSet();
     m = Game.createMatch(units, M, (now() ^ (Math.random() * 1e9)) >>> 0, mapPick, m && m.map ? m.map.id : null, offChars, matchOpts());
     nextReady = [false, false]; rematch = [false, false];
     claude.off = false; claude.history = [];
@@ -5130,7 +5251,7 @@ ${m.packages[1].map((p, k) => `  ${k}: ${p.squads.map(ui => units[ui].name).join
 - You may sell squads from earlier rounds for half their worth: the unit's price plus its level-ups (their tile becomes free).
 
 UNITS
-${units.map((u, i) => Game.isOff(m, i) ? null : unitLine(u, i)).filter(Boolean).join('\n')}
+${units.map((u, i) => Game.isOff(m, i, 1) ? null : unitLine(u, i)).filter(Boolean).join('\n')}
 
 COUNTER TABLE (each unit vs each other with equal gold; +100 = wins easily, -100 = loses badly)
 ${matrix}
@@ -5235,10 +5356,95 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (claude.say) claude.history.push(claude.say);
   }
 
+  // ---------- Factions gamemode: the draft ----------
+  // Before a Factions match the players draft factions one at a time (Game.FACTION_MODE.order). The match is then
+  // played with the drafted factions' units only (useSet swaps them in; restoreSet puts the player's own units back),
+  // each player with their own two factions. Live: the host runs the draft; the guest sends its picks (dpick).
+  let matchKind = 'standard'; // standard | factions: what Play vs AI / Start match / Rematch starts
+  let draft = null, draftSel = null, draftTimer = 0, standardSet = null;
+  const FALL = { units: FDATA.units, matrix: FDATA.matrix, skills: FDATA.skills || [] };
+  const FSHAPES = Shapes.assign(FALL.units); // for showing each faction's units
+  const factionsReady = () => Game.draftPossible() && FALL.units.length >= 2;
+  function useFactionSet(picks) {
+    if (!standardSet) standardSet = { set: rawSet, custom: customSet };
+    useSet(Game.factionSet(FALL, [...picks[0], ...picks[1]]), false);
+  }
+  function restoreSet() { if (standardSet) { useSet(standardSet.set, standardSet.custom); standardSet = null; } }
+  function startDraft() {
+    restoreSet();
+    m = null; bt = null; battlePre = null; deadline = 0; draftSel = null;
+    draft = Game.createDraft(Math.random() < 0.5 ? 0 : 1);
+    phase = 'draft'; hud(); netStatus(); render();
+    draftChanged();
+  }
+  // after every pick or ban: the AI's turn, the guest's screen, or the match when the draft is done
+  function draftChanged() {
+    clearTimeout(draftTimer); draftSel = null;
+    if (Game.draftDone(draft)) { finishDraft(); return; }
+    const t = Game.draftTurn(draft);
+    if (mode === 'ai' && t.side === 1) draftTimer = setTimeout(() => {
+      if (mode !== 'ai' || phase !== 'draft' || !draft) return;
+      Game.draftAct(draft, 1, Game.aiDraftChoice(draft, 1, FALL, (now() ^ (Math.random() * 1e9)) >>> 0));
+      draftChanged();
+    }, 900);
+    if (mode === 'host') sendSync();
+    drawDraft();
+  }
+  function finishDraft() {
+    const picks = draft.picks; draft = null;
+    useFactionSet(picks);
+    m = Game.createMatch(units, M, (now() ^ (Math.random() * 1e9)) >>> 0, null, null, offChars, { factions: picks });
+    lastSummary = null; nextReady = [false, false]; rematch = [false, false];
+    startReport();
+    if (mode === 'host') hostBeginRound(); else beginAiRound();
+  }
+  function draftPick(id) {
+    const t = Game.draftTurn(draft);
+    if (!t || t.side !== me || !Game.draftOpen(draft).includes(id)) return;
+    if (mode === 'guest') { send({ t: 'dpick', id, step: draft.step }); draftSel = null; return; }
+    if (Game.draftAct(draft, me, id)) draftChanged();
+  }
+  function drawDraft() {
+    if (phase !== 'draft' || !draft) return;
+    const t = Game.draftTurn(draft), mine = t && t.side === me, open = Game.draftOpen(draft);
+    if (!open.includes(draftSel)) draftSel = null;
+    const who = mode === 'ai' ? 'The enemy' : 'Your opponent';
+    const owner = (id) => draft.picks[me].includes(id) ? 'Yours' : draft.picks[foe()].includes(id) ? (mode === 'ai' ? 'Enemy’s' : 'Theirs') : (draft.bans[0].includes(id) || draft.bans[1].includes(id)) ? 'Banned' : '';
+    const names = (ids) => ids.length ? ids.map(id => { const f = Game.factionInfo(id); return `<b style="color:${f.color}">${esc(f.name)}</b>`; }).join('') : '<b>–</b>';
+    overlay(`<div class="draft">
+      <span class="eyebrow">Factions · draft · ${Game.FACTION_MODE.picks} each</span>
+      <h2 style="font-size:clamp(20px,6vw,28px);margin:0">${!t ? 'Draft done' : mine ? (t.act === 'ban' ? 'Ban a faction' : 'Pick a faction') : `${who} is ${t.act === 'ban' ? 'banning' : 'picking'}…`}</h2>
+      <div class="sides"><span>You${names(draft.picks[me])}</span><span>${mode === 'ai' ? 'Enemy' : 'Opponent'}${names(draft.picks[foe()])}</span></div>
+      <div class="fgrid">${draft.pool.map(id => {
+        const f = Game.factionInfo(id); if (!f) return '';
+        const st = owner(id);
+        return `<button class="fac" data-fac="${esc(id)}" style="--fc:${f.color}" aria-pressed="${draftSel === id}" ${st ? 'disabled' : ''}>
+          <span class="nm">${esc(f.name)}</span>${f.theme ? `<span class="sub">${esc(f.theme)}</span>` : ''}${st ? `<span class="st">${st}</span>` : ''}</button>`;
+      }).join('')}</div>
+    </div>`);
+    $('overlay').querySelectorAll('[data-fac]').forEach(b => b.addEventListener('click', () => { draftSel = b.dataset.fac; drawDraft(); }));
+    const f = draftSel && Game.factionInfo(draftSel), T = f && f.tower.unit;
+    const fu = f ? FSHAPES.filter(u => u.faction === f.id) : [];
+    $('panel').innerHTML = `${f ? `<div style="display:grid;gap:6px;font-size:13px;line-height:1.4">
+        <b style="color:${f.color};font-family:var(--font-display);font-size:16px">${esc(f.name)}</b>
+        ${f.trait ? `<span><span style="color:var(--gold)">${esc(f.trait.name || 'Trait')}:</span> ${esc(f.trait.text || '')}</span>` : ''}
+        <span><span style="color:var(--gold)">Tower: ${esc(f.tower.name)}</span> · ${Math.round(T.hp)} hp · hit ${T.hit} × ${T.aps}/s · ${T.range} m${f.tower.text ? `. ${esc(f.tower.text)}` : ''}</span>
+        <span class="hint">${fu.map(u => `<span style="color:${u.color};display:inline-flex;vertical-align:middle;margin-right:3px">${Shapes.svg(u.shape, 12)}</span>${esc(u.name)} · ${Game.unitCostOf(u)} gold`).join('<br>') || 'No units yet.'}</span>
+      </div>` : `<span class="hint">${mine ? 'Tap a faction to see its units and tower.' : 'Tap a faction to see its units and tower while you wait.'}</span>`}
+      <div class="bar">
+        <button class="btn" id="draft-leave">${mode === 'ai' ? 'Main menu' : 'Leave'}</button>
+        ${mine ? `<button class="btn primary" id="draft-go" ${f && open.includes(f.id) ? '' : 'disabled'}>${f ? `${t.act === 'ban' ? 'Ban' : 'Pick'} ${esc(f.name)}` : (t.act === 'ban' ? 'Ban' : 'Pick')}</button>` : ''}
+      </div>`;
+    $('draft-leave').addEventListener('click', () => { if (mode === 'host') clearHost(); showStart(); });
+    if ($('draft-go')) $('draft-go').addEventListener('click', () => { if (draftSel) draftPick(draftSel); });
+  }
+
   // ---------- flow: vs AI ----------
   function startAiMatch() {
     leaveNet();
     mode = 'ai'; me = 0;
+    if (matchKind === 'factions' && factionsReady()) { startDraft(); return; }
+    restoreSet();
     m = Game.createMatch(units, M, (now() ^ (Math.random() * 1e9)) >>> 0, mapPick, m && m.map ? m.map.id : null, offChars, matchOpts());
     nextReady = [false, false]; rematch = [false, false];
     startReport();
@@ -6031,6 +6237,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       <span class="eyebrow">Match code</span>
       <span class="code" aria-label="Match code">${net.code}</span>
       <p class="status ${here ? '' : 'wait'}" id="lobby-status">${problem ? esc(problem) : here ? 'Your friend is here!' : (net.peer && net.peer.open ? 'Waiting for your friend to open the link' : 'Setting up the match')}</p>
+      ${factionsReady() ? `<div class="seg" role="group" aria-label="Gamemode"><button data-kind="standard" aria-pressed="${matchKind !== 'factions'}">Standard</button><button data-kind="factions" aria-pressed="${matchKind === 'factions'}">Factions</button></div>` : ''}
       <button class="btn primary" id="start" ${here ? '' : 'disabled'}>Start match</button>
     </div>`);
     $('panel').innerHTML = `
@@ -6055,12 +6262,15 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     });
     $('cancel').addEventListener('click', () => { clearHost(); showStart(); });
     $('start').addEventListener('click', hostStartMatch);
+    $('overlay').querySelectorAll('[data-kind]').forEach(b => b.addEventListener('click', () => { matchKind = b.dataset.kind; drawLobby(); }));
     wireMapSeg(); wireCharSeg(); wireSettings();
   }
   function selectLink() { const r = document.createRange(); r.selectNodeContents($('link')); const s = getSelection(); s.removeAllRanges(); s.addRange(r); }
 
   function hostStartMatch() {
     if (!net.connected) return;
+    if (matchKind === 'factions' && factionsReady()) { startDraft(); return; }
+    restoreSet();
     m = Game.createMatch(units, M, (now() ^ (Math.random() * 1e9)) >>> 0, mapPick, m && m.map ? m.map.id : null, offChars, matchOpts());
     lastSummary = null; nextReady = [false, false]; rematch = [false, false];
     startReport();
@@ -6080,6 +6290,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     sendSync();
     netStatus();
     if (phase === 'lobby') drawLobby();
+    else if (phase === 'draft') drawDraft();
     else if (phase === 'deploy') panelDeploy();
   }
   function onFriendLost() {
@@ -6123,6 +6334,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   function sendSync() {
     if (!net.connected) return;
     const base = { t: 'sync', proto: 1, set: { units: rawSet.units, matrix: rawSet.matrix, skills: rawSet.skills || [], rules: rawSet.rules || null }, custom: customSet, config: { levelCostPerTier: Game.CONFIG.levelCostPerTier } };
+    if (!m && phase === 'draft' && draft) { send({ t: 'draft', draft }); return; }
     if (!m) { send({ ...base, phase: 'lobby' }); return; }
     const ph = phase === 'battle' ? 'result' : phase;
     send({ ...base, phase: ph, m: syncState(), remaining: phase === 'deploy' && deadline ? deadline - now() : 0, ready, nextReady, rematch, summary: lastSummary });
@@ -6145,6 +6357,9 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     } else if (d.t === 'rematch') {
       rematch[1] = true; sendStatus();
       if (!checkRematch() && phase === 'end') showResult(lastSummary);
+    } else if (d.t === 'dpick') {
+      if (phase !== 'draft' || !draft || d.step !== draft.step || !Game.draftAct(draft, 1, String(d.id))) return;
+      draftChanged();
     } else if (d.t === 'forfeit') foeForfeited();
   }
 
@@ -6268,6 +6483,8 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (!peerAvailable()) { overlayMsg('Couldn’t load the multiplayer code', 'Check your connection and reload the page.'); return; }
     leaveNet();
     mode = 'host'; me = 0;
+    restoreSet();
+    if (s.m && s.m.factions) { standardSet = { set: rawSet, custom: customSet }; matchKind = 'factions'; } // a Factions match: the player's own units come back after it
     useSet(validSet(s.set) ? s.set : BUILTIN, !!s.custom);
     Game.CONFIG.levelCostPerTier = (s.config && s.config.levelCostPerTier) || Game.CONFIG.levelCostPerTier;
     net.code = s.code; mapPick = typeof s.mapPick === 'string' ? s.mapPick : '';
@@ -6356,9 +6573,17 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
 
   function guestRecv(d) {
     if (!d || typeof d !== 'object') return;
+    if (d.t === 'draft') {
+      const x = d.draft;
+      if (!x || !Array.isArray(x.pool) || !Array.isArray(x.picks) || !Array.isArray(x.bans) || !Number.isInteger(x.step)) return;
+      m = null; bt = null; battlePre = null; deadline = 0;
+      draft = x; phase = 'draft'; hud(); netStatus(); render(); drawDraft();
+      return;
+    }
     if (d.t === 'sync') {
       if (validSet(d.set)) useSet(d.set, !!d.custom);
       if (d.config && d.config.levelCostPerTier) Game.CONFIG.levelCostPerTier = d.config.levelCostPerTier;
+      if (d.m) draft = null;
       if (d.phase === 'lobby' || !d.m) { m = null; phase = 'lobby'; hud(); render(); guestWaiting('Connected. Waiting for your friend to start the match'); return; }
       const incoming = withUnits(d.m);
       const theirReady = d.ready ? !!d.ready[0] : false;
