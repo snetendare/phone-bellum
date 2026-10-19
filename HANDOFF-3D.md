@@ -1,0 +1,28 @@
+# Handoff: getting the 3D board into the live game
+
+Repo `snetendare/phone-bellum`, branch `refactor/render-split` (12 commits ahead of `main`, 1 behind). Not merged, no PR yet.
+
+## Where things stand
+
+- **2D board split out.** `src/render2d.js` draws the board and reads the game only through `view()`. Shared art (palette, coats of arms, tower icons) is in `src/art.js`. `node tools/tests/snapshots.js before` / `after before` checks the 2D drawing hasn't changed (68 fixed board moments, all identical so far).
+- **3D board.** `src/render3d.js` (three.js 0.180.0 in `vendor/`) has the same calls and the same `view()` as `render2d.js`. `src/camera3d.js` has three views: strategic (straight down), angled and ground (ground is for watching only). `src/models3d.js` holds low-poly models, picked from unit stats. The six tier 4 units have their own models, picked by name (Ether Golem, Sun Priest, Meteor Caller, War Mammoth, Necromancer, Truespear).
+- **3D test page** `lab3d.html` (`src/lab3d.js`, `src/lab3d-template.html`). You deploy blue against the AI, with unlimited gold. Pick a unit and tap a tile, tap a new squad to take it back, drag to move it. This works in the strategic view and in the angled view. The Strategic / Angled / Ground buttons switch views. Auto lets the AI deploy. Blue: AI watches two AIs.
+- **Camera input.** In the strategic view, and in the angled view while `opts.placing()` is true, the page can take taps, one-finger drags (`onPress` / `onDrag` / `onDrop`) and mouse hover. `render3d.js` hands these on as tiles.
+- **Artifact.** "No Mans Land · 3D test", https://claude.ai/artifact/S5EmsCVWqpqm3BfkWUQ5w8. To update it: `node src/build.js && node tools/build-artifact.js`, then publish `lab3d-artifact.html` to that URL. `vendor/` and `icon.png` are already published there.
+- **Checks.** `tools/tests/deploy3d.js`: deploy in both views, then fight and round 2. Serve the site on port 8766, `cd tools && npm i`, and run with `NODE_PATH=tools/node_modules` from a scratch folder (it writes screenshots). Headless Chromium needs `--use-gl=angle --use-angle=swiftshader` and runs at about 10–15 fps. That speed is software rendering and doesn't predict phone performance.
+- The live game (`index.html`, `src/site-template.html`) still uses the 2D board only.
+
+## Before the 3D board goes into the live game
+
+Ship it as an opt-in setting first. Keep the 2D board as the default until 3D has held up in real matches.
+
+1. **Merge `main` into the branch first.** `main` has the factions game mode (`deb5f15`: faction draft, per-player faction rosters, faction towers). A trial merge conflicts in `src/site-template.html`, `src/build.js`, `README.md` and `index.html`. `game.js` merges cleanly. The conflict is because the branch moved about 850 lines out of the game page while factions added about 150 to it. Resolve it, rebuild with `node src/build.js` (never hand-merge `index.html`), and rerun the snapshot check and `tools/tests/factions.js`. Faction towers need 3D models; for now they fall back to the plain keep.
+2. **Wire the game's board input to the 3D board.** The game's click and drag handlers (`src/site-template.html`, the "board input" section, about lines 1620–1700) cover more than the test page: the paid Move ability, Matteo's Charisma, elf towers, the altar and map pop-ups, and the unit and tower info sheets. Route them through `render3d.js`'s `onTap` / `onPress` / `onDrag` / `onDrop` / `onHover` so both boards share one set of rules. Don't copy the logic a second time.
+3. **Test on real phones (the most important step).** Measure frame rate in big late-game fights on a mid-range Android and an older iPhone, plus battery use and heat. The 2D board only redraws when something changes; the 3D board redraws every frame, even in the shop, so make it idle when the camera and board are still. Check touch: tile size in the angled view (the zone's outer columns are partly off-screen on a phone), and dragging squads compared with moving the camera.
+4. **Fall back to 2D when 3D can't run.** If WebGL is missing or crashes, or the phone is too slow, switch to the 2D board on its own. Add a 2D / 3D switch in settings.
+5. **Check that two-player matches stay safe.** The renderer only draws, and the battle engine is untouched, so fights still match on both phones. Test one phone on 2D and the other on 3D, rejoining a match, and the countdown. Add a check that 3D never shows what 2D hides from the opponent: hidden enemy squads, stealth units, tower types and characters before they're revealed.
+6. **Loading three.js** (about 720 KB). The live site serves it from `vendor/`. The game artifact is a single inlined page (`tools/build-artifact.js`), so it needs three.js from a CDN (pinned to 0.180.0) or the files published next to it. Load it only when 3D is on, so the 2D game opens as fast as before.
+7. **Tests.** The existing Playwright tests tap the 2D board by grid position. Keeping 2D as the default keeps them valid. Add 3D versions of the key flows (deploy, move, sheets, a full round in a two-player match), building on `deploy3d.js`.
+8. **Smaller gaps.** Models for units that still use the general figures, if wanted. Fix the Counter Lab artifact build: `tools/build-artifact.js` stops at the Counter Lab step because its check rejects any page that mentions "Load units", and Counter Lab help text now does. Decide what the start screen and map picker look like in 3D (the map thumbnails can stay 2D).
+
+Steps 1 and 2 are code work that can start now. Step 3 needs the owner testing on their phones, and its results decide how far to take 3D as the default.
