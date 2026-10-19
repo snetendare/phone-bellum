@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0D1315">
+<link rel="icon" href="icon.png">
+<title>No Mans Land · 3D test</title>
+<style>
+/*BASECSS*/
+html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; background: var(--bg); color: var(--ink); }
+#view { position: fixed; inset: 0; touch-action: none; display: block; }
+#view canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+.hud { position: fixed; left: 0; right: 0; display: flex; gap: 8px; align-items: center; padding: 10px 12px; pointer-events: none; flex-wrap: wrap; }
+.hud > * { pointer-events: auto; }
+.top { top: env(safe-area-inset-top, 0px); justify-content: space-between; }
+.bottom { bottom: env(safe-area-inset-bottom, 0px); flex-direction: column; gap: 6px; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+.chip { font: 500 12px var(--font-data); padding: 4px 8px; border: 1px solid var(--line); border-radius: 999px; background: rgba(13,19,21,0.75); color: var(--muted); }
+.chip.on { color: var(--bg); background: var(--gold); border-color: var(--gold); }
+.levels { display: flex; gap: 4px; }
+.stats { font: 400 11px var(--font-data); color: var(--muted); background: rgba(13,19,21,0.75); padding: 4px 8px; border-radius: 4px; }
+.hud .btn { min-height: 40px; }
+.hud select { min-height: 40px; background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 4px; padding: 0 8px; font: inherit; }
+#msg { position: fixed; left: 50%; top: calc(80px + env(safe-area-inset-top, 0px)); transform: translateX(-50%); font: 600 13px var(--font-data); color: var(--ink); background: rgba(13,19,21,0.8); padding: 6px 12px; border-radius: 4px; pointer-events: none; text-align: center; max-width: calc(100% - 32px); }
+#help { font: 400 12px var(--font-body); color: var(--muted); background: rgba(13,19,21,0.8); padding: 6px 10px; border-radius: 4px; pointer-events: none; text-align: center; max-width: 520px; }
+#board2d { position: fixed; left: -10000px; top: 0; width: 720px; }
+</style>
+</head>
+<body>
+<div id="view"></div>
+<div class="hud top">
+  <div class="levels" id="levels"><span class="chip on">Strategic</span><span class="chip">Angled</span><span class="chip">Ground</span></div>
+  <span class="stats" id="stats"></span>
+</div>
+<div id="msg"></div>
+<div class="hud bottom">
+  <div id="help"></div>
+  <div class="row">
+  <select id="map" aria-label="Map"><option value="standard">Standard</option><option value="forest">Forest Clearing</option><option value="cavern">Mushroom Cavern</option><option value="ice">Frozen Peak</option></select>
+  <button class="btn primary" id="fight">Fight</button>
+  <button class="btn" id="next">Next round</button>
+  <button class="btn" id="new">New armies</button>
+  </div>
+</div>
+<canvas id="board2d" aria-hidden="true"></canvas>
+<script>
+/*SHAPES*/
+/*ENGINE*/
+</script>
+<script>
+/*GAME*/
+</script>
+<script>
+/*ART*/
+/*RENDER2D*/
+/*CAMERA3D*/
+const DATA = /*DATA*/;
+</script>
+<script type="module">
+import * as THREE from './vendor/three.module.min.js';
+/*LAB3D*/
+</script>
+</body>
+</html>

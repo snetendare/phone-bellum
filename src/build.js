@@ -38,4 +38,10 @@ const game = src('site-template.html').replace('/*BASECSS*/', () => src('game.cs
   .replace('/*ART*/', () => src('art.js')).replace('/*RENDER2D*/', () => src('render2d.js')).replace('/*DATA*/', () => src('demo-units.json'));
 game.split('<script>').slice(1).map(s => s.split('</script>')[0]).forEach(s => new Function(s));
 fs.writeFileSync('index.html', game);
-console.log('built index.html and lab.html');
+// 3D test page
+const lab3d = src('lab3d-template.html').replace('/*BASECSS*/', () => src('game.css'))
+  .replace('/*SHAPES*/', () => shapes).replace('/*ENGINE*/', () => eng).replace('/*GAME*/', () => src('game.js'))
+  .replace('/*ART*/', () => src('art.js')).replace('/*RENDER2D*/', () => src('render2d.js')).replace('/*CAMERA3D*/', () => src('camera3d.js'))
+  .replace('/*DATA*/', () => src('demo-units.json')).replace('/*LAB3D*/', () => src('lab3d.js'));
+fs.writeFileSync('lab3d.html', lab3d);
+console.log('built index.html, lab.html and lab3d.html');
