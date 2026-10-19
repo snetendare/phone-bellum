@@ -92,7 +92,10 @@
       "type": "shrink",
       "name": "Shortsight",
       "cost": 100,
-      "params": {}
+      "params": {
+        "m": 6,
+        "duration": 4
+      }
     },
     {
       "id": "skmv5oxj501",
@@ -230,6 +233,15 @@
         "range": 15,
         "min": 5,
         "aps": 0.1
+      }
+    },
+    {
+      "id": "explode",
+      "type": "explode",
+      "name": "Explode on death",
+      "cost": 400,
+      "params": {
+        "pct": 30
       }
     }
   ],
@@ -468,7 +480,8 @@
         },
         {
           "params": {
-            "waves": 3
+            "waves": 3,
+            "every": 8.5
           }
         },
         null
@@ -777,7 +790,7 @@
       "hit": 480,
       "aps": 0.2,
       "range": 22,
-      "speed": 2,
+      "speed": 2.5,
       "splash": 6,
       "shape": "ring",
       "color": "#81f038",
@@ -1044,13 +1057,16 @@
       "color": "#0d3000",
       "skills": [
         "armorHp",
-        "forward"
+        "forward",
+        "explode"
       ],
       "skillsOn": [
+        false,
         false,
         false
       ],
       "skillsInnate": [
+        false,
         false,
         false
       ],
@@ -1061,9 +1077,10 @@
             "hp": 20
           }
         },
+        null,
         null
       ],
-      "deathBlast": 30
+      "deathBlast": 0
     },
     {
       "burst": 1,

@@ -42,9 +42,9 @@ const Game = (() => {
     { id: 'bastion', name: 'Bastion', text: 'Much tougher, with a shorter, slower attack that splashes the units around its target.', unit: { ...TOWER, name: 'Bastion', kind: 'bastion', hp: 1000, aps: 0.8, range: 5, splash: 2, color: '#B79C8A' },
       skill: { name: 'Home ground', text: 'In fights, your units get +2 armor and +10% health while they stand in your own zone. They lose it in no man’s land and get it back if they return.' },
       skill2: { name: 'Moats', cost: 250, text: 'A ring of fire around the bastion: 12 damage 4 times a second to every enemy within 5 m, like a Flame Wizard’s flames.' } },
-    { id: 'mage', name: 'Mage tower', text: 'A small sun-priest beam: it locks onto one enemy and hits harder and faster the longer it stays on it. Slow against swarms, but melts big units after a few seconds.', unit: { ...TOWER, name: 'Mage Tower', kind: 'mage', hit: 14, aps: 1.5, range: 12, spinUp: 50, spinHit: 50, color: '#A493DE' },
+    { id: 'mage', name: 'Mage tower', text: 'A small sun-priest beam: it locks onto one enemy and hits harder and faster the longer it stays on it. Slow against swarms, but melts big units after a few seconds.', unit: { ...TOWER, name: 'Mage Tower', kind: 'mage', hp: 600, hit: 14, aps: 1.5, range: 12, spinUp: 50, spinHit: 50, color: '#A493DE' },
       generals: true }, // no once-per-match skill: a mage general can be called every round instead (MAGE_GENERALS)
-    { id: 'bank', name: 'Bank tower', text: 'Sturdy, with an attack between the keep and the sniper tower: medium range, medium fire rate.', unit: { ...TOWER, name: 'Bank Tower', kind: 'bank', hp: 700, hit: 45, aps: 0.8, range: 18, color: '#D9B95B' },
+    { id: 'bank', name: 'Bank tower', text: 'Sturdy, with an attack between the keep and the sniper tower: medium range, medium fire rate.', unit: { ...TOWER, name: 'Bank Tower', kind: 'bank', hp: 700, hit: 45, aps: 0.6, range: 18, color: '#D9B95B' },
       loan: true, // a loan can be taken every round (LOAN)
       skill2: { name: 'Major investment', cost: 500, noFree: true, text: 'Pay 500 gold now and get 1000 gold at the start of next round. Once per match.' } }, // see resolve
     { id: 'slime', name: 'Slime tower', text: 'Lobs splashing slime globs like one Slimeshots body, with 5 m more range.', unit: { ...TOWER, name: 'Slime Tower', kind: 'slime', hit: 7, aps: 0.8, range: 26, splash: 3, projSpeed: 30, spinUp: 0.1, color: '#7BD93F' },
@@ -253,7 +253,7 @@ const Game = (() => {
   // Each starting package comes with a character, who gives that player a passive ability for the whole match.
   const CHARACTERS = [
     { id: 'cage', name: 'Frickolas Cage', ability: 'All your units have 10% more health.' },
-    { id: 'zoe', name: 'Zoe', ability: 'Every round, 2 random tiles in your zone become buff tiles. A squad that starts the fight on one gets +20% damage, +20% health and +10% attack speed for the whole fight.' },
+    { id: 'zoe', name: 'Zoe', ability: 'Every round, 2 random tiles in your zone become buff tiles. A squad that starts the fight on one gets a bonus for the whole fight, and the bonus grows every round you use them: +10% damage and health at first, then +20% / +20% / +5% attack speed, +30% / +30% / +10%, up to +40% / +40% / +15%.' },
     { id: 'emile', name: 'Emile', ability: 'Tier 1 units are free to unlock.' },
     { id: 'wilhelm', name: 'Wilhelm', ability: 'Your squads on flank tiles and in no man’s land get +4 armor, and flank squads start twice as fast.' },
     { id: 'blixten', name: 'Blixten', ability: 'Your first map or tower purchase each round is free: a bribe, an offering at the altar of ice, your own elf tower, removing a mushroom tile, a tower skill or a mage general (not the bank’s Major investment).' },
@@ -265,7 +265,7 @@ const Game = (() => {
     { id: 'enzo', name: 'Enzo', ability: 'You can’t buy unit skills, but each unit type comes with one random skill, for free, picked at the start of the match and the same for all your squads of it all match (see it under the unit’s i button). All your units have 10% less health and damage.' },
     { id: 'matteo', name: 'Matteo - the Gentleman', ability: 'Give one of your squads a stack of Charisma. When a squad with Charisma kills an enemy, it gains a stack and gives one to a squad of yours without any. At 5 stacks a squad is a Gentleman: the first enemy it would kill each fight joins your side for that fight instead, at half health.' },
   ];
-  const CHAR = { cageHp: 10, zoeTiles: 2, zoeDmg: 20, zoeHp: 20, zoeAps: 10, wilhelmArmor: 4, wilhelmDelay: 0.5, noahLevel: 1, noahCut: 10, enzoCut: 10, philTier: 4, philOff: 100, yotUnit: 'Ember Imps', yotLv2: 3, yotLv3: 6, felixRound: 3, felixGold: 50 };
+  const CHAR = { cageHp: 10, zoeTiles: 2, zoeDmg: [10, 20, 30, 40], zoeHp: [10, 20, 30, 40], zoeAps: [0, 5, 10, 15], wilhelmArmor: 4, wilhelmDelay: 0.5, noahLevel: 1, noahCut: 10, enzoCut: 10, philTier: 4, philOff: 100, yotUnit: 'Ember Imps', yotLv2: 3, yotLv3: 6, felixRound: 3, felixGold: 50 };
   // ---------- Matteo's charisma ----------
   // sq.charm = Charisma stacks on a squad, kept between rounds; they grow in fights (see Engine: opts.charm).
   // Matteo gives the first stack to a squad of his choice (again whenever none of his squads has any, e.g. after
@@ -728,6 +728,7 @@ const Game = (() => {
       towers: null, // { col, row } of each player's tower (fixed; set below, as it depends on the map)
       chars: [null, null], // each player's character id (comes with the package)
       buff: [[], []], // Zoe's buff tiles for this round: [{ col, row }, ...]
+      zoeUses: [0, 0], // fights each player has used Zoe's buff tiles in (the buff grows with them: zoeBuff)
       unlocks: [{}, {}], // units unlocked per player: unlocks[side][unitIdx] = round it was unlocked
       off, // units left out of this match: they can't be unlocked, placed or dealt in a package
       rules, // roster rules for the fights (null = all on)
@@ -754,7 +755,18 @@ const Game = (() => {
   // ---------- skills (bought per unit type, for all squads of that type) ----------
   // m.units[i].skillDefs = [def or null, ...], one per skill slot (Engine.SKILL_SLOTS)
   const skillDef = (m, ui, k) => (m.units[ui].skillDefs || [])[k] || null;
-  const skillCost = (m, ui, k) => { const d = skillDef(m, ui, k); return d ? Math.max(0, Math.round(+d.cost || 0)) : 0; };
+  // Every skill a player buys makes all their other skills SKILL_STEP gold dearer. side (optional): that player's price,
+  // for a skill they don't have yet the price to buy it, for one they bought the refund for undoing it (so buying and
+  // undoing in any order always adds up)
+  const SKILL_STEP = 50;
+  const skillsBought = (m, side) => { let n = 0; const t = (m.tech && m.tech[side]) || {}; for (const ui in t) t[ui].forEach((r, k) => { if (r > 0 && !isInnate(m, +ui, k)) n++; }); return n; };
+  const skillCost = (m, ui, k, side) => {
+    const d = skillDef(m, ui, k); if (!d) return 0;
+    const base = Math.max(0, Math.round(+d.cost || 0));
+    if (side == null || isInnate(m, ui, k)) return base;
+    const n = skillsBought(m, side) - (hasSkill(m, side, ui, k) ? 1 : 0);
+    return base + SKILL_STEP * Math.max(0, n);
+  };
   // a built-in skill (skillsInnate on the unit) is always on, free and visible
   const isInnate = (m, ui, k) => !!(skillDef(m, ui, k) && Array.isArray(m.units[ui].skillsInnate) && m.units[ui].skillsInnate[k]);
   const hasSkill = (m, side, ui, k) => isInnate(m, ui, k) || !!(m.tech && m.tech[side] && m.tech[side][ui] && m.tech[side][ui][k] > 0);
@@ -827,11 +839,11 @@ const Game = (() => {
     if (!d || hasSkill(m, side, ui, k)) return false;
     if (charOf(m, side) === 'enzo') return false; // Enzo's squads come with their skill instead
     if (!m.armies[side].some(s => s.unit === ui)) return false; // needs a squad of that type on the board
-    return m.gold[side] >= skillCost(m, ui, k);
+    return m.gold[side] >= skillCost(m, ui, k, side);
   }
   function buySkill(m, side, ui, k) {
     if (!canBuySkill(m, side, ui, k)) return false;
-    m.gold[side] -= skillCost(m, ui, k);
+    m.gold[side] -= skillCost(m, ui, k, side);
     if (!m.tech) m.tech = [{}, {}];
     const t = m.tech[side][ui] || (m.tech[side][ui] = E.SLOTS.map(() => 0));
     t[k] = m.round;
@@ -843,8 +855,8 @@ const Game = (() => {
     // Forward planting can't be taken back while a squad of that unit stands in no man's land
     const d = skillDef(m, ui, k);
     if (d && d.type === 'forward' && m.armies[side].some(s => s.unit === ui && inNoMans(s.row))) return false;
+    m.gold[side] += skillCost(m, ui, k, side); // the refund, worked out while it's still owned
     t[k] = 0;
-    m.gold[side] += skillCost(m, ui, k);
     return true;
   }
 
@@ -999,7 +1011,7 @@ const Game = (() => {
       if (ch === 'wilhelm' && forward) u = { ...u, bonusArmor: (u.bonusArmor || 0) + CHAR.wilhelmArmor };
       // Zoe: a squad that starts the fight on a buff tile keeps the bonus for the whole fight
       const zoe = onBuffTile(m, side, sq.col, sq.row);
-      if (zoe) u = { ...u, hit: u.hit * (1 + CHAR.zoeDmg / 100), hp: u.hp * (1 + CHAR.zoeHp / 100), aps: u.aps * (1 + CHAR.zoeAps / 100) };
+      if (zoe) { const zb = zoeBuff(m, side); u = { ...u, hit: u.hit * (1 + zb.dmg / 100), hp: u.hp * (1 + zb.hp / 100), aps: u.aps * (1 + zb.aps / 100) }; }
       if (eagle && u.name === 'Sniper') u = { ...u, range: u.range + TOWER_SKILL.eagleRange, aps: u.aps * (1 + TOWER_SKILL.eagleAps / 100) };
       if (mp && mp.rangeCut && u.range > mp.rangeKeep) u = { ...u, range: Math.max(mp.rangeKeep, u.range * (1 - mp.rangeCut / 100)) }; // the map shortens reach (never below rangeKeep)
       const b = E.buildSquad(u, side, w.x, w.y, sq.id, TILE, idx, sq.level);
@@ -1100,6 +1112,12 @@ const Game = (() => {
     for (let k = 0; k < CHAR.zoeTiles && spots.length; k++) m.buff[side].push(spots.splice(Math.floor(r() * spots.length), 1)[0]);
   }
   const onBuffTile = (m, side, col, row) => charOf(m, side) === 'zoe' && !!(m.buff && m.buff[side] || []).some(t => t.col === col && t.row === row);
+  // The buff grows with use: m.zoeUses[side] = fights in which a squad started on one of her tiles (see resolve).
+  // Returns the bonus in percent for this round's fight: { dmg, hp, aps }
+  const zoeBuff = (m, side) => {
+    const lv = Math.min(CHAR.zoeDmg.length - 1, (m && m.zoeUses && m.zoeUses[side]) || 0);
+    return { dmg: CHAR.zoeDmg[lv], hp: CHAR.zoeHp[lv], aps: CHAR.zoeAps[lv] };
+  };
 
   function startBattle(m) {
     ensureTower(m, 0); ensureTower(m, 1);
@@ -1140,6 +1158,9 @@ const Game = (() => {
   // Apply a finished battle to the match. Returns a summary for the results screen.
   function resolve(m, res) {
     const dmg = [0, 0]; // damage taken by each side
+    // Zoe: a fight with a squad on one of her buff tiles makes the buff stronger from the next round on
+    if (!m.zoeUses) m.zoeUses = [0, 0];
+    for (const sd of [0, 1]) if (m.armies[sd].some(sq => onBuffTile(m, sd, sq.col, sq.row))) m.zoeUses[sd]++;
     let roundWinner = res.winner;
     if (res.timeout) {
       dmg[0] = survivorDamage(m, res, 1);
@@ -1243,6 +1264,9 @@ const Game = (() => {
     (sq.boughtLevels = sq.boughtLevels || {})[m.round] = ((sq.boughtLevels || {})[m.round] || 0) + 1;
     return true;
   }
+
+  // the level the opponent sees: levels bought this round stay hidden until the fight
+  const seenLevel = (m, sq) => Math.max(0, (sq.level || 0) - ((sq.boughtLevels && sq.boughtLevels[m.round]) || 0));
 
   // Undo a level bought this round (full refund)
   function undoLevel(m, side, sqId) {
@@ -1432,7 +1456,7 @@ const Game = (() => {
       const types = Object.keys(own).map(Number).filter(ui => own[ui] >= 2).sort((a, b) => own[b] - own[a]);
       for (const ui of types) for (const k of E.SLOTS) {
         if (!skillDef(m, ui, k) || hasSkill(m, side, ui, k)) continue;
-        if (m.gold[side] - reserve - skillCost(m, ui, k) < minCost) continue;
+        if (m.gold[side] - reserve - skillCost(m, ui, k, side) < minCost) continue;
         if (r() < 0.5) buySkill(m, side, ui, k);
       }
     }
@@ -1503,17 +1527,17 @@ const Game = (() => {
   return {
     MAX_ROUND_DMG, seenAt, movedId, canMove, moveSquad, undoMove,
     COLS, ROWS, TILE, ZONE, START_HP, START_GOLD, INCOME, incomeFor, LOSER_BONUS, SQUAD_COST, SQUAD_POINTS, SETTINGS, XP_STEPS, xpNeeded, unitCostOf,
-    levelCost, isReady, levelUp, undoLevel, aiLevel, AI, CONFIG,
+    levelCost, isReady, levelUp, undoLevel, seenLevel, aiLevel, AI, CONFIG,
     deploysAllowed, deploysLeft, deployedThisRound, canBuyDeploy, buyDeploy, refundDeploy,
     PACKAGE, allPackages, packOf, needsPack, freeLeft, choosePack, ensurePack,
     unlockCost, tierOf, startLevel, shopCost, mapFreeOf, mapFreeLeft, isUnlocked, unlockVisible, unlock, undoUnlock,
-    skillDef, skillCost, isInnate, hasSkill, skillVisible, unitFor, canBuySkill, buySkill, undoSkill, sellValue, sell,
+    skillDef, skillCost, SKILL_STEP, skillsBought, isInnate, hasSkill, skillVisible, unitFor, canBuySkill, buySkill, undoSkill, sellValue, sell,
     isRider, hiddenFromFoe, isCarrier, riderOf, carrierOf, squadAt, boardable, unplaceSquad,
     TOWER, TOWER_TYPES, OUTPOST, TOWER_PICK_ROUND, towerType, towerChoices, needsTowerPick, setTowerType, settleTowerPicks, TOWER_SKILL, towerSkillOf, towerSkillVisible, towerPicked, canBuyTowerSkill, buyTowerSkill, undoTowerSkill, towerSkillCost, towerSkill2Of, towerSkill2Visible, towerSkill2Cost, canBuyTowerSkill2, buyTowerSkill2, undoTowerSkill2, towerSkill2On, AIRSHIP, MOAT, INVEST, MAGE_GENERALS, mageGenPrice, MAGE, mageGenInfo, mageGenOf, mageTpOf, isExtraGen, mageGenCost, canBuyMageGen, buyMageGen, undoMageGen, mageTowerUnit, generalUnit, LOAN, loanNow, canTakeLoan, takeLoan, undoLoan, SLIME_UNITS, slimeTowerUnit, slimeSkillDefs, TOWER_MID, towerColOk, towerAt, needsTower, placeTower, ensureTower,
     FLANK, flankRows, flankOpen, isFlank, reserved, canPlaceAt, isOff, enemyHolds, inNoMans, hasSkillType,
     ICE, ALTAR, GOLEM, isIce, hailRound, altarRound, stormShift, stormRows, hailTiles, altarCost, altarRefund, altarCount, pushRoom, altarBought, addAltar, buyAltar, undoAltar, snowgres, snowgreUnit,
     MAPS, ELF_TOWER, SHROOM, SHROOM_SPLIT, shroomAt, shroomTileAt, shroomRemoval, SHROOM_REMOVE, shroomCost, removeShroom, undoRemoveShroom, mapOf, elfSpot, rollMap, BRIBE_COST, bribeList, bribeGold, bribeCount, bribeNow, bribeCost, bribeRefund, ELF_POWER, elfPowered, elfUnit, ELF_OWN, elfOwnCost, elfOwnOf, elfOwnAt, elfOwnUnlocked, elfOwnOffered, canBuyElfOwn, elfOwnSpotOk, buyElfOwn, undoElfOwn, bribeLeader, canBribe, bribe, undoBribe,
-    CHARACTERS, CHAR, charOf, charInfo, enzoSkill, charmOf, isGentleman, canGiveCharm, giveCharm, undoCharm, ensureCharm, felixGold, isTier1, rollBuffTiles, onBuffTile, yotImps, yotLevel, TOWER_SPOT, towerSpot,
+    CHARACTERS, CHAR, charOf, charInfo, enzoSkill, charmOf, isGentleman, canGiveCharm, giveCharm, undoCharm, ensureCharm, felixGold, isTier1, rollBuffTiles, onBuffTile, zoeBuff, yotImps, yotLevel, TOWER_SPOT, towerSpot,
     FACTION_MODE, FACTIONS: () => FACTIONS, setFactions, factionInfo, factionsOf, factionTowers, towerTypeById, ownsUnit, withFactionTrait, factionSet,
     createDraft, draftTurn, draftOpen, draftAct, draftDone, draftPossible, aiDraftChoice,
     zoneRows, inZone, tileToWorld, createMatch, place, unplace, bodiesFor, startBattle, resolve, aiDeploy, occupied,
