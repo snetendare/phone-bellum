@@ -38,13 +38,15 @@ if (!l3a.includes("from './vendor/three.module.min.js'")) throw new Error('3D ar
 fs.writeFileSync('lab3d-artifact.html', l3a);
 console.log('wrote lab3d-artifact.html', l3a.length);
 
-// Counter Lab artifact (counter-lab.html) from lab.html: no link back to the game, no note about Load units
+// Counter Lab artifact (counter-lab.html) from lab.html: no link back to the game, no notes about Load units
 // (artifacts don't share browser storage with the game).
 const lab = fs.readFileSync('lab.html', 'utf8');
 let la = lab.slice(lab.indexOf('<title>'), lab.indexOf('</head>')) + '\n' + lab.slice(lab.indexOf('<body>') + 6, lab.lastIndexOf('</body>'));
 la = la.replace('<a href="./" style="color:inherit">No Mans Land</a>', 'No Mans Land')
-  .replace(' Units you make here show up in the game under Load units on this device.', '');
-if (la.includes('href="./"') || la.includes('Load units')) throw new Error('lab artifact build failed');
+  .replace(' Units you make here show up in the game under Load units on this device.', '')
+  .replace(' The game’s Load units plays with the saved version of a roster.', '');
+// no sentence on the page may point at the game's Load units (a code comment may)
+if (la.includes('href="./"') || la.split('\n').some(l => l.includes('Load units') && !/\/\/.*Load units/.test(l))) throw new Error('lab artifact build failed');
 fs.writeFileSync('counter-lab.html', la);
 console.log('wrote counter-lab.html', la.length);
 

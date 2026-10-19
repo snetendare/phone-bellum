@@ -7,7 +7,7 @@ Repo `snetendare/phone-bellum`, branch `refactor/render-split`. `main` (with the
 ## Where things stand
 
 - **2D board split out.** `src/render2d.js` draws the board and reads the game only through `view()`. Shared art (palette, coats of arms, tower icons) is in `src/art.js`.
-- **3D board.** `src/render3d.js` (three.js 0.180.0 in `vendor/`) has the same calls and the same `view()` as `render2d.js`. `src/camera3d.js` has three views: strategic (straight down), angled and ground (ground is for watching only). `src/models3d.js` holds low-poly models, picked from unit stats. The six tier 4 units have their own models.
+- **3D board.** `src/render3d.js` (three.js 0.180.0 in `vendor/`) has the same calls and the same `view()` as `render2d.js`. `src/camera3d.js` has three views: strategic (straight down), angled and ground (ground is for watching only). `src/models3d.js` holds low-poly models, picked from unit stats. The six tier 4 units and several more (see step 8) have their own models.
 - **One set of board rules.** The game's board input (`src/site-template.html`, "board input") is five functions on tiles: `boardPress`, `boardDrag`, `boardDrop`, `boardHover` and `boardTap`. The 2D canvas's pointer handlers and `render3d.js`'s `onPress` / `onDrag` / `onDrop` / `onHover` / `onTap` both call them.
 - **3D in the game is a setting.** The in-match Settings sheet (the cog) has **Board: 2D / 3D**, and while 3D is on, **3D quality: High / Medium / Low**. 2D is the default. The choice is saved in localStorage (`phone-bellum-board`: `'2d'` / `'3d'`, in `B3D_STORE`), and a saved 3D starts at page load. `?board=3d` in the address, or a page that sets `window.PB_FORCE3D = true` (the phone-test artifact below), forces 3D for testing (`force3d`): that also shows the speed meter and skips the too-slow rule. The switch still works there for the session.
   - `start3d()` in `src/site-template.html` imports three.js from `THREE_URL` (`./vendor/three.module.min.js` on the live site, jsDelivr in `phone-bellum.html`) and, unless a build inlined it, the 3D code from `src/`, then puts the 3D board in place of the canvas. It can run at any time, mid-match too; a switch back to 2D while it loads is respected (`want3d`).
@@ -50,13 +50,12 @@ Repo `snetendare/phone-bellum`, branch `refactor/render-split`. `main` (with the
   - `move-ui.js` fails now and then when a random package squad lands on its fixed target tile (5,11).
   - `flank-ui.js` already failed before this work: it never picks a start package.
   - Several UI checks print `#panel .hint` for a person to read. Tips now live in the Help sheet, so for those moments they print the footer status instead. They still pass.
-  - `tools/build-artifact.js` stops at the Counter Lab step, after writing the game and 3D artifacts (see step 8).
 
 ## Steps to get the 3D board into the live game
 
 Ship it as an opt-in setting first. Keep the 2D board as the default until 3D has held up in real matches. **The owner has decided: once they've done step 5's phone test, 3D becomes the default (step 9).**
 
-1. **Merge `main` into the branch.** Done. The only drawing change on `main` (tower types looked up with `Game.towerTypeById`, so faction towers are found) moved into `src/art.js`. Faction towers still use the plain keep in 3D. `src/factions.json` is still empty, so the Factions mode can't be played yet.
+1. **Merge `main` into the branch.** Done. The only drawing change on `main` (tower types looked up with `Game.towerTypeById`, so faction towers are found) moved into `src/art.js`. Faction towers used the plain keep in 3D until step 8. `src/factions.json` is still empty, so the Factions mode can't be played yet.
 2. **Wire the game's board input to the 3D board.** Done (see "One set of board rules"). Also fixed: the 3D floor stayed black when the board started before a match existed. A texture can't grow in place, so `paintFloor` now starts a new one when the floor canvas changes size.
 3. **Test on real phones.** Done. The owner tested the phone-test artifact on their phones:
    - no big lag and no big battery drain;
@@ -77,11 +76,11 @@ Ship it as an opt-in setting first. Keep the 2D board as the default until 3D ha
    - `game3d-maps.js`: the elf tower (Forest Clearing: bribing from its sheet, then an elf tower of your own bought and placed with a tap), the ice altar (Frozen Peak, round 2: walls and a Snowgre), and Matteo's Give Charisma.
    - `game3d-mp.js`: a full round of a live match with both phones on 3D.
    - The 2D tests still tap the 2D board by grid position (see step 9).
-8. **Smaller gaps.**
-   - Models for units that still use the general figures, and for faction towers, if wanted.
-   - Fix the Counter Lab artifact build: its check rejects any page that mentions "Load units", and the Counter Lab help text now does.
-   - Decide what the start screen and map picker look like in 3D; the map thumbnails can stay 2D.
-   - View buttons (Strategic / Angled) in the game, if pinch and scroll aren't enough.
+8. **Smaller gaps.** Done, except two calls for the owner.
+   - Models: the default roster's units that used general figures now have their own (`NAMED` in `src/models3d.js`): Ent (a walking tree), Rogue (hooded, two daggers), Sniper (a long rifle), Slimeshots (a slime blob), Skeleton Archers (a skeleton with a bow), and the six wizards (Fire Mage, Flame, Leaf, Earth, Steel and Slime Wizard: a bearded wizard with an element on the staff; Slime Wizard used to be drawn as a flying wisp because of its ring shape). Still general figures, and fitting: Goblin Swarm (goblin), Brute (brute), Ember Imps and Wisps (flier). A faction's tower (`kind` `f-<id>`) is now one tower model in the faction's colour (`tower:faction`); on the 2D board faction towers are still the plain keep.
+   - The Counter Lab artifact build works again: it drops the help sentence about the game's Load units, and its check only rejects page text about Load units (a code comment may mention it). `counter-lab.html` hasn't been republished; Counter Lab hasn't changed on this branch apart from a small `shapes.js` tweak.
+   - **Owner's call, recommendation: leave as is.** The start screen and map picker: in 3D the board behind the start screen shows the plain map floor, and the map thumbnails are 2D pictures, which read fine in the picker.
+   - **Owner's call, recommendation: no view buttons.** The owner found the camera fine on phones with pinch and scroll.
 9. **Make 3D the default** (after step 5's phone test; the owner's decision).
    - In `src/site-template.html`, `want3d` starts from `force3d || saved === '3d'`; make it `saved !== '2d'` (anyone who never chose gets 3D; a saved 2D stays 2D) and add `?board=2d` to force 2D.
    - The fallbacks stay: no WebGL, a lost context or a slow phone still drop to 2D with their line, and failing to start or being too slow saves 2D.

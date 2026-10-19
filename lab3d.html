@@ -4148,8 +4148,9 @@ import * as THREE from './vendor/three.module.min.js';
 // Models3D(THREE) -> { kindOf(u), parts(kind), height(kind) }.
 // kindOf picks a figure from a unit's stats (rosters are custom, so names can't be relied on): towers (one per tower
 // type), the elf spire, airships (aloft), the horse and spider shapes, fliers, then archers / casters for ranged
-// units and goblins / brutes / soldiers for melee ones. The default roster's tier 4 units have their own models, by
-// name (NAMED); a custom unit with one of those names gets that model too. height(kind): the top of the model, for markers above it.
+// units and goblins / brutes / soldiers for melee ones. The default roster's tier 4 units, the wizards and a few more
+// (Ent, Rogue, Sniper, Slimeshots, Skeleton Archers) have their own models, by name (NAMED); a custom unit with one of
+// those names gets that model too. A faction's tower (Factions mode) is one tower model in the faction's colour. height(kind): the top of the model, for markers above it.
 // parts(kind) gives up to three geometries, drawn as separate instanced meshes so each can be coloured per body:
 //   tint  - takes the unit's own colour (its clothes or hide), as the 2D board fills the shape with it
 //   team  - takes the side's colour (shields, banners, sashes)
@@ -4258,6 +4259,66 @@ const Models3D = (THREE) => {
       P(cone(0.5, 0.9, 3), 'team', [0, 1.4, 1.75], [-Math.PI / 2, 0, 0], [1, 1, 0.2]),
       P(cone(0.5, 0.9, 3), 'team', [0, 1.4, 1.75], [-Math.PI / 2, 0, Math.PI / 2], [1, 1, 0.2]),
       P(box(0.45, 0.3, 0.9), DARK, [0, 0.55, 0])],
+    // ---------- units of the default roster with their own models (NAMED) ----------
+    // Ent: a walking tree, root legs, a band in the team colour, a crown of leaves in the unit's colour, leafy hands
+    ent: () => [
+      P(cyl(0.18, 0.24, 0.7, 5), WOOD, [-0.25, 0.35, 0]), P(cyl(0.18, 0.24, 0.7, 5), WOOD, [0.25, 0.35, 0]),
+      P(cyl(0.38, 0.45, 1.4, 6), WOOD, [0, 1.35, 0]),
+      P(cyl(0.47, 0.47, 0.14, 6), 'team', [0, 1.1, 0]),
+      P(cyl(0.1, 0.14, 1.0, 5), WOOD, [-0.55, 1.6, -0.1], [0.3, 0, 0.9]), P(cyl(0.1, 0.14, 1.0, 5), WOOD, [0.55, 1.6, -0.1], [0.3, 0, -0.9]),
+      P(ball(0.75), 'tint', [0, 2.35, 0.05], [0, 0, 0], [1.1, 0.9, 1.1]),
+      P(ball(0.4), 'tint', [-0.95, 2.0, -0.2]), P(ball(0.4), 'tint', [0.95, 2.0, -0.2]),
+      P(ball(0.06), GLOW, [-0.14, 1.75, -0.4]), P(ball(0.06), GLOW, [0.14, 1.75, -0.4])],
+    // Rogue: slim and hooded, a mask, a cloak in the team colour, a dagger in each hand
+    rogue: () => [...legs(0.75, 0.17, 0.2),
+      P(cyl(0.26, 0.34, 0.75, 6), 'tint', [0, 1.12, 0]),
+      P(cone(0.5, 1.3, 6), 'team', [0, 1.0, 0.14], [-0.12, 0, 0], [1, 1, 0.6]),
+      P(ball(0.23), SKIN, [0, 1.7, 0]),
+      P(cone(0.32, 0.6, 6), 'tint', [0, 1.88, 0.06], [0.2, 0, 0]),
+      P(box(0.3, 0.08, 0.05), DARK, [0, 1.72, -0.21]),
+      ...[-1, 1].flatMap(sd => [P(box(0.1, 0.1, 0.18), DARK, [sd * 0.42, 1.0, -0.12]), P(cone(0.05, 0.55, 4), METAL, [sd * 0.42, 1.08, -0.45], [-1.3, 0, 0])])],
+    // Sniper: a wide-brimmed hat, a strap in the team colour, a long rifle with a scope
+    sniper: () => [...legs(0.8, 0.18, 0.22),
+      P(cyl(0.3, 0.36, 0.8, 6), 'tint', [0, 1.2, 0]),
+      P(box(0.1, 0.9, 0.08), 'team', [0, 1.25, -0.33], [0, 0, 0.6]),
+      P(ball(0.25), SKIN, [0, 1.82, 0]),
+      P(cyl(0.38, 0.38, 0.05, 8), 'tint', [0, 1.98, 0]),
+      P(cyl(0.2, 0.22, 0.24, 6), 'tint', [0, 2.12, 0]),
+      P(cyl(0.045, 0.045, 2.0, 5), DARK, [0.28, 1.5, -0.6], [Math.PI / 2, 0, 0]),
+      P(box(0.12, 0.22, 0.6), WOOD, [0.28, 1.42, 0.2]),
+      P(cyl(0.07, 0.07, 0.4, 6), METAL, [0.28, 1.65, -0.25], [Math.PI / 2, 0, 0])],
+    // Slimeshots: a squat blob of slime with eyes, a ring in the team colour
+    slimeshot: () => [
+      P(ball(0.6), 'tint', [0, 0.5, 0], [0, 0, 0], [1.1, 0.8, 1.1]),
+      P(ball(0.35), 'tint', [0, 0.98, 0.05]),
+      P(cyl(0.62, 0.66, 0.1, 8), 'team', [0, 0.2, 0]),
+      P(ball(0.08), DARK, [-0.14, 1.02, -0.28]), P(ball(0.08), DARK, [0.14, 1.02, -0.28])],
+    // Skeleton Archers: bone legs and spine, ribs in the unit's colour, a skull, a loincloth in the team colour, a bow
+    skeleton: () => [
+      P(box(0.12, 0.75, 0.12), BONE, [-0.16, 0.38, 0]), P(box(0.12, 0.75, 0.12), BONE, [0.16, 0.38, 0]),
+      P(box(0.5, 0.14, 0.26), 'team', [0, 0.8, 0]),
+      P(cyl(0.05, 0.05, 0.7, 4), BONE, [0, 1.15, 0.05]),
+      ...[0, 1, 2].map(k => P(box(0.5 - k * 0.06, 0.06, 0.3), 'tint', [0, 1.0 + k * 0.16, 0])),
+      P(ball(0.24), BONE, [0, 1.65, 0]),
+      P(ball(0.05), DARK, [-0.08, 1.67, -0.21]), P(ball(0.05), DARK, [0.08, 1.67, -0.21]),
+      P(new THREE.TorusGeometry(0.55, 0.035, 3, 8, Math.PI), WOOD, [-0.2, 1.3, -0.5], [0, 0, Math.PI / 2]),
+      P(cyl(0.1, 0.1, 0.7), WOOD, [0.15, 1.25, 0.32], [0.35, 0, 0])],
+    // the wizards: a robe and pointed hat in the unit's colour, a beard, a staff topped by their element
+    ...Object.fromEntries(Object.entries({
+      fire: () => [P(ball(0.17), FIRE, [0.55, 2.3, -0.15]), P(cone(0.12, 0.35, 5), EMBER, [0.55, 2.52, -0.15])],
+      flame: () => [P(cone(0.22, 0.6, 6), FIRE, [0.55, 2.5, -0.15]), P(cone(0.12, 0.38, 6), EMBER, [0.55, 2.42, -0.2])],
+      leaf: () => [P(ball(0.12), '#A6E36A', [0.55, 2.3, -0.15]), ...[0, 2.1, 4.2].map(a => P(cone(0.1, 0.4, 4), '#3E9B2E', [0.55 + Math.sin(a) * 0.15, 2.42, -0.15 + Math.cos(a) * 0.15], [Math.cos(a) * 0.6, 0, -Math.sin(a) * 0.6]))],
+      earth: () => [P(ball(0.2), ROCK, [0.55, 2.3, -0.15], [0.4, 0.6, 0]), P(ball(0.08), STONE, [0.3, 2.6, -0.1])],
+      steel: () => [P(box(0.3, 0.3, 0.3), METAL, [0.55, 2.3, -0.15], [0.6, 0.6, 0]), ...[-1, 1].map(sd => P(cone(0.06, 0.2, 4), METAL, [0.55 + sd * 0.2, 2.3, -0.15], [0, 0, -sd * Math.PI / 2]))],
+      slime: () => [P(ball(0.2), '#7BD93F', [0.55, 2.3, -0.15]), P(cone(0.07, 0.25, 5), '#7BD93F', [0.55, 2.1, -0.15], [Math.PI, 0, 0])],
+    }).map(([k, top]) => ['wizard:' + k, () => [
+      P(cone(0.6, 1.5, 7), 'tint', [0, 0.75, 0]),
+      P(ball(0.25), SKIN, [0, 1.6, 0]),
+      P(cone(0.13, 0.42, 5), BONE, [0, 1.36, -0.2], [Math.PI - 0.35, 0, 0]),
+      P(cyl(0.5, 0.5, 0.06, 8), 'team', [0, 1.78, 0]),
+      P(cone(0.32, 0.8, 7), 'tint', [0, 2.2, 0.05], [0.15, 0, 0]),
+      P(cyl(0.05, 0.05, 2.2, 5), WOOD, [0.55, 1.1, -0.15]),
+      ...top()]])),
     // ---------- the tier 4 units (NAMED) ----------
     // Ether Golem: a hunched heap of boulders in the unit's colour, a glowing core and eye slit, rune shards floating
     golem: () => [
@@ -4374,14 +4435,21 @@ const Models3D = (THREE) => {
     slime: () => [P(cyl(1.8, 2.2, 4.4, 7), 'tint', [0, 2.2, 0]), P(cyl(2.2, 2.0, 0.6, 7), 'tint', [0, 4.7, 0]), ...crown(1.95, 5.25, 7),
       ...[...Array(7)].map((_, k) => P(cone(0.35, 1.2, 5), '#3FA81E', [Math.sin(k * 0.9) * 2.15, 3.9 - (k % 2) * 0.4, Math.cos(k * 0.9) * 2.15], [Math.PI, 0, 0])),
       P(ball(0.85), '#3FA81E', [0, 5.6, 0]), P(cyl(0.65, 0.65, 0.2, 8), 'team', [0, 0.65, -2.0], [Math.PI / 2, 0, 0]), ...flagOn(5.4)],
+    // a faction's tower: a stone hall, a tall round tower and spire in the faction's colour, banners in the team colour
+    faction: () => [P(box(3.4, 3.4, 3.4), STONE, [0, 1.7, 0]), ...crown(2.0, 3.65, 8).map(p => ({ g: p.g, col: STONE })),
+      P(cyl(1.3, 1.5, 3.2, 8), 'tint', [0, 5.0, 0]), P(cone(1.7, 2.4, 8), 'tint', [0, 7.8, 0]),
+      ...[[0, -1], [1, 0], [-1, 0], [0, 1]].map(([x, z]) => P(box(z ? 0.9 : 0.1, 1.6, z ? 0.1 : 0.9), 'team', [x * 1.76, 2.5, z * 1.76])),
+      door(-1.75, 0.8, 1.1), ...flagOn(9.0)],
   };
   for (const [k, f] of Object.entries(TOWERS)) BUILD['tower:' + k] = f;
 
-  const NAMED = { 'Ether Golem': 'golem', 'Sun Priest': 'sunPriest', 'Meteor Caller': 'meteor', 'War Mammoth': 'mammoth', 'Necromancer': 'necro', 'Truespear': 'truespear' };
+  const NAMED = { 'Ether Golem': 'golem', 'Sun Priest': 'sunPriest', 'Meteor Caller': 'meteor', 'War Mammoth': 'mammoth', 'Necromancer': 'necro', 'Truespear': 'truespear',
+    'Ent': 'ent', 'Rogue': 'rogue', 'Sniper': 'sniper', 'Slimeshots': 'slimeshot', 'Skeleton Archers': 'skeleton',
+    'Fire Mage': 'wizard:fire', 'Flame Wizard': 'wizard:flame', 'Leaf Wizard': 'wizard:leaf', 'Earth Wizard': 'wizard:earth', 'Steel Wizard': 'wizard:steel', 'Slime Wizard': 'wizard:slime' };
   const RANGED = 12; // metres: from this range on, a unit is drawn as an archer or a caster
   function kindOf(u) {
     if (u.spire) return 'spire';
-    if (u.structure) return TOWERS[u.kind] ? 'tower:' + u.kind : 'tower:keep';
+    if (u.structure) return TOWERS[u.kind] ? 'tower:' + u.kind : /^f-/.test(u.kind || '') ? 'tower:faction' : 'tower:keep';
     if (u.aloft) return 'airship';
     if (NAMED[u.name]) return NAMED[u.name];
     if (u.shape === 'horse') return 'horse';
