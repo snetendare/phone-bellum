@@ -132,6 +132,9 @@ a { color: var(--you); }
 .settings summary span::after { content: " ▾"; color: var(--gold); }
 .settings[open] summary span::after { content: " ▴"; }
 .settings-body { display: grid; gap: 12px; padding: 0 12px 12px; }
+.cog.help { width: 28px; height: 28px; font: 600 14px var(--font-display); }
+.cog.help.new { color: var(--bg); background: var(--gold); border-color: var(--gold); }
+.helplist { margin: 0; padding-left: 18px; display: grid; gap: 6px; font-size: 14px; color: var(--muted); }
 .linkbtn { border: 0; background: none; padding: 0; font: inherit; color: var(--gold); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
 /* choose one of 3 (starting package, tower): cards over the board, like a level-up pick */
 .pick { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 8px; padding: 12px 10px; overflow-y: auto; -webkit-overflow-scrolling: touch;
@@ -803,6 +806,30 @@ a { color: var(--you); }
   // ---------- panel ----------
   // the picked tower's skill, not bought yet: offered as a button in the deploy panel
   const MORE = (id) => `<button class="linkbtn" id="${id}">More</button>`; // opens the full rules in a sheet
+  // the "More" links in hints, on the panel or in the Help sheet
+  function wireMore() {
+    if ($('map-more')) $('map-more').addEventListener('click', () => openMapSheet());
+    if ($('flank-more')) $('flank-more').addEventListener('click', () => overlayMsgSheet('Flanks', `From round ${Game.FLANK.round}, the blue edge columns on the enemy’s half are yours to deploy on too, and the red ones on your half are theirs. A squad placed on a flank can’t move or attack for the first ${Game.FLANK.delay} s of its first fight. Flank squads march in sideways, toward the middle of the board, until they spot an enemy.`));
+  }
+  // Help while deploying: the current tip (set by panelDeploy), then how the board works
+  let helpTip = '', helpSeen = 0; // helpSeen: the round whose news the player has opened
+  function openHelp() {
+    if (m) helpSeen = m.round;
+    $('sheet').innerHTML = `<div class="bar"><h3 id="sheet-h">Help</h3><button class="btn small" id="close">Close</button></div>
+      ${helpTip ? `<p style="margin:0">${helpTip}</p>` : ''}
+      <ul class="helplist">
+        <li>Pick a unit card, then tap a highlighted tile in your zone, the bottom six rows. Each squad costs its gold and one deployment.</li>
+        <li>Drag a squad you placed this round to move it, or tap it to take it back. Your round 1 package squads are free.</li>
+        <li>A squad with a gold badge can level up: tap it. Tap an older squad, a tower or an enemy squad to see what it does.</li>
+        ${board3d ? '<li>3D board: spread two fingers (or scroll) for the angled view, pinch (or press Esc) to go back to the view from above.</li>' : ''}
+      </ul>
+      <div class="bar"><span></span><button class="btn small" id="help-how">How to play</button></div>`;
+    $('sheet-back').hidden = false;
+    $('close').addEventListener('click', closeSheet);
+    $('help-how').addEventListener('click', openHowTo);
+    wireMore();
+    if (phase === 'deploy') panelDeploy(); // the button stops glowing
+  }
   function overlayMsgSheet(head, text) {
     $('sheet').innerHTML = `<div class="bar"><h3 id="sheet-h">${esc(head)}</h3><button class="btn small" id="close">Close</button></div><p style="margin:0">${esc(text)}</p>`;
     $('sheet-back').hidden = false;
@@ -848,6 +875,12 @@ a { color: var(--you); }
       if (placingElf()) hint = 'Tap a free tile in your zone to place your elf tower. Tap anywhere else to cancel.';
       if (placingTower()) hint = 'Next, place your tower: tap a gold tile on the left or right side of your zone. If it falls in a fight, your army is crippled for a few seconds.';
     }
+    // Only hints about what the next tap does (or why it can't) stay on the panel; the rest (tips, this round's
+    // news) go to the Help sheet, whose button turns gold while there's news not read yet this round.
+    const inline = !can || placingTower() || placingElf() || choosingTower() || choosingPack() || moveMode || (charmMode && Game.canGiveCharm(m, me))
+      || (selected !== null && !canBuy(selected)) ? hint : '';
+    helpTip = inline ? '' : hint;
+    const news = can && selected === null && !fresh && !inline && (Game.hailRound(m) || Game.altarRound(m) || m.round === Game.FLANK.round || (tskillOffer() && m.round === Game.TOWER_PICK_ROUND));
     const extraBtns = `<span style="display:flex;gap:6px;flex-wrap:wrap">
         <button class="btn small" id="buy-deploy" ${can && Game.canBuyDeploy(m, me) ? '' : 'disabled'}>+1 deployment · ${Game.CONFIG.extraDeployCost}</button>
         ${loanOffer() ? (Game.loanNow(m, me) ? `<button class="btn small" id="loan-undo" ${can && m.gold[me] >= Game.LOAN.gold ? '' : 'disabled'}>Pay back loan · −${Game.LOAN.gold}</button>` : `<button class="btn small" id="loan" ${can ? '' : 'disabled'}>Loan · +${Game.LOAN.gold}</button>`) : ''}
@@ -871,8 +904,8 @@ a { color: var(--you); }
       action = `<button class="btn ${ready[me] ? '' : 'primary'}" id="ready" ${timeUp || choosingTower() ? 'disabled' : ''}>${ready[me] ? 'Not ready' : 'Ready'}</button>`;
     }
     $('panel').innerHTML = `
-      <div class="bar"><span class="gold num">${g} gold</span><span class="deploys num">${Math.max(0, left)} of ${allowed} deployments left</span><span class="timer" id="timer">${deadline ? fmtClock(deadline - now()) : ''}</span></div>
-      <div class="bar"><span class="hint">${hint}</span>${(choosingPack() || choosingTower()) && can ? '' : extraBtns}</div>
+      <div class="bar"><span class="gold num">${g} gold</span><span class="deploys num">${Math.max(0, left)} of ${allowed} deployments left</span><span class="timer" id="timer">${deadline ? fmtClock(deadline - now()) : ''}</span><button class="cog help${news && helpSeen !== m.round ? ' new' : ''}" id="help-btn" aria-label="${news && helpSeen !== m.round ? 'Help, news this round' : 'Help'}">?</button></div>
+      <div class="bar">${inline ? `<span class="hint">${inline}</span>` : ''}${(choosingPack() || choosingTower()) && can ? '' : extraBtns}</div>
       ${(choosingPack() || choosingTower()) && can ? '' : (() => {
         const tiers = [...new Set(units.map((u, i) => Game.isOff(m, i, me) ? 0 : tierOf(i)))].filter(t => t > 0).sort((a, b) => a - b); // units left out of the match aren't in the shop
         if (!tiers.includes(shopTier)) shopTier = tiers[0];
@@ -909,8 +942,8 @@ a { color: var(--you); }
     if ($('fight')) $('fight').addEventListener('click', runFight);
     if ($('ready')) $('ready').addEventListener('click', toggleReady);
     if ($('buy-deploy')) $('buy-deploy').addEventListener('click', () => { if (editable() && Game.buyDeploy(m, me)) changed(); });
-    if ($('map-more')) $('map-more').addEventListener('click', () => openMapSheet());
-    if ($('flank-more')) $('flank-more').addEventListener('click', () => overlayMsgSheet('Flanks', `From round ${Game.FLANK.round}, the blue edge columns on the enemy’s half are yours to deploy on too, and the red ones on your half are theirs. A squad placed on a flank can’t move or attack for the first ${Game.FLANK.delay} s of its first fight. Flank squads march in sideways, toward the middle of the board, until they spot an enemy.`));
+    wireMore();
+    $('help-btn').addEventListener('click', openHelp);
     if ($('mage-gen')) $('mage-gen').addEventListener('click', () => openTowerSheet(me));
     if ($('loan')) $('loan').addEventListener('click', () => { if (editable() && Game.takeLoan(m, me)) changed(); });
     if ($('loan-undo')) $('loan-undo').addEventListener('click', () => { if (editable() && Game.undoLoan(m, me)) changed(); });

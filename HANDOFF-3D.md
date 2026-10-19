@@ -16,9 +16,10 @@ Repo `snetendare/phone-bellum`, branch `refactor/render-split`. `main` (with the
   - smaller page padding;
   - the HUD in one row (round number beside its phase and buttons);
   - tighter deploy panel;
-  - two-line tier tabs ("T2 Strong" / price), smaller shop cards.
+  - two-line tier tabs ("T2 Strong" / price), smaller shop cards;
+  - general deploy tips moved off the panel into a Help sheet. The "?" button in the gold line opens it (`openHelp()`, tip in `helpTip`). On the panel, only hints about what the next tap does stay (`inline` in `panelDeploy()`): placing the tower or elf tower, choosing a package or tower, Move and Charisma prompts, not enough gold or no deployments, and waiting or time's-up messages. In a round with news (hail, the ice altar, flanks opening, a tower skill offer), the "?" turns gold until opened that round (`helpSeen`).
   
-  At 390×664 (Safari's usable height on an iPhone 13) the deploy screen now overflows by about 118 px instead of 227. The board keeps its size: it's still `min(100%, (100svh - 300px) * 0.75)` wide on `#wrap`. Raising that 300 would fit more on one screen but shrink the board.
+  At 390×664 (Safari's usable height on an iPhone 13) the deploy screen now overflows by about 77 px instead of 227. The board keeps its size: it's still `min(100%, (100svh - 300px) * 0.75)` wide on `#wrap`. Raising that 300 would fit more on one screen but shrink the board.
 - **Artifacts** (claude.ai, private to the owner):
   - "No Mans Land 3D Game", https://claude.ai/artifact/5ZUYFDjVS6eSv234RBHHEy: the full game starting on the 3D board, for phone testing. "Play vs Claude" doesn't work there; the match history and Claude features would need capabilities declared.
   - "No Mans Land · 3D test", https://claude.ai/artifact/S5EmsCVWqpqm3BfkWUQ5w8: the 3D test page. It's an older build, from before the black-floor fix and idling; republish it from `lab3d-artifact.html` if it's still wanted.
@@ -34,6 +35,8 @@ Repo `snetendare/phone-bellum`, branch `refactor/render-split`. `main` (with the
 - **Problems in older tests:**
   - `pack-ui.js` already failed before this work: a sheet covers the button it clicks.
   - `move-ui.js` fails now and then when a random package squad lands on its fixed target tile (5,11).
+  - `flank-ui.js` already failed before this work: it never picks a start package.
+  - Several UI checks print `#panel .hint` for a person to read. Tips now live in the Help sheet, so for those moments they print the footer status instead. They still pass.
   - `tools/build-artifact.js` stops at the Counter Lab step, after writing the game and 3D artifacts (see step 8).
 
 ## Steps to get the 3D board into the live game
