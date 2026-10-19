@@ -15,7 +15,7 @@ A small auto-battler for the phone browser. Buy squads, place them, and watch th
 
 ## Editing
 
-The source is in `src/`. After changing it, run `node src/build.js` from the repo root. This rebuilds `index.html` and `lab.html`.
+The source is in `src/`. After changing it, run `node src/build.js` from the repo root. This rebuilds `index.html`, `lab.html` and `lab3d.html`.
 
 - `engine.js`: the battle engine. Plain arithmetic only, so both phones in a live match play the same fight. Draws nothing.
 - `game.js`: match rules (gold, rounds, maps, characters, the AI, what each player may see of the other). Draws nothing.
