@@ -211,7 +211,7 @@ a { color: var(--you); }
     'Slime Wizard': 'Lobs huge, slow globs of slime that splash over a wide area.',
     'Ether Golem': 'A walking wall. Heavy armor shrugs off small hits while it holds its lane.',
     'Slimeshots': 'A pack of slime spitters lobbing small splashing globs. Shreds packed swarms.',
-    'Ent': 'Slow tree guardians sweeping a wide arc in front. With the Explode on death skill, each one explodes when it falls, hurting everything around it.',
+    'Ent': 'Slow tree guardians sweeping everything around them in a full circle. With the Explode on death skill, each one explodes when it falls, hurting everything around it.',
     'Sun Priest': 'Channels a beam that burns hotter the longer it holds one target. Melts giants.',
     'Meteor Caller': 'Drops slow meteors from far behind the lines. Helpless once something reaches it.',
     'War Mammoth': 'Charges straight through the enemy line, trampling every body in its path, then stands stunned for a moment before it turns to charge again.',
@@ -1846,7 +1846,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
           ['Growing your army', 'Level up squads, unlock units, buy skills, sell what you don’t need.', `
             <li>Squads earn experience. A gold + means you can upgrade one: level 2 doubles health and attack, level 3 triples them.</li>
             <li>Some units start unlocked. The rest cost gold once to unlock for the match; tap a locked card.</li>
-            <li>Each unit has three skills. Buy one and all your squads of that unit get it. Every skill you buy makes all your other skills ${Game.SKILL_STEP} gold more expensive.</li>
+            <li>Each unit has three skills. Buy one and all your squads of that unit get it. Every skill you buy for a unit makes that unit’s other skills ${Game.SKILL_STEP} gold more expensive.</li>
             <li>You can buy one extra deployment per round for ${Game.CONFIG.extraDeployCost} gold. Tap a squad from an earlier round to sell it for half its worth: its price plus the upgrades it has.</li>`],
         ].map(([h, gist, body]) => `<details><summary><b>${h}</b><span>${gist}</span></summary><ul>${body}</ul></details>`).join('')}
       </div>
@@ -2115,7 +2115,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
       if (u.defense === 'armor') t.push(`armor ${u.defVal}`);
       if (u.defense === 'ward') t.push(`ward ${u.defVal} (max damage per hit)`);
       if (u.burst > 1) t.push(`burst ${u.burst}`);
-      if (u.flame > 0) t.push(`flamethrower: every attack hits all enemies in range within ${u.flame}° to each side of its target`);
+      if (u.flame > 0) t.push(u.flame >= 180 ? 'every attack hits all enemies in range all around it' : `flamethrower: every attack hits all enemies in range within ${u.flame}° to each side of its target`);
       else if (u.pellets > 1) t.push(`shotgun ${u.pellets}`);
       if (u.spinUp > 0) t.push(`spin-up ${u.spinUp}%/s on one target, up to 3x attack speed, starts over when it switches target`);
       if (u.spinHit > 0) t.push(`damage spin-up ${u.spinHit}%/s on one target, up to 3x hit size, starts over when it switches target`);
@@ -2140,7 +2140,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
     const matrix = units.map((u, i) => `${tag(u)}: ` + units.map((v, j) => i === j ? null : `${tag(v)} ${M[i][j] > 0 ? '+' : ''}${Math.round(M[i][j] * 100)}`).filter(Boolean).join(', ')).join('\n');
     const mine = m.armies[1].map(s => {
       const u = units[s.unit], need = s.level < Engine.MAX_LEVEL ? Math.round(Game.xpNeeded(u, s.level)) : null;
-      return `- id ${s.id}: ${u.name} at col ${s.col}, row ${s.row}${Game.isRider(s) ? ` (riding inside your ${units[(Game.carrierOf(m, 1, s) || s).unit].name}, id ${s.in})` : ''}, level ${s.level + 1}${need ? `, XP ${Math.round(s.xp)}/${need}` : ', max level'}${Game.isReady(m, s) ? ', READY TO LEVEL UP' : ''}${s.round < m.round ? `, sells for ${Game.sellValue(m, s)}` : ''}${Game.enzoSkill(m, 1, s) != null ? `, has skill "${u.skillDefs[Game.enzoSkill(m, 1, s)].name}" (Enzo)` : ''}${Game.charmOf(s) ? `, charisma ${Game.charmOf(s)}/${Engine.CHARM_MAX}${Game.isGentleman(s) ? ' (Gentleman)' : ''}` : ''}`;
+      return `- id ${s.id}: ${u.name} at col ${s.col}, row ${s.row}${Game.isRider(s) ? ` (riding inside your ${units[(Game.carrierOf(m, 1, s) || s).unit].name}, id ${s.in})` : ''}, level ${s.level + 1}${need ? `, XP ${Math.round(s.xp)}/${need}` : ', max level'}${Game.isReady(m, s) ? ', READY TO LEVEL UP' : ''}${s.round < m.round ? `, sells for ${Game.sellValue(m, s)}` : ''}${Game.enzoSkill(m, 1, s) != null ? `, has skill "${u.skillDefs[Game.enzoSkill(m, 1, s)].name}" (Enzo${Game.enzoActive(m, 1, s.unit) ? '' : `; off until you have ${Game.CHAR.enzoMin} squads of this unit`})` : ''}${Game.charmOf(s) ? `, charisma ${Game.charmOf(s)}/${Engine.CHARM_MAX}${Game.isGentleman(s) ? ' (Gentleman)' : ''}` : ''}`;
     });
     const theirs = m.armies[0].filter(s => s.round < m.round && !Game.hiddenFromFoe(m, s)).map(s => { const p = Game.seenAt(m, s); return `- ${units[s.unit].name} at col ${p.col}, row ${p.row}, level ${Game.seenLevel(m, s) + 1}`; });
     const theirSkills = [];
@@ -2202,7 +2202,7 @@ ${hist.length ? 'Recent rounds:\n' + hist.join('\n') : '- This is the first roun
 
 ${lastFight}${counterLines}
 HOW TO PLAY WELL
-- Spend your gold. Gold you keep does nothing in this fight, and the human spends theirs every round. Aim to end the round with less than ${cheapest} gold left: place your ${placeNow} squad(s), level up squads that are ready (a level-up doubles a squad for half its price, the best deal in the game), buy skills for units you have several of (every skill you buy makes all your other skills ${Game.SKILL_STEP} gold dearer; the prices listed are yours now), and buy extra deployments (${Game.CONFIG.extraDeployCost} gold each, up to 3) to place more squads when you still have gold.
+- Spend your gold. Gold you keep does nothing in this fight, and the human spends theirs every round. Aim to end the round with less than ${cheapest} gold left: place your ${placeNow} squad(s), level up squads that are ready (a level-up doubles a squad for half its price, the best deal in the game), buy skills for units you have several of (every skill you buy for a unit makes that unit's other skills ${Game.SKILL_STEP} gold dearer; the prices listed are yours now), and buy extra deployments (${Game.CONFIG.extraDeployCost} gold each, up to 3) to place more squads when you still have gold.
 - Learn from the last fight: stop adding units that died without doing damage, and add more of what worked. Counter what they have most of, using the ranking above, but keep a mix so one counter pick from them can't wipe you.
 - Their squads stay where they are, so build where their army will walk into yours. Put tough, short-range units in front of your damage dealers.
 
@@ -2632,7 +2632,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       if (Game.isInnate(m, i, k)) {
         act = `<span class="chip" style="color:var(--ink);border:1px solid currentColor;border-radius:99px;padding:1px 8px;font-size:12px">Built in</span>`;
       } else if (enzo) {
-        act = ek === k ? `<span class="chip" style="color:${mine ? 'var(--gold)' : 'var(--foe)'};border:1px solid currentColor;border-radius:99px;padding:1px 8px;font-size:12px">✓ ${mine ? 'Yours' : 'Theirs'}, free</span>` : `<span class="hint">Not picked</span>`;
+        act = ek === k ? (Game.enzoActive(m, owner, i) ? `<span class="chip" style="color:${mine ? 'var(--gold)' : 'var(--foe)'};border:1px solid currentColor;border-radius:99px;padding:1px 8px;font-size:12px">✓ ${mine ? 'Yours' : 'Theirs'}, free</span>` : `<span class="hint">${mine ? 'Yours' : 'Theirs'}, free · works with ${Game.CHAR.enzoMin}+ squads</span>`) : `<span class="hint">Not picked</span>`;
       } else if (mine) {
         if (Game.hasSkill(m, me, i, k)) {
           act = `<span class="chip" style="color:var(--gold);border:1px solid currentColor;border-radius:99px;padding:1px 8px;font-size:12px">Owned</span>`;
@@ -2649,7 +2649,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
         <div class="bar"><b style="font-family:var(--font-display)">${esc(d.name)}</b><span>${act}</span></div>
         <span class="hint">${esc(Engine.describeSkill(d))}</span></div>`;
     });
-    return `<div style="display:grid;gap:8px"><h4 style="margin:0;font-size:12px;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted)">Skills${enzo ? ' · Enzo: one random skill per unit, free' : mine ? ' · for all your squads of this unit' : ''}</h4>${rows.join('')}</div>`;
+    return `<div style="display:grid;gap:8px"><h4 style="margin:0;font-size:12px;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted)">Skills${enzo ? ` · Enzo: one random skill per unit, free with ${Game.CHAR.enzoMin}+ squads of it` : mine ? ' · for all your squads of this unit' : ''}</h4>${rows.join('')}</div>`;
   }
 
   function openTowerSheet(side) {
@@ -2909,7 +2909,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (u.carrier) tr.push('Carries one squad inside, hidden');
     if (u.noFlank) tr.push('Can’t deploy on flanks');
     if (u.burst > 1) tr.push(`Burst ${u.burst}`);
-    if (u.flame > 0) tr.push(`Flame cone ${u.flame}°, reaches ${Math.round(u.range * (Game.SETTINGS.flameReach || 1) * 10) / 10} m`);
+    if (u.flame > 0) tr.push(`${u.flame >= 180 ? 'Hits all around itself' : `Flame cone ${u.flame}°`}, reaches ${Math.round(u.range * (Game.SETTINGS.flameReach || 1) * 10) / 10} m`);
     else if (u.pellets > 1) tr.push(`Shotgun ${u.pellets}`);
     if (u.spinUp > 0) tr.push(`Spin-up ${u.spinUp}%/s`);
     if (u.spinHit > 0) tr.push(`Damage spin-up ${u.spinHit}%/s`);
