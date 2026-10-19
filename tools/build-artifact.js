@@ -9,15 +9,24 @@ let art = head + '\n' + body;
 art = art.replace('<script src="peerjs.min.js"></script>', '<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>')
   .replace(/<a class="btn small" id="lab-link"[^>]*>Counter Lab<\/a>/, '');
 if (art.includes('id="lab-link"') || !art.includes('jsdelivr')) throw new Error('artifact build failed');
-fs.writeFileSync('phone-bellum.html', art);
-console.log('wrote phone-bellum.html', art.length);
-
-// The game on the 3D board, for testing 3D on phones (game3d-artifact.html): the same page with the 3D code inlined,
-// which makes it start on the 3D board. three.js stays at ./vendor/, published next to the page.
+// The 3D board (the Board setting): its code inlined (about 75 KB; it only defines functions, so the 2D game opens
+// as before), three.js imported from jsDelivr only when 3D starts.
 const code3d = ['camera3d', 'models3d', 'render3d'].map(f => fs.readFileSync(`src/${f}.js`, 'utf8')).join('\n');
-const g3 = art.replace('<title>No Mans Land</title>', '<title>No Mans Land 3D Game</title>')
-  .replace('</style>', () => '</style>\n<script>\n' + code3d + '\n</script>');
-if (g3 === art || !g3.includes('const Render3D')) throw new Error('3D game artifact build failed');
+const with3d = (page, threeUrl) => {
+  const out = page.replace('</style>', () => '</style>\n<script>\n' + code3d + '\n</script>')
+    .replace("const THREE_URL = './vendor/three.module.min.js';", () => `const THREE_URL = '${threeUrl}';`);
+  if (out === page || !out.includes('const Render3D') || !out.includes(`const THREE_URL = '${threeUrl}';`)) throw new Error('3D build failed');
+  return out;
+};
+const ga = with3d(art, 'https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.min.js');
+fs.writeFileSync('phone-bellum.html', ga);
+console.log('wrote phone-bellum.html', ga.length);
+
+// The game on the 3D board, for testing 3D on phones (game3d-artifact.html): forced onto the 3D board with the speed
+// meter (PB_FORCE3D). three.js stays at ./vendor/, published next to the page.
+const g3 = with3d(art, './vendor/three.module.min.js').replace('<title>No Mans Land</title>', '<title>No Mans Land 3D Game</title>')
+  .replace('</style>', () => '</style>\n<script>window.PB_FORCE3D = true;</script>');
+if (!g3.includes('No Mans Land 3D Game') || !g3.includes('PB_FORCE3D = true')) throw new Error('3D game artifact build failed');
 fs.writeFileSync('game3d-artifact.html', g3);
 console.log('wrote game3d-artifact.html', g3.length);
 
