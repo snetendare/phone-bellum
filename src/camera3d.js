@@ -15,6 +15,9 @@
 //          the nearest level when they lift.
 //   Mouse: the wheel steps a level in or out; a touchpad pinch (ctrl + wheel) works like the fingers.
 //
+// opts.onInput() on every pointer, wheel and key event and when the camera starts gliding to a level (setLevel too),
+// and busy() while it moves on its own, so a page that only draws when something changes knows when to draw.
+//
 // The ground is the plane y = 0, the board is opts.width x opts.depth metres centred on the origin, and the player's
 // own side is toward +z (the bottom of the screen in the strategic view).
 const Camera3D = (THREE, camera, el, opts) => {
@@ -34,6 +37,7 @@ const Camera3D = (THREE, camera, el, opts) => {
   let yaw = 0;                // rotation of a cinematic view around the vertical axis (radians, 0 = from your side)
   let settle = null;          // { from, to, t } while z glides to a level
   let aspect = 1, viewH = 1;
+  const woke = () => { if (opts.onInput) opts.onInput(); };
   const clampTarget = () => {
     target.x = Math.max(-W / 2 - 4, Math.min(W / 2 + 4, target.x));
     target.z = Math.max(-D / 2 - 4, Math.min(D / 2 + 4, target.z));
@@ -67,6 +71,7 @@ const Camera3D = (THREE, camera, el, opts) => {
     to = Math.max(0, Math.min(MAX, to));
     settle = { from: z, to, t: 0 };
     if (opts.onLevel) opts.onLevel(to);
+    woke();
   }
   // the nearest level when the fingers lift; it takes a fair push to leave the strategic view
   const nearest = () => z < 0.35 ? 0 : Math.max(1, Math.min(MAX, Math.round(z)));
@@ -114,6 +119,7 @@ const Camera3D = (THREE, camera, el, opts) => {
     tap = null;
   }
   el.addEventListener('pointerdown', (e) => {
+    woke();
     if (e.pointerType === 'mouse' && e.button !== 0) {
       e.preventDefault();
       if (!strategic()) rotDrag = { x: e.clientX };
@@ -129,6 +135,7 @@ const Camera3D = (THREE, camera, el, opts) => {
     else if (pts.size === 2) startTwo();
   });
   el.addEventListener('pointermove', (e) => {
+    woke();
     if (rotDrag) { yaw -= (e.clientX - rotDrag.x) * 0.008; rotDrag.x = e.clientX; return; }
     const p0 = pts.get(e.pointerId);
     if (!p0) { if (e.pointerType === 'mouse' && !e.buttons && handsOn() && opts.onHover) opts.onHover(groundAt(e.clientX, e.clientY)); return; }
@@ -148,6 +155,7 @@ const Camera3D = (THREE, camera, el, opts) => {
     }
   });
   function lift(e) {
+    woke();
     if (rotDrag && e.pointerType === 'mouse' && e.button !== 0) { rotDrag = null; return; }
     if (!pts.has(e.pointerId)) return;
     pts.delete(e.pointerId);
@@ -167,7 +175,7 @@ const Camera3D = (THREE, camera, el, opts) => {
   // ---------- wheel: a notch steps a level (toward the pointer from the strategic view); ctrl + wheel is a touchpad pinch ----------
   let wheelAcc = 0, wheelBlock = 0, pinchIdle = 0;
   el.addEventListener('wheel', (e) => {
-    e.preventDefault();
+    e.preventDefault(); woke();
     const dy = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1);
     if (e.ctrlKey) { // touchpad pinch
       settle = null;
@@ -189,7 +197,7 @@ const Camera3D = (THREE, camera, el, opts) => {
 
   // ---------- keys: Q / E rotate, Escape goes back to the strategic view ----------
   const keys = new Set();
-  window.addEventListener('keydown', (e) => { keys.add(e.key.toLowerCase()); if (e.key === 'Escape') goStrategic(); });
+  window.addEventListener('keydown', (e) => { woke(); keys.add(e.key.toLowerCase()); if (e.key === 'Escape') goStrategic(); });
   window.addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
 
   function update(dt) {
@@ -209,5 +217,7 @@ const Camera3D = (THREE, camera, el, opts) => {
   }
   function resize(width, height) { aspect = width / height; viewH = height; camera.aspect = aspect; apply(); }
 
-  return { update, resize, groundAt, goStrategic, setLevel, strategic, handsOn, level, zoom: () => z, LEVELS: MAX + 1 };
+  // moving on its own (gliding to a level, a gesture under way, a rotate key held), so the page should keep drawing
+  const busy = () => !!settle || !!two || !!rotDrag || keys.has('q') || keys.has('e');
+  return { update, resize, groundAt, goStrategic, setLevel, strategic, handsOn, level, busy, zoom: () => z, LEVELS: MAX + 1 };
 };

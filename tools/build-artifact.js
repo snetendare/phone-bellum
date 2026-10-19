@@ -1,4 +1,5 @@
-// Builds the claude.ai artifact versions (phone-bellum.html, counter-lab.html, lab3d-artifact.html) from the built pages.
+// Builds the claude.ai artifact versions (phone-bellum.html, game3d-artifact.html, counter-lab.html, lab3d-artifact.html)
+// from the built pages.
 // Run from the repo root after `node src/build.js`:  node tools/build-artifact.js
 const fs = require('fs');
 const game = fs.readFileSync('index.html', 'utf8');
@@ -10,6 +11,15 @@ art = art.replace('<script src="peerjs.min.js"></script>', '<script src="https:/
 if (art.includes('id="lab-link"') || !art.includes('jsdelivr')) throw new Error('artifact build failed');
 fs.writeFileSync('phone-bellum.html', art);
 console.log('wrote phone-bellum.html', art.length);
+
+// The game on the 3D board, for testing 3D on phones (game3d-artifact.html): the same page with the 3D code inlined,
+// which makes it start on the 3D board. three.js stays at ./vendor/, published next to the page.
+const code3d = ['camera3d', 'models3d', 'render3d'].map(f => fs.readFileSync(`src/${f}.js`, 'utf8')).join('\n');
+const g3 = art.replace('<title>No Mans Land</title>', '<title>No Mans Land 3D Game</title>')
+  .replace('</style>', () => '</style>\n<script>\n' + code3d + '\n</script>');
+if (g3 === art || !g3.includes('const Render3D')) throw new Error('3D game artifact build failed');
+fs.writeFileSync('game3d-artifact.html', g3);
+console.log('wrote game3d-artifact.html', g3.length);
 
 // 3D test artifact (lab3d-artifact.html) from lab3d.html. three.js stays at ./vendor/, published next to the page.
 const l3 = fs.readFileSync('lab3d.html', 'utf8');

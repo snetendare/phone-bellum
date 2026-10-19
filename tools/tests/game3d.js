@@ -1,6 +1,7 @@
 // The game on the 3D board (?board=3d): the game's own board input through render3d.js. Package squads dragged,
 // a unit placed from the shop and taken back, the tower and unit sheets, the paid Move ability in round 2 (tap and
-// drag), an enemy squad's sheet, and placing in the angled view. Screenshots go to the current folder.
+// drag), an enemy squad's sheet, and placing in the angled view. Also that the board idles in the shop, the meter
+// (frame rate, quality steps, the last fight's summary). Screenshots go to the current folder.
 // Headless Chromium needs software WebGL (the args below) and runs at about 10-15 fps.
 const { chromium } = require('playwright-core');
 (async () => {
@@ -55,8 +56,24 @@ const { chromium } = require('playwright-core');
   await tap(...a);
   s = await st(); check(placed && !s.army.some(q => q.id === placed.id) && s.gold === g0, `tap takes it back, gold ${s.gold}`);
 
+  // idle: nothing moves in the shop, so the board stops drawing (the meter counts frames drawn in the last second)
+  const fps = async () => +(await p.locator('.meter3d').textContent()).split(' fps')[0];
+  await p.mouse.move(5, 5); await p.waitForTimeout(4000); // software WebGL: a frame can take half a second
+  check(await fps() === 0, `idle in the shop: ${await fps()} frames in the last second`);
+  // the meter steps the quality: high -> medium -> low -> high
+  const q = async () => (await p.locator('.meter3d').textContent()).split('\n')[0].split(' · ')[2];
+  const q0 = await q(); await p.click('.meter3d'); const q1 = await q(); await p.click('.meter3d'); const q2 = await q(); await p.click('.meter3d');
+  check(/^high/.test(q0) && /^medium/.test(q1) && /^low ×1$/.test(q2) && /^high/.test(await q()), `quality: ${q0} -> ${q1} -> ${q2} -> ${await q()}`);
+  // a fight draws every frame, and the meter sums it up afterwards
+  await p.click('#fight'); await p.waitForTimeout(2200);
+  check(await fps() > 0, `fight: ${await fps()} frames in the last second`);
+  if (await p.locator('#skip').count()) await p.click('#skip');
+  await p.waitForFunction(() => /last fight/.test(document.querySelector('.meter3d').textContent), null, { timeout: 15000 }).catch(() => {});
+  const sum = (await p.locator('.meter3d').textContent()).split('\n')[1] || '';
+  check(/^last fight \d+ fps · slowest second \d+ · \d+ bodies$/.test(sum), `after the fight: ${sum}`);
+
   // round 2: Move ability (50 gold) by tap, undo, then by drag
-  await p.click('#fight'); await p.waitForTimeout(500); await p.click('#skip'); await p.waitForTimeout(400); await p.click('#next'); await p.waitForTimeout(800);
+  await p.click('#next'); await p.waitForTimeout(800);
   s = await st(); check(s.round === 2, 'round 2');
   await p.screenshot({ path: 'game3d-2-round2.png' });
   const old = s.army.find(q => q.round < 2);

@@ -11,6 +11,9 @@
 // the mouse over the strategic view. opts.placing() -> true: the angled view takes them too. All as in Camera3D, with
 // tiles for ground points.
 // opts.onLevel(level): the camera is settling on a level (0 strategic, 1 angled, 2 ground).
+// For a page that draws only when something changes: opts.onInput() on every pointer, wheel and key event, and
+// still() -> false while the camera moves on its own. quality('high' | 'medium' | 'low') trades sharpness and shadows
+// for speed: high is the screen's pixels up to 2 per CSS pixel with shadows, medium 1.5 with shadows, low 1 without.
 //
 // The map floor (zones, flank tiles, mushrooms, buff tiles, the storm and the altar) is painted by the 2D renderer
 // onto a hidden canvas and laid on the ground. Everything else is drawn here, with the same rules for what this
@@ -603,6 +606,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
     onHover: (p) => { if (opts.onHover) opts.onHover(tileOfGround(p, lastMe)); },
     placing: () => !!(opts.placing && opts.placing()),
     onLevel: (lv) => { if (opts.onLevel) opts.onLevel(lv); },
+    onInput: () => { if (opts.onInput) opts.onInput(); },
   });
 
   // ---------- the calls ----------
@@ -636,5 +640,13 @@ const Render3D = (THREE, el, view, opts = {}) => {
     renderer.render(scene, camera);
   }
   const tileAt = (clientX, clientY) => tileOfGround(cam.groundAt(clientX, clientY), view().me);
-  return { size: sizeTo, draw, tileAt, thumb: (match) => floor2d.thumb(match), camera: cam, info: () => renderer.info.render };
+  const QUALITY = { high: [2, true], medium: [1.5, true], low: [1, false] };
+  function quality(q) {
+    const [ratio, shadows] = QUALITY[q] || QUALITY.high;
+    renderer.setPixelRatio(Math.min(ratio, window.devicePixelRatio || 1));
+    sun.castShadow = shadows;
+    sizeTo();
+  }
+  return { size: sizeTo, draw, tileAt, thumb: (match) => floor2d.thumb(match), camera: cam, info: () => renderer.info.render,
+    still: () => !cam.busy(), quality, pixelRatio: () => renderer.getPixelRatio() };
 };

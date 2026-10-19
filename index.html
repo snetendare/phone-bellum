@@ -61,6 +61,7 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 .board-wrap { position: relative; width: 100%; max-width: 100%; aspect-ratio: 1 / 1; border-radius: 6px; overflow: hidden; border: 1px solid var(--line); background: var(--board); touch-action: manipulation; }
 canvas { display: block; width: 100%; height: 100%; }
 .board3d { position: absolute; inset: 0; touch-action: none; } /* the 3D board (?board=3d): its own canvas, the camera takes every finger */
+.meter3d { position: absolute; top: 6px; right: 6px; max-width: calc(100% - 12px); padding: 3px 6px; border: 0; border-radius: 4px; background: rgba(13, 19, 21, 0.72); color: var(--muted); font: 10px/1.35 var(--font-data); text-align: right; white-space: pre-wrap; cursor: pointer; }
 .tag-clock { position: absolute; top: 8px; left: 10px; font-family: var(--font-data); font-size: 12px; color: var(--muted); pointer-events: none; }
 .overlay { position: absolute; inset: 0; display: flex; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 16px; background: rgba(13, 19, 21, 0.86); text-align: center; }
 .card { margin: auto; display: grid; gap: 10px; justify-items: center; max-width: 36ch; }
@@ -4468,12 +4469,12 @@ const Render2D = (cv, view) => {
   const boardView = () => ({ m, me, phase, units, mode, bt, battlePre, fx, selected, moving, drag, hoverTile,
     editable: editable(), placingUnit: placingUnit(), placingElf: placingElf(), placingTower: placingTower() });
   const board = Render2D(cv, boardView);
-  let board3d = null; // the 3D board when it's on (see "the 3D board" below): it draws itself every frame
+  let board3d = null; // the 3D board when it's on (see "the 3D board" below)
   const size = () => (board3d || board).size();
   function render() {
     syncMusic();
     cv.style.touchAction = phase === 'deploy' ? 'none' : ''; // so a finger can drag squads without scrolling the page
-    if (!board3d) board.draw();
+    if (board3d) wake3d(); else board.draw();
   }
   const teamCol = (side) => Art.teamCol(side, me);
   const { SHROOM_COL, CHARM_COL, armsImg } = Art;
@@ -5669,29 +5670,85 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     }
   }
 
-  // ---------- the 3D board (src/render3d.js): for now only with ?board=3d in the address ----------
+  // ---------- the 3D board (src/render3d.js): for now only with ?board=3d in the address, or in a build that has it inlined ----------
   // It draws from the same view() as the 2D board and hands taps, drags and the mouse to the board input above, as
-  // tiles; while deploying, the angled view takes them too. three.js (vendor/) and the 3D code (src/) load only then,
-  // so the artifact, a single page, stays on the 2D board. If anything fails, the 2D board stays.
+  // tiles; while deploying, the angled view takes them too. three.js (vendor/) and the 3D code (src/) load only then.
+  // If anything fails, the 2D board stays.
   async function start3d() {
     const load = (src) => new Promise((ok, no) => { const sc = document.createElement('script'); sc.src = src; sc.onload = ok; sc.onerror = () => no(new Error('could not load ' + src)); document.head.appendChild(sc); });
     const el = document.createElement('div');
     try {
       const THREE = await import('./vendor/three.module.min.js');
-      for (const f of ['camera3d', 'models3d', 'render3d']) await load(`src/${f}.js`);
+      if (typeof Render3D !== 'function') for (const f of ['camera3d', 'models3d', 'render3d']) await load(`src/${f}.js`);
       el.className = 'board3d';
       cv.after(el);
-      board3d = Render3D(THREE, el, boardView, { onTap: boardTap, onPress: boardPress, onDrag: boardDrag, onDrop: boardDrop, onHover: boardHover, placing: () => phase === 'deploy' });
+      board3d = Render3D(THREE, el, boardView, { onTap: boardTap, onPress: boardPress, onDrag: boardDrag, onDrop: boardDrop, onHover: boardHover, placing: () => phase === 'deploy', onInput: wake3d });
       el.querySelector('canvas').setAttribute('aria-label', cv.getAttribute('aria-label'));
-      cv.style.display = 'none'; size();
-      const frame = () => { board3d.draw(); requestAnimationFrame(frame); };
-      requestAnimationFrame(frame);
+      cv.style.display = 'none';
+      startMeter(el);
+      size(); wake3d();
     } catch (e) {
       board3d = null; el.remove(); cv.style.display = ''; size(); render();
       console.warn('No Mans Land: the 3D board could not start; staying on the 2D board.', e);
     }
   }
-  if (/[?&]board=3d\b/.test(location.search)) start3d();
+  if (/[?&]board=3d\b/.test(location.search) || typeof Render3D === 'function') start3d();
+  // Unlike the 2D board, which draws only when render() is called, the 3D board draws in frames. To spare the battery
+  // it draws only during fights, while the camera moves on its own, and for a moment after a change (render()) or a
+  // touch on the board, so squads finish gliding and the floor catches up.
+  let raf3d = 0, wakeUntil = 0;
+  function wake3d() {
+    wakeUntil = performance.now() + 700;
+    if (board3d && !raf3d) raf3d = requestAnimationFrame(frame3d);
+  }
+  function frame3d(ts) {
+    raf3d = 0;
+    board3d.draw();
+    meterFrame(ts);
+    if (phase === 'battle' || !board3d.still() || performance.now() < wakeUntil) raf3d = requestAnimationFrame(frame3d);
+  }
+  // The meter, top right on the 3D board, for testing on phones: frames drawn in the last second (0 while the board
+  // idles), the slowest frame among frames drawn in a row, the quality and pixels per CSS pixel; during a fight the
+  // live bodies and draw calls, after it that fight's average, its slowest second and the most bodies at once.
+  // Tap it to step the quality (high, medium, low).
+  const meter = { el: null, n: 0, last: 0, worst: 0, fight: null, lastFight: '', q: 'high' };
+  const Q3D_STORE = 'phone-bellum-3d-quality';
+  function startMeter(at) {
+    try { meter.q = localStorage.getItem(Q3D_STORE) || 'high'; } catch (e) {}
+    board3d.quality(meter.q);
+    meter.el = document.createElement('button');
+    meter.el.className = 'meter3d'; meter.el.type = 'button';
+    meter.el.setAttribute('aria-label', '3D board speed. Tap to change the quality.');
+    meter.el.addEventListener('click', () => {
+      meter.q = { high: 'medium', medium: 'low', low: 'high' }[meter.q] || 'high';
+      try { localStorage.setItem(Q3D_STORE, meter.q); } catch (e) {}
+      board3d.quality(meter.q); wake3d(); showMeter();
+    });
+    at.after(meter.el);
+    setInterval(() => { showMeter(); meter.n = 0; meter.worst = 0; }, 1000);
+  }
+  function meterFrame(ts) {
+    if (meter.last && ts - meter.last < 250) meter.worst = Math.max(meter.worst, ts - meter.last);
+    meter.last = ts; meter.n++;
+    const live = phase === 'battle' && bt;
+    if (live) {
+      const f = meter.fight || (meter.fight = { t0: ts, n: 0, sn: 0, st: ts, secs: [], bodies: 0 });
+      f.n++; f.sn++; f.end = ts;
+      f.bodies = Math.max(f.bodies, bt.bodies.reduce((k, b) => k + (b.alive ? 1 : 0), 0));
+      if (ts - f.st >= 1000) { f.secs.push(f.sn * 1000 / (ts - f.st)); f.sn = 0; f.st = ts; }
+    } else if (meter.fight) {
+      const f = meter.fight; meter.fight = null;
+      const avg = f.n * 1000 / Math.max(1, f.end - f.t0), low = f.secs.length ? Math.min(...f.secs) : avg;
+      meter.lastFight = `last fight ${Math.round(avg)} fps · slowest second ${Math.round(low)} · ${f.bodies} bodies`;
+      console.log('No Mans Land 3D:', meter.lastFight, '·', meter.q);
+    }
+  }
+  function showMeter() {
+    if (!meter.el || !board3d) return;
+    const head = `${meter.n} fps · slowest ${Math.round(meter.worst)} ms · ${meter.q} ×${board3d.pixelRatio()}`;
+    const live = bt && phase === 'battle' ? `${bt.bodies.reduce((k, b) => k + (b.alive ? 1 : 0), 0)} bodies · ${board3d.info().calls} draws` : meter.lastFight;
+    meter.el.textContent = live ? head + '\n' + live : head;
+  }
 
   // ---------- unit sheet ----------
   function unlockBlock(i, side) {
