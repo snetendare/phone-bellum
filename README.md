@@ -22,8 +22,8 @@ The source is in `src/`. After changing it, run `node src/build.js` from the rep
 - `shapes.js`: how a unit looks: its shape, colour and 3-letter tag.
 - `art.js`: the shared palette, coats of arms and tower icons, used on the board and in the panels.
 - `camera3d.js`: the 3D camera and its touch, mouse and key controls (strategic, angled and ground views).
-- `render3d.js`: draws the board and the battles in 3D (three.js), through the same `view()` and calls as `render2d.js`. The map floor is painted by `render2d.js` and laid on the ground.
-- `models3d.js`: the low-poly unit models (soldier, archer, caster, goblin, brute, flier, horse, spider, tower), picked from each unit's stats.
+- `render3d.js`: draws the board and the battles in 3D (three.js), through the same `view()` and calls as `render2d.js`, with the same markers (health, wind-up and flank timers, statuses, charisma, levels, buffs, tags, badges, placement hints, coats of arms, the elf spires, ice walls and hail, the crippled-army notice). The map floor is painted by `render2d.js` (its `floor()` call) and laid on the ground.
+- `models3d.js`: the low-poly models: units (soldier, archer, caster, goblin, brute, flier, horse, spider, airship), picked from each unit's stats, a tower for each tower type, the elf spire and the thrown spear.
 - `lab3d.js` + `lab3d-template.html`: the 3D test page: runs AI matches and shows them with `render3d.js`.
 - `render2d.js`: draws the board and the battles on the canvas. It reads what to show only through the `view()` the page hands it, so another renderer (3D) can take its place.
 - `site-template.html` + `game.css`: the game page: panels, menus, live matches, music.

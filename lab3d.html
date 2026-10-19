@@ -3091,7 +3091,8 @@ const Art = (() => {
 //     editable, placingUnit, placingElf, placingTower }
 // fx: short-lived battle effects as plain data (shots, flames, bolts, heals, deaths), in board metres.
 // Calls: size() after the canvas changes size, draw(), tileAt(clientX, clientY) -> { col, row } or null,
-// thumb(match) -> a data URL of a small picture of that match's board (null: a plain board with a question mark).
+// thumb(match) -> a data URL of a small picture of that match's board (null: a plain board with a question mark),
+// floor(): only the board itself (map, zones, tiles), no squads or towers: the 3D renderer lays it on the ground.
 // A 3D renderer can take its place by offering the same calls.
 const Render2D = (cv, view) => {
   let ctx = cv.getContext('2d'); // swapped for a moment while drawing map thumbnails (thumb)
@@ -3786,7 +3787,9 @@ const Render2D = (cv, view) => {
     return { col: scol(c), row: srow(rw) };
   }
 
-  return { size, draw, tileAt, thumb };
+  function floor() { pull(); drawBoard(); }
+
+  return { size, draw, tileAt, thumb, floor };
 };
 
 // ===== 3D camera and its controls (used by the 3D test page; meant for the 3D renderer later) =====
@@ -3986,16 +3989,17 @@ const DATA = {"units":[{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":
 <script type="module">
 import * as THREE from './vendor/three.module.min.js';
 // ===== Low-poly unit models for the 3D board =====
-// Models3D(THREE) -> { kindOf(u), parts(kind) }.
-// kindOf picks a figure from a unit's stats (rosters are custom, so names can't be relied on): towers, the horse and
-// spider shapes, fliers, then archers / casters for ranged units and goblins / brutes / soldiers for melee ones.
+// Models3D(THREE) -> { kindOf(u), parts(kind), height(kind) }.
+// kindOf picks a figure from a unit's stats (rosters are custom, so names can't be relied on): towers (one per tower
+// type), the elf spire, airships (aloft), the horse and spider shapes, fliers, then archers / casters for ranged
+// units and goblins / brutes / soldiers for melee ones. height(kind): the top of the model, for markers above it.
 // parts(kind) gives up to three geometries, drawn as separate instanced meshes so each can be coloured per body:
 //   tint  - takes the unit's own colour (its clothes or hide), as the 2D board fills the shape with it
 //   team  - takes the side's colour (shields, banners, sashes)
 //   fixed - its own colours, from vertex colours (skin, wood, metal)
 // Sizes are for a body of radius 1 metre standing on y = 0 and facing -z; the renderer scales them like the 2D board.
 const Models3D = (THREE) => {
-  const SKIN = '#D9A27A', DARK = '#2B2F33', METAL = '#B8C0C8', WOOD = '#8A5A32', BONE = '#E9E3CF', STONE = '#7D8790', GLOW = '#FFE9A8';
+  const SKIN = '#D9A27A', DARK = '#2B2F33', METAL = '#B8C0C8', WOOD = '#8A5A32', BONE = '#E9E3CF', GLOW = '#FFE9A8';
   const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), v = new THREE.Vector3(), s = new THREE.Vector3(1, 1, 1);
   const box = (w, h, d) => new THREE.BoxGeometry(w, h, d);
   const cyl = (rt, rb, h, n = 6) => new THREE.CylinderGeometry(rt, rb, h, n);
@@ -4090,23 +4094,54 @@ const Models3D = (THREE) => {
       ...[-0.55, -0.2, 0.15, 0.5].flatMap((z) => [-1, 1].flatMap((sd) => [
         P(box(0.7, 0.08, 0.08), DARK, [sd * 0.5, 0.82, z - 0.1], [0, sd * z * 0.6, sd * 0.6]),
         P(box(0.08, 0.75, 0.08), DARK, [sd * 0.95, 0.42, z - 0.1], [0, 0, sd * 0.25])]))],
-    // a stone keep with a coloured roof and a banner
-    tower: () => [
-      P(cyl(1.9, 2.3, 4.6, 8), STONE, [0, 2.3, 0]),
-      P(cyl(2.3, 2.1, 0.6, 8), STONE, [0, 4.9, 0]),
-      ...[...Array(8)].map((_, k) => P(box(0.6, 0.6, 0.5), STONE, [Math.sin(k * Math.PI / 4 + 0.39) * 2.05, 5.5, Math.cos(k * Math.PI / 4 + 0.39) * 2.05], [0, k * Math.PI / 4 + 0.39, 0])),
-      P(cone(1.7, 2.2, 8), 'team', [0, 6.3, 0]),
-      P(cyl(0.05, 0.05, 1.6, 4), WOOD, [0, 7.9, 0]),
-      P(box(0.05, 0.5, 0.9), 'team', [0, 8.4, 0.45]),
-      P(box(0.9, 1.2, 0.2), DARK, [0, 0.6, -2.05])],
+    // the sniper tower's airship: a blimp in the team colour (drawn see-through), fins and a gondola
+    airship: () => [
+      P(ball(1), 'team', [0, 1.4, 0], [0, 0, 0], [0.75, 0.75, 1.9]),
+      P(cone(0.5, 0.9, 3), 'team', [0, 1.4, 1.75], [-Math.PI / 2, 0, 0], [1, 1, 0.2]),
+      P(cone(0.5, 0.9, 3), 'team', [0, 1.4, 1.75], [-Math.PI / 2, 0, Math.PI / 2], [1, 1, 0.2]),
+      P(box(0.45, 0.3, 0.9), DARK, [0, 0.55, 0])],
+    // a thrown spear, flying toward -z: the shaft takes the unit's colour
+    spear: () => [P(cyl(0.06, 0.06, 2.4, 4), 'tint', [0, 0, 0.3], [Math.PI / 2, 0, 0]), P(cone(0.14, 0.5, 4), METAL, [0, 0, -1.1], [-Math.PI / 2, 0, 0])],
+    // a neutral elf spire: pale stone, a roof in its own colour (green, gilded once the elves grow strong), a flag
+    spire: () => [
+      P(cyl(0.7, 1.0, 5.2, 6), '#CFC6A8', [0, 2.6, 0]),
+      P(cone(1.2, 2.2, 6), 'tint', [0, 6.3, 0]),
+      P(box(0.35, 0.6, 0.1), '#FFE27A', [0, 3.8, -0.75]),
+      P(cyl(0.04, 0.04, 1.6, 4), WOOD, [0, 8.0, 0]),
+      P(box(0.05, 0.5, 0.9), 'team', [0, 8.5, 0.45])],
   };
+
+  // the tower types (Game.TOWER_TYPES and the outpost): the walls take the type's colour, as on the 2D board
+  const crown = (r, y, n = 8) => [...Array(n)].map((_, k) => P(box(r * 0.3, 0.55, 0.45), 'tint', [Math.sin((k + 0.5) * Math.PI * 2 / n) * r, y, Math.cos((k + 0.5) * Math.PI * 2 / n) * r], [0, (k + 0.5) * Math.PI * 2 / n, 0]));
+  const door = (z, w = 0.9, h = 1.2) => P(box(w, h, 0.2), DARK, [0, h / 2, z]);
+  const flagOn = (y) => [P(cyl(0.05, 0.05, 1.6, 4), WOOD, [0, y + 0.8, 0]), P(box(0.05, 0.5, 0.9), 'team', [0, y + 1.3, 0.45])];
+  const TOWERS = {
+    keep: () => [P(cyl(1.9, 2.3, 4.6, 8), 'tint', [0, 2.3, 0]), P(cyl(2.3, 2.1, 0.6, 8), 'tint', [0, 4.9, 0]), ...crown(2.05, 5.5),
+      P(cone(1.7, 2.2, 8), 'team', [0, 6.3, 0]), ...flagOn(7.1), door(-2.05)],
+    outpost: () => [...[[-1, -1], [1, -1], [-1, 1], [1, 1]].map(([x, z]) => P(box(0.3, 3.4, 0.3), WOOD, [x * 1.1, 1.7, z * 1.1])),
+      P(box(2.8, 1.1, 2.8), 'tint', [0, 3.6, 0]), P(cone(2.2, 1.4, 4), 'team', [0, 4.85, 0], [0, Math.PI / 4, 0]), ...flagOn(5.3)],
+    sniper: () => [P(cyl(1.1, 1.5, 7.5, 6), 'tint', [0, 3.75, 0]), P(cyl(1.15, 1.15, 0.6, 6), '#F2C94C', [0, 6.2, 0]),
+      P(box(0.3, 1.0, 0.2), 'team', [0, 4.6, -1.25]), P(cyl(1.5, 1.2, 0.6, 6), 'tint', [0, 7.8, 0]), ...crown(1.35, 8.35, 6), ...flagOn(8.3), door(-1.4, 0.7, 1.1)],
+    bastion: () => [P(cyl(2.9, 3.2, 3.2, 8), 'tint', [0, 1.6, 0]), P(cyl(3.2, 3.0, 0.5, 8), 'tint', [0, 3.45, 0]), ...crown(3.0, 3.95, 10),
+      P(box(1.6, 1.9, 0.25), 'team', [0, 1.7, -3.05]), P(box(0.25, 1.2, 0.3), 'tint', [0, 1.75, -3.15]), P(box(1.0, 0.25, 0.3), 'tint', [0, 2.0, -3.15]), ...flagOn(3.7)],
+    mage: () => [P(cyl(1.6, 1.9, 4.2, 7), 'tint', [0, 2.1, 0]), P(cone(2.0, 4.0, 7), 'team', [0, 6.2, 0]), P(ball(0.45), '#F2C94C', [0, 6.6, -1.0]),
+      P(cyl(0.12, 0.12, 0.8, 4), WOOD, [0, 8.6, 0]), door(-1.75, 0.8, 1.4)],
+    bank: () => [P(box(4.2, 3.6, 3.6), 'tint', [0, 1.8, 0]), ...[-1.6, -0.55, 0.55, 1.6].map(x => P(box(0.6, 0.55, 0.45), 'tint', [x, 3.85, -1.6])),
+      P(cyl(0.9, 0.9, 0.25, 10), 'team', [0, 2.4, -1.85], [Math.PI / 2, 0, 0]), P(cyl(0.6, 0.6, 0.3, 10), '#F2C94C', [0, 2.4, -1.9], [Math.PI / 2, 0, 0]), door(-1.85), ...flagOn(3.6)],
+    slime: () => [P(cyl(1.8, 2.2, 4.4, 7), 'tint', [0, 2.2, 0]), P(cyl(2.2, 2.0, 0.6, 7), 'tint', [0, 4.7, 0]), ...crown(1.95, 5.25, 7),
+      ...[...Array(7)].map((_, k) => P(cone(0.35, 1.2, 5), '#3FA81E', [Math.sin(k * 0.9) * 2.15, 3.9 - (k % 2) * 0.4, Math.cos(k * 0.9) * 2.15], [Math.PI, 0, 0])),
+      P(ball(0.85), '#3FA81E', [0, 5.6, 0]), P(cyl(0.65, 0.65, 0.2, 8), 'team', [0, 0.65, -2.0], [Math.PI / 2, 0, 0]), ...flagOn(5.4)],
+  };
+  for (const [k, f] of Object.entries(TOWERS)) BUILD['tower:' + k] = f;
 
   const RANGED = 12; // metres: from this range on, a unit is drawn as an archer or a caster
   function kindOf(u) {
-    if (u.structure) return 'tower';
+    if (u.spire) return 'spire';
+    if (u.structure) return TOWERS[u.kind] ? 'tower:' + u.kind : 'tower:keep';
+    if (u.aloft) return 'airship';
     if (u.shape === 'horse') return 'horse';
     if (u.shape === 'spider') return 'spider';
-    if (u.aloft || u.shape === 'imp' || u.shape === 'ring') return 'flier';
+    if (u.shape === 'imp' || u.shape === 'ring') return 'flier';
     const n = Math.round(u.bodies || 1);
     if (u.range >= RANGED) return n >= 3 ? 'archer' : 'caster';
     if (n >= 5) return 'goblin';
@@ -4122,7 +4157,17 @@ const Models3D = (THREE) => {
       fixed: merge(list.filter(p => p.col !== 'tint' && p.col !== 'team'), true),
     });
   }
-  return { kindOf, parts, KINDS: Object.keys(BUILD) };
+  // the top of each model (metres, for a body of radius 1), found once from its geometry
+  const tops = {};
+  function height(kind) {
+    if (tops[kind] == null) {
+      const p = parts(kind); let top = 0;
+      for (const g of [p.tint, p.team, p.fixed]) if (g) { g.computeBoundingBox(); top = Math.max(top, g.boundingBox.max.y); }
+      tops[kind] = top;
+    }
+    return tops[kind];
+  }
+  return { kindOf, parts, height, KINDS: Object.keys(BUILD) };
 };
 
 // ===== 3D board renderer: draws the board, the squads and the battles with three.js =====
@@ -4135,12 +4180,17 @@ const Models3D = (THREE) => {
 // opts.onTap(tile | null): a tap in the strategic view, as a tile in model columns / rows (like tileAt).
 // opts.onLevel(level): the camera is settling on a level (0 strategic, 1 angled, 2 ground).
 //
-// The map floor is painted by the 2D renderer onto a hidden canvas and laid on the ground. Board metres map to the
-// world as x -> x, y -> -z (height is y), turned around for side 1 like the 2D board, so your side is toward +z.
-// Bodies glide between engine ticks on their own; units are the low-poly models of Models3D.
+// The map floor (zones, flank tiles, mushrooms, buff tiles, the storm and the altar) is painted by the 2D renderer
+// onto a hidden canvas and laid on the ground. Everything else is drawn here, with the same rules for what this
+// screen may see as the 2D board. Board metres map to the world as x -> x, y -> -z (height is y), turned around for
+// side 1 like the 2D board, so your side is toward +z. Bodies glide between engine ticks on their own.
+// Layers: the low-poly models of Models3D (instanced, one mesh per model part), sprites (every small marker: health
+// bars, arcs, rings, tile outlines, icons, labels; one draw call), beams (shots, bolts, heals, streaks), flame fans,
+// ice walls, and a text overlay for the crippled-army notice.
 const Render3D = (THREE, el, view, opts = {}) => {
-  const BW = Game.COLS * Game.TILE, BD = Game.ROWS * Game.TILE;
+  const BW = Game.COLS * Game.TILE, BD = Game.ROWS * Game.TILE, T = Game.TILE;
   const css = Art.css;
+  const { ELF_COL, SHROOM_COL, CHARM_COL } = Art;
   const models = Models3D(THREE);
 
   // ---------- three.js basics: renderer, scene, camera, light ----------
@@ -4162,12 +4212,12 @@ const Render3D = (THREE, el, view, opts = {}) => {
   Object.assign(sun.shadow.camera, { left: -55, right: 55, top: 65, bottom: -65, near: 1, far: 160 });
   scene.add(sun);
 
-  // ---------- the floor: painted by the 2D renderer (no bodies), repainted when the match, round or side changes ----------
+  // ---------- the floor: the 2D renderer's board without squads, repainted when what it shows may have changed ----------
   const floorCv = document.createElement('canvas');
   floorCv.setAttribute('aria-hidden', 'true');
   floorCv.style.cssText = 'position:fixed;left:-10000px;top:0;width:720px';
   document.body.appendChild(floorCv);
-  let floorView = null, floorKey = null;
+  let floorView = null, floorKey = null, floorAge = 0;
   const floor2d = Render2D(floorCv, () => floorView);
   const groundTex = new THREE.CanvasTexture(floorCv);
   groundTex.colorSpace = THREE.SRGBColorSpace;
@@ -4180,43 +4230,242 @@ const Render3D = (THREE, el, view, opts = {}) => {
   const around = new THREE.Mesh(new THREE.PlaneGeometry(600, 600), new THREE.MeshLambertMaterial({ color: '#141b1d' }));
   around.rotation.x = -Math.PI / 2; around.position.y = -0.05; around.receiveShadow = true;
   scene.add(around);
-  const noBattle = { bodies: [], projectiles: () => [], crippled: () => 0, time: () => 0 };
-  function paintFloor(v) {
-    const key = v.m && [v.m.map && v.m.map.id, v.m.round, v.me, v.m.seed].join('|');
-    if (!v.m || key === floorKey) return;
-    floorKey = key;
-    floorView = { ...v, phase: 'battle', bt: noBattle, battlePre: v.m, fx: [], selected: null, moving: null, drag: null, hoverTile: null, editable: false, placingUnit: null, placingElf: false, placingTower: false };
-    floor2d.size(); floor2d.draw();
+  const ids = new WeakMap(); let nextId = 1;
+  const idOf = (o) => o ? (ids.get(o) || (ids.set(o, nextId), nextId++)) : 0;
+  function paintFloor(v, dt) {
+    if (!v.m) return;
+    // while deploying, the board changes with what the player buys (mushrooms, buff tiles, the altar): look again twice a second
+    floorAge += dt;
+    const key = [idOf(v.m), idOf(v.battlePre), v.m.round, v.me, v.phase].join('|');
+    if (key === floorKey && !(v.phase === 'deploy' && floorAge > 0.5)) return;
+    floorKey = key; floorAge = 0;
+    floorView = { ...v, bt: v.phase === 'battle' ? null : v.bt, fx: [], selected: null, moving: null, drag: null, hoverTile: null, placingElf: false, placingTower: false };
+    floor2d.size(); floor2d.floor();
     groundTex.needsUpdate = true;
   }
 
-  // ---------- bodies: one instanced mesh per model part, grown when it runs out of room ----------
+  // ---------- models: one instanced mesh per model part and look, grown when it runs out of room ----------
   const tintMat = new THREE.MeshStandardMaterial({ flatShading: true, roughness: 0.75, metalness: 0.05 });
   const teamMat = new THREE.MeshStandardMaterial({ flatShading: true, roughness: 0.6, metalness: 0.1 });
   const fixedMat = new THREE.MeshStandardMaterial({ flatShading: true, roughness: 0.7, metalness: 0.1, vertexColors: true });
+  // see-through looks, the whole body in the team colour: stealthed (yours, the enemy's), waiting to flank, airships
+  const seeThrough = (opacity) => new THREE.MeshStandardMaterial({ flatShading: true, roughness: 0.5, transparent: true, opacity, depthWrite: false });
+  const LOOKS = { ghost: seeThrough(0.45), ghostFoe: seeThrough(0.22), glass: seeThrough(0.55) };
   const flatMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.9, depthWrite: false });
   const ringGeo = new THREE.RingGeometry(1.0, 1.25, 20).rotateX(-Math.PI / 2).translate(0, 0.04, 0);
   const shotGeo = new THREE.SphereGeometry(0.28, 6, 4);
   const groups = {}; // key -> InstancedMesh
+  const used = new Set(); // groups drawn this frame
   function group(key, geo, mat, cap) {
     let g = groups[key];
-    if (g && g.instanceMatrix.count >= cap) return g;
-    if (g) { scene.remove(g); g.dispose(); }
-    g = new THREE.InstancedMesh(geo, mat, Math.max(16, cap * 2));
-    g.castShadow = mat !== flatMat; g.receiveShadow = mat !== flatMat;
-    g.frustumCulled = false;
-    scene.add(g);
-    return (groups[key] = g);
+    if (!g || g.instanceMatrix.count < cap) {
+      if (g) { scene.remove(g); g.dispose(); }
+      g = new THREE.InstancedMesh(geo, mat, Math.max(16, cap * 2));
+      g.castShadow = !mat.transparent; g.receiveShadow = !mat.transparent;
+      g.frustumCulled = false;
+      scene.add(g);
+      groups[key] = g;
+    }
+    used.add(g);
+    return g;
   }
   function finish(g, n) { g.count = n; g.instanceMatrix.needsUpdate = true; if (g.instanceColor) g.instanceColor.needsUpdate = true; }
   // size in metres, from health, as on the 2D board
   const LEVEL_SIZE = [1, 0.8, 0.65], SWARM_SIZE = [1, 0.72, 0.56];
   const size = (u) => Math.max(0.6, Math.min(2.4, 0.55 + Math.sqrt(u.hp * ((u.bodies >= 5 ? SWARM_SIZE : LEVEL_SIZE)[u.level | 0] || 1)) / 30));
-  const teamCols = {};
-  const teamColor = (side, me) => teamCols[side + ':' + me] || (teamCols[side + ':' + me] = new THREE.Color(Art.teamCol(side, me)));
+  const cols = {};
+  const color = (hex) => cols[hex] || (cols[hex] = new THREE.Color(hex));
+  const teamColor = (side, me) => color(Art.teamCol(side, me));
   const tmpM = new THREE.Matrix4(), tmpQ = new THREE.Quaternion(), tmpP = new THREE.Vector3(), tmpS = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0), tmpC = new THREE.Color();
+  const zAxis = new THREE.Vector3(0, 0, 1), tmpD = new THREE.Vector3(), camRight = new THREE.Vector3();
 
-  // where each body is drawn: it glides toward the engine's position, so movement looks smooth between ticks
+  // ---------- sprites: every small marker, in one draw call ----------
+  // Each is a quad: an icon or a bar facing the camera, or a ring arc, disc or tile square lying on the ground.
+  // p: icon -> its place in the atlas (u0, v0, u1, v1); bar -> fill; arc -> fill, thickness (share of the radius),
+  // dashes around the full circle, soft (fades toward the rim); square -> -, thickness (share of half the side), dashes.
+  const MODE = { icon: 0, bar: 1, arc: 2, square: 3 };
+  const SPR_CAP = 6000;
+  const sprGeo = new THREE.InstancedBufferGeometry();
+  const quad = new THREE.PlaneGeometry(1, 1);
+  sprGeo.index = quad.index; sprGeo.setAttribute('position', quad.getAttribute('position')); sprGeo.setAttribute('uv', quad.getAttribute('uv'));
+  const sprAttr = {};
+  for (const [name, n] of [['aPos', 3], ['aSize', 2], ['aCol', 4], ['aP', 4], ['aMode', 1]]) {
+    const a = new THREE.InstancedBufferAttribute(new Float32Array(SPR_CAP * n), n);
+    a.setUsage(THREE.DynamicDrawUsage);
+    sprGeo.setAttribute(name, a); sprAttr[name] = a;
+  }
+  const atlasCv = document.createElement('canvas'); atlasCv.width = atlasCv.height = 1024;
+  const atlas = new THREE.CanvasTexture(atlasCv);
+  atlas.colorSpace = THREE.SRGBColorSpace; atlas.generateMipmaps = false; atlas.minFilter = THREE.LinearFilter;
+  const sprMat = new THREE.ShaderMaterial({
+    uniforms: { atlas: { value: atlas } },
+    transparent: true, depthWrite: false,
+    vertexShader: `
+      attribute vec3 aPos; attribute vec2 aSize; attribute vec4 aCol; attribute vec4 aP; attribute float aMode;
+      varying vec2 vUv; varying vec4 vCol; varying vec4 vP; varying float vMode;
+      void main() {
+        vUv = uv; vCol = aCol; vP = aP; vMode = aMode;
+        vec4 mv;
+        if (aMode < 1.5) { mv = viewMatrix * vec4(aPos, 1.0); mv.xy += position.xy * aSize; }
+        else mv = viewMatrix * vec4(aPos + vec3(position.x * aSize.x, 0.0, -position.y * aSize.y), 1.0);
+        gl_Position = projectionMatrix * mv;
+      }`,
+    fragmentShader: `
+      uniform sampler2D atlas;
+      varying vec2 vUv; varying vec4 vCol; varying vec4 vP; varying float vMode;
+      void main() {
+        vec4 c = vCol;
+        if (vMode < 0.5) c *= texture2D(atlas, mix(vP.xy, vP.zw, vUv));
+        else if (vMode < 1.5) {
+          float edge = step(vUv.y, 0.16) + step(0.84, vUv.y) + step(vUv.x, 0.025) + step(0.975, vUv.x);
+          if (edge > 0.0 || vUv.x > vP.x) c = vec4(0.03, 0.04, 0.05, 0.8 * vCol.a);
+        } else if (vMode < 2.5) {
+          vec2 p = vUv * 2.0 - 1.0; float r = length(p);
+          if (r > 1.0 || r < 1.0 - vP.y) discard;
+          float f = fract(atan(p.x, p.y) / 6.2831853 + 1.0);
+          if (f > vP.x) discard;
+          if (vP.z > 0.0 && fract(f * vP.z) > 0.5) discard;
+          if (vP.w > 0.5) c.a *= 1.0 - r;
+        } else {
+          vec2 p = abs(vUv * 2.0 - 1.0);
+          if (max(p.x, p.y) < 1.0 - vP.y) discard;
+          if (vP.z > 0.0 && fract((vUv.x + vUv.y) * vP.z) > 0.5) discard;
+        }
+        if (c.a < 0.01) discard;
+        gl_FragColor = c;
+        #include <colorspace_fragment>
+      }`,
+  });
+  const sprites = new THREE.Mesh(sprGeo, sprMat);
+  sprites.frustumCulled = false; sprites.renderOrder = 10;
+  scene.add(sprites);
+  let ns = 0;
+  function spr(mode, x, y, z, w, h, c, a, p0 = 0, p1 = 0, p2 = 0, p3 = 0) {
+    if (ns >= SPR_CAP || a <= 0.01) return;
+    const P = sprAttr.aPos.array, S = sprAttr.aSize.array, C = sprAttr.aCol.array, Q = sprAttr.aP.array, i3 = ns * 3, i2 = ns * 2, i4 = ns * 4;
+    P[i3] = x; P[i3 + 1] = y; P[i3 + 2] = z; S[i2] = w; S[i2 + 1] = h;
+    C[i4] = c.r; C[i4 + 1] = c.g; C[i4 + 2] = c.b; C[i4 + 3] = a;
+    Q[i4] = p0; Q[i4 + 1] = p1; Q[i4 + 2] = p2; Q[i4 + 3] = p3;
+    sprAttr.aMode.array[ns] = mode;
+    ns++;
+  }
+  const white = color('#ffffff');
+  // icon (billboard), size s metres tall; wide icons (labels) keep their shape
+  function icon(key, x, y, z, s, c = white, a = 1) { const u = cell(key); spr(MODE.icon, x, y, z, s * u.aspect, s, c, a, u.u0, u.v0, u.u1, u.v1); }
+  const bar = (x, y, z, w, h, fill, c, a = 1) => spr(MODE.bar, x, y, z, w, h, c, a, Math.max(0, Math.min(1, fill)));
+  // a ring or arc on the ground at board point (wx, wz) in the world; r = outer radius
+  const arc = (wx, wz, r, c, a, fill = 1, thick = 0.12, dashes = 0, soft = 0, y = 0.07) => spr(MODE.arc, wx, y, wz, r * 2, r * 2, c, a, fill, thick, dashes, soft);
+  const disc = (wx, wz, r, c, a, soft = 0) => arc(wx, wz, r, c, a, 1, 1, 0, soft, 0.06);
+  // a tile square (screen column / row as this side sees the board): thick = 1 fills it
+  const tileSq = (sc, sr, c, a, thick = 0.07, dashes = 0, inset = 0.06) => spr(MODE.square, (sc + 0.5) * T - BW / 2, 0.08, (sr + 0.5) * T - BD / 2, T * (1 - inset * 2), T * (1 - inset * 2), c, a, 0, thick, dashes);
+  // a row of icons above a point, spread along the screen's horizontal
+  function iconRow(keys, x, y, z, s, c, a = 1) {
+    const step = s * 1.1, x0 = -(keys.length - 1) * step / 2;
+    keys.forEach((k, i) => { const o = x0 + i * step; icon(k, x + camRight.x * o, y, z + camRight.z * o, s, Array.isArray(c) ? c[i] : c, a); });
+  }
+
+  // the icon atlas: 64 px cells, drawn the first time each icon is needed (labels take two cells' width)
+  const CELL = 64, PER = 1024 / CELL;
+  const actx = atlasCv.getContext('2d');
+  let cells = {}, nextCell = 0;
+  const ICONS = {
+    dot: (g) => { g.fillStyle = '#fff'; g.beginPath(); g.arc(32, 32, 26, 0, Math.PI * 2); g.fill(); },
+    star: (g) => { g.fillStyle = '#fff'; g.beginPath(); for (let k = 0; k < 10; k++) { const a = -Math.PI / 2 + k * Math.PI / 5, r = k % 2 ? 12 : 28; g.lineTo(32 + r * Math.cos(a), 34 + r * Math.sin(a)); } g.closePath(); g.fill(); },
+    plus: (g) => { // ready to level up: a gold badge with a plus
+      g.fillStyle = css('--gold'); g.beginPath(); g.arc(32, 32, 28, 0, Math.PI * 2); g.fill();
+      g.strokeStyle = css('--bg'); g.lineWidth = 8; g.beginPath(); g.moveTo(16, 32); g.lineTo(48, 32); g.moveTo(32, 16); g.lineTo(32, 48); g.stroke(); },
+    hat: (g) => { // the Gentleman's top hat
+      g.fillStyle = '#16161C'; g.strokeStyle = '#EDEFF2'; g.lineWidth = 2.5;
+      g.beginPath(); g.rect(4, 44, 56, 8); g.rect(16, 6, 32, 40); g.fill(); g.stroke();
+      g.fillStyle = CHARM_COL; g.fillRect(16, 32, 32, 7); },
+  };
+  function drawCell(key, g) {
+    const [kind, a, b, c] = key.split('|');
+    if (ICONS[kind]) return ICONS[kind](g);
+    if (kind === 'tag') { // a unit's 3-letter tag (two cells wide)
+      g.font = '600 34px "IBM Plex Mono", ui-monospace, monospace'; g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.lineWidth = 7; g.strokeStyle = 'rgba(8,12,14,0.9)'; g.strokeText(a, 64, 34); g.fillStyle = '#E5ECE9'; g.fillText(a, 64, 34);
+    } else if (kind === 'arms') Art.armsFlag(g, a, 6, 12, 52, b); // a coat of arms on a flag edged in a side's colour
+    else if (kind === 'rider') { // what rides inside a carrier: its shape on a disc
+      g.fillStyle = css('--bg'); g.strokeStyle = c; g.lineWidth = 4; g.beginPath(); g.arc(32, 32, 27, 0, Math.PI * 2); g.fill(); g.stroke();
+      g.fillStyle = b; Shapes.draw(g, a, 32, 32, 15, 1);
+    }
+  }
+  function cell(key) {
+    if (cells[key]) return cells[key];
+    const wide = key.startsWith('tag|') ? 2 : 1;
+    if (nextCell % PER + wide > PER) nextCell += PER - nextCell % PER;
+    if (nextCell + wide > PER * PER) { cells = {}; nextCell = 0; actx.clearRect(0, 0, 1024, 1024); } // full: start over
+    const cx = nextCell % PER, cy = Math.floor(nextCell / PER);
+    nextCell += wide;
+    actx.save(); actx.translate(cx * CELL, cy * CELL); actx.beginPath(); actx.rect(0, 0, CELL * wide, CELL); actx.clip();
+    drawCell(key, actx); actx.restore();
+    atlas.needsUpdate = true;
+    const e = 0.5 / 1024;
+    return (cells[key] = { u0: cx * CELL / 1024 + e, u1: (cx + wide) * CELL / 1024 - e, v0: 1 - (cy + 1) * CELL / 1024 + e, v1: 1 - cy * CELL / 1024 - e, aspect: wide });
+  }
+
+  // ---------- beams: shots, bolts, heals, hail and speed streaks (glowing boxes, added light) ----------
+  const beamMat = new THREE.MeshBasicMaterial({ blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, toneMapped: false });
+  const beamGeo = new THREE.BoxGeometry(1, 1, 1);
+  const beams = [];
+  const beam = (x1, y1, z1, x2, y2, z2, w, c, a) => { if (a > 0.01) beams.push([x1, y1, z1, x2, y2, z2, w, c.r * a, c.g * a, c.b * a]); };
+  function drawBeams() {
+    const g = group('beams', beamGeo, beamMat, beams.length);
+    beams.forEach(([x1, y1, z1, x2, y2, z2, w, r, gg, b], i) => {
+      tmpD.set(x2 - x1, y2 - y1, z2 - z1); const L = tmpD.length() || 1e-3;
+      tmpQ.setFromUnitVectors(zAxis, tmpD.multiplyScalar(1 / L));
+      tmpP.set((x1 + x2) / 2, (y1 + y2) / 2, (z1 + z2) / 2); tmpS.set(w, w, L);
+      g.setMatrixAt(i, tmpM.compose(tmpP, tmpQ, tmpS)); g.setColorAt(i, tmpC.setRGB(r, gg, b));
+    });
+    finish(g, beams.length);
+    beams.length = 0;
+  }
+
+  // ---------- flame cones: fans on the ground, bright at the mouth, fading outward ----------
+  const FAN_CAP = 64, FAN_SEG = 10;
+  const fanPos = new Float32Array(FAN_CAP * FAN_SEG * 9), fanCol = new Float32Array(FAN_CAP * FAN_SEG * 9);
+  const fans = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial({ vertexColors: true, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, side: THREE.DoubleSide, toneMapped: false }));
+  fans.geometry.setAttribute('position', new THREE.BufferAttribute(fanPos, 3));
+  fans.geometry.setAttribute('color', new THREE.BufferAttribute(fanCol, 3));
+  fans.frustumCulled = false;
+  scene.add(fans);
+
+  // ---------- ice walls around a tower (Frozen Peak): they shrink as they take hits ----------
+  const wallMat = new THREE.MeshStandardMaterial({ color: '#CFEAF7', roughness: 0.2, metalness: 0.05, transparent: true, opacity: 0.75, flatShading: true });
+  const walls = [];
+  function addWalls(f, wx, wy, hits) {
+    const dirs = [[0, 1], [1, 0], [0, -1], [-1, 0]];
+    hits.forEach((n, k) => {
+      if (!(n > 0)) return;
+      const h = 2.6 * n / Game.ICE.wallHits, x = (wx + dirs[k][0] * T * 0.5) * f, z = -(wy + dirs[k][1] * T * 0.5) * f;
+      walls.push([x, h, z, dirs[k][0] !== 0]);
+    });
+  }
+  function drawWalls() {
+    const g = group('walls', beamGeo, wallMat, walls.length);
+    walls.forEach(([x, h, z, across], i) => { tmpP.set(x, h / 2, z); tmpQ.identity(); tmpS.set(across ? T * 0.12 : T * 0.8, h, across ? T * 0.8 : T * 0.12); g.setMatrixAt(i, tmpM.compose(tmpP, tmpQ, tmpS)); });
+    finish(g, walls.length);
+    walls.length = 0;
+  }
+
+  // ---------- text over the board: a fallen tower cripples its army for a few seconds ----------
+  const note = document.createElement('div');
+  note.style.cssText = 'position:absolute;inset:0;pointer-events:none;font:600 13px "IBM Plex Mono",ui-monospace,monospace';
+  el.appendChild(note);
+  let noteText = '';
+  function showNote(v) {
+    const { bt, me, mode, phase } = v;
+    let html = '';
+    if (bt && phase === 'battle') for (const sd of [me, 1 - me]) {
+      const s = bt.crippled(sd); if (!(s > 0)) continue;
+      const txt = sd === me ? `Your tower fell · crippled ${Math.ceil(s)} s` : `${mode === 'claude' ? 'Claude’s' : 'Enemy'} tower fell · crippled ${Math.ceil(s)} s`;
+      html += `<div style="position:absolute;left:50%;top:${sd === me ? 62 : 30}%;transform:translateX(-50%);background:rgba(0,0,0,.6);padding:4px 8px;white-space:nowrap;color:${Art.teamCol(sd, me)}">${txt}</div>`;
+    }
+    if (html !== noteText) { note.innerHTML = html; noteText = html; }
+  }
+
+  // ---------- where each body is drawn: it glides toward the engine's position, so movement looks smooth ----------
   let shown = new WeakMap();
   const GLIDE = 0.06; // seconds to close most of the gap
   function glide(b, dt) {
@@ -4228,118 +4477,265 @@ const Render3D = (THREE, el, view, opts = {}) => {
     return p;
   }
 
-  // what stands on the board: { u, side, x, y, hx, hy, hidden, key } in board metres
-  function standing(v, dt) {
-    const out = [], { m, me, bt, phase, units } = v;
-    if (!m) return out;
-    if (bt && (phase === 'battle' || phase === 'result' || phase === 'end')) {
-      for (const b of bt.bodies) {
-        if (!b.alive || b.boarded) continue;
-        const p = glide(b, dt);
-        out.push({ u: b.u, side: b.side, x: p.x, y: p.y, hx: b.hx, hy: b.hy, hidden: b.hidden, moving: p.moving, phase: p.phase });
-      }
-      return out;
+  // ---------- what stands on the board, with its markers ----------
+  // A body: { u, side, x, y (board metres), hx, hy, look ('solid', 'ghost', 'ghostFoe', 'glass'), moving, phase,
+  //   flag (a Color for its team parts, if not its side's), b (the battle body, for its markers) }
+  let clock = 0;
+  const bodies = [];
+  const towerUnit = (m, side, seen) => seen ? Game.towerType(m, side).unit : Game.OUTPOST.unit;
+  const world = (f, x, y) => [x * f, -y * f];
+  // a tile in model columns / rows -> where this side sees it on the board ({ c, r })
+  const tileCenter = (v, col, row) => v.me === 1 ? { c: Game.COLS - 1 - col, r: Game.ROWS - 1 - row } : { c: col, r: row };
+  // the neutral elf spire and the players' own elf spires, as on the 2D board
+  function addSpires(v, src, deploying, f) {
+    const e = Game.elfSpot(src); if (!e) return;
+    const strong = Game.elfPowered(src), roof = strong ? '#E8B931' : '#5E9A4E';
+    const lead = Game.bribeLeader(src, deploying);
+    const arms = (sd) => Game.charShown(src, v.me, deploying, sd) ? Game.charOf(src, sd) : null;
+    const spire = (x, y, side, flagCol, crest, scale) => {
+      bodies.push({ u: { spire: true, structure: true, color: roof }, side, x, y, look: 'solid', flag: color(flagCol), scale, crest, edge: flagCol });
+      const [wx, wz] = world(f, x, y);
+      if (strong) disc(wx, wz, 4.5, color('#FFD65A'), 0.45, 1);
+    };
+    spire(e.x, e.y, 2, lead < 0 ? '#F4F1E6' : Art.teamCol(lead, v.me), lead < 0 ? null : arms(lead), 1);
+    if (deploying) { const [wx, wz] = world(f, e.x, e.y); arc(wx, wz, Game.ELF_TOWER.range, color(ELF_COL), 0.3, 1, 0.012, 90); }
+    for (const sd of [v.me, 1 - v.me]) {
+      const own = Game.elfOwnOf(src, sd);
+      if (!own || !Game.elfOwnShown(src, v.me, deploying, sd)) continue;
+      const w = Game.tileToWorld(own.col, own.row);
+      spire(w.x, w.y, sd, Art.teamCol(sd, v.me), arms(sd), 0.85);
     }
+  }
+  function collectBattle(v, dt, f) {
+    const { bt, me } = v, src = v.battlePre || v.m;
+    const muted = color(css('--muted') || '#8DA1A1');
+    for (const b of bt.bodies) {
+      if (!b.alive) { if (!b.boarded) { const [wx, wz] = world(f, b.x, b.y); disc(wx, wz, Math.max(0.3, size(b.u) * 0.45), muted, 0.18); } continue; }
+      if (b.boarded) continue;
+      const p = glide(b, dt);
+      const look = b.u.aloft ? 'glass' : b.hidden ? (b.side === me ? 'ghost' : 'ghostFoe') : b.delay > 0 ? 'ghost' : 'solid';
+      const crest = b.u.structure ? Game.charOf(src, b.side) : null;
+      bodies.push({ u: b.u, side: b.side, x: p.x, y: p.y, hx: b.hx, hy: b.hy, look, moving: p.moving, phase: p.phase, b, crest, edge: Art.teamCol(b.side, me) });
+      if (b.u.structure && b.walls) addWalls(f, b.x, b.y, b.walls);
+    }
+    addSpires(v, src, false, f);
+  }
+  function collectDeploy(v, f) {
     shown = new WeakMap();
-    const foe = 1 - me;
-    const squad = (sq, side) => {
-      const u = units[sq.unit], w = Game.tileToWorld(sq.col, sq.row);
-      for (const b of Engine.buildSquad(u, side, w.x, w.y, sq.id, Game.TILE)) out.push({ u, side, x: b.x, y: b.y });
+    const { m, me, phase, units, drag, moving, selected, hoverTile, placingUnit, editable } = v, foe = 1 - me;
+    const deploying = phase === 'deploy';
+    const you = color(css('--you') || '#5CC6DF'), gold = color(css('--gold') || '#E6B84A');
+    const squad = (sq, side, fresh) => {
+      const u = units[sq.unit], w = Game.tileToWorld(sq.col, sq.row), st = tileCenter(v, sq.col, sq.row);
+      const list = Engine.buildSquad(u, side, w.x, w.y, sq.id, T);
+      for (const b of list) bodies.push({ u, side, x: b.x, y: b.y, look: 'solid' });
+      if (fresh) tileSq(st.c, st.r, teamColor(side, me), 0.8, 0.05, 14);
+      // badges over the squad: its tag, level pips, charisma pips (or the Gentleman's hat), ready to level up
+      const [wx, wz] = world(f, w.x, w.y), top = models.height(models.kindOf(u)) * size(u) + 1.4;
+      icon('tag|' + Shapes.tag(u), wx, top, wz, 1.0, white, 0.9);
+      const pips = [];
+      for (let k = 0; k < (sq.level || 0); k++) pips.push(gold);
+      const ch = Game.charmOf(sq);
+      if (!Game.isGentleman(sq)) for (let k = 0; k < ch; k++) pips.push(color(CHARM_COL));
+      if (pips.length) iconRow(pips.map(() => 'dot'), wx, top + 0.85, wz, 0.42, pips);
+      if (Game.isGentleman(sq)) icon('hat', wx, top + 1.1, wz, 1.1);
+      if (side === me && deploying && Game.isReady(m, sq)) icon('plus', wx + camRight.x * 1.6, top + 0.2, wz + camRight.z * 1.6, 0.9);
+      return [wx, wz];
     };
     // the opponent's squads from this round stay hidden until the fight; a squad they moved shows on its old tile
-    for (const sq of m.armies[foe]) if ((sq.round < m.round || phase !== 'deploy') && !Game.hiddenFromFoe(m, sq)) {
-      const p = phase === 'deploy' ? Game.seenAt(m, sq) : sq;
-      squad(p === sq ? sq : { ...sq, col: p.col, row: p.row }, foe);
+    for (const sq of m.armies[foe]) if ((sq.round < m.round || !deploying) && !Game.hiddenFromFoe(m, sq)) {
+      const p = deploying ? Game.seenAt(m, sq) : sq;
+      squad(p === sq ? sq : { ...sq, col: p.col, row: p.row }, foe, false);
     }
-    for (const sq of m.armies[me]) if (!Game.isRider(sq)) squad(sq, me);
+    for (const sq of m.armies[me]) {
+      if (deploying && sq.from && sq.movedRound === m.round) { const s = tileCenter(v, sq.from.col, sq.from.row); tileSq(s.c, s.r, color(css('--muted') || '#8DA1A1'), 0.6, 0.04, 10, 0.1); }
+      if (Game.isRider(sq)) continue; // shown as a badge on its carrier
+      const at = drag && drag.moved && drag.id === sq.id ? { ...sq, col: drag.over.col, row: drag.over.row } : sq;
+      const [wx, wz] = squad(at, me, (sq.round === m.round || sq.movedRound === m.round) && deploying);
+      const rider = Game.riderOf(m, me, sq);
+      if (rider) { const ru = units[rider.unit]; icon(`rider|${ru.shape}|${ru.color}|${Art.teamCol(me, me)}`, wx - camRight.x * 1.6, 1.0, wz - camRight.z * 1.6, 1.0); }
+      if (moving === sq.id && deploying) { const s = tileCenter(v, sq.col, sq.row); tileSq(s.c, s.r, gold, 1, 0.08, 0, 0.02); }
+    }
+    // where things may go
+    if ((selected !== null || (drag && drag.moved) || moving != null) && deploying) {
+      for (let row = 0; row < Game.ROWS; row++) for (let c = 0; c < Game.COLS; c++) {
+        if (Game.canPlaceAt(m, me, c, row, placingUnit) && !Game.occupied(m, me, c, row)) { const s = tileCenter(v, c, row); tileSq(s.c, s.r, you, 0.3, 0.05); }
+      }
+      if (placingUnit != null) for (const sq of m.armies[me]) if (Game.boardable(m, me, sq.col, sq.row, placingUnit) && !(drag && drag.id === sq.id)) { const s = tileCenter(v, sq.col, sq.row); tileSq(s.c, s.r, gold, 0.85, 0.07, 0, 0.03); }
+    }
+    if (hoverTile && (selected !== null || moving != null) && Game.canPlaceAt(m, me, hoverTile.col, hoverTile.row, placingUnit) && (!Game.occupied(m, me, hoverTile.col, hoverTile.row) || (placingUnit != null && Game.boardable(m, me, hoverTile.col, hoverTile.row, placingUnit)))) {
+      const s = tileCenter(v, hoverTile.col, hoverTile.row); tileSq(s.c, s.r, you, 0.2, 1, 0, 0);
+    }
+    if (v.placingElf && editable) for (const row of Game.zoneRows(me)) for (let c = 0; c < Game.COLS; c++) if (Game.elfOwnSpotOk(m, me, c, row)) { const s = tileCenter(v, c, row); tileSq(s.c, s.r, color(ELF_COL), 0.6, 0.06); }
+    if (v.placingTower && editable) for (const row of Game.zoneRows(me)) for (let c = 0; c < Game.COLS; c++) {
+      if (Game.towerColOk(c) && !Game.reserved(me, c, row) && !Game.occupied(m, me, c, row)) { const s = tileCenter(v, c, row); tileSq(s.c, s.r, gold, 0.5, 0.06); }
+    }
+    // towers: their type and coat of arms only where this screen may see them
     for (const side of [me, foe]) if (m.towers && m.towers[side]) {
       const w = Game.tileToWorld(m.towers[side].col, m.towers[side].row);
-      out.push({ u: { structure: true }, side, x: w.x, y: w.y });
+      const crest = Game.charShown(m, me, deploying, side) ? Game.charOf(m, side) : null;
+      bodies.push({ u: towerUnit(m, side, Game.towerTypeShown(m, me, deploying, side)), side, x: w.x, y: w.y, look: 'solid', crest, edge: Art.teamCol(side, me) });
     }
-    const e = Game.elfSpot(m);
-    if (e) out.push({ u: { structure: true }, side: 2, x: e.x, y: e.y });
-    return out;
+    addSpires(v, m, deploying, f);
+    if (Game.isIce(m)) for (const side of [me, foe]) {
+      // Snowgres on their tiles in no man's land (an opponent's new one shows up at the fight), and walls bought this round
+      const buys = (m.altar || []).filter(b => b.side === side && b.type === 'snowgre');
+      Game.snowgres(m, side).forEach((sg, k) => {
+        if (!Game.altarShown(m, me, deploying, buys[k])) return;
+        const w = Game.tileToWorld(sg.col, sg.row);
+        bodies.push({ u: Game.snowgreUnit(m, sg.strength), side, x: w.x, y: w.y, look: 'solid' });
+      });
+      const wb = (m.altar || []).find(b => b.side === side && b.type === 'walls' && b.round === m.round);
+      if (wb && Game.altarShown(m, me, deploying, wb) && m.towers && m.towers[side]) { const w = Game.tileToWorld(m.towers[side].col, m.towers[side].row); addWalls(f, w.x, w.y, [1, 1, 1, 1].map(() => Game.ICE.wallHits)); }
+    }
   }
 
-  let clock = 0;
+  // markers on a battle body: health, wind-up, flank wait, statuses, charisma, level, mushroom and Zoe buffs
+  function bodyMarkers(s, f, me, wx, wz, r, top, t) {
+    const b = s.b, team = teamColor(s.side, me), u = s.u;
+    const hpr = Math.max(0, b.hp / u.hp);
+    let y = top + 0.45;
+    if (u.structure || (u.hp >= 500 && hpr < 1)) { const w = u.structure ? 4.2 : Math.max(1.6, r * 1.5); bar(wx, y, wz, w, u.structure ? 0.42 : 0.3, hpr, team); y += 0.55; }
+    if (u.structure) return;
+    if (b.windTarget && u.windUp > 0) arc(wx, wz, r * 1.4, team, 0.95, 1 - b.windT / u.windUp, 0.14);
+    if (b.delay > 0) arc(wx, wz, r * 1.5, color(css('--gold') || '#E6B84A'), 1, b.delay / Game.FLANK.delay, 0.12);
+    if (b.level > 0) for (let k = 0; k < b.level; k++) arc(wx, wz, r * (1.32 + k * 0.14), color(css('--gold') || '#E6B84A'), 0.85, 1, 0.07);
+    if (b.convert) arc(wx, wz, r * 1.45, color(CHARM_COL), 0.9, 1, 0.08, 16);
+    // small dots over the head: poisoned (green), slowed (blue), charisma stacks (pink)
+    const dots = [];
+    if (b.poison && b.poison.length) dots.push(color('#6FD08C'));
+    if (b.slowT > 0) dots.push(color('#9BD0FF'));
+    const ch = v0.bt.charm ? v0.bt.charm(b.side, b.squad) : 0;
+    if (ch >= Engine.CHARM_MAX) { icon('hat', wx, top + 0.35, wz, Math.max(0.8, r * 0.9)); y += 0.5; }
+    else if (ch > 0) dots.push(color(CHARM_COL));
+    if (dots.length) iconRow(dots.map(() => 'dot'), wx, y + 0.1, wz, 0.4, dots);
+    if (b.stunT > 0) for (let k = 0; k < 3; k++) { // stunned: three dots circling over its head
+      const a = t * 6 + k * 2.094; icon('dot', wx + Math.cos(a) * r * 0.7, top + 0.25, wz + Math.sin(a) * r * 0.7, 0.35, color('#FFD23F'));
+    }
+    const seed = b.squad * 0.29 + b.x * 0.11;
+    if (b.shroom) for (let k = 0; k < 2; k++) { // purple mushroom: spores drifting up
+      const s0 = (seed + k * 0.5) % 1, p = (t * 0.6 + s0) % 1;
+      icon('dot', wx + (k ? 1 : -1) * r * (0.3 + 0.3 * Math.sin((p + s0) * 6)), top * (0.3 + 0.9 * p), wz, 0.3, color(SHROOM_COL.purple), 0.7 * Math.sin(p * Math.PI));
+    }
+    if (b.zoe) for (let k = 0; k < 2; k++) { // Zoe's buff: stars drifting up
+      const s0 = (seed * 1.3 + k * 0.5) % 1, p = (t * 0.7 + s0) % 1;
+      icon('star', wx + (k ? 1 : -1) * r * (0.35 + 0.25 * Math.sin((p + s0) * 6)), top * (0.3 + 1.0 * p), wz, 0.5, color(css('--gold') || '#E6B84A'), 0.75 * Math.sin(p * Math.PI));
+    }
+    if (b.fast) { // yellow mushroom: speed streaks behind it
+      const hx = (b.hx || 0) * f, hz = -(b.hy || 0) * f;
+      for (const o of [-0.4, 0.4]) beam(wx - hx * r * 1.2 - hz * r * o, 0.6 * r, wz - hz * r * 1.2 + hx * r * o, wx - hx * r * 2.4 - hz * r * o, 0.6 * r, wz - hz * r * 2.4 + hx * r * o, 0.06, color(SHROOM_COL.yellow), 0.6);
+    }
+  }
+
+  let v0 = null;
   function placeBodies(v, dt) {
     const f = v.me === 1 ? -1 : 1, me = v.me;
-    const byKind = {};
-    for (const s of standing(v, dt)) (byKind[models.kindOf(s.u)] || (byKind[models.kindOf(s.u)] = [])).push(s);
-    for (const g of Object.values(groups)) g.count = 0;
+    bodies.length = 0;
+    if (!v.m) return;
+    const battle = v.bt && (v.phase === 'battle' || v.phase === 'result' || v.phase === 'end');
+    if (battle) collectBattle(v, dt, f); else collectDeploy(v, f);
+    const byKey = {};
+    for (const s of bodies) { const k = models.kindOf(s.u) + '#' + s.look; (byKey[k] || (byKey[k] = [])).push(s); }
     const rings = [];
-    for (const [kind, list] of Object.entries(byKind)) {
-      const parts = models.parts(kind);
-      const gs = [['tint', tintMat], ['team', teamMat], ['fixed', fixedMat]].filter(([p]) => parts[p]).map(([p, mat]) => [p, group(kind + ':' + p, parts[p], mat, list.length)]);
+    for (const [key, list] of Object.entries(byKey)) {
+      const [kind, look] = key.split('#'), parts = models.parts(kind), top = models.height(kind);
+      const gs = [['tint', tintMat], ['team', teamMat], ['fixed', fixedMat]].filter(([p]) => parts[p])
+        .map(([p, mat]) => [p, group(key + ':' + p, parts[p], look === 'solid' ? mat : LOOKS[look], list.length)]);
       list.forEach((s, i) => {
-        const r = s.u.structure ? 1 : size(s.u);
+        const r = s.u.structure ? (s.scale || 1) : size(s.u), sc = r * (s.look === 'ghost' || s.look === 'ghostFoe' ? 0.85 : 1);
         const hx = s.hx || 0, hy = s.hy == null ? (s.side === 1 ? -1 : 1) : s.hy;
+        const lift = s.u.aloft ? 6 + Math.sin(clock * 1.5 + (s.phase || 0)) * 0.3 : 0;
         const bob = s.moving ? Math.abs(Math.sin(clock * 9 + s.phase)) * 0.12 * r * s.moving : 0;
-        tmpQ.setFromAxisAngle(up, Math.atan2(-hx * f, hy * f)); // a model's front is its -z side
-        tmpP.set(s.x * f, (s.u.aloft ? 6 : 0) + bob, -s.y * f); tmpS.setScalar(r * (s.hidden ? 0.6 : 1));
+        const [wx, wz] = world(f, s.x, s.y);
+        tmpQ.setFromAxisAngle(up, s.u.structure ? (s.side === me ? Math.PI : 0) : Math.atan2(-hx * f, hy * f)); // a model's front is its -z side; a tower's door faces its own side
+        tmpP.set(wx, lift + bob, wz); tmpS.setScalar(sc);
         tmpM.compose(tmpP, tmpQ, tmpS);
+        const team = s.flag || teamColor(s.side, me);
         for (const [p, g] of gs) {
           g.setMatrixAt(i, tmpM);
-          if (p === 'tint') g.setColorAt(i, tmpC.set(s.u.color || '#cccccc'));
-          if (p === 'team') g.setColorAt(i, teamColor(s.side, me));
-          if (p === 'fixed') g.setColorAt(i, tmpC.set('#ffffff'));
+          if (look !== 'solid') g.setColorAt(i, team);
+          else g.setColorAt(i, p === 'tint' ? tmpC.set(s.u.color || '#cccccc') : p === 'team' ? team : white);
         }
-        rings.push([s.x * f, -s.y * f, r * (s.u.structure ? 2.6 : 1), s.side]);
+        if (!s.u.spire) rings.push([wx, wz, r * (s.u.structure ? 2.6 : 1), s.side]);
+        const h = top * sc + lift;
+        if (s.crest) icon(`arms|${s.crest}|${s.edge}`, wx, h + 1.2, wz, 1.5);
+        if (s.b) bodyMarkers(s, f, me, wx, wz, r, h, clock);
       });
       for (const [, g] of gs) finish(g, list.length);
     }
     const rg = group('rings', ringGeo, flatMat, rings.length);
     rings.forEach(([x, z, r, side], i) => { tmpP.set(x, 0, z); tmpS.set(r, 1, r); tmpQ.identity(); rg.setMatrixAt(i, tmpM.compose(tmpP, tmpQ, tmpS)); rg.setColorAt(i, teamColor(side, me)); });
     finish(rg, rings.length);
-    // projectiles in flight
-    const ps = v.bt && v.phase === 'battle' ? v.bt.projectiles() : [], sg = group('projectiles', shotGeo, flatMat, ps.length);
-    ps.forEach((p, i) => { tmpP.set(p.x * f, 1.2, -p.y * f); tmpS.setScalar(1); tmpQ.identity(); sg.setMatrixAt(i, tmpM.compose(tmpP, tmpQ, tmpS)); sg.setColorAt(i, teamColor(p.owner.side, me)); });
-    finish(sg, ps.length);
+    if (!battle) return;
+    // projectiles in flight: thrown spears, and team-coloured shot for the rest
+    const ps = v.phase === 'battle' ? v.bt.projectiles() : [];
+    const spears = ps.filter(p => p.owner.u.shape === 'spear'), rest = ps.filter(p => p.owner.u.shape !== 'spear');
+    const sg = group('projectiles', shotGeo, flatMat, rest.length);
+    rest.forEach((p, i) => { tmpP.set(p.x * f, 1.2, -p.y * f); tmpS.setScalar(1); tmpQ.identity(); sg.setMatrixAt(i, tmpM.compose(tmpP, tmpQ, tmpS)); sg.setColorAt(i, teamColor(p.owner.side, me)); });
+    finish(sg, rest.length);
+    const sp = models.parts('spear'), spT = group('spear:tint', sp.tint, tintMat, spears.length), spF = group('spear:fixed', sp.fixed, fixedMat, spears.length);
+    spears.forEach((p, i) => {
+      tmpD.set(p.dirX * f, 0, -p.dirY * f).normalize(); tmpQ.setFromUnitVectors(tmpS.set(0, 0, -1), tmpD);
+      tmpP.set(p.x * f, 1.3, -p.y * f); tmpS.setScalar(1); tmpM.compose(tmpP, tmpQ, tmpS);
+      spT.setMatrixAt(i, tmpM); spT.setColorAt(i, tmpC.set(p.owner.u.color || '#cccccc'));
+      spF.setMatrixAt(i, tmpM); spF.setColorAt(i, white);
+    });
+    finish(spT, spears.length); finish(spF, spears.length);
+    // hail on Frozen Peak: falling streaks in the hail tiles
+    const src = v.battlePre || v.m;
+    if (Game.isIce(src) && v.phase === 'battle') for (const h of Game.hailTiles(src)) {
+      const s = tileCenter(v, h.col, h.row), x0 = s.c * T - BW / 2, z0 = s.r * T - BD / 2;
+      for (let k = 0; k < 6; k++) {
+        const fx = (k * 0.37 + h.col * 0.13) % 1, fz = (k * 0.53 + h.row * 0.29) % 1, p = (v.bt.time() * (0.9 + (k % 3) * 0.25) + k * 0.21) % 1, y = 9 * (1 - p);
+        beam(x0 + fx * T, y + 0.8, z0 + fz * T, x0 + fx * T - 0.1, y, z0 + fz * T, 0.07, color('#EAF6FF'), 0.8);
+      }
+    }
   }
 
-  // ---------- effects from view().fx: shots, bolts, heals and flames as fading lines, deaths as a widening ring ----------
-  const LINE_CAP = 800;
-  const linePos = new Float32Array(LINE_CAP * 6), lineCol = new Float32Array(LINE_CAP * 6);
-  const lines = new THREE.LineSegments(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.9 }));
-  lines.geometry.setAttribute('position', new THREE.BufferAttribute(linePos, 3));
-  lines.geometry.setAttribute('color', new THREE.BufferAttribute(lineCol, 3));
-  lines.frustumCulled = false;
-  scene.add(lines);
-  const deathGeo = new THREE.RingGeometry(0.92, 1.0, 24).rotateX(-Math.PI / 2).translate(0, 0.06, 0);
-  const FX_COL = { heal: new THREE.Color('#7BD66A'), flame: new THREE.Color('#FF8A3D'), bolt: new THREE.Color('#BFE3FF') };
+  // ---------- effects from view().fx ----------
   function drawFx(v) {
     const f = v.me === 1 ? -1 : 1;
-    let n = 0;
-    const deaths = [];
+    let nf = 0;
+    const jag = (seed, k) => (Math.sin((seed * 97 + k) * 12.9898) * 43758.5453) % 1;
     for (const e of v.fx || []) {
-      const a = Math.max(0, 1 - e.age / e.life);
-      if (e.kind === 'death') { deaths.push([e, a]); continue; }
-      if (n >= LINE_CAP) continue;
-      const c = FX_COL[e.kind] || teamColor(e.side, v.me);
-      linePos.set([e.x1 * f, 1.0, -e.y1 * f, e.x2 * f, 0.9, -e.y2 * f], n * 6);
-      lineCol.set([c.r * a, c.g * a, c.b * a, c.r * a, c.g * a, c.b * a], n * 6);
-      n++;
+      const a = Math.max(0, 1 - e.age / e.life), team = teamColor(e.side, v.me);
+      if (e.kind === 'death') { arc(e.x * f, -e.y * f, size(e.u) * (1 + e.age / e.life), team, 0.6 * a, 1, 0.1); continue; }
+      const x1 = e.x1 * f, z1 = -e.y1 * f, x2 = e.x2 * f, z2 = -e.y2 * f;
+      if (e.kind === 'shot') {
+        beam(x1, 1.1, z1, x2, 0.9, z2, Math.max(e.charged ? 0.28 : 0.1, 0.1 + ((e.spin || 1) - 1) * 0.16), team, 0.85 * a);
+        if (e.splash > 0) arc(x2, z2, e.splash, team, 0.55 * a, 1, 0.08);
+      } else if (e.kind === 'heal') { // a dashed green line
+        const L = Math.hypot(x2 - x1, z2 - z1), n = Math.max(1, Math.floor(L / 1.2)), heal = color('#6FD08C');
+        for (let k = 0; k < n; k++) { const p0 = k / n, p1 = (k + 0.5) / n; beam(x1 + (x2 - x1) * p0, 1.0, z1 + (z2 - z1) * p0, x1 + (x2 - x1) * p1, 1.0, z1 + (z2 - z1) * p1, 0.12, heal, 0.9 * a); }
+        if (e.splash > 0) arc(x2, z2, e.splash, heal, 0.6 * a, 1, 0.08);
+      } else if (e.kind === 'bolt') { // lightning: a jagged white-blue line with a glow in the team colour
+        const dx = x2 - x1, dz = z2 - z1, L = Math.hypot(dx, dz) || 1, n = Math.max(3, Math.round(L / 2.5)), pts = [[x1, 1.2, z1]];
+        for (let k = 1; k < n; k++) { const o = jag(e.seed || 0, k) * Math.min(1.5, L * 0.12); pts.push([x1 + dx * k / n - dz / L * o, 1.2 + Math.abs(o) * 0.6, z1 + dz * k / n + dx / L * o]); }
+        pts.push([x2, 1.0, z2]);
+        for (let k = 1; k < pts.length; k++) {
+          beam(...pts[k - 1], ...pts[k], 0.4, team, 0.4 * a);
+          beam(...pts[k - 1], ...pts[k], 0.1, color('#E8F1FF'), a);
+        }
+      } else if (e.kind === 'flame' && nf < FAN_CAP) { // a fire cone, bright at the mouth
+        const ang = Math.atan2(z2 - z1, x2 - x1), half = (e.half || 30) * Math.PI / 180, rr = Math.hypot(x2 - x1, z2 - z1), k = 0.4 + 0.6 * a;
+        for (let sgm = 0; sgm < FAN_SEG; sgm++) {
+          const a0 = ang - half + 2 * half * sgm / FAN_SEG, a1 = ang - half + 2 * half * (sgm + 1) / FAN_SEG, o = (nf * FAN_SEG + sgm) * 9;
+          fanPos.set([x1, 0.3, z1, x1 + Math.cos(a0) * rr, 0.3, z1 + Math.sin(a0) * rr, x1 + Math.cos(a1) * rr, 0.3, z1 + Math.sin(a1) * rr], o);
+          fanCol.set([0.55 * k, 0.32 * k, 0.08 * k, 0.12 * k, 0.03 * k, 0, 0.12 * k, 0.03 * k, 0], o);
+        }
+        nf++;
+      }
     }
-    lines.geometry.setDrawRange(0, n * 2);
-    lines.geometry.attributes.position.needsUpdate = true;
-    lines.geometry.attributes.color.needsUpdate = true;
-    const dg = group('deaths', deathGeo, flatMat, deaths.length);
-    deaths.forEach(([e, a], i) => {
-      const r = size(e.u) * (1 + e.age / e.life);
-      tmpP.set(e.x * f, 0, -e.y * f); tmpS.set(r, 1, r); tmpQ.identity();
-      dg.setMatrixAt(i, tmpM.compose(tmpP, tmpQ, tmpS)); dg.setColorAt(i, tmpC.copy(teamColor(e.side, v.me)).multiplyScalar(a));
-    });
-    finish(dg, deaths.length);
+    fans.geometry.setDrawRange(0, nf * FAN_SEG * 3);
+    fans.geometry.attributes.position.needsUpdate = true; fans.geometry.attributes.color.needsUpdate = true;
   }
 
-  // ---------- the tile under the pointer (view().hoverTile) ----------
-  const tileMark = new THREE.Mesh(new THREE.PlaneGeometry(Game.TILE - 0.4, Game.TILE - 0.4).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: css('--you') || '#5CC6DF', transparent: true, opacity: 0.35, depthWrite: false }));
-  tileMark.position.y = 0.06; tileMark.visible = false; scene.add(tileMark);
+  // ---------- the tile under the pointer (view().hoverTile), in the strategic view ----------
   // model column / row <-> the board as this side sees it (the flip is its own inverse)
   const screenTile = (me, col, row) => me === 1 ? { col: Game.COLS - 1 - col, row: Game.ROWS - 1 - row } : { col, row };
   function tileOfGround(p, me) {
     if (!p) return null;
-    const c = Math.floor((p.x + BW / 2) / Game.TILE), r = Math.floor((p.z + BD / 2) / Game.TILE);
+    const c = Math.floor((p.x + BW / 2) / T), r = Math.floor((p.z + BD / 2) / T);
     if (c < 0 || r < 0 || c >= Game.COLS || r >= Game.ROWS) return null;
     return screenTile(me, c, r);
   }
@@ -4363,14 +4759,19 @@ const Render3D = (THREE, el, view, opts = {}) => {
     const now = performance.now(), dt = last ? Math.min(0.1, (now - last) / 1000) : 0.016; last = now;
     clock += dt;
     const v = view();
-    lastMe = v.me;
-    paintFloor(v);
+    v0 = v; lastMe = v.me;
+    cam.update(dt);
+    camRight.setFromMatrixColumn(camera.matrixWorld, 0); camRight.y = 0; camRight.normalize();
+    paintFloor(v, dt);
+    used.clear(); ns = 0;
     placeBodies(v, dt);
     drawFx(v);
-    const ht = v.hoverTile && cam.strategic() ? screenTile(v.me, v.hoverTile.col, v.hoverTile.row) : null;
-    tileMark.visible = !!ht;
-    if (ht) tileMark.position.set((ht.col + 0.5) * Game.TILE - BW / 2, 0.06, (ht.row + 0.5) * Game.TILE - BD / 2);
-    cam.update(dt);
+    if (v.hoverTile && cam.strategic() && !(v.selected !== null || v.moving != null)) { const s = screenTile(v.me, v.hoverTile.col, v.hoverTile.row); tileSq(s.col, s.row, color(css('--you') || '#5CC6DF'), 0.35, 1, 0, 0.03); }
+    drawBeams(); drawWalls();
+    for (const g of Object.values(groups)) if (!used.has(g)) g.count = 0;
+    sprGeo.instanceCount = ns;
+    for (const a of Object.values(sprAttr)) { a.clearUpdateRanges(); a.addUpdateRange(0, ns * a.itemSize); a.needsUpdate = true; }
+    showNote(v);
     const near = Math.min(1, cam.zoom() / 2); // fog only at the ground view: the strategic and angled views see the whole board
     scene.fog.near = 400 - 310 * near; scene.fog.far = 600 - 380 * near;
     renderer.render(scene, camera);
@@ -4388,6 +4789,7 @@ const touch = matchMedia('(pointer: coarse)').matches;
 
 // ---------- the match: AI armies on both sides; a fight is the engine's real battle ----------
 let m = null, bt = null, phase = 'deploy', fx = [], acc = 0, result = null, hoverTile = null;
+let extra = {}; // for tests: view fields to set (selected, placingUnit, placingTower, ...)
 const DT = Game.SETTINGS.dt;
 function newMatch() {
   m = Game.createMatch(units, DATA.matrix, (Math.random() * 1e9) >>> 0, $('map').value);
@@ -4422,7 +4824,7 @@ $('map').addEventListener('change', newMatch);
 
 // ---------- the board ----------
 const board = Render3D(THREE, $('view'), () => ({ m, me: 0, phase, units, mode: 'ai', bt, battlePre: m, fx, selected: null, moving: null, drag: null, hoverTile,
-  editable: false, placingUnit: null, placingElf: false, placingTower: false }), {
+  editable: false, placingUnit: null, placingElf: false, placingTower: false, ...extra }), {
   // a tap in the strategic view marks a tile, in the game's own column / row numbers
   onTap: (t) => { hoverTile = t; if (t) msg(`Tapped tile: column ${t.col + 1}, row ${t.row + 1}`); },
   onLevel: (lv) => { if (lv) hoverTile = null; },
@@ -4462,7 +4864,7 @@ function frame(ts) {
 board.size();
 newMatch();
 requestAnimationFrame(frame);
-window.__lab3d = { board, get m() { return m; }, get bt() { return bt; }, get phase() { return phase; } }; // for tests
+window.__lab3d = { board, get m() { return m; }, get bt() { return bt; }, get phase() { return phase; }, view(x) { extra = x || {}; } }; // for tests
 
 </script>
 </body>

@@ -5,7 +5,8 @@
 //     editable, placingUnit, placingElf, placingTower }
 // fx: short-lived battle effects as plain data (shots, flames, bolts, heals, deaths), in board metres.
 // Calls: size() after the canvas changes size, draw(), tileAt(clientX, clientY) -> { col, row } or null,
-// thumb(match) -> a data URL of a small picture of that match's board (null: a plain board with a question mark).
+// thumb(match) -> a data URL of a small picture of that match's board (null: a plain board with a question mark),
+// floor(): only the board itself (map, zones, tiles), no squads or towers: the 3D renderer lays it on the ground.
 // A 3D renderer can take its place by offering the same calls.
 const Render2D = (cv, view) => {
   let ctx = cv.getContext('2d'); // swapped for a moment while drawing map thumbnails (thumb)
@@ -700,5 +701,7 @@ const Render2D = (cv, view) => {
     return { col: scol(c), row: srow(rw) };
   }
 
-  return { size, draw, tileAt, thumb };
+  function floor() { pull(); drawBoard(); }
+
+  return { size, draw, tileAt, thumb, floor };
 };

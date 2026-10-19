@@ -7,6 +7,7 @@ const touch = matchMedia('(pointer: coarse)').matches;
 
 // ---------- the match: AI armies on both sides; a fight is the engine's real battle ----------
 let m = null, bt = null, phase = 'deploy', fx = [], acc = 0, result = null, hoverTile = null;
+let extra = {}; // for tests: view fields to set (selected, placingUnit, placingTower, ...)
 const DT = Game.SETTINGS.dt;
 function newMatch() {
   m = Game.createMatch(units, DATA.matrix, (Math.random() * 1e9) >>> 0, $('map').value);
@@ -41,7 +42,7 @@ $('map').addEventListener('change', newMatch);
 
 // ---------- the board ----------
 const board = Render3D(THREE, $('view'), () => ({ m, me: 0, phase, units, mode: 'ai', bt, battlePre: m, fx, selected: null, moving: null, drag: null, hoverTile,
-  editable: false, placingUnit: null, placingElf: false, placingTower: false }), {
+  editable: false, placingUnit: null, placingElf: false, placingTower: false, ...extra }), {
   // a tap in the strategic view marks a tile, in the game's own column / row numbers
   onTap: (t) => { hoverTile = t; if (t) msg(`Tapped tile: column ${t.col + 1}, row ${t.row + 1}`); },
   onLevel: (lv) => { if (lv) hoverTile = null; },
@@ -81,4 +82,4 @@ function frame(ts) {
 board.size();
 newMatch();
 requestAnimationFrame(frame);
-window.__lab3d = { board, get m() { return m; }, get bt() { return bt; }, get phase() { return phase; } }; // for tests
+window.__lab3d = { board, get m() { return m; }, get bt() { return bt; }, get phase() { return phase; }, view(x) { extra = x || {}; } }; // for tests
