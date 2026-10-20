@@ -629,7 +629,12 @@ const Engine = (() => {
   //   b.site = { work, need }: seconds of building done and needed. At the start of a fight the nearest builder without
   //   a job walks to it (within SITE_REACH) and builds instead of fighting (u.buildSpeed seconds of work a second) until
   //   it is done or falls; then the builder carries on like any builder (its turret, then melee).
-  //   b.produce = { unit, time }: once built, it makes one body of unit after time seconds, a little in front of it.
+  //   A site nobody is assigned to builds itself at site.self seconds of work a second (0 = not at all).
+  //   b.produce = { units: [unit, ...], time }: once built, it makes one body of each after time seconds, side by side a
+  //   little in front of it.
+  // A unit with flee (metres) keeps away from enemies: whenever one is that close it moves straight away from it (it
+  // still shoots). A unit with backline picks the farthest enemy in reach instead of the nearest. A unit with lob fires
+  // shells over the heads of whoever is in the way: they only land where they were aimed.
   //   What it makes earns it XP (credit). result().buildings tells the game how each building did.
   const SITE_REACH = 3.5;
   // link: the bodies of a squad share one health pool. Damage to any of them is split across all that are alive
@@ -1269,7 +1274,7 @@ const Engine = (() => {
         const d = dist(f, b);
         if (d <= reachOf(b) + 0.01 && d >= b.u.minRange) valid.push([d, f]);
       }
-      valid.sort((p, q) => p[0] - q[0]);
+      valid.sort((p, q) => b.u.backline ? q[0] - p[0] : p[0] - q[0]);
       return valid.map(v => v[1]);
     }
 
@@ -1504,7 +1509,8 @@ const Engine = (() => {
     function finishBuild(b) {
       b.buildT = 0; b.built = true;
       const bd = b.u.build, n = Math.max(1, Math.round(bd.count || 1)), [dx, dy] = b.buildDir;
-      const cu = leveled(withTraits({ ...bd.unit, bodies: 1, speed: 0, construct: true, noCount: true, anchored: true }), b.level);
+      // a construct stands where it was built, unless it was made to move (Core Awoken)
+      const cu = leveled(withTraits({ ...bd.unit, bodies: 1, construct: true, noCount: true, ...(bd.unit.speed > 0 ? {} : { speed: 0, anchored: true }) }), b.level);
       for (let k = 0; k < n; k++) {
         const off = (k - (n - 1) / 2) * BUILD_GAP;
         let x = b.x - dy * off, y = b.y + dx * off;
@@ -1608,6 +1614,13 @@ const Engine = (() => {
           if (d < nd) { nd = d; near = f; }
         }
         b.near = near;
+        if (b.u.flee > 0 && near && nd < b.u.flee) { // keeping away from the enemy
+          const mv = b.u.speed * moveMul(b) * dt;
+          b.hx = -(near.x - b.x) / (nd || 1); b.hy = -(near.y - b.y) / (nd || 1);
+          b.x += b.hx * mv; b.y += b.hy * mv; b.moved += mv;
+          if (g.bounds) { b.x = Math.max(g.bounds.x0, Math.min(g.bounds.x1, b.x)); b.y = Math.max(g.bounds.y0, Math.min(g.bounds.y1, b.y)); }
+          continue;
+        }
         // a builder that hasn't built yet stops to build once an enemy is within its constructs' range (see the builders below)
         if (b.u.build && !b.built) {
           if (b.buildT > 0) continue;
@@ -1674,13 +1687,17 @@ const Engine = (() => {
         });
         builders.forEach((b, k) => { b.buildT -= dt * rate[k]; if (b.buildT <= 1e-9) finishBuild(b); });
       }
-      // ...and at building sites
+      // ...and at building sites (a site without a builder builds itself, slowly, if it can)
+      const manned = new Set();
       for (const b of all) {
-        if (!b.alive || !b.siteJob || !b.siteAt) continue;
+        if (!b.alive || !b.siteJob) continue;
+        manned.add(b.siteJob);
+        if (!b.siteAt) continue;
         const s = b.siteJob.site;
         s.work = Math.min(s.need, s.work + dt * (b.u.buildSpeed || 1));
         if (s.work >= s.need) { b.siteJob = null; b.siteAt = false; }
       }
+      for (const b of all) if (b.alive && b.site && b.site.self > 0 && b.site.work < b.site.need && !manned.has(b)) b.site.work = Math.min(b.site.need, b.site.work + dt * b.site.self);
       // separation between allies
       const minSep = g.spacing * 0.7;
       for (let s = 0; s < 2; s++) {
@@ -1736,11 +1753,16 @@ const Engine = (() => {
           b.prodT = (b.prodT == null ? b.produce.time : b.prodT) - dt;
           if (b.prodT <= 1e-9) {
             b.produced = true;
+            const list = b.produce.units || [], gap = g.spacing;
             let y = b.y + (b.side === 0 ? 1 : -1) * BUILD_GAP * 0.7;
             if (g.bounds) y = Math.max(g.bounds.y0, Math.min(g.bounds.y1, y));
-            const kid = newBody(b.produce.unit, b.side, b.x, y, spawnIdx++, -1);
-            kid.credit = b;
-            pendingKids.push(kid);
+            list.forEach((pu, k) => {
+              let x = b.x + (k - (list.length - 1) / 2) * gap;
+              if (g.bounds) x = Math.max(g.bounds.x0, Math.min(g.bounds.x1, x));
+              const kid = newBody(pu, b.side, x, y, spawnIdx++, -1);
+              kid.credit = b;
+              pendingKids.push(kid);
+            });
           }
         }
         if (b.follow && b.healPct > 0) { // a healbot mends the bodies of its squad within reach
@@ -1927,7 +1949,7 @@ const Engine = (() => {
           while (mv > 0 && !done) {
             const sub = Math.min(0.5, mv, p.left);
             p.x += p.dirX * sub; p.y += p.dirY * sub; p.left -= sub; mv -= sub;
-            for (const f of foes) {
+            if (!p.owner.u.lob) for (const f of foes) {
               if (f.alive && hyp(f.x - p.x, f.y - p.y) <= PROJ_HIT_RADIUS) {
                 impact(p.owner, p.x, p.y, null, p.hit, p.dirX, p.dirY, p.fx, p.fy);
                 done = true; break;
@@ -2057,7 +2079,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
       "color": "#C2873F",
       "theme": "Rock elementals with clockwork hearts. They move smooth as magic; the machines they build rattle and smoke.",
       "tower": {
-        "name": "Cog Spire",
+        "name": "Mechite Tower",
         "text": "For now the standard tower. The Mechites' own tower comes later.",
         "unit": {
           "hp": 650
@@ -2158,6 +2180,33 @@ if (typeof module !== 'undefined') module.exports = Engine;
           ],
           "smooth": true,
           "tag": "GRD"
+        },
+        {
+          "name": "Altar of Build",
+          "cost": 500,
+          "unlock": 150,
+          "bodies": 1,
+          "hp": 4000,
+          "hit": 0,
+          "aps": 1,
+          "range": 0,
+          "speed": 0,
+          "splash": 0,
+          "building": "altar",
+          "footprint": 2,
+          "idle": true,
+          "noCount": true,
+          "anchored": true,
+          "noPack": true,
+          "noFlank": true,
+          "shape": "star",
+          "color": "#9C8B6E",
+          "tag": "ALT",
+          "skills": [
+            null,
+            null,
+            null
+          ]
         }
       ]
     }
@@ -2323,6 +2372,89 @@ if (typeof module !== 'undefined') module.exports = Engine;
             "shape": "hexagon",
             "color": "#B5895A",
             "tag": "MCH"
+          }
+        }
+      ],
+      "survive": true,
+      "awake": {
+        "speed": 2,
+        "hit": 220,
+        "aps": 0.4,
+        "range": 22,
+        "splash": 3,
+        "projSpeed": 30
+      }
+    },
+    {
+      "id": "altar",
+      "name": "Altar of Build",
+      "faction": "mechites",
+      "hp": 4000,
+      "buildSecs": 30,
+      "selfBuild": 0.2,
+      "rebuild": 50,
+      "color": "#9C8B6E",
+      "text": "A stone ring with the Cog Spire in its middle, standing where four tiles meet. Your nearest free Cog Builder builds it during fights (with none free it builds itself, five times slower); once built, buy one of its blessings each round.",
+      "awake": {
+        "speed": 2.5,
+        "hit": 38,
+        "aps": 2,
+        "range": 18,
+        "spinUp": 50,
+        "spinHit": 50,
+        "beams": 6
+      },
+      "skills": [
+        {
+          "id": "blessing",
+          "name": "Blessing of the Cycle",
+          "cost": 200,
+          "text": "This round all your constructs (turrets, healbots, buildings and what they make) get +25% construct speed, +25% health, +15% move speed, +15% fire rate and regain 2% of their health every second.",
+          "bless": {
+            "build": 25,
+            "hp": 25,
+            "speed": 15,
+            "aps": 15,
+            "regen": 2
+          }
+        },
+        {
+          "id": "defense",
+          "name": "Cogbot Defensive Force",
+          "cost": 500,
+          "time": 4,
+          "text": "Four seconds into this round's fight the altar makes 2 Cogbot Fighters and 2 Cogbot Machinegunners.",
+          "make": [
+            [
+              "factory",
+              "fighter",
+              2
+            ],
+            [
+              "factory",
+              "gunner",
+              2
+            ]
+          ]
+        },
+        {
+          "id": "awoken",
+          "name": "Core Awoken",
+          "cost": 800,
+          "text": "This round your construct buildings become units when the fight starts: the Factory rolls out on caterpillar tracks with a big tank gun, the altar rises on four spider legs and its Cog Spire fires 6 beams like a Sun Priest, and your turrets get wheels: they keep away from enemies at 4 m/s while lobbing mortar shells at the enemy's back line.",
+          "awake": {
+            "built": {
+              "speed": 4,
+              "flee": 14,
+              "backline": true,
+              "hit": 28,
+              "aps": 0.75,
+              "range": 35,
+              "minRange": 8,
+              "splash": 3,
+              "projSpeed": 22,
+              "lob": true
+            }
           }
         }
       ]

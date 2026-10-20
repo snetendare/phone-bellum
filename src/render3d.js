@@ -381,6 +381,15 @@ const Render3D = (THREE, el, view, opts = {}) => {
     const deploying = phase === 'deploy';
     const you = color(css('--you') || '#5CC6DF'), gold = color(css('--gold') || '#E6B84A');
     const squad = (sq, side, fresh) => {
+      if (units[sq.unit].building) { // a building bought in the shop (the Altar of Build): in the middle of its block
+        const u = units[sq.unit], n = Game.footprint(m, sq.unit), w = Game.recordWorld({ col: sq.col, row: sq.row, size: n }), [wx, wz] = world(f, w.x, w.y);
+        bodies.push({ u: { ...u, size: n }, side, x: w.x, y: w.y, look: sq.built ? 'solid' : 'glass' });
+        if (!sq.built) arc(wx, wz, 2.6 * n, gold, 0.95, sq.progress || 0, 0.05);
+        if (fresh) for (const [c, r] of Game.blockOf(m, sq.unit, sq.col, sq.row)) { const st = tileCenter(v, c, r); tileSq(st.c, st.r, teamColor(side, me), 0.8, 0.05, 14); }
+        if (sq.level > 0) iconRow([...Array(sq.level)].map(() => 'dot'), wx, 7.2, wz, 0.5, gold);
+        if (side === me && deploying && Game.isReady(m, sq)) icon('plus', wx + camRight.x * 4, 5, wz + camRight.z * 4, 1.1);
+        return [wx, wz];
+      }
       const u = units[sq.unit], w = Game.tileToWorld(sq.col, sq.row), st = tileCenter(v, sq.col, sq.row);
       const list = Engine.buildSquad(u, side, w.x, w.y, sq.id, T);
       for (const b of list) bodies.push({ u, side, x: b.x, y: b.y, look: 'solid', tag: side + '|' + sq.id });
@@ -414,12 +423,12 @@ const Render3D = (THREE, el, view, opts = {}) => {
     // where things may go
     if ((selected !== null || (drag && drag.moved) || moving != null) && deploying) {
       for (let row = 0; row < Game.ROWS; row++) for (let c = 0; c < Game.COLS; c++) {
-        if (Game.canPlaceAt(m, me, c, row, placingUnit) && !Game.occupied(m, me, c, row)) { const s = tileCenter(v, c, row); tileSq(s.c, s.r, you, 0.3, 0.05); }
+        if (Game.canPlaceAt(m, me, c, row, placingUnit) && Game.spotFree(m, me, c, row, placingUnit)) { const s = tileCenter(v, c, row); tileSq(s.c, s.r, you, 0.3, 0.05); }
       }
       if (placingUnit != null) for (const sq of m.armies[me]) if (Game.boardable(m, me, sq.col, sq.row, placingUnit) && !(drag && drag.id === sq.id)) { const s = tileCenter(v, sq.col, sq.row); tileSq(s.c, s.r, gold, 0.85, 0.07, 0, 0.03); }
     }
-    if (hoverTile && (selected !== null || moving != null) && Game.canPlaceAt(m, me, hoverTile.col, hoverTile.row, placingUnit) && (!Game.occupied(m, me, hoverTile.col, hoverTile.row) || (placingUnit != null && Game.boardable(m, me, hoverTile.col, hoverTile.row, placingUnit)))) {
-      const s = tileCenter(v, hoverTile.col, hoverTile.row); tileSq(s.c, s.r, you, 0.2, 1, 0, 0);
+    if (hoverTile && (selected !== null || moving != null) && Game.canPlaceAt(m, me, hoverTile.col, hoverTile.row, placingUnit) && (Game.spotFree(m, me, hoverTile.col, hoverTile.row, placingUnit) || (placingUnit != null && Game.boardable(m, me, hoverTile.col, hoverTile.row, placingUnit)))) {
+      for (const [c, r] of Game.blockOf(m, placingUnit, hoverTile.col, hoverTile.row)) { const s = tileCenter(v, c, r); tileSq(s.c, s.r, you, 0.2, 1, 0, 0); } // a building's whole block
     }
     if (v.placingElf && editable) for (const row of Game.zoneRows(me)) for (let c = 0; c < Game.COLS; c++) if (Game.elfOwnSpotOk(m, me, c, row)) { const s = tileCenter(v, c, row); tileSq(s.c, s.r, color(ELF_COL), 0.6, 0.06); }
     if (v.placingTower && editable) for (const row of Game.zoneRows(me)) for (let c = 0; c < Game.COLS; c++) {
@@ -463,13 +472,13 @@ const Render3D = (THREE, el, view, opts = {}) => {
     const big = u.structure || u.building;
     if (big || (u.hp >= 500 && hpr < 1)) {
       if (viewMode === 'strategic') { // a ring around it, as on the 2D board (dark where the health is gone)
-        const rr = big ? 3.1 : r * 1.42, th = big ? 0.11 : 0.1;
+        const rr = big ? 3.1 * (u.size > 1 ? 1.5 : 1) : r * 1.42, th = big ? 0.11 : 0.1;
         arc(wx, wz, rr, color('#0B0F11'), 0.6, 1, th, 0, 0, 0.065); arc(wx, wz, rr, team, 1, hpr, th);
       } else { const w = big ? 4.2 : Math.max(1.6, r * 1.5); bar(wx, y, wz, w, big ? 0.42 : 0.3, hpr, team); y += 0.55; }
     }
     if (u.building) { // how far the site is built, and the unit it is making
       const gold = color(css('--gold') || '#E6B84A');
-      if (b.site && b.site.work < b.site.need) arc(wx, wz, 3.5, gold, 1, b.site.work / b.site.need, 0.08);
+      if (b.site && b.site.work < b.site.need) arc(wx, wz, 3.5 * (u.size > 1 ? 1.5 : 1), gold, 1, b.site.work / b.site.need, 0.08);
       if (b.produce && !b.produced && b.prodT != null) arc(wx, wz, 2.5, gold, 0.95, 1 - b.prodT / b.produce.time, 0.1, 24);
       return;
     }
@@ -530,8 +539,9 @@ const Render3D = (THREE, el, view, opts = {}) => {
         .map(([p, mat]) => [p, group(key + ':' + p, parts[p], look === 'solid' ? mat : LOOKS[look], list.length)]);
       const rollAt = models.ROLL_AT[kind];
       list.forEach((s, i) => {
-        const fixed = s.u.structure || s.u.building; // towers and buildings are drawn at their own size, door toward their own side
-        const r = fixed ? (s.scale || 1) : size(s.u) * MODEL_SCALE, sc = r * (s.look === 'ghost' || s.look === 'ghostFoe' ? 0.85 : 1);
+        // towers and buildings are drawn at their own size and face their own side (a walking building faces where it goes)
+        const fixed = s.u.structure || (s.u.building && !s.u.awake);
+        const r = s.u.structure || s.u.building ? (s.scale || 1) : size(s.u) * MODEL_SCALE, sc = r * (s.look === 'ghost' || s.look === 'ghostFoe' ? 0.85 : 1);
         const hx = s.hx || 0, hy = s.hy == null ? (s.side === 1 ? -1 : 1) : s.hy;
         const lift = s.u.aloft ? 6 + Math.sin(clock * 1.5 + (s.phase || 0)) * 0.3 : 0;
         // Mechites glide (smooth); a roller rolls instead of bobbing
@@ -555,13 +565,14 @@ const Render3D = (THREE, el, view, opts = {}) => {
         // a stealthed body is only its see-through model, as the dashed ghost on the 2D board: no markers, and no
         // ring under the opponent's
         const ghost = !!(s.b && s.b.hidden && !s.u.aloft);
-        if (!s.u.spire && !uiOff && !(ghost && s.side !== me)) rings.push([wx, wz, r * (fixed ? 2.6 : 1), s.side]);
+        if (!s.u.spire && !uiOff && !(ghost && s.side !== me)) rings.push([wx, wz, r * (s.u.structure || s.u.building ? 2.6 * (s.u.size > 1 ? 1.6 : 1) : 1), s.side]);
         const h = top * sc + lift;
         if (s.crest) icon(`arms|${s.crest}|${s.edge}`, wx, h + 1.2, wz, 1.5);
         if (s.b && !ghost) { bodyMarkers(s, f, me, wx, wz, r, h, clock); s.marked = true; }
         // smoke from constructs, and from a working building's chimney (in fights)
         if (s.b && s.look === 'solid' && (s.u.construct || s.u.building)) {
-          if (s.u.building) { tmpD.set(1.3, 4.8, 0.9).applyQuaternion(tmpQ); smoke(wx + tmpD.x, tmpD.y, wz + tmpD.z, 0.9, s.phase || 0); }
+          if (s.u.building === 'factory') { tmpD.set(1.3, s.u.awake ? 5.5 : 4.8, 0.9).applyQuaternion(tmpQ); smoke(wx + tmpD.x, tmpD.y, wz + tmpD.z, 0.9, s.phase || 0); }
+          else if (s.u.building) { /* the altar doesn't smoke */ }
           else smoke(wx, h, wz, 0.35 * r, s.phase || 0);
         }
         if (s.tag) { const l = labels.get(s.tag) || { u: s.u, pts: [] }; l.pts.push([wx, wz, r]); labels.set(s.tag, l); }

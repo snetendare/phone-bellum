@@ -1420,6 +1420,7 @@ a { color: var(--you); }
       if (u.ram) t.push(`NEVER ATTACKS: runs straight at the enemy tower (the nearest enemy once it is down) and rams it once for its hit (${n1(u.hit)}), then is destroyed`);
       if (u.carrier) t.push('CARRIES ONE SQUAD of any other unit, hidden from the opponent until it is destroyed: place a squad on its tile (price and deployment as usual) and it rides inside, then jumps out where the carrier falls');
       if (u.noFlank) t.push('can\'t be placed on flank tiles');
+      if (u.building) t.push(`A BUILDING (${Game.footprint(m, i)}x${Game.footprint(m, i)} tiles: "col"/"row" in "place" is its first column and row, every tile must be free in your zone; it never moves, never attacks and doesn't count as a unit left standing). See Buildings below for how it is built and its skills`);
       if (u.roll > 0) t.push(`NEVER STOPS TO ATTACK: rolls at its target from ${Engine.ROLL_START} m/s up to its speed over ${n1(u.roll)} s, hits every enemy body it rolls over for its hit, carries on ${Engine.ROLL_PAST} m past the target, stops and rolls back (the faster it gets going, the more often it hits)`);
       if (u.build && u.build.unit) { const c = u.build.unit; t.push(`BUILDS once per fight: when an enemy is within ${u.build.range} m it stops for ${n1(u.build.time)} s (faster with other builders next to it) and builds ${u.build.count} ${c.name}${u.build.count > 1 ? 's' : ''} (${n1(c.hp)} health, ${n1(c.hit)} hit, ${n1(c.aps)} attacks/s, ${c.range} m range, never moves, gone after the fight), then fights on`); }
       if (u.link) t.push('linked health: its bodies share one health pool and fall together');
@@ -1527,14 +1528,16 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   }
 
   // the Claude opponent: buildings (the Mechites' Factory), when the match has a unit that places one
-  const hasBuildings = () => units.some((u, ui) => Engine.SLOTS.some(k => Game.isBuildingSkill(m, ui, k)));
+  const hasBuildings = () => units.some((u, ui) => u.building || Engine.SLOTS.some(k => Game.isBuildingSkill(m, ui, k)));
   function buildingsPrompt() {
     if (!hasBuildings()) return '';
-    const kinds = [...new Set(units.flatMap((u, ui) => Engine.SLOTS.map(k => Game.buildingIdOf(m, ui, k)).filter(Boolean)))].map(id => Game.buildingInfo(id)).filter(Boolean);
-    const desc = (b) => `${b.name} at col ${b.col}, row ${b.row}: ${b.built ? 'built' : `${Math.round(b.progress * 100)}% built`}, level ${b.level + 1}`;
-    const mine = Game.buildingsOf(m, 1), theirs = Game.buildingsOf(m, 0).filter(b => b.round < m.round).map(b => ({ ...b, name: Game.buildingInfo(b.id).name }));
-    return `\n- Buildings: a unit skill of type building places one (one of each kind per player). In "skills" give it a tile too: {"unit":"Cog Builder","slot":1,"col":5,"row":1}, a free tile of your zone. ${kinds.map(b => `${b.name}: ${b.hp} health, never moves or attacks. Your nearest builder walks over and builds it during fights (${b.buildSecs} s of work); if it is still standing at the end of a fight it was worked on, it is built (if it falls, the work done is kept). Once built, each round you may buy ONE of its units with "buildingSkills":{"${b.id}":"skill id"}, made a few seconds into that fight only: ${b.skills.map(x => `"${x.id}" ${x.name} (${x.cost} gold, ${x.unit.hp} health, hit ${x.unit.hit} × ${x.unit.aps}/s, range ${x.unit.range} m)`).join(', ')}. What it makes earns it XP; level it up with "levelBuilding":["${b.id}"] (${Game.buildingLevelCost(b.id)} gold) when it has ${Game.buildingXpNeeded(b.id, 0)} XP (then ${Game.buildingXpNeeded(b.id, 1)}): it and its units get +100% health and damage per level. Destroyed after it was built, it starts the next round ${b.rebuild == null ? 50 : b.rebuild}% built and must be built again.`).join(' ')}
-- Your buildings: ${mine.length ? mine.map(b => desc({ ...b, name: Game.buildingInfo(b.id).name }) + `, XP ${Math.round(b.xp)}${Game.buildingReady(b) ? ', READY TO LEVEL UP' : ''}`).join('; ') : 'none'}.
+    const kinds = Game.BUILDINGS().filter(b => units.some((u, ui) => u.building === b.id || Engine.SLOTS.some(k => Game.buildingIdOf(m, ui, k) === b.id)));
+    const how = (b) => units.some(u => u.building === b.id) ? `bought in the shop like a unit ("place" it; it takes a ${Game.footprint(m, units.findIndex(u => u.building === b.id))}x${Game.footprint(m, units.findIndex(u => u.building === b.id))} block of free tiles of your zone; it levels up like a squad)`
+      : `placed by a unit skill of type building (in "skills" give it a tile too: {"unit":"Cog Builder","slot":1,"col":5,"row":1}, a free tile of your zone; one per player; level it up with "levelBuilding":["${b.id}"], ${Game.buildingLevelCost(b.id)} gold, when it has ${Game.buildingXpNeeded(b.id, 0)} XP, then ${Game.buildingXpNeeded(b.id, 1)})`;
+    const desc = (r) => `"${r.key}": ${Game.buildingInfo(r.id).name} at col ${r.col}, row ${r.row}: ${r.rec.built ? 'built' : `${Math.round((r.rec.progress || 0) * 100)}% built`}, level ${(r.rec.level || 0) + 1}`;
+    const mine = Game.buildingRecords(m, 1), theirs = Game.buildingRecords(m, 0).filter(r => (r.rec.round || 0) < m.round);
+    return `\n- Buildings: ${kinds.map(b => `${b.name}: ${how(b)}, ${b.hp} health, never moves or attacks. Your nearest free builder walks over and builds it during fights (${b.buildSecs} s of work${b.selfBuild > 0 ? `; with no builder it builds itself ${Math.round(1 / b.selfBuild)} times slower` : ''}); ${b.survive ? 'if it is still standing at the end of a fight it was worked on, it is built' : 'the work carries over between fights until it is done'} (if it falls, the work done is kept). Once built, each round you may buy ONE of its skills with "buildingSkills":{"<its key>":"skill id"}, for that fight only: ${b.skills.map(x => `"${x.id}" ${x.name} (${x.cost} gold${x.unit ? `, ${x.unit.hp} health, hit ${x.unit.hit} × ${x.unit.aps}/s, range ${x.unit.range} m` : `: ${x.text || ''}`})`).join(', ')}. What it makes earns it XP; a leveled one and its units get +100% health and damage per level. Destroyed after it was built, it starts the next round ${b.rebuild == null ? 50 : b.rebuild}% built and must be built again.`).join(' ')}
+- Your buildings (by key): ${mine.length ? mine.map(r => desc(r) + (!r.sq ? `, XP ${Math.round(r.rec.xp)}${Game.buildingReady(r.rec) ? ', READY TO LEVEL UP' : ''}` : '')).join('; ') : 'none'}.
 - Their buildings: ${theirs.length ? theirs.map(desc).join('; ') : 'none'}.`;
   }
   function applyClaudeMove(mv) {
@@ -1576,7 +1579,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     for (const name of list(mv.unlock)) { const ui = unitIdx(name); if (ui >= 0 && Game.unlock(m, 1, ui)) did.push(`unlocked ${units[ui].name}`); }
     trySkills();
     for (const id of list(mv.levelBuilding)) if (Game.levelBuilding(m, 1, String(id))) levels.push({ building: String(id), level: Game.buildingOf(m, 1, String(id)).level });
-    if (mv.buildingSkills && typeof mv.buildingSkills === 'object') for (const id in mv.buildingSkills) if (Game.buyBuildingSkill(m, 1, id, String(mv.buildingSkills[id]))) did.push(`ordered a ${Game.buildingSkillInfo(id, String(mv.buildingSkills[id])).name} from its ${buildingName(id)}`);
+    if (mv.buildingSkills && typeof mv.buildingSkills === 'object') for (const id in mv.buildingSkills) if (Game.buyBuildingSkill(m, 1, id, String(mv.buildingSkills[id]))) { const kind = Game.recordOf(m, 1, id).id; did.push(`bought ${Game.buildingSkillInfo(kind, String(mv.buildingSkills[id])).name} at its ${buildingName(kind)}`); }
     const bribes = Math.max(0, Math.min(20, mv.bribe === true ? 1 : int(mv.bribe) || 0));
     let paid = 0;
     for (let k = 0; k < bribes; k++) if (Game.bribe(m, 1)) paid++;
@@ -1905,7 +1908,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       else openSheet(own.unit, own, me);
       return;
     }
-    const enemy = m.armies[foe()].find(s => { const p = Game.seenAt(m, s); return !Game.hiddenFromFoe(m, s) && p.col === t.col && p.row === t.row && s.round < m.round; });
+    const enemy = m.armies[foe()].find(s => { const p = Game.seenAt(m, s); return !Game.hiddenFromFoe(m, s) && Game.blockOf(m, s.unit, p.col, p.row).some(([c, r]) => c === t.col && r === t.row) && s.round < m.round; });
     if (enemy) { openSheet(enemy.unit, enemy, foe()); return; }
     if (selected !== null && editable() && Game.canPlaceAt(m, me, t.col, t.row, selected)) {
       if (Game.place(m, me, selected, t.col, t.row)) {
@@ -2146,14 +2149,40 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if ($('mgen-undo')) $('mgen-undo').addEventListener('click', () => { if (editable() && Game.undoMageGen(m, me)) { changed(); openTowerSheet(me); } });
     if ($('mtp-undo')) $('mtp-undo').addEventListener('click', () => { if (editable() && Game.undoMageGen(m, me, 'teleport')) { changed(); openTowerSheet(me); } });
   }
-  // a building's sheet (the Mechites' Factory): how far it is built, its level, and the unit it makes this round
-  // (yours; the opponent's choice stays hidden, as it is bought each round)
+  // A building's block (the Factory's sheet; the Altar of Build's unit sheet): how far it is built and its skills for
+  // this round (yours; the opponent's choice stays hidden, as it is bought each round). key: see Game.buildingRecords
+  function buildingBlock(side, key) {
+    const r = Game.recordOf(m, side, key), info = r && Game.buildingInfo(r.id);
+    if (!r || !info) return '';
+    const b = r.rec, id = r.id, mine = side === me, live = phase === 'deploy' && editable() && mine, r2 = (v) => Math.round(v * 100) / 100;
+    const chip = (txt, col) => `<span class="chip" style="color:${col};border:1px solid currentColor;border-radius:99px;padding:1px 8px;font-size:12px">${txt}</span>`;
+    const cb = Game.constructBuff(m, side), k = 1 + Engine.LEVEL_BONUS * (b.level || 0), cur = mine ? Game.bskillOf(m, me, key) : null;
+    const made = (u) => { const armor = (u.defense === 'armor' ? u.defVal : 0) + (mine ? cb.armor : 0), shield = (u.shield || 0) + (mine ? cb.shield : 0);
+      return `${r2(u.hp * k)} health${armor ? ` · ${r2(armor)} armor` : ''}${shield ? ` · shield ${shield}` : ''} · hit ${r2(u.hit * k)}${u.turrets > 1 ? ` ×${u.turrets} at once` : ''} × ${r2(u.aps * (1 + (mine ? cb.aps : 0) / 100))}/s${u.spinCap > 1 ? ` (winds up to ${r2(u.aps * u.spinCap)}/s)` : ''} · ${r2(u.range)} m${u.splash ? ` · ${r2(u.splash)} m splash` : ''} · speed ${r2(u.speed)}`; };
+    const rows = Game.buildingSkills(id).map(sk => {
+      let act = '';
+      if (mine && cur === sk.id) act = chip('This round', 'var(--gold)') + (live ? ` <button class="btn small" data-bskill-undo="${esc(key)}">Undo</button>` : '');
+      else if (mine && phase === 'deploy') { const ok = editable() && Game.canBuyBuildingSkill(m, me, key, sk.id); act = `<button class="btn small${ok ? ' either' : ''}" data-bskill="${esc(sk.id)}" data-bkey="${esc(key)}" ${ok ? '' : 'disabled'}>${!b.built ? 'Not built' : cur ? 'Swap' : 'Buy'} · ${Game.bskillCost(id, sk.id)} gold</button>`; }
+      else act = `<span class="hint">${Game.bskillCost(id, sk.id)} gold</span>`;
+      const t = r2((sk.time || 0) * (1 - cb.faster / 100));
+      return abilityRow(sk.name, act, sk.unit ? `${made(sk.unit)}. Ready ${t} s into the fight.` : esc(sk.text || ''));
+    });
+    const status = b.built ? 'Built' : b.progress > 0 ? `${Math.round(b.progress * 100)}% built` : 'Not built yet';
+    const how = info.survive ? 'If it is still standing at the end of that fight, it is built.' : `${info.buildSecs} s of work in all, over as many fights as it takes${info.selfBuild > 0 ? `; with no builder free it builds itself, ${Math.round(1 / info.selfBuild)} times slower` : ''}.`;
+    return `<div style="display:grid;gap:8px">
+      <p style="margin:0"><b>${status}</b>${b.built ? '' : ` · ${mine ? `your nearest free Cog Builder walks over and builds it during fights (faster with Master engineering). ${how} If it falls, the work done is kept.` : 'being built.'}`}</p>
+      ${b.built ? `<p class="hint" style="margin:0">If it is destroyed in a fight, it starts the next round ${info.rebuild == null ? 50 : info.rebuild}% built and has to be built again.</p>` : ''}
+      <h4 style="margin:0;font-size:12px;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted)">${mine ? 'One a round, bought each round, once it is built' : 'Their choice stays hidden until the fight'}</h4>${rows.join('')}</div>`;
+  }
+  function bindBuildingBlock(root, again) {
+    root.querySelectorAll('[data-bskill]').forEach(x => x.addEventListener('click', () => { if (editable() && Game.buyBuildingSkill(m, me, x.dataset.bkey, x.dataset.bskill)) again(); }));
+    root.querySelectorAll('[data-bskill-undo]').forEach(x => x.addEventListener('click', () => { if (editable() && Game.undoBuildingSkill(m, me, x.dataset.bskillUndo)) again(); }));
+  }
+  // a building from a skill's sheet (the Factory): its block, and its level (it levels up from its own sheet)
   function openBuildingSheet(side, id) {
     const b = Game.buildingOf(m, side, id), info = Game.buildingInfo(id);
     if (!b || !info) return;
-    const mine = side === me, live = phase === 'deploy' && editable() && mine, r2 = (v) => Math.round(v * 100) / 100;
-    const chip = (txt, col) => `<span class="chip" style="color:${col};border:1px solid currentColor;border-radius:99px;padding:1px 8px;font-size:12px">${txt}</span>`;
-    const status = b.built ? 'Built' : b.progress > 0 ? `${Math.round(b.progress * 100)}% built` : 'Not built yet';
+    const mine = side === me, live = phase === 'deploy' && editable() && mine;
     const need = b.level < Engine.MAX_LEVEL ? Game.buildingXpNeeded(id, b.level) : 0, cost = Game.buildingLevelCost(id);
     let lvl = `<p style="margin:0">Level ${b.level + 1} · ${Math.round(info.hp * (1 + Engine.LEVEL_BONUS * b.level))} health${need ? ` · XP ${Math.round(b.xp)}/${need}` : ' · max level'}</p>`;
     if (live) {
@@ -2162,28 +2191,15 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       if (b.levels && b.levels[m.round]) btns.push('<button class="btn small" id="blvl-undo">Undo level</button>');
       if (btns.length) lvl += `<div style="display:flex;gap:8px;flex-wrap:wrap">${btns.join('')}</div>`;
     }
-    const cb = Game.constructBuff(m, side), k = 1 + Engine.LEVEL_BONUS * b.level, cur = mine ? Game.bskillOf(m, me, id) : null;
-    const rows = Game.buildingSkills(id).map(sk => {
-      const u = sk.unit, t = (sk.time || 0) * (1 - cb.faster / 100);
-      let act = '';
-      if (mine && cur === sk.id) act = chip('This round', 'var(--gold)') + (live ? ' <button class="btn small" id="bskill-undo">Undo</button>' : '');
-      else if (mine && phase === 'deploy') { const ok = editable() && Game.canBuyBuildingSkill(m, me, id, sk.id); act = `<button class="btn small${ok ? ' either' : ''}" data-bskill="${esc(sk.id)}" ${ok ? '' : 'disabled'}>${!b.built ? 'Not built' : cur ? 'Swap' : 'Buy'} · ${Game.bskillCost(id, sk.id)} gold</button>`; }
-      else act = `<span class="hint">${Game.bskillCost(id, sk.id)} gold</span>`;
-      const armor = (u.defense === 'armor' ? u.defVal : 0) + (mine ? cb.armor : 0), shield = (u.shield || 0) + (mine ? cb.shield : 0);
-      return abilityRow(sk.name, act, `${r2(u.hp * k)} health${armor ? ` · ${r2(armor)} armor` : ''}${shield ? ` · shield ${shield}` : ''} · hit ${r2(u.hit * k)}${u.turrets > 1 ? ` ×${u.turrets} at once` : ''} × ${r2(u.aps * (1 + (mine ? cb.aps : 0) / 100))}/s${u.spinCap > 1 ? ` (winds up to ${r2(u.aps * u.spinCap)}/s)` : ''} · ${r2(u.range)} m${u.splash ? ` · ${r2(u.splash)} m splash` : ''} · speed ${r2(u.speed)}. Ready ${r2(t)} s into the fight.`);
-    });
     $('sheet').innerHTML = `
-      <div class="bar"><h3 id="sheet-h">${mine ? 'Your' : `${esc(foeName())}’s`} ${esc(info.name)} · ${status}</h3><button class="btn small" id="close">Close</button></div>
+      <div class="bar"><h3 id="sheet-h">${mine ? 'Your' : `${esc(foeName())}’s`} ${esc(info.name)} · ${b.built ? 'Built' : b.progress > 0 ? `${Math.round(b.progress * 100)}% built` : 'Not built yet'}</h3><button class="btn small" id="close">Close</button></div>
       <p class="role" style="margin:0">${esc(info.text || '')}</p>
-      ${b.built ? '' : `<p style="margin:0">${mine ? `Your nearest Cog Builder walks over and builds it during the fight (${info.buildSecs} s of work, faster with Master engineering). If it is still standing at the end, it is built. If it falls, the work done is kept.` : 'Being built.'}</p>`}
-      ${b.built ? `<p class="hint" style="margin:0">If it is destroyed in a fight, it starts the next round ${info.rebuild == null ? 50 : info.rebuild}% built and has to be built again.</p>` : ''}
       ${lvl}
-      <div style="display:grid;gap:8px"><h4 style="margin:0;font-size:12px;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted)">Units it makes · ${mine ? 'one per round, bought each round, made at the start of the fight' : 'their choice stays hidden until the fight'}</h4>${rows.join('')}</div>`;
+      ${buildingBlock(side, id)}`;
     $('sheet-back').hidden = false;
     $('close').addEventListener('click', closeSheet);
     const again = () => { changed(); openBuildingSheet(side, id); };
-    $('sheet').querySelectorAll('[data-bskill]').forEach(x => x.addEventListener('click', () => { if (editable() && Game.buyBuildingSkill(m, me, id, x.dataset.bskill)) again(); }));
-    if ($('bskill-undo')) $('bskill-undo').addEventListener('click', () => { if (editable() && Game.undoBuildingSkill(m, me, id)) again(); });
+    bindBuildingBlock($('sheet'), again);
     if ($('blvl')) $('blvl').addEventListener('click', () => { if (editable() && Game.levelBuilding(m, me, id)) again(); });
     if ($('blvl-undo')) $('blvl-undo').addEventListener('click', () => { if (editable() && Game.undoLevelBuilding(m, me, id)) again(); });
   }
@@ -2419,6 +2435,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (u.ram) tr.push(`Runs for the enemy tower and rams it for ${Math.round(u.hit)}`);
     if (u.carrier) tr.push('Carries one squad inside, hidden');
     if (u.noFlank) tr.push('Can’t deploy on flanks');
+    if (u.building) tr.push(`Building · ${Game.footprint(m, i)}×${Game.footprint(m, i)} tiles · never moves or attacks`);
     if (u.roll > 0) tr.push(`Rolls over enemies: ${Engine.ROLL_START}→${Math.round(u.speed * 100) / 100} m/s in ${Math.round(u.roll * 100) / 100} s`);
     if (u.build && u.build.unit) tr.push(`Builds ${u.build.count > 1 ? u.build.count + ' ' : 'a '}${esc(u.build.unit.name)}${u.build.count > 1 ? 's' : ''} in ${Math.round(u.build.time * 100) / 100} s (${Math.round(u.build.unit.hp)} health, ${Math.round(u.build.unit.hit)} hit, ${Math.round(u.build.unit.aps * 100) / 100}/s, ${u.build.range} m)`);
     if (u.link) tr.push('Linked health');
@@ -2449,6 +2466,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       ${unlockBlock(i, side)}
       ${tr.length ? `<div class="traits">${tr.map(x => `<span>${x}</span>`).join('')}</div>` : ''}
       ${skillBlock(i, side, sq)}
+      ${sq && m && units[i].building && (side === me || side === undefined || sq.round < m.round || phase !== 'deploy') ? buildingBlock(side === undefined ? me : side, 'sq' + sq.id) : ''}
       <div class="stats num">
         <div><span>Bodies</span>${u.bodies}</div><div><span>Health</span>${Math.round(u.hp)}</div>
         <div><span>${u.ram ? 'Ram' : 'Hit'}</span>${Math.round(u.hit)}</div>${u.ram ? '' : `<div><span>Attacks/s</span>${u.aps}</div>`}
@@ -2463,6 +2481,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   function bindPane(root, i, sq, side, reopen) {
     const on = (act, fn) => { const b = root.querySelector(`[data-act="${act}"]`); if (b) b.addEventListener('click', () => fn(b)); };
     const after = () => { changed(); reopen(); };
+    bindBuildingBlock(root, after);
     on('lvl-up', () => { if (editable() && Game.levelUp(m, me, sq.id)) after(); });
     on('lvl-undo', () => { if (editable() && Game.undoLevel(m, me, sq.id)) after(); });
     on('charm-give', () => { if (editable() && Game.giveCharm(m, me, sq.id)) after(); });
@@ -2842,6 +2861,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     m.armies[1] = army.filter(s => { const k = Number.isInteger(s.in) ? 'in' + s.in : s.col + ',' + s.row; if (seen.has(k)) return false; seen.add(k); return true; }).map(s => ({
       ...(Number.isInteger(s.in) ? { in: s.in } : {}),
       id: s.id | 0, unit: s.unit, col: s.col, row: s.row, round: s.round | 0, xp: Math.max(0, +s.xp || 0),
+      ...(had.get(s.id | 0) && units[s.unit] && units[s.unit].building ? { progress: had.get(s.id | 0).progress || 0, built: !!had.get(s.id | 0).built } : {}), // a building's progress comes from the fights played here
       level: Math.max(0, Math.min(Engine.MAX_LEVEL, s.level | 0)), cost: Math.max(0, +s.cost || 0), ...(s.free ? { free: true } : {}),
       ...(s.boughtLevels && typeof s.boughtLevels === 'object' ? { boughtLevels: s.boughtLevels } : {}),
       ...(s.from && (s.movedRound | 0) === m.round && (s.round | 0) < m.round && Number.isInteger(s.from.col) && Number.isInteger(s.from.row) ? { from: { col: s.from.col, row: s.from.row, ...(Number.isInteger(s.from.in) ? { in: s.from.in } : {}) }, movedRound: m.round } : {}),
@@ -2922,8 +2942,8 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (!m.bskill) m.bskill = [{}, {}];
     m.bskill[1] = {};
     if (d.bskill && typeof d.bskill === 'object') for (const id in d.bskill) {
-      const x = d.bskill[id], b = Game.buildingOf(m, 1, id);
-      if (x && (x.round | 0) === m.round && b && b.built && Game.buildingSkillInfo(id, x.skill)) m.bskill[1][id] = { round: m.round, skill: String(x.skill) };
+      const x = d.bskill[id], r = Game.recordOf(m, 1, id);
+      if (x && (x.round | 0) === m.round && r && r.rec.built && Game.buildingSkillInfo(r.id, x.skill)) m.bskill[1][id] = { round: m.round, skill: String(x.skill) };
     }
     // the guest's altar purchases this round (gold was checked on their side; Snowgre spots are worked out here)
     if (m.altar) m.altar = m.altar.filter(x => !(x.side === 1 && x.round === m.round));

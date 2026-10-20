@@ -375,7 +375,8 @@ const Models3D = (THREE) => {
   for (const [k, f] of Object.entries(TOWERS)) BUILD['tower:' + k] = f;
   // buildings (drawn at their real size, like towers): the Mechites' Factory, a brick workshop in the building's colour
   // with a sawtooth roof, a smoking chimney, a big brass cog on its front and banners in the team colour
-  BUILD['building:factory'] = () => [
+  const lifted = (list, y0) => { if (!y0) return list; for (const p of list) p.g.translate(0, y0, 0); return list; };
+  const factory = (y0 = 0) => lifted([
     P(box(4.0, 2.4, 3.2), 'tint', [0, 1.2, 0]),
     ...[-1.33, 0, 1.33].flatMap(x => [P(box(1.45, 0.12, 3.3), '#5B4A3A', [x - 0.05, 2.75, 0], [0, 0, 0.45]), P(box(0.08, 0.62, 3.3), '#9FC7D9', [x + 0.62, 2.7, 0])]),
     P(cyl(0.35, 0.42, 3.6, 6), DARK, [1.3, 3.6, 0.9]),
@@ -383,7 +384,33 @@ const Models3D = (THREE) => {
     P(cyl(0.95, 0.95, 0.2, 14), BRASS, [-0.9, 1.4, -1.65], [Math.PI / 2, 0, 0]),
     ...[...Array(10)].map((_, k) => { const a = k * Math.PI / 5; return P(box(0.28, 0.28, 0.2), BRASS, [-0.9 + Math.cos(a) * 1.05, 1.4 + Math.sin(a) * 1.05, -1.65], [0, 0, a]); }),
     P(box(1.0, 1.5, 0.15), DARK, [0.9, 0.75, -1.63]),
-    P(box(0.15, 1.3, 0.9), 'team', [-2.05, 1.6, 0.5]), P(box(0.15, 1.3, 0.9), 'team', [2.05, 1.6, -0.5])];
+    P(box(0.15, 1.3, 0.9), 'team', [-2.05, 1.6, 0.5]), P(box(0.15, 1.3, 0.9), 'team', [2.05, 1.6, -0.5])], y0);
+  BUILD['building:factory'] = () => factory();
+  // Core Awoken: the factory on caterpillar tracks with a big tank gun on its roof
+  BUILD['building:factory:awake'] = () => [...factory(0.7),
+    ...[-1, 1].flatMap(sd => [P(box(0.9, 0.8, 3.8), DARK, [sd * 1.75, 0.4, 0]), ...[-1.4, -0.45, 0.45, 1.4].map(z => P(cyl(0.32, 0.32, 0.95, 8), IRON, [sd * 1.75, 0.4, z], [0, 0, Math.PI / 2]))]),
+    P(box(1.4, 0.6, 1.4), IRON, [-0.6, 3.75, 0.3]), P(cyl(0.18, 0.2, 3.0, 8), DARK, [-0.6, 3.8, -1.4], [Math.PI / 2, 0, 0])];
+  // the Altar of Build: a stone ring where four tiles meet, four pillars with brass caps and banners, and the Cog Spire
+  // in its middle: a tall spire ringed by a standing brass cog, an ether crystal on top
+  const altar = (y0 = 0) => lifted([
+    P(cyl(3.8, 4.0, 0.45, 16), 'tint', [0, 0.22, 0]),
+    P(cyl(2.9, 2.9, 0.5, 16), STONE, [0, 0.3, 0]),
+    ...[[-1, -1], [1, -1], [-1, 1], [1, 1]].flatMap(([x, z]) => [P(cyl(0.38, 0.45, 2.4, 6), STONE, [x * 2.6, 1.6, z * 2.6]), P(cyl(0.5, 0.5, 0.25, 6), BRASS, [x * 2.6, 2.9, z * 2.6]),
+      P(box(0.06, 0.9, 0.55), 'team', [x * 2.6 - x * 0.42, 1.9, z * 2.6])]),
+    P(cone(0.9, 5.2, 8), 'tint', [0, 3.0, 0]),
+    P(new THREE.TorusGeometry(1.4, 0.18, 4, 16), BRASS, [0, 2.4, 0]),
+    ...[...Array(12)].map((_, k) => { const a = k * Math.PI / 6; return P(box(0.3, 0.32, 0.3), BRASS, [Math.cos(a) * 1.62, 2.4 + Math.sin(a) * 1.62, 0], [0, 0, a]); }),
+    P(ball(0.5), ETHER, [0, 5.9, 0])], y0);
+  BUILD['building:altar'] = () => altar();
+  // Core Awoken: the altar rises on four spider legs
+  BUILD['building:altar:awake'] = () => [...altar(1.6),
+    ...[[-1, -1], [1, -1], [-1, 1], [1, 1]].flatMap(([x, z]) => [P(box(0.3, 2.6, 0.3), IRON, [x * 3.0, 2.0, z * 3.0], [z * 0.5, 0, -x * 0.5]), P(box(0.28, 2.2, 0.28), IRON, [x * 4.1, 0.9, z * 4.1], [-z * 0.25, 0, x * 0.25])])];
+  // Core Awoken: a turret on wheels
+  BUILD['cogTurret:awake'] = () => [
+    P(box(0.8, 0.5, 0.7), 'tint', [0, 0.85, 0]), P(box(0.84, 0.12, 0.74), 'team', [0, 0.65, 0]),
+    P(cyl(0.12, 0.12, 0.9, 6), DARK, [0, 1.15, -0.55], [Math.PI / 2 - 0.6, 0, 0]),
+    ...[[-1, -1], [1, -1], [-1, 1], [1, 1]].map(([x, z]) => P(cyl(0.28, 0.28, 0.16, 8), DARK, [x * 0.5, 0.28, z * 0.32], [0, 0, Math.PI / 2])),
+    P(cyl(0.07, 0.07, 0.5, 5), IRON, [0.25, 1.3, 0.3])];
   BUILD.building = BUILD['building:factory']; // any other building, until it has a model of its own
 
   const NAMED = { 'Ether Golem': 'golem', 'Sun Priest': 'sunPriest', 'Meteor Caller': 'meteor', 'War Mammoth': 'mammoth', 'Necromancer': 'necro', 'Truespear': 'truespear',
@@ -394,10 +421,10 @@ const Models3D = (THREE) => {
   const RANGED = 12; // metres: from this range on, a unit is drawn as an archer or a caster
   function kindOf(u) {
     if (u.spire) return 'spire';
-    if (u.building) return BUILD['building:' + u.building] ? 'building:' + u.building : 'building';
+    if (u.building) { const k = 'building:' + u.building; return u.awake && BUILD[k + ':awake'] ? k + ':awake' : BUILD[k] ? k : 'building'; } // Core Awoken: its walking version
     if (u.structure) return TOWERS[u.kind] ? 'tower:' + u.kind : /^f-/.test(u.kind || '') ? 'tower:faction' : 'tower:keep';
     if (u.aloft) return 'airship';
-    if (NAMED[u.name]) return NAMED[u.name];
+    if (NAMED[u.name]) return u.awake && BUILD[NAMED[u.name] + ':awake'] ? NAMED[u.name] + ':awake' : NAMED[u.name];
     if (u.shape === 'horse') return 'horse';
     if (u.shape === 'spider') return 'spider';
     if (u.shape === 'imp' || u.shape === 'ring') return 'flier';

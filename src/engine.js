@@ -55,7 +55,12 @@ const Engine = (() => {
   //   b.site = { work, need }: seconds of building done and needed. At the start of a fight the nearest builder without
   //   a job walks to it (within SITE_REACH) and builds instead of fighting (u.buildSpeed seconds of work a second) until
   //   it is done or falls; then the builder carries on like any builder (its turret, then melee).
-  //   b.produce = { unit, time }: once built, it makes one body of unit after time seconds, a little in front of it.
+  //   A site nobody is assigned to builds itself at site.self seconds of work a second (0 = not at all).
+  //   b.produce = { units: [unit, ...], time }: once built, it makes one body of each after time seconds, side by side a
+  //   little in front of it.
+  // A unit with flee (metres) keeps away from enemies: whenever one is that close it moves straight away from it (it
+  // still shoots). A unit with backline picks the farthest enemy in reach instead of the nearest. A unit with lob fires
+  // shells over the heads of whoever is in the way: they only land where they were aimed.
   //   What it makes earns it XP (credit). result().buildings tells the game how each building did.
   const SITE_REACH = 3.5;
   // link: the bodies of a squad share one health pool. Damage to any of them is split across all that are alive
@@ -695,7 +700,7 @@ const Engine = (() => {
         const d = dist(f, b);
         if (d <= reachOf(b) + 0.01 && d >= b.u.minRange) valid.push([d, f]);
       }
-      valid.sort((p, q) => p[0] - q[0]);
+      valid.sort((p, q) => b.u.backline ? q[0] - p[0] : p[0] - q[0]);
       return valid.map(v => v[1]);
     }
 
@@ -930,7 +935,8 @@ const Engine = (() => {
     function finishBuild(b) {
       b.buildT = 0; b.built = true;
       const bd = b.u.build, n = Math.max(1, Math.round(bd.count || 1)), [dx, dy] = b.buildDir;
-      const cu = leveled(withTraits({ ...bd.unit, bodies: 1, speed: 0, construct: true, noCount: true, anchored: true }), b.level);
+      // a construct stands where it was built, unless it was made to move (Core Awoken)
+      const cu = leveled(withTraits({ ...bd.unit, bodies: 1, construct: true, noCount: true, ...(bd.unit.speed > 0 ? {} : { speed: 0, anchored: true }) }), b.level);
       for (let k = 0; k < n; k++) {
         const off = (k - (n - 1) / 2) * BUILD_GAP;
         let x = b.x - dy * off, y = b.y + dx * off;
@@ -1034,6 +1040,13 @@ const Engine = (() => {
           if (d < nd) { nd = d; near = f; }
         }
         b.near = near;
+        if (b.u.flee > 0 && near && nd < b.u.flee) { // keeping away from the enemy
+          const mv = b.u.speed * moveMul(b) * dt;
+          b.hx = -(near.x - b.x) / (nd || 1); b.hy = -(near.y - b.y) / (nd || 1);
+          b.x += b.hx * mv; b.y += b.hy * mv; b.moved += mv;
+          if (g.bounds) { b.x = Math.max(g.bounds.x0, Math.min(g.bounds.x1, b.x)); b.y = Math.max(g.bounds.y0, Math.min(g.bounds.y1, b.y)); }
+          continue;
+        }
         // a builder that hasn't built yet stops to build once an enemy is within its constructs' range (see the builders below)
         if (b.u.build && !b.built) {
           if (b.buildT > 0) continue;
@@ -1100,13 +1113,17 @@ const Engine = (() => {
         });
         builders.forEach((b, k) => { b.buildT -= dt * rate[k]; if (b.buildT <= 1e-9) finishBuild(b); });
       }
-      // ...and at building sites
+      // ...and at building sites (a site without a builder builds itself, slowly, if it can)
+      const manned = new Set();
       for (const b of all) {
-        if (!b.alive || !b.siteJob || !b.siteAt) continue;
+        if (!b.alive || !b.siteJob) continue;
+        manned.add(b.siteJob);
+        if (!b.siteAt) continue;
         const s = b.siteJob.site;
         s.work = Math.min(s.need, s.work + dt * (b.u.buildSpeed || 1));
         if (s.work >= s.need) { b.siteJob = null; b.siteAt = false; }
       }
+      for (const b of all) if (b.alive && b.site && b.site.self > 0 && b.site.work < b.site.need && !manned.has(b)) b.site.work = Math.min(b.site.need, b.site.work + dt * b.site.self);
       // separation between allies
       const minSep = g.spacing * 0.7;
       for (let s = 0; s < 2; s++) {
@@ -1162,11 +1179,16 @@ const Engine = (() => {
           b.prodT = (b.prodT == null ? b.produce.time : b.prodT) - dt;
           if (b.prodT <= 1e-9) {
             b.produced = true;
+            const list = b.produce.units || [], gap = g.spacing;
             let y = b.y + (b.side === 0 ? 1 : -1) * BUILD_GAP * 0.7;
             if (g.bounds) y = Math.max(g.bounds.y0, Math.min(g.bounds.y1, y));
-            const kid = newBody(b.produce.unit, b.side, b.x, y, spawnIdx++, -1);
-            kid.credit = b;
-            pendingKids.push(kid);
+            list.forEach((pu, k) => {
+              let x = b.x + (k - (list.length - 1) / 2) * gap;
+              if (g.bounds) x = Math.max(g.bounds.x0, Math.min(g.bounds.x1, x));
+              const kid = newBody(pu, b.side, x, y, spawnIdx++, -1);
+              kid.credit = b;
+              pendingKids.push(kid);
+            });
           }
         }
         if (b.follow && b.healPct > 0) { // a healbot mends the bodies of its squad within reach
@@ -1353,7 +1375,7 @@ const Engine = (() => {
           while (mv > 0 && !done) {
             const sub = Math.min(0.5, mv, p.left);
             p.x += p.dirX * sub; p.y += p.dirY * sub; p.left -= sub; mv -= sub;
-            for (const f of foes) {
+            if (!p.owner.u.lob) for (const f of foes) {
               if (f.alive && hyp(f.x - p.x, f.y - p.y) <= PROJ_HIT_RADIUS) {
                 impact(p.owner, p.x, p.y, null, p.hit, p.dirX, p.dirY, p.fx, p.fy);
                 done = true; break;
