@@ -2,7 +2,7 @@
 // It sees the game only through view(), which it calls at the start of every draw and which returns what this
 // screen shows right now:
 //   { m, me, phase, units, mode, bt, battlePre, fx, selected, moving, drag, hoverTile,
-//     editable, placingUnit, placingElf, placingTower }
+//     editable, placingUnit, placingElf, placingTower, placingBuilding }
 // fx: short-lived battle effects as plain data (shots, flames, bolts, heals, deaths), in board metres.
 // Calls: size() after the canvas changes size, draw(), tileAt(clientX, clientY) -> { col, row } or null,
 // thumb(match) -> a data URL of a small picture of that match's board (null: a plain board with a question mark),
@@ -12,8 +12,8 @@
 const Render2D = (cv, view) => {
   let ctx = cv.getContext('2d'); // swapped for a moment while drawing map thumbnails (thumb)
   let m = null, me = 0, phase = 'start', units = [], mode = 'ai', bt = null, battlePre = null, fx = [];
-  let selected = null, moving = null, drag = null, hoverTile = null, editable = false, placingUnit = null, placingElf = false, placingTower = false;
-  const pull = () => { ({ m, me, phase, units, mode, bt, battlePre, fx, selected, moving, drag, hoverTile, editable, placingUnit, placingElf, placingTower } = view()); };
+  let selected = null, moving = null, drag = null, hoverTile = null, editable = false, placingUnit = null, placingElf = false, placingTower = false, placingBuilding = null;
+  const pull = () => { ({ m, me, phase, units, mode, bt, battlePre, fx, selected, moving, drag, hoverTile, editable, placingUnit, placingElf, placingTower, placingBuilding } = view()); };
   const foe = () => 1 - me;
   const css = Art.css, tag = Shapes.tag;
   const { ELF_COL, SHROOM_COL, CHARM_COL } = Art;
@@ -471,9 +471,68 @@ const Render2D = (cv, view) => {
     ctx.beginPath(); ctx.moveTo(x, py - s * 0.28); ctx.lineTo(x + s * 0.2, py - s * 0.23); ctx.lineTo(x, py - s * 0.18); ctx.closePath(); ctx.fill();
   }
 
+  // a building (the Mechites' Factory) at (x, y), s = tile size in px: a brick workshop with a sawtooth roof, a chimney
+  // and a cog on its front. Not built yet: a faint scaffold with a gold arc for how far along it is. o: { built,
+  // progress, level, hpr (health ring in fights), time (fight time: smoke rises from a built one) }
+  const smokeCol = '#8E8A86';
+  function drawFactory(x, y, s, side, color, o) {
+    const w = s * 0.74, h = s * 0.42, x0 = x - w / 2, y0 = y - h * 0.25, team = teamCol(side);
+    ctx.globalAlpha = 0.3; ctx.fillStyle = '#000'; ctx.beginPath(); ctx.ellipse(x, y0 + h + s * 0.02, w * 0.55, s * 0.07, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = o.built ? 1 : 0.5;
+    ctx.fillStyle = '#3A3330'; ctx.fillRect(x0 + w * 0.7, y0 - h * 0.85, w * 0.13, h * 0.85); // chimney
+    ctx.fillStyle = color; ctx.strokeStyle = team; ctx.lineWidth = Math.max(1, s * 0.035);
+    ctx.beginPath(); ctx.rect(x0, y0, w, h); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#5B4A3A'; // sawtooth roof
+    for (let k = 0; k < 3; k++) { ctx.beginPath(); ctx.moveTo(x0 + k * w / 3, y0); ctx.lineTo(x0 + (k + 1) * w / 3, y0 - h * 0.38); ctx.lineTo(x0 + (k + 1) * w / 3, y0); ctx.closePath(); ctx.fill(); ctx.stroke(); }
+    const cr = h * 0.27, cx = x0 + w * 0.3, cy = y0 + h * 0.5, turn = (o.time || 0) * 1.5; // the cog turns while it works
+    ctx.fillStyle = '#D6B26A';
+    ctx.beginPath(); for (let k = 0; k < 16; k++) { const a = turn + k * Math.PI / 8, r = k % 2 ? cr : cr * 1.3; ctx.lineTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r); } ctx.closePath(); ctx.fill();
+    ctx.fillStyle = color; ctx.beginPath(); ctx.arc(cx, cy, cr * 0.4, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#231E1B'; ctx.fillRect(x0 + w * 0.58, y0 + h * 0.35, w * 0.22, h * 0.65); // door
+    ctx.globalAlpha = 1;
+    if (!o.built) { // scaffold poles and how far along it is
+      ctx.strokeStyle = '#C8A46A'; ctx.lineWidth = 1; ctx.setLineDash([2, 2]);
+      ctx.strokeRect(x0 - s * 0.05, y0 - h * 0.45, w + s * 0.1, h * 1.45); ctx.setLineDash([]);
+      ctx.strokeStyle = css('--gold'); ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.arc(x, y, s * 0.46, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.max(0, Math.min(1, o.progress || 0))); ctx.stroke();
+    } else if (o.time != null) puffs(x0 + w * 0.765, y0 - h * 0.85, s * 0.07, o.time, x * 0.37);
+    if (o.hpr != null) { ctx.strokeStyle = team; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, s * 0.52, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.max(0, o.hpr)); ctx.stroke(); }
+    if (o.level > 0) { ctx.fillStyle = css('--gold'); const pr = Math.max(2, s * 0.07); for (let k = 0; k < o.level; k++) { ctx.beginPath(); ctx.arc(x - s / 2 + pr + 3 + k * pr * 2.6, y - s / 2 + pr + 3, pr, 0, Math.PI * 2); ctx.fill(); } }
+  }
+  // grey smoke puffs rising from (x, y): Mechite constructs and buildings rattle and smoke
+  function puffs(x, y, r, time, seed) {
+    ctx.fillStyle = smokeCol;
+    for (let k = 0; k < 3; k++) {
+      const p = ((time * 0.8 + k / 3 + seed) % 1 + 1) % 1; // seed may be negative (it comes from a position)
+      ctx.globalAlpha = 0.45 * (1 - p);
+      ctx.beginPath(); ctx.arc(x + Math.sin((p + k) * 5) * r * 0.8, y - p * r * 6, r * (0.6 + p * 1.2), 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+  // the buildings on the board while deploying (an opponent's new one only from the fight on)
+  function drawBuildings() {
+    const t = tilePx();
+    for (const side of [me, foe()]) for (const b of Game.buildingsOf(m, side)) {
+      if (!Game.buildingShown(m, me, deploying(), side, b)) continue;
+      const info = Game.buildingInfo(b.id) || {};
+      drawFactory((scol(b.col) + 0.5) * t, (srow(b.row) + 0.5) * t, t, side, info.color || '#B07A3C', { built: b.built, progress: b.progress, level: b.level });
+      if (side === me && deploying() && Game.buildingReady(b)) { // ready to level up: the gold plus badge, as on a squad
+        const br = Math.max(5, t * 0.17), bx = (scol(b.col) + 1) * t - br - 2, by = srow(b.row) * t + br + 2;
+        ctx.fillStyle = css('--gold'); ctx.beginPath(); ctx.arc(bx, by, br, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = css('--bg'); ctx.lineWidth = Math.max(1.5, br * 0.3);
+        ctx.beginPath(); ctx.moveTo(bx - br * 0.5, by); ctx.lineTo(bx + br * 0.5, by); ctx.moveTo(bx, by - br * 0.5); ctx.lineTo(bx, by + br * 0.5); ctx.stroke();
+      }
+    }
+  }
+
   function drawDeploy() {
     drawBoard();
     const t = tilePx();
+    if (placingBuilding && editable) { // where the building may go: any free tile of your zone
+      ctx.strokeStyle = css('--gold'); ctx.globalAlpha = 0.6; ctx.lineWidth = 1.5; ctx.setLineDash([4, 3]);
+      for (const row of Game.zoneRows(me)) for (let c = 0; c < Game.COLS; c++) if (Game.buildingSpotOk(m, me, c, row)) ctx.strokeRect(scol(c) * t + 3, srow(row) * t + 3, t - 6, t - 6);
+      ctx.setLineDash([]); ctx.globalAlpha = 1;
+    }
     if (placingElf && editable) { // where the elf tower may go: any free tile of your zone
       ctx.strokeStyle = ELF_COL; ctx.globalAlpha = 0.6; ctx.lineWidth = 1.5;
       for (const row of Game.zoneRows(me)) for (let c = 0; c < Game.COLS; c++) if (Game.elfOwnSpotOk(m, me, c, row)) ctx.strokeRect(scol(c) * t + 3, srow(row) * t + 3, t - 6, t - 6);
@@ -528,6 +587,7 @@ const Render2D = (cv, view) => {
       }
     }
     for (const side of [me, foe()]) if (towerVisible(side)) drawTowerTile(side);
+    drawBuildings();
     drawElfTower(m, true);
     if (Game.isIce(m)) for (const side of [me, foe()]) {
       // Snowgres on their tiles in no man's land (an opponent's new one shows up at the fight)
@@ -575,6 +635,12 @@ const Render2D = (cv, view) => {
       if (b.walls) drawWalls(b.x, b.y, b.walls);
     }
     drawElfTower(battlePre || m, false);
+    for (const b of bt.bodies) { // buildings (the Factory): a site with its progress, or a workshop that smokes and makes its unit
+      if (!b.alive || !b.u.building) continue;
+      const info = Game.buildingInfo(b.u.building) || {}, t = tilePx();
+      drawFactory(PX(b.x), PY(b.y), t, b.side, info.color || b.u.color, { built: !b.site || b.site.work >= b.site.need, progress: b.site ? b.site.work / b.site.need : 1, level: b.level, hpr: b.hp / b.u.hp, time: bt.time() });
+      if (b.produce && !b.produced && b.prodT != null) { ctx.strokeStyle = css('--gold'); ctx.lineWidth = 2.5; ctx.setLineDash([2, 2]); ctx.beginPath(); ctx.arc(PX(b.x), PY(b.y), t * 0.38, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * (1 - b.prodT / b.produce.time)); ctx.stroke(); ctx.setLineDash([]); }
+    }
     // a linked squad: a faint line joins its bodies (they share one health pool)
     for (const b of bt.bodies) {
       if (!b.alive || !b.link || b.hidden) continue;
@@ -584,7 +650,7 @@ const Render2D = (cv, view) => {
       ctx.beginPath(); ctx.moveTo(PX(b.x), PY(b.y)); ctx.lineTo(PX(nx.x), PY(nx.y)); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1;
     }
     for (const b of bt.bodies) {
-      if (!b.alive || b.u.structure || b.u.aloft) continue;
+      if (!b.alive || b.u.structure || b.u.aloft || b.u.building) continue;
       const c = teamCol(b.side), r = radius(b.u), hpr = b.hp / b.u.hp;
       if (b.hidden) { // stealthed: a dashed ghost while hidden (fainter for the enemy's)
         ctx.globalAlpha = b.side === me ? 0.6 : 0.3; ctx.strokeStyle = c; ctx.lineWidth = 1.5; ctx.setLineDash([2, 2]);
@@ -592,7 +658,15 @@ const Render2D = (cv, view) => {
         ctx.setLineDash([]); ctx.globalAlpha = 1;
         continue;
       }
-      Shapes.body(ctx, b.u.shape, PX(b.x), PY(b.y), r, upOf(b.side), b.u.color, c, (0.35 + 0.65 * hpr) * (b.delay > 0 ? 0.45 : 1));
+      // what Mechites build rattles as it goes (the Mechites themselves move smoothly)
+      const rattle = b.u.construct ? Math.sin(bt.time() * 47 + b.x * 3.1) * r * 0.08 : 0;
+      Shapes.body(ctx, b.u.shape, PX(b.x) + rattle, PY(b.y), r, upOf(b.side), b.u.color, c, (0.35 + 0.65 * hpr) * (b.delay > 0 ? 0.45 : 1));
+      if (b.u.roll > 0) { // a roller: a seam across the ball turns as it rolls
+        const a = (b.moved || 0) / Math.max(0.3, r / S);
+        ctx.strokeStyle = 'rgba(30,24,20,0.75)'; ctx.lineWidth = Math.max(1, r * 0.18);
+        ctx.beginPath(); ctx.moveTo(PX(b.x) + Math.cos(a) * r * 0.85, PY(b.y) + Math.sin(a) * r * 0.85); ctx.lineTo(PX(b.x) - Math.cos(a) * r * 0.85, PY(b.y) - Math.sin(a) * r * 0.85); ctx.stroke();
+      }
+      if (b.u.construct) puffs(PX(b.x) + r * 0.4, PY(b.y) - r * 0.8, Math.max(1.2, r * 0.22), bt.time(), b.x * 0.13 + b.y * 0.07);
       if (b.delay > 0) { // flank squads arrive a few seconds late: a shrinking ring shows the wait
         ctx.strokeStyle = css('--gold'); ctx.lineWidth = 1.5;
         ctx.beginPath(); ctx.arc(PX(b.x), PY(b.y), r + 3, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * b.delay / Game.FLANK.delay); ctx.stroke();

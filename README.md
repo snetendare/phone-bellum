@@ -66,10 +66,18 @@ Fight mechanics added for factions (they work for any unit, in Counter Lab too):
 - `build`: `{ "time": 1.5, "range": 25, "count": 1, "unit": { ...stats } }`. Once per fight the unit stops when an enemy is within `range` − 1 m, builds `count` copies of `unit` (a tile apart) in `time` seconds and fights on. Builders building next to each other speed each other up (1×, 1.5×, 1.75×, …). What it builds never moves, levels with its builder, earns the builder's squad its XP, and doesn't count as a unit left standing.
 - `skillNeeds`: `[null, null, [0, 1]]` = skill 3 can only be bought once skills 1 and 2 are owned (empty slots are skipped).
 - Skill types: `momentum` (a roller gets up to speed faster), `link` (a squad's bodies share one health pool and fall together), `healbot` (a construct follows each squad and heals it a share of max health per second), `builder` (more constructs per build, faster builds, better constructs).
+- `building` skill type (`"params": { "building": "factory" }`): buying it places a building on a free tile of your zone. Buildings are listed under `"buildings"` in `src/factions.json`: `{ id, name, faction, hp, buildSecs, rebuild (% after it falls), levelCost, color, text, skills: [{ id, name, cost, time, unit }] }`. A site is built by the nearest builder during fights and is done if it survives a fight it was worked on (the work done is kept if it falls). Once built, its owner may buy one of its skills each round: its `unit` is made `time` seconds into that fight. What it makes earns it XP; it levels up with gold, and its units with it. A built building that falls starts the next round at `rebuild` % and must be built again.
+- `spinCap`: how far spin-up can go (default 3×; the Machinegunner's is 10×, 0.3 → 3 attacks a second). `tag`: the unit's 3-letter tag on the board, if its name's first letters don't suit. `smooth`: the 3D board doesn't bob it as it walks (Mechites glide).
 
 ### Mechites (in progress)
 
-Rock elementals with clockwork hearts. Done: Rollers, Cog Builder (turrets, Twin turrets, Master engineering) and Mechite Guards (Oiled pumps, Linked cores, Healbot); `node tools/tests/mechites.js` checks them. Still to come: the Factory (Cog Builder skill 1: a building placed on your side, built over a round by your Cog Builders, kept between rounds, with one bought skill per round that builds Cogbot Fighters, Cogbot Machinegunners or the CogMech), the Altar of Build (tier 4 building), Core Awoken, the faction's trait and its own tower. The Cog Spire is the standard tower until then.
+Rock elementals with clockwork hearts; what they build rattles and smokes. Done:
+- Rollers, Cog Builder (turrets, Twin turrets, Master engineering), Mechite Guards (Oiled pumps, Linked cores, Healbot).
+- The Factory (Cog Builder skill 1, 200 gold): placed with a tap on a free tile of your zone, built by your nearest Cog Builder during fights, then one unit a round from its sheet (tap it): Cogbot Fighter (100), Cogbot Machinegunner (100) or CogMech (300). Master engineering now needs Build factory and Twin turrets, and its upgrades reach what the factory makes.
+- Drawn on both boards: on the 2D board a brick workshop with a cog and a smoking chimney (a scaffold with a gold arc while it is being built); on the 3D board their own models (Rollers roll, Mechites glide, their constructs rattle and smoke).
+- Checks: `node tools/tests/mechites.js`, `node tools/tests/factory.js` (headless), `tools/tests/factory-ui.js` (2D and 3D) and `tools/tests/factory-mp.js` (a 2D host against a 3D guest).
+
+Still to come: the Altar of Build (tier 4 building), Core Awoken, the Rollers' "ent" form, the faction's trait and its own tower. The Cog Spire is the standard tower until then.
 
 ## Tools (`tools/`)
 

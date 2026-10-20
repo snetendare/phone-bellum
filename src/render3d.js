@@ -2,7 +2,7 @@
 // Render3D(THREE, el, view, opts) puts a WebGL canvas in el and offers the same calls as Render2D, reading the game
 // only through the same view():
 //   { m, me, phase, units, mode, bt, battlePre, fx, selected, moving, drag, hoverTile,
-//     editable, placingUnit, placingElf, placingTower }
+//     editable, placingUnit, placingElf, placingTower, placingBuilding }
 // Calls: size() after el changes size, draw() once per frame, tileAt(clientX, clientY) -> { col, row } or null,
 // thumb(match) (from the 2D renderer). Also camera: the Camera3D driving the view.
 // opts.onTap(tile | null): a tap in the strategic view, as a tile in model columns / rows (like tileAt).
@@ -76,7 +76,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
     const key = [idOf(v.m), idOf(v.battlePre), v.m.round, v.me, v.phase, uiOff].join('|');
     if (key === floorKey && !(v.phase === 'deploy' && floorAge > 0.5)) return;
     floorKey = key; floorAge = 0;
-    floorView = { ...v, bt: v.phase === 'battle' ? null : v.bt, fx: [], selected: null, moving: null, drag: null, hoverTile: null, placingElf: false, placingTower: false };
+    floorView = { ...v, bt: v.phase === 'battle' ? null : v.bt, fx: [], selected: null, moving: null, drag: null, hoverTile: null, placingElf: false, placingTower: false, placingBuilding: null };
     floor2d.size(); floor2d.floor(uiOff); // the ground view gets the land alone, no zones or grid
     // a texture can't grow in place: when the canvas changed size (the first floor, or after a resize), start a new one
     const dims = floorCv.width + 'x' + floorCv.height;
@@ -120,6 +120,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
   const teamColor = (side, me) => color(Art.teamCol(side, me));
   const tmpM = new THREE.Matrix4(), tmpQ = new THREE.Quaternion(), tmpP = new THREE.Vector3(), tmpS = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0), tmpC = new THREE.Color();
   const zAxis = new THREE.Vector3(0, 0, 1), tmpD = new THREE.Vector3(), camRight = new THREE.Vector3(), camDown = new THREE.Vector3();
+  const xAxis = new THREE.Vector3(1, 0, 0), tmpQ2 = new THREE.Quaternion();
 
   // ---------- sprites: every small marker, in one draw call ----------
   // Each is a quad: an icon or a bar facing the camera, or a ring arc, disc or tile square lying on the ground.
@@ -359,9 +360,9 @@ const Render3D = (THREE, el, view, opts = {}) => {
       if (!b.alive) { if (!b.boarded) { const [wx, wz] = world(f, b.x, b.y); scene_(() => disc(wx, wz, Math.max(0.3, size(b.u) * 0.45), muted, 0.18)); } continue; }
       if (b.boarded) continue;
       const p = glide(b, dt);
-      const look = b.u.aloft ? 'glass' : b.hidden ? (b.side === me ? 'ghost' : 'ghostFoe') : b.delay > 0 ? 'ghost' : 'solid';
+      const look = b.u.aloft || (b.site && b.site.work < b.site.need) ? 'glass' : b.hidden ? (b.side === me ? 'ghost' : 'ghostFoe') : b.delay > 0 ? 'ghost' : 'solid'; // a building site is a see-through scaffold
       const crest = b.u.structure ? Game.charOf(src, b.side) : null;
-      const tag = b.u.structure || b.u.aloft || (b.hidden && b.side !== me) ? null : `${b.side}|${b.squad}|${b.u.name}`;
+      const tag = b.u.structure || b.u.aloft || b.u.noCount || (b.hidden && b.side !== me) ? null : `${b.side}|${b.squad}|${b.u.name}`;
       bodies.push({ u: b.u, side: b.side, x: p.x, y: p.y, hx: b.hx, hy: b.hy, look, moving: p.moving, phase: p.phase, b, crest, edge: Art.teamCol(b.side, me), tag });
       if (b.u.structure && b.walls) addWalls(f, b.x, b.y, b.walls);
     }
@@ -431,6 +432,16 @@ const Render3D = (THREE, el, view, opts = {}) => {
       bodies.push({ u: towerUnit(m, side, Game.towerTypeShown(m, me, deploying, side)), side, x: w.x, y: w.y, look: 'solid', crest, edge: Art.teamCol(side, me) });
     }
     addSpires(v, m, deploying, f);
+    // buildings (the Mechites' Factory): a see-through scaffold with a gold arc until it is built (an opponent's new one only from the fight on)
+    for (const side of [me, foe]) for (const bl of Game.buildingsOf(m, side)) {
+      if (!Game.buildingShown(m, me, deploying, side, bl)) continue;
+      const info = Game.buildingInfo(bl.id) || {}, w = Game.tileToWorld(bl.col, bl.row), [wx, wz] = world(f, w.x, w.y);
+      bodies.push({ u: { name: info.name, building: bl.id, color: info.color || '#B07A3C', hp: info.hp || 1000 }, side, x: w.x, y: w.y, look: bl.built ? 'solid' : 'glass' });
+      if (!bl.built) arc(wx, wz, 3.2, gold, 0.95, bl.progress || 0, 0.07);
+      if (bl.level > 0) iconRow([...Array(bl.level)].map(() => 'dot'), wx, 5.6, wz, 0.5, gold);
+      if (side === me && deploying && Game.buildingReady(bl)) icon('plus', wx + camRight.x * 2.4, 4.2, wz + camRight.z * 2.4, 1.0);
+    }
+    if (v.placingBuilding && editable) for (const row of Game.zoneRows(me)) for (let c = 0; c < Game.COLS; c++) if (Game.buildingSpotOk(m, me, c, row)) { const s = tileCenter(v, c, row); tileSq(s.c, s.r, gold, 0.6, 0.06, 12); }
     if (Game.isIce(m)) for (const side of [me, foe]) {
       // Snowgres on their tiles in no man's land (an opponent's new one shows up at the fight), and walls bought this round
       const buys = (m.altar || []).filter(b => b.side === side && b.type === 'snowgre');
@@ -449,11 +460,18 @@ const Render3D = (THREE, el, view, opts = {}) => {
     const b = s.b, team = teamColor(s.side, me), u = s.u;
     const hpr = Math.max(0, b.hp / u.hp);
     let y = top + 0.45;
-    if (u.structure || (u.hp >= 500 && hpr < 1)) {
+    const big = u.structure || u.building;
+    if (big || (u.hp >= 500 && hpr < 1)) {
       if (viewMode === 'strategic') { // a ring around it, as on the 2D board (dark where the health is gone)
-        const rr = u.structure ? 3.1 : r * 1.42, th = u.structure ? 0.11 : 0.1;
+        const rr = big ? 3.1 : r * 1.42, th = big ? 0.11 : 0.1;
         arc(wx, wz, rr, color('#0B0F11'), 0.6, 1, th, 0, 0, 0.065); arc(wx, wz, rr, team, 1, hpr, th);
-      } else { const w = u.structure ? 4.2 : Math.max(1.6, r * 1.5); bar(wx, y, wz, w, u.structure ? 0.42 : 0.3, hpr, team); y += 0.55; }
+      } else { const w = big ? 4.2 : Math.max(1.6, r * 1.5); bar(wx, y, wz, w, big ? 0.42 : 0.3, hpr, team); y += 0.55; }
+    }
+    if (u.building) { // how far the site is built, and the unit it is making
+      const gold = color(css('--gold') || '#E6B84A');
+      if (b.site && b.site.work < b.site.need) arc(wx, wz, 3.5, gold, 1, b.site.work / b.site.need, 0.08);
+      if (b.produce && !b.produced && b.prodT != null) arc(wx, wz, 2.5, gold, 0.95, 1 - b.prodT / b.produce.time, 0.1, 24);
+      return;
     }
     if (u.structure) return;
     if (b.windTarget && u.windUp > 0) arc(wx, wz, r * 1.58, team, 0.95, 1 - b.windT / u.windUp, 0.1);
@@ -474,6 +492,11 @@ const Render3D = (THREE, el, view, opts = {}) => {
       const hx = (b.hx || 0) * f, hz = -(b.hy || 0) * f;
       for (const o of [-0.4, 0.4]) beam(wx - hx * r * 1.2 - hz * r * o, 0.6 * r, wz - hz * r * 1.2 + hx * r * o, wx - hx * r * 2.4 - hz * r * o, 0.6 * r, wz - hz * r * 2.4 + hx * r * o, 0.06, color(SHROOM_COL.yellow), 0.6);
     }
+  }
+  // grey puffs rising from (x, y, z), part of the scene (shown in every view)
+  const smokeCol = color('#8E8A86');
+  function smoke(x, y, z, s, seed) {
+    scene_(() => { for (let k = 0; k < 3; k++) { const p = ((clock * 0.6 + k / 3 + seed * 0.17) % 1 + 1) % 1; icon('dot', x + Math.sin((p + k) * 5) * s * 0.5, y + p * s * 4, z, s * (0.6 + p * 1.4), smokeCol, 0.5 * (1 - p)); } });
   }
   // what belongs to the scene itself, shown in every view: stun, mushroom spores, Zoe's stars
   function sceneMarkers(b, wx, wz, r, top, t) {
@@ -505,14 +528,23 @@ const Render3D = (THREE, el, view, opts = {}) => {
       const [kind, look] = key.split('#'), parts = models.parts(kind), top = models.height(kind);
       const gs = [['tint', tintMat], ['team', teamMat], ['fixed', fixedMat]].filter(([p]) => parts[p])
         .map(([p, mat]) => [p, group(key + ':' + p, parts[p], look === 'solid' ? mat : LOOKS[look], list.length)]);
+      const rollAt = models.ROLL_AT[kind];
       list.forEach((s, i) => {
-        const r = s.u.structure ? (s.scale || 1) : size(s.u) * MODEL_SCALE, sc = r * (s.look === 'ghost' || s.look === 'ghostFoe' ? 0.85 : 1);
+        const fixed = s.u.structure || s.u.building; // towers and buildings are drawn at their own size, door toward their own side
+        const r = fixed ? (s.scale || 1) : size(s.u) * MODEL_SCALE, sc = r * (s.look === 'ghost' || s.look === 'ghostFoe' ? 0.85 : 1);
         const hx = s.hx || 0, hy = s.hy == null ? (s.side === 1 ? -1 : 1) : s.hy;
         const lift = s.u.aloft ? 6 + Math.sin(clock * 1.5 + (s.phase || 0)) * 0.3 : 0;
-        const bob = s.moving ? Math.abs(Math.sin(clock * 9 + s.phase)) * 0.12 * r * s.moving : 0;
+        // Mechites glide (smooth); a roller rolls instead of bobbing
+        const bob = s.moving && !s.u.smooth && !rollAt ? Math.abs(Math.sin(clock * 9 + s.phase)) * 0.12 * r * s.moving : 0;
         const [wx, wz] = world(f, s.x, s.y);
-        tmpQ.setFromAxisAngle(up, s.u.structure ? (s.side === me ? Math.PI : 0) : Math.atan2(-hx * f, hy * f)); // a model's front is its -z side; a tower's door faces its own side
+        tmpQ.setFromAxisAngle(up, fixed ? (s.side === me ? Math.PI : 0) : Math.atan2(-hx * f, hy * f)); // a model's front is its -z side; a tower's door faces its own side
         tmpP.set(wx, lift + bob, wz); tmpS.setScalar(sc);
+        if (rollAt && s.b) { // turn the ball around its middle by how far it has rolled
+          tmpQ.multiply(tmpQ2.setFromAxisAngle(xAxis, -(s.b.moved || 0) / (rollAt * sc)));
+          const c = rollAt * sc; tmpD.set(0, -c, 0).applyQuaternion(tmpQ); tmpP.x += tmpD.x; tmpP.y += c + tmpD.y; tmpP.z += tmpD.z;
+        }
+        // what the Mechites build rattles (in fights)
+        if (s.b && (s.u.construct || s.u.building) && s.look === 'solid') { tmpP.x += Math.sin(clock * 47 + (s.phase || 0) * 13) * 0.04 * sc; tmpP.z += Math.cos(clock * 53 + (s.phase || 0) * 7) * 0.04 * sc; }
         tmpM.compose(tmpP, tmpQ, tmpS);
         const team = s.flag || teamColor(s.side, me);
         for (const [p, g] of gs) {
@@ -523,10 +555,15 @@ const Render3D = (THREE, el, view, opts = {}) => {
         // a stealthed body is only its see-through model, as the dashed ghost on the 2D board: no markers, and no
         // ring under the opponent's
         const ghost = !!(s.b && s.b.hidden && !s.u.aloft);
-        if (!s.u.spire && !uiOff && !(ghost && s.side !== me)) rings.push([wx, wz, r * (s.u.structure ? 2.6 : 1), s.side]);
+        if (!s.u.spire && !uiOff && !(ghost && s.side !== me)) rings.push([wx, wz, r * (fixed ? 2.6 : 1), s.side]);
         const h = top * sc + lift;
         if (s.crest) icon(`arms|${s.crest}|${s.edge}`, wx, h + 1.2, wz, 1.5);
         if (s.b && !ghost) { bodyMarkers(s, f, me, wx, wz, r, h, clock); s.marked = true; }
+        // smoke from constructs, and from a working building's chimney (in fights)
+        if (s.b && s.look === 'solid' && (s.u.construct || s.u.building)) {
+          if (s.u.building) { tmpD.set(1.3, 4.8, 0.9).applyQuaternion(tmpQ); smoke(wx + tmpD.x, tmpD.y, wz + tmpD.z, 0.9, s.phase || 0); }
+          else smoke(wx, h, wz, 0.35 * r, s.phase || 0);
+        }
         if (s.tag) { const l = labels.get(s.tag) || { u: s.u, pts: [] }; l.pts.push([wx, wz, r]); labels.set(s.tag, l); }
       });
       for (const [, g] of gs) finish(g, list.length);
@@ -680,7 +717,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
   // for checks: what the last frame drew of each body (its unit's name, kind, shape and colour, side, look, coat of
   // arms and its edge, whether it got markers)
   const drawn = () => bodies.map(s => ({ name: s.u.name || null, kind: s.u.kind || null, shape: s.u.shape || null, color: s.u.color || null,
-    side: s.side, look: s.look, crest: s.crest || null, edge: s.edge || null, structure: !!s.u.structure, spire: !!s.u.spire, aloft: !!s.u.aloft, marked: !!s.marked }));
+    side: s.side, look: s.look, crest: s.crest || null, edge: s.edge || null, structure: !!s.u.structure, building: s.u.building || null, spire: !!s.u.spire, aloft: !!s.u.aloft, marked: !!s.marked }));
   function dispose() {
     cam.dispose();
     renderer.dispose();

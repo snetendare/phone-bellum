@@ -12,6 +12,7 @@
 // Sizes are for a body of radius 1 metre standing on y = 0 and facing -z; the renderer scales them like the 2D board.
 const Models3D = (THREE) => {
   const SKIN = '#D9A27A', DARK = '#2B2F33', METAL = '#B8C0C8', WOOD = '#8A5A32', BONE = '#E9E3CF', GLOW = '#FFE9A8';
+  const BRASS = '#C9A24A', IRON = '#55595E', PAPER = '#E8DFC4', HEAL = '#6FD08C';
   const STONE = '#6E6A64', ETHER = '#8FE3FF', SUN = '#F7D154', FIRE = '#FF8A3D', EMBER = '#FFD27A', ROCK = '#5A4A42', GHOST = '#7CFF6B';
   const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), v = new THREE.Vector3(), s = new THREE.Vector3(1, 1, 1);
   const box = (w, h, d) => new THREE.BoxGeometry(w, h, d);
@@ -258,6 +259,82 @@ const Models3D = (THREE) => {
       P(cyl(0.035, 0.035, 2.4, 5), WOOD, [0, 1.5, 0.38], [0, 0, 0.7]),
       P(cone(0.08, 0.36, 4), METAL, [-0.89, 2.56, 0.38], [0, 0, 0.7]),
       P(cyl(0.35, 0.35, 0.07, 8), 'team', [-0.5, 1.25, -0.1], [0, 0, Math.PI / 2])],
+    // ---------- the Mechites (NAMED): rock elementals with clockwork in them, and the rattling machines they build ----------
+    // a cog: a disc with teeth, lying in the x-y plane (turn it to face where it should)
+    // Rollers: a ball of rock with a brass cog band and a band in the team colour. Built around its middle (ROLL_AT
+    // metres up), so the renderer can roll it.
+    roller: () => [
+      P(ball(0.9), 'tint', [0, 0.9, 0], [0.3, 0.5, 0]),
+      P(new THREE.TorusGeometry(0.88, 0.09, 4, 14), BRASS, [0, 0.9, 0], [0, Math.PI / 2, 0]),
+      ...[...Array(10)].map((_, k) => { const a = k * Math.PI / 5; return P(box(0.12, 0.2, 0.2), BRASS, [0, 0.9 + Math.cos(a) * 0.98, Math.sin(a) * 0.98], [a, 0, 0]); }),
+      P(new THREE.TorusGeometry(0.8, 0.07, 4, 14), 'team', [0, 0.9, 0], [0, 0, 0])],
+    // Cog Builder: a squat rock elemental with a backpack full of scrolls and a brass gadget for a right hand
+    cogBuilder: () => [
+      P(box(0.34, 0.6, 0.34), STONE, [-0.22, 0.3, 0]), P(box(0.34, 0.6, 0.34), STONE, [0.22, 0.3, 0]),
+      P(ball(0.62), 'tint', [0, 1.1, 0], [0.2, 0.4, 0], [1.05, 0.95, 0.9]),
+      P(box(1.0, 0.12, 0.7), 'team', [0, 0.85, 0]),
+      P(ball(0.3), 'tint', [0, 1.8, -0.05], [0.4, 0, 0]),
+      P(box(0.22, 0.05, 0.04), ETHER, [0, 1.85, -0.3]),
+      P(box(0.7, 0.75, 0.4), WOOD, [0, 1.2, 0.6]),
+      ...[-0.2, 0, 0.2].map((x, k) => P(cyl(0.07, 0.07, 0.6 + k * 0.1, 6), PAPER, [x, 1.75, 0.6], [0.2 * (k - 1), 0, 0.2 * (k - 1)])),
+      P(ball(0.24), 'tint', [-0.6, 1.0, -0.1]),
+      P(cyl(0.12, 0.16, 0.6, 6), BRASS, [0.62, 1.05, -0.2], [-1.2, 0, 0]),
+      P(cone(0.12, 0.35, 6), METAL, [0.62, 1.2, -0.62], [-1.2 - Math.PI, 0, 0]),
+      P(new THREE.TorusGeometry(0.16, 0.05, 3, 8), BRASS, [0.62, 1.08, -0.15])],
+    // Mechite Guards: a heavy rock body under iron plates, a brass shoulder, a short shotgun
+    mechGuard: () => [
+      P(box(0.36, 0.65, 0.36), STONE, [-0.25, 0.33, 0]), P(box(0.36, 0.65, 0.36), STONE, [0.25, 0.33, 0]),
+      P(ball(0.6), 'tint', [0, 1.15, 0], [0, 0.3, 0], [1.1, 1, 0.9]),
+      P(box(0.9, 0.55, 0.2), IRON, [0, 1.2, -0.48]),
+      P(box(0.5, 0.25, 0.06), 'team', [0, 1.25, -0.6]),
+      P(ball(0.34), BRASS, [-0.62, 1.5, 0]), P(ball(0.3), IRON, [0.62, 1.5, 0]),
+      P(ball(0.28), 'tint', [0, 1.85, -0.05], [0.4, 0.2, 0]),
+      P(box(0.26, 0.06, 0.04), ETHER, [0, 1.88, -0.3]),
+      P(cyl(0.09, 0.09, 0.9, 6), DARK, [0.5, 1.1, -0.55], [Math.PI / 2, 0, 0]),
+      P(cyl(0.09, 0.09, 0.9, 6), DARK, [0.32, 1.1, -0.55], [Math.PI / 2, 0, 0]),
+      P(box(0.35, 0.25, 0.45), WOOD, [0.41, 1.0, 0.0])],
+    // Cog Turret: a rattling gun on a tripod, an exhaust pipe at the back
+    cogTurret: () => [
+      ...[0, 2.1, 4.2].map(a => P(cyl(0.06, 0.08, 1.0, 4), IRON, [Math.sin(a) * 0.35, 0.45, Math.cos(a) * 0.35], [Math.cos(a) * 0.45, 0, -Math.sin(a) * 0.45])),
+      P(box(0.8, 0.5, 0.7), 'tint', [0, 1.05, 0]),
+      P(box(0.84, 0.12, 0.74), 'team', [0, 0.85, 0]),
+      P(cyl(0.1, 0.1, 0.9, 6), DARK, [0, 1.1, -0.75], [Math.PI / 2, 0, 0]),
+      P(cyl(0.07, 0.07, 0.5, 5), IRON, [0.25, 1.5, 0.3]),
+      P(new THREE.TorusGeometry(0.2, 0.05, 3, 8), BRASS, [-0.41, 1.05, 0], [0, Math.PI / 2, 0])],
+    // Healbot: a little hovering box with a green cross and a spinning rotor on top
+    healbot: () => [
+      P(box(0.7, 0.55, 0.7), 'tint', [0, 1.2, 0]),
+      P(box(0.74, 0.1, 0.74), 'team', [0, 0.95, 0]),
+      P(box(0.42, 0.12, 0.04), HEAL, [0, 1.22, -0.37]), P(box(0.12, 0.42, 0.04), HEAL, [0, 1.22, -0.37]),
+      P(cyl(0.04, 0.04, 0.3, 4), IRON, [0, 1.6, 0]),
+      P(box(1.2, 0.04, 0.12), IRON, [0, 1.76, 0]),
+      P(cone(0.12, 0.3, 4), IRON, [0, 0.82, 0], [Math.PI, 0, 0])],
+    // Cogbot Fighter: a boxy riveted brawler with huge fists
+    cogFighter: () => [
+      P(box(0.32, 0.7, 0.32), IRON, [-0.3, 0.35, 0]), P(box(0.32, 0.7, 0.32), IRON, [0.3, 0.35, 0]),
+      P(box(1.2, 1.0, 0.8), 'tint', [0, 1.25, 0]),
+      P(box(0.7, 0.35, 0.06), 'team', [0, 1.3, -0.42]),
+      P(box(0.5, 0.4, 0.5), 'tint', [0, 1.95, -0.05]),
+      P(box(0.34, 0.07, 0.04), '#FF8A3D', [0, 1.98, -0.31]),
+      ...[-1, 1].flatMap(sd => [P(cyl(0.12, 0.12, 0.7, 5), IRON, [sd * 0.75, 1.25, -0.1], [0.4, 0, 0]), P(box(0.45, 0.45, 0.45), BRASS, [sd * 0.78, 0.95, -0.4])]),
+      P(cyl(0.08, 0.08, 0.5, 5), DARK, [0.4, 2.0, 0.35])],
+    // Cogbot Machinegunner: a walker carrying a rotary gun of three barrels
+    cogGunner: () => [
+      P(box(0.26, 0.8, 0.26), IRON, [-0.28, 0.4, 0]), P(box(0.26, 0.8, 0.26), IRON, [0.28, 0.4, 0]),
+      P(box(0.9, 0.7, 0.7), 'tint', [0, 1.15, 0]),
+      P(box(0.92, 0.14, 0.72), 'team', [0, 0.85, 0]),
+      P(ball(0.25), DARK, [0, 1.7, -0.05]),
+      P(cyl(0.22, 0.22, 0.3, 8), BRASS, [0.25, 1.2, -0.45], [Math.PI / 2, 0, 0]),
+      ...[0, 2.1, 4.2].map(a => P(cyl(0.05, 0.05, 1.1, 4), DARK, [0.25 + Math.sin(a) * 0.12, 1.2 + Math.cos(a) * 0.12, -1.05], [Math.PI / 2, 0, 0])),
+      P(cyl(0.07, 0.07, 0.5, 5), IRON, [-0.3, 1.6, 0.3])],
+    // CogMech: a tall two-legged mech with a cockpit and a cannon on each arm (it fires both at once)
+    cogMech: () => [
+      ...[-1, 1].flatMap(sd => [P(box(0.3, 0.9, 0.35), IRON, [sd * 0.4, 0.45, 0.1]), P(box(0.34, 0.7, 0.34), 'tint', [sd * 0.4, 1.2, -0.05], [0.25, 0, 0])]),
+      P(box(1.3, 0.9, 1.0), 'tint', [0, 1.95, 0]),
+      P(box(1.34, 0.18, 1.04), 'team', [0, 1.55, 0]),
+      P(box(0.6, 0.35, 0.1), ETHER, [0, 2.1, -0.52]),
+      ...[-1, 1].flatMap(sd => [P(box(0.35, 0.35, 0.8), BRASS, [sd * 0.88, 1.9, -0.1]), P(cyl(0.11, 0.11, 0.9, 6), DARK, [sd * 0.88, 1.9, -0.85], [Math.PI / 2, 0, 0])]),
+      P(cyl(0.08, 0.08, 0.6, 5), IRON, [0.35, 2.65, 0.35]), P(cyl(0.08, 0.08, 0.6, 5), IRON, [-0.35, 2.65, 0.35])],
     // a thrown spear, flying toward -z: the shaft takes the unit's colour
     spear: () => [P(cyl(0.06, 0.06, 2.4, 4), 'tint', [0, 0, 0.3], [Math.PI / 2, 0, 0]), P(cone(0.14, 0.5, 4), METAL, [0, 0, -1.1], [-Math.PI / 2, 0, 0])],
     // a neutral elf spire: pale stone, a roof in its own colour (green, gilded once the elves grow strong), a flag
@@ -296,13 +373,28 @@ const Models3D = (THREE) => {
       door(-1.75, 0.8, 1.1), ...flagOn(9.0)],
   };
   for (const [k, f] of Object.entries(TOWERS)) BUILD['tower:' + k] = f;
+  // buildings (drawn at their real size, like towers): the Mechites' Factory, a brick workshop in the building's colour
+  // with a sawtooth roof, a smoking chimney, a big brass cog on its front and banners in the team colour
+  BUILD['building:factory'] = () => [
+    P(box(4.0, 2.4, 3.2), 'tint', [0, 1.2, 0]),
+    ...[-1.33, 0, 1.33].flatMap(x => [P(box(1.45, 0.12, 3.3), '#5B4A3A', [x - 0.05, 2.75, 0], [0, 0, 0.45]), P(box(0.08, 0.62, 3.3), '#9FC7D9', [x + 0.62, 2.7, 0])]),
+    P(cyl(0.35, 0.42, 3.6, 6), DARK, [1.3, 3.6, 0.9]),
+    P(cyl(0.45, 0.45, 0.25, 6), BRASS, [1.3, 4.6, 0.9]),
+    P(cyl(0.95, 0.95, 0.2, 14), BRASS, [-0.9, 1.4, -1.65], [Math.PI / 2, 0, 0]),
+    ...[...Array(10)].map((_, k) => { const a = k * Math.PI / 5; return P(box(0.28, 0.28, 0.2), BRASS, [-0.9 + Math.cos(a) * 1.05, 1.4 + Math.sin(a) * 1.05, -1.65], [0, 0, a]); }),
+    P(box(1.0, 1.5, 0.15), DARK, [0.9, 0.75, -1.63]),
+    P(box(0.15, 1.3, 0.9), 'team', [-2.05, 1.6, 0.5]), P(box(0.15, 1.3, 0.9), 'team', [2.05, 1.6, -0.5])];
+  BUILD.building = BUILD['building:factory']; // any other building, until it has a model of its own
 
   const NAMED = { 'Ether Golem': 'golem', 'Sun Priest': 'sunPriest', 'Meteor Caller': 'meteor', 'War Mammoth': 'mammoth', 'Necromancer': 'necro', 'Truespear': 'truespear',
     'Ent': 'ent', 'Rogue': 'rogue', 'Sniper': 'sniper', 'Slimeshots': 'slimeshot', 'Skeleton Archers': 'skeleton',
+    'Rollers': 'roller', 'Cog Builder': 'cogBuilder', 'Mechite Guards': 'mechGuard', 'Cog Turret': 'cogTurret', 'Healbot': 'healbot',
+    'Cogbot Fighter': 'cogFighter', 'Cogbot Machinegunner': 'cogGunner', 'CogMech': 'cogMech',
     'Fire Mage': 'wizard:fire', 'Flame Wizard': 'wizard:flame', 'Leaf Wizard': 'wizard:leaf', 'Earth Wizard': 'wizard:earth', 'Steel Wizard': 'wizard:steel', 'Slime Wizard': 'wizard:slime' };
   const RANGED = 12; // metres: from this range on, a unit is drawn as an archer or a caster
   function kindOf(u) {
     if (u.spire) return 'spire';
+    if (u.building) return BUILD['building:' + u.building] ? 'building:' + u.building : 'building';
     if (u.structure) return TOWERS[u.kind] ? 'tower:' + u.kind : /^f-/.test(u.kind || '') ? 'tower:faction' : 'tower:keep';
     if (u.aloft) return 'airship';
     if (NAMED[u.name]) return NAMED[u.name];
@@ -334,5 +426,7 @@ const Models3D = (THREE) => {
     }
     return tops[kind];
   }
-  return { kindOf, parts, height, KINDS: Object.keys(BUILD) };
+  // models that roll (a roller's ball): the height of their middle, for a body of radius 1
+  const ROLL_AT = { roller: 0.9 };
+  return { kindOf, parts, height, ROLL_AT, KINDS: Object.keys(BUILD) };
 };

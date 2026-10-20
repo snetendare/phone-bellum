@@ -8,37 +8,273 @@
       "tower": {
         "name": "Cog Spire",
         "text": "For now the standard tower. The Mechites' own tower comes later.",
-        "unit": { "hp": 650 }
+        "unit": {
+          "hp": 650
+        }
       },
       "units": [
         {
-          "name": "Rollers", "cost": 100, "unlock": 50, "bodies": 2, "hp": 400, "hit": 30, "aps": 0.4, "range": 1.5, "speed": 7, "splash": 0,
-          "roll": 2, "shape": "circle", "color": "#9A8B76",
-          "skills": ["rollerMomentum", "rollerPlating", null]
+          "name": "Rollers",
+          "cost": 100,
+          "unlock": 50,
+          "bodies": 2,
+          "hp": 400,
+          "hit": 30,
+          "aps": 0.4,
+          "range": 1.5,
+          "speed": 7,
+          "splash": 0,
+          "roll": 2,
+          "shape": "circle",
+          "color": "#9A8B76",
+          "skills": [
+            "rollerMomentum",
+            "rollerPlating",
+            null
+          ],
+          "smooth": true,
+          "tag": "ROL"
         },
         {
-          "name": "Cog Builder", "cost": 200, "unlock": 50, "bodies": 1, "hp": 350, "hit": 30, "aps": 1, "range": 2, "speed": 4, "splash": 0,
-          "shape": "pentagon", "color": "#B98B5A",
-          "build": { "time": 1.5, "range": 25, "count": 1,
-            "unit": { "name": "Cog Turret", "cost": 0, "bodies": 1, "hp": 100, "hit": 14, "aps": 1.5, "range": 25, "speed": 0, "splash": 0, "shape": "square", "color": "#A8A296" } },
-          "skills": [null, "twinTurrets", "masterEngineering"],
-          "skillNeeds": [null, null, [0, 1]]
+          "name": "Cog Builder",
+          "cost": 200,
+          "unlock": 50,
+          "bodies": 1,
+          "hp": 350,
+          "hit": 30,
+          "aps": 1,
+          "range": 2,
+          "speed": 4,
+          "splash": 0,
+          "shape": "pentagon",
+          "color": "#B98B5A",
+          "build": {
+            "time": 1.5,
+            "range": 25,
+            "count": 1,
+            "unit": {
+              "name": "Cog Turret",
+              "cost": 0,
+              "bodies": 1,
+              "hp": 100,
+              "hit": 14,
+              "aps": 1.5,
+              "range": 25,
+              "speed": 0,
+              "splash": 0,
+              "shape": "square",
+              "color": "#A8A296",
+              "tag": "TUR"
+            }
+          },
+          "skills": [
+            "buildFactory",
+            "twinTurrets",
+            "masterEngineering"
+          ],
+          "skillNeeds": [
+            null,
+            null,
+            [
+              0,
+              1
+            ]
+          ],
+          "smooth": true,
+          "tag": "BLD"
         },
         {
-          "name": "Mechite Guards", "cost": 200, "unlock": 50, "bodies": 3, "hp": 340, "hit": 32, "pellets": 5, "aps": 0.3, "range": 10, "speed": 2, "splash": 0,
-          "knockback": 4, "defense": "armor", "defVal": 2, "shape": "hexagon", "color": "#7E8A8F",
-          "skills": ["guardRapid", "guardLink", "guardHealbot"]
+          "name": "Mechite Guards",
+          "cost": 200,
+          "unlock": 50,
+          "bodies": 3,
+          "hp": 340,
+          "hit": 32,
+          "pellets": 5,
+          "aps": 0.3,
+          "range": 10,
+          "speed": 2,
+          "splash": 0,
+          "knockback": 4,
+          "defense": "armor",
+          "defVal": 2,
+          "shape": "hexagon",
+          "color": "#7E8A8F",
+          "skills": [
+            "guardRapid",
+            "guardLink",
+            "guardHealbot"
+          ],
+          "smooth": true,
+          "tag": "GRD"
         }
       ]
     }
   ],
   "skills": [
-    { "id": "rollerMomentum", "type": "momentum", "name": "Momentum", "cost": 100, "params": { "accel": 100 } },
-    { "id": "rollerPlating", "type": "armorHp", "name": "Stone plating", "cost": 150, "params": { "armor": 4, "hp": 15 } },
-    { "id": "twinTurrets", "type": "builder", "name": "Twin turrets", "cost": 200, "params": { "extra": 1 } },
-    { "id": "masterEngineering", "type": "builder", "name": "Master engineering", "cost": 400, "params": { "faster": 50, "aps": 20, "shield": 2, "armor": 2 } },
-    { "id": "guardRapid", "type": "rapid", "name": "Oiled pumps", "cost": 100, "params": { "aps": 25, "range": 0 } },
-    { "id": "guardLink", "type": "link", "name": "Linked cores", "cost": 150, "params": { "hp": 15 } },
-    { "id": "guardHealbot", "type": "healbot", "name": "Healbot", "cost": 200, "params": { "hp": 300, "pct": 4, "range": 8, "speed": 3 } }
+    {
+      "id": "rollerMomentum",
+      "type": "momentum",
+      "name": "Momentum",
+      "cost": 100,
+      "params": {
+        "accel": 100
+      }
+    },
+    {
+      "id": "rollerPlating",
+      "type": "armorHp",
+      "name": "Stone plating",
+      "cost": 150,
+      "params": {
+        "armor": 4,
+        "hp": 15
+      }
+    },
+    {
+      "id": "buildFactory",
+      "type": "building",
+      "name": "Build factory",
+      "cost": 200,
+      "params": {
+        "building": "factory"
+      }
+    },
+    {
+      "id": "twinTurrets",
+      "type": "builder",
+      "name": "Twin turrets",
+      "cost": 200,
+      "params": {
+        "extra": 1
+      }
+    },
+    {
+      "id": "masterEngineering",
+      "type": "builder",
+      "name": "Master engineering",
+      "cost": 400,
+      "params": {
+        "faster": 50,
+        "aps": 20,
+        "shield": 2,
+        "armor": 2
+      }
+    },
+    {
+      "id": "guardRapid",
+      "type": "rapid",
+      "name": "Oiled pumps",
+      "cost": 100,
+      "params": {
+        "aps": 25,
+        "range": 0
+      }
+    },
+    {
+      "id": "guardLink",
+      "type": "link",
+      "name": "Linked cores",
+      "cost": 150,
+      "params": {
+        "hp": 15
+      }
+    },
+    {
+      "id": "guardHealbot",
+      "type": "healbot",
+      "name": "Healbot",
+      "cost": 200,
+      "params": {
+        "hp": 300,
+        "pct": 4,
+        "range": 8,
+        "speed": 3
+      }
+    }
+  ],
+  "buildings": [
+    {
+      "id": "factory",
+      "name": "Factory",
+      "faction": "mechites",
+      "hp": 1000,
+      "buildSecs": 20,
+      "rebuild": 50,
+      "levelCost": 100,
+      "color": "#B07A3C",
+      "text": "A small, smoking workshop. Your nearest Cog Builder builds it during fights; once built, buy one of its constructs each round.",
+      "skills": [
+        {
+          "id": "fighter",
+          "name": "Cogbot Fighter",
+          "cost": 100,
+          "time": 2,
+          "unit": {
+            "name": "Cogbot Fighter",
+            "cost": 1,
+            "bodies": 1,
+            "hp": 1500,
+            "hit": 300,
+            "aps": 0.5,
+            "range": 2,
+            "speed": 3,
+            "splash": 0,
+            "defense": "armor",
+            "defVal": 4,
+            "shield": 2,
+            "shape": "square",
+            "color": "#A88452",
+            "tag": "FGT"
+          }
+        },
+        {
+          "id": "gunner",
+          "name": "Cogbot Machinegunner",
+          "cost": 100,
+          "time": 2,
+          "unit": {
+            "name": "Cogbot Machinegunner",
+            "cost": 1,
+            "bodies": 1,
+            "hp": 500,
+            "hit": 50,
+            "aps": 0.3,
+            "spinUp": 225,
+            "spinCap": 10,
+            "range": 22,
+            "speed": 3,
+            "splash": 0,
+            "shape": "triangle",
+            "color": "#9C8F7A",
+            "tag": "MGN"
+          }
+        },
+        {
+          "id": "cogmech",
+          "name": "CogMech",
+          "cost": 300,
+          "time": 4,
+          "unit": {
+            "name": "CogMech",
+            "cost": 1,
+            "bodies": 1,
+            "hp": 2000,
+            "hit": 200,
+            "aps": 1,
+            "range": 18,
+            "speed": 2.5,
+            "splash": 2,
+            "defense": "armor",
+            "defVal": 4,
+            "shield": 3,
+            "turrets": 2,
+            "shape": "hexagon",
+            "color": "#B5895A",
+            "tag": "MCH"
+          }
+        }
+      ]
+    }
   ]
 }

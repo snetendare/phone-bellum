@@ -33,7 +33,7 @@ for (const fc of f.factions || []) {
 }
 const names = fUnits.map(u => u.name), dup = names.find((x, i) => names.indexOf(x) !== i);
 if (dup) throw new Error(`two faction units are called ${dup}: unit names must be unique across factions`);
-const ft = table('factions', 'src/faction-units.json', fUnits, fSkills, { factions: meta });
+const ft = table('factions', 'src/faction-units.json', fUnits, fSkills, { factions: meta, buildings: f.buildings || [] });
 // each faction's average against every other faction
 meta.forEach((a) => {
   const A = ft.units.map((u, i) => u.faction === a.id ? i : -1).filter(i => i >= 0);

@@ -130,17 +130,24 @@ const run = (bt, secs) => { for (let k = 0; k < secs / g.dt - 1e-9 && bt.step();
 }
 
 // ---------- in a match ----------
-Game.setFactions(F.factions);
+Game.setFactions(F.factions); Game.setBuildings(F.buildings);
 const mu = F.units.map(u => ({ ...E.withTraits(u), skillDefs: E.SLOTS.map(k => (u.skills && F.skills.find(s => s.id === u.skills[k])) || null) })); // as the page resolves them
 const mm = Game.createMatch(mu, F.matrix, 7, null, null, [], { factions: [['mechites'], ['mechites']] });
 const cb = mu.findIndex(u => u.name === 'Cog Builder');
 mm.gold[0] = 5000; mm.unlocks[0][cb] = 1;
 assert.ok(Game.place(mm, 0, cb, 5, Game.zoneRows(0)[0]), 'place a cog builder');
 assert.ok(!Game.canBuySkill(mm, 0, cb, 2), 'Master engineering needs Twin turrets first');
-assert.deepStrictEqual(Game.skillNeedsMissing(mm, 0, cb, 2), [1]);
+assert.deepStrictEqual(Game.skillNeedsMissing(mm, 0, cb, 2), [0, 1]);
+assert.ok(!Game.buySkill(mm, 0, cb, 0), 'Build factory needs a tile');
+const row0 = Game.zoneRows(0)[4];
+assert.ok(!Game.buyBuilding(mm, 0, cb, 0, 5, Game.zoneRows(0)[0]), 'not on a squad');
+assert.ok(Game.buyBuilding(mm, 0, cb, 0, 3, row0), 'Build factory placed');
+assert.ok(Game.occupied(mm, 0, 3, row0) && !Game.place(mm, 0, cb, 3, row0), 'its tile is taken');
+assert.ok(!Game.canBuyBuilding(mm, 0, cb, 0), 'one factory');
 assert.ok(Game.buySkill(mm, 0, cb, 1) && Game.buySkill(mm, 0, cb, 2), 'Twin turrets, then Master engineering');
-assert.ok(!Game.undoSkill(mm, 0, cb, 1), 'Twin turrets stays while Master engineering is owned');
-assert.ok(Game.undoSkill(mm, 0, cb, 2) && Game.undoSkill(mm, 0, cb, 1), 'undo in order');
+assert.ok(!Game.undoSkill(mm, 0, cb, 1) && !Game.undoSkill(mm, 0, cb, 0), 'skills stay while Master engineering is owned');
+assert.ok(Game.undoSkill(mm, 0, cb, 2) && Game.undoSkill(mm, 0, cb, 1) && Game.undoSkill(mm, 0, cb, 0), 'undo in order');
+assert.strictEqual(Game.buildingsOf(mm, 0).length, 0, 'taking back Build factory takes the factory back');
 // Frickolas Cage's +10% health reaches the turret too
 mm.chars[0] = 'cage';
 near(Game.unitFor(mm, 0, cb).build.unit.hp, 110, 1e-9, 'Cage: tougher turrets');
