@@ -366,6 +366,11 @@ const Render3D = (THREE, el, view, opts = {}) => {
       bodies.push({ u: b.u, side: b.side, x: p.x, y: p.y, hx: b.hx, hy: b.hy, look, moving: p.moving, phase: p.phase, b, crest, edge: Art.teamCol(b.side, me), tag });
       if (b.u.structure && b.walls) addWalls(f, b.x, b.y, b.walls);
     }
+    // the Mecha Tower's mines: a dark disc ringed in the team colour (the opponent's fainter)
+    for (const mn of bt.mines ? bt.mines() : []) {
+      const [wx, wz] = world(f, mn.x, mn.y), team = teamColor(mn.side, me);
+      scene_(() => { disc(wx, wz, 0.55, color('#2B2F33'), 0.9); arc(wx, wz, 0.8, team, mn.side === me ? 0.9 : 0.5, 1, 0.14); });
+    }
     // a linked squad: a faint line joins its bodies (they share one health pool)
     for (const b of bt.bodies) {
       if (!b.alive || !b.link || b.hidden || uiOff) continue;
@@ -540,10 +545,10 @@ const Render3D = (THREE, el, view, opts = {}) => {
       const rollAt = models.ROLL_AT[kind];
       list.forEach((s, i) => {
         // towers and buildings are drawn at their own size and face their own side (a walking building faces where it goes)
-        const fixed = s.u.structure || (s.u.building && !s.u.awake);
+        const fixed = (s.u.structure || s.u.building) && !s.u.awake;
         const r = s.u.structure || s.u.building ? (s.scale || 1) : size(s.u) * MODEL_SCALE, sc = r * (s.look === 'ghost' || s.look === 'ghostFoe' ? 0.85 : 1);
         const hx = s.hx || 0, hy = s.hy == null ? (s.side === 1 ? -1 : 1) : s.hy;
-        const lift = s.u.aloft ? 6 + Math.sin(clock * 1.5 + (s.phase || 0)) * 0.3 : 0;
+        const lift = s.u.aloft ? (s.u.kind === 'drone' ? 4 : 6) + Math.sin(clock * 1.5 + (s.phase || 0)) * 0.3 : 0; // a drone flies lower than an airship
         // Mechites glide (smooth); a roller rolls instead of bobbing
         const bob = s.moving && !s.u.smooth && !rollAt ? Math.abs(Math.sin(clock * 9 + s.phase)) * 0.12 * r * s.moving : 0;
         const [wx, wz] = world(f, s.x, s.y);

@@ -233,6 +233,27 @@ const Game = (() => {
     m.gold[side] -= LOAN.gold;
     return true;
   }
+  // Tower skills bought every round (a faction tower's `rounds`, the Mecha Tower's bots): each works in that round's
+  // fight only and can be bought again the next round. m.tround[side] = { [id]: round bought }; hidden from the
+  // opponent until the fight. See bodiesFor for what each does.
+  const towerRounds = (m, side) => (towerPicked(m, side) && towerType(m, side).rounds) || [];
+  const troundInfo = (m, side, id) => towerRounds(m, side).find(x => x.id === id) || null;
+  const troundOn = (m, side, id) => !!(m && m.tround && m.tround[side] && m.tround[side][id] === m.round && troundInfo(m, side, id));
+  const troundCost = (m, side, id) => Math.max(0, Math.round(+(troundInfo(m, side, id) || {}).cost || 0));
+  const canBuyTround = (m, side, id) => !!troundInfo(m, side, id) && !troundOn(m, side, id) && m.gold[side] >= troundCost(m, side, id);
+  function buyTround(m, side, id) {
+    if (!canBuyTround(m, side, id)) return false;
+    if (!m.tround) m.tround = [{}, {}];
+    m.gold[side] -= troundCost(m, side, id);
+    m.tround[side][id] = m.round;
+    return true;
+  }
+  function undoTround(m, side, id) {
+    if (!troundOn(m, side, id)) return false;
+    delete m.tround[side][id];
+    m.gold[side] += troundCost(m, side, id);
+    return true;
+  }
   // Slime tower: the skills bought for Slime Wizards and Slimeshots work on it too
   const SLIME_UNITS = ['Slime Wizard', 'Slimeshots'];
   // the skills bought for slime units (except unit type skipUi)
@@ -768,6 +789,7 @@ const Game = (() => {
       towerSkill: [0, 0], // round each player bought their tower's skill in (0 = not bought)
       towerSkill2: [0, 0], // ...and its second skill (keep, bastion, bank)
       loan: [0, 0], // the round each player last took a bank loan in (Bank tower)
+      tround: [{}, {}], // tower skills bought every round (the Mecha Tower's bots): tround[side][id] = round bought
       mageGen: [null, null], // the mage generals each player called this round: { round, id, tp } (Mage tower)
       mapFree: [{}, {}], // Blixten's discounted map purchase per round (see mapFreeOf)
       factions, // Factions mode: each player's drafted faction ids (null = a normal match)
@@ -1056,7 +1078,7 @@ const Game = (() => {
       if (!info) return;
       const w = recordWorld(r), lv = r.rec.level || 0, built = !!r.rec.built;
       let bu = E.withTraits({ name: info.name, cost: 0, bodies: 1, hp: info.hp, hit: 0, aps: 1, range: 0, speed: 0, splash: 0, shape: 'square', color: info.color || '#B07A3C',
-        building: r.id, size: r.size, idle: true, anchored: true, noCount: true, construct: true });
+        building: r.id, size: r.size, idle: true, anchored: true, noCount: true, construct: true, buildSecs: info.buildSecs });
       if (built && fx.awake && info.awake) bu = { ...bu, ...info.awake, idle: false, noCount: false, awake: true }; // Core Awoken: it becomes a unit
       if (bl) bu = blessed(bu, bl);
       const [b] = E.buildSquad(bu, side, w.x, w.y, r.squad, TILE, idx + k, lv);
@@ -1273,9 +1295,36 @@ const Game = (() => {
       if (towerSkill2On(m, side, 'bastion')) tu = { ...tu, moat: { ...MOAT } };
       if (eagle) tu = { ...tu, range: tu.range + TOWER_SKILL.eagleRange, aps: tu.aps * (1 + TOWER_SKILL.eagleAps / 100) };
       if (airship) tu = { ...tu, hit: tu.hit + AIRSHIP.sniperHit };
+      if (fx.awake && towerType(m, side).awake) tu = { ...tu, ...towerType(m, side).awake, idle: false, awake: true }; // Core Awoken: the Mecha Tower drives
       const w = tileToWorld(t.col, t.row), tb = E.buildSquad(tu, side, w.x, w.y, -2, TILE, idx);
       if (altarBought(m, side, 'walls')) for (const x of tb) x.walls = [ICE.wallHits, ICE.wallHits, ICE.wallHits, ICE.wallHits];
       idx += tb.length; out.push(...tb);
+      // the Mecha Tower's drone: circles the tower and does its shooting
+      if (tu.drone && tu.drone.unit) {
+        const du = E.withTraits({ ...tu.drone.unit, bodies: 1, aloft: true, noCount: true, construct: true, kind: 'drone' });
+        const [d] = E.buildSquad(du, side, w.x + tu.drone.orbit, w.y, -5, TILE, idx);
+        d.orbit = { anchor: tb[0], r: tu.drone.orbit };
+        idx++; out.push(d);
+      }
+      // the Mecha Tower's bots, bought for this round: minebots plant mines in no man's land, repairbots mend buildings
+      towerRounds(m, side).forEach((x, k) => {
+        if (!troundOn(m, side, x.id) || !x.bots || !x.bots.unit) return;
+        const n = Math.max(1, x.bots.count | 0), bu = E.withTraits({ ...x.bots.unit, bodies: 1, noCount: true, construct: true });
+        const bb = E.buildSquad({ ...bu, bodies: n }, side, w.x, w.y + (side === 0 ? 1 : -1) * TILE * 0.6, -6 - k, TILE, idx);
+        if (x.mines) { // each bot plants mines.each mines on tiles of no man's land picked from the match and round (the same on both phones)
+          const q = rng(m.seed + m.round * 811 + side * 53 + k), pool = [];
+          for (let row = 0; row < ROWS; row++) if (inNoMans(row)) for (let col = 0; col < COLS; col++) pool.push([col, row]);
+          const per = Math.max(1, x.mines.each | 0), picks = [];
+          while (picks.length < per * bb.length && pool.length) picks.push(pool.splice(Math.floor(q() * pool.length), 1)[0]);
+          const spots = picks.map(([col, row]) => { const c = tileToWorld(col, row); return { x: c.x + (q() - 0.5) * TILE * 0.6, y: c.y + (q() - 0.5) * TILE * 0.6 }; });
+          bb.forEach((b, j) => {
+            const mine = spots.filter((_, i) => i % bb.length === j);
+            mine.sort((a, c) => Math.abs(a.y - w.y) - Math.abs(c.y - w.y)); // nearest row first
+            b.plant = { spots: mine, mine: { hit: +x.mines.hit || 0, radius: +x.mines.radius || 0 } };
+          });
+        }
+        idx += bb.length; out.push(...bb);
+      });
       // Guards (keep): reskinned Wisps (base stats, no skills) a tile in front of the keep, holding there for a while
       // Brute guards (keep's second skill): Brutes with the skills bought for Brutes instead
       if (towerSkillOn(m, side, 'keep')) {
@@ -1547,13 +1596,15 @@ const Game = (() => {
   const FACTION_MODE = { map: 'standard', picks: 2, order: [{ who: 'A', act: 'pick' }, { who: 'B', act: 'pick' }, { who: 'B', act: 'pick' }, { who: 'A', act: 'pick' }] };
   const TRAIT_STATS = ['hp', 'hit', 'aps', 'range', 'speed']; // a trait changes these by a percentage
   let FACTIONS = [];
-  // list: [{ id, name, color, theme, trait: { name, text, hp, hit, ... (percent) }, tower: { name, text, unit: { stats } }, units: [unit names] }]
+  // list: [{ id, name, color, theme, trait: { name, text, hp, hit, ... (percent) }, tower: { name, text, unit: { stats },
+  // awake (its stats under Core Awoken), rounds (skills bought every round, see towerRounds) }, units: [unit names] }]
   function setFactions(list) {
     FACTIONS = (Array.isArray(list) ? list : []).filter(f => f && typeof f.id === 'string' && f.id).map(f => ({
       id: f.id, name: String(f.name || f.id), color: f.color || '#C9B79C', theme: String(f.theme || ''),
       trait: f.trait && typeof f.trait === 'object' ? f.trait : null, units: Array.isArray(f.units) ? f.units.slice() : [],
       tower: { id: 'f-' + f.id, faction: f.id, name: (f.tower && f.tower.name) || f.name + ' tower', text: (f.tower && f.tower.text) || '',
-        unit: { ...TOWER, color: f.color || TOWER.color, ...((f.tower && f.tower.unit) || {}), name: (f.tower && f.tower.name) || f.name + ' Tower', kind: 'f-' + f.id } },
+        unit: { ...TOWER, color: f.color || TOWER.color, ...((f.tower && f.tower.unit) || {}), name: (f.tower && f.tower.name) || f.name + ' Tower', kind: 'f-' + f.id },
+        awake: (f.tower && f.tower.awake) || null, rounds: Array.isArray(f.tower && f.tower.rounds) ? f.tower.rounds.filter(x => x && x.id) : [] },
     }));
     return FACTIONS;
   }
@@ -1646,6 +1697,9 @@ const Game = (() => {
     if (canBuyTowerSkill(m, side) && rng(m.seed + m.round * 331 + side * 17)() < 0.5) buyTowerSkill(m, side); // own stream, as above
     if (canBuyTowerSkill2(m, side) && m.gold[side] - towerSkill2Cost(m, side) >= SQUAD_COST && rng(m.seed + m.round * 347 + side * 19)() < 0.35) buyTowerSkill2(m, side);
     if (canTakeLoan(m, side) && m.gold[side] < SQUAD_COST * 3 && rng(m.seed + m.round * 613 + side * 37)() < 0.4) takeLoan(m, side); // short on gold: sometimes a loan
+    for (const x of towerRounds(m, side)) { // the Mecha Tower's bots: some rounds, if they leave gold for a squad
+      if (canBuyTround(m, side, x.id) && m.gold[side] - troundCost(m, side, x.id) >= SQUAD_COST && rng(m.seed + m.round * 619 + side * 41 + x.id.length)() < 0.45) buyTround(m, side, x.id);
+    }
     if (towerPicked(m, side) && towerType(m, side).id === 'mage') { // a mage general most rounds, if it leaves gold for a squad
       const q = rng(m.seed + m.round * 577 + side * 29), g = MAGE_GENERALS[Math.floor(q() * MAGE_GENERALS.length)];
       if (q() < 0.6 && m.gold[side] - g.cost >= SQUAD_COST) buyMageGen(m, side, g.id);
@@ -1793,7 +1847,7 @@ const Game = (() => {
     canBuyBuilding, buyBuilding, buildingSkills, buildingSkillInfo, bskillOf, bskillCost, canBuyBuildingSkill, buyBuildingSkill, undoBuildingSkill,
     buildingXpNeeded, buildingLevelCost, buildingReady, levelBuilding, undoLevelBuilding, constructBuff, buildingBodies, canBuySkill, buySkill, undoSkill, sellValue, sell,
     isRider, hiddenFromFoe, isCarrier, riderOf, carrierOf, squadAt, boardable, unplaceSquad,
-    TOWER, TOWER_TYPES, OUTPOST, TOWER_PICK_ROUND, towerType, towerChoices, needsTowerPick, setTowerType, settleTowerPicks, TOWER_SKILL, towerSkillOf, towerSkillVisible, towerPicked, canBuyTowerSkill, buyTowerSkill, undoTowerSkill, towerSkillCost, towerSkill2Of, towerSkill2Visible, towerSkill2Cost, canBuyTowerSkill2, buyTowerSkill2, undoTowerSkill2, towerSkill2On, AIRSHIP, MOAT, INVEST, MAGE_GENERALS, mageGenPrice, MAGE, mageGenInfo, mageGenOf, mageTpOf, isExtraGen, mageGenCost, canBuyMageGen, buyMageGen, undoMageGen, mageTowerUnit, generalUnit, LOAN, loanNow, canTakeLoan, takeLoan, undoLoan, SLIME_UNITS, slimeTowerUnit, slimeSkillDefs, TOWER_MID, towerColOk, towerAt, needsTower, placeTower, ensureTower,
+    TOWER, TOWER_TYPES, OUTPOST, TOWER_PICK_ROUND, towerType, towerChoices, needsTowerPick, setTowerType, settleTowerPicks, TOWER_SKILL, towerSkillOf, towerSkillVisible, towerPicked, canBuyTowerSkill, buyTowerSkill, undoTowerSkill, towerSkillCost, towerSkill2Of, towerSkill2Visible, towerSkill2Cost, canBuyTowerSkill2, buyTowerSkill2, undoTowerSkill2, towerSkill2On, AIRSHIP, MOAT, INVEST, MAGE_GENERALS, mageGenPrice, MAGE, mageGenInfo, mageGenOf, mageTpOf, isExtraGen, mageGenCost, canBuyMageGen, buyMageGen, undoMageGen, mageTowerUnit, generalUnit, LOAN, loanNow, canTakeLoan, takeLoan, undoLoan, towerRounds, troundInfo, troundOn, troundCost, canBuyTround, buyTround, undoTround, SLIME_UNITS, slimeTowerUnit, slimeSkillDefs, TOWER_MID, towerColOk, towerAt, needsTower, placeTower, ensureTower,
     FLANK, flankRows, flankOpen, isFlank, reserved, canPlaceAt, isOff, enemyHolds, inNoMans, hasSkillType,
     ICE, ALTAR, GOLEM, isIce, hailRound, altarRound, stormShift, stormRows, hailTiles, altarCost, altarRefund, altarCount, pushRoom, altarBought, addAltar, buyAltar, undoAltar, snowgres, snowgreUnit,
     MAPS, ELF_TOWER, SHROOM, SHROOM_SPLIT, shroomAt, shroomTileAt, shroomRemoval, SHROOM_REMOVE, shroomCost, removeShroom, undoRemoveShroom, mapOf, elfSpot, rollMap, BRIBE_COST, bribeList, bribeGold, bribeCount, bribeNow, bribeCost, bribeRefund, ELF_POWER, elfPowered, elfUnit, ELF_OWN, elfOwnCost, elfOwnOf, elfOwnAt, elfOwnUnlocked, elfOwnOffered, canBuyElfOwn, elfOwnSpotOk, buyElfOwn, undoElfOwn, bribeLeader, canBribe, bribe, undoBribe,

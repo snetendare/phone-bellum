@@ -53,7 +53,9 @@ Factions go in `src/factions.json`, then run `node tools/counter-table.js` and r
 ```
 
 - `trait` changes all the faction's units (spawned ones too) by a percentage: `hp`, `hit`, `aps`, `range`, `speed`. It is optional.
-- `tower.unit` overrides the standard tower's stats.
+- `tower.unit` overrides the standard tower's stats. With `drone: { orbit, unit }` (and `idle: true`) the tower doesn't shoot itself: a drone circles it `orbit` metres out and does the shooting (the Mecha Tower).
+- `tower.awake`: the tower's stats while Core Awoken is on (the Mecha Tower drives and lobs mortar shells).
+- `tower.rounds`: skills bought every round for that round's fight, each `{ id, name, cost, text, bots: { count, unit }, mines: { each, hit, radius } }` (the Mecha Tower's minebots and repairbots; a bot unit has `bot: "mine"` or `"repair"`).
 - `skills`: skills only the factions use. Units can also use any skill from `default-roster.json` by its id.
 - Unit names must be unique across all factions.
 - The draft order, picks per player and the map are in `FACTION_MODE` in `src/game.js`. A ban phase later is a matter of adding `{ "who": "A", "act": "ban" }` steps to its order.

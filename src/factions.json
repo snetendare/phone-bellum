@@ -6,11 +6,97 @@
       "color": "#C2873F",
       "theme": "Rock elementals with clockwork hearts. They move smooth as magic; the machines they build rattle and smoke.",
       "tower": {
-        "name": "Mechite Tower",
-        "text": "For now the standard tower. The Mechites' own tower comes later.",
+        "name": "Mecha Tower",
+        "text": "A squat clockwork tower that doesn't shoot itself: its drone circles it and shoots any enemy it sees, a Keep's shots at a faster rate. Every round it can send out minebots or repairbots for that round's fight.",
         "unit": {
-          "hp": 650
-        }
+          "hp": 700,
+          "hit": 0,
+          "aps": 1,
+          "range": 0,
+          "idle": true,
+          "drone": {
+            "orbit": 5,
+            "unit": {
+              "name": "Mecha Drone",
+              "cost": 0,
+              "hp": 1,
+              "hit": 30,
+              "aps": 2,
+              "range": 9,
+              "speed": 4,
+              "splash": 0,
+              "shape": "diamond",
+              "color": "#C2873F",
+              "tag": "DRN"
+            }
+          }
+        },
+        "awake": {
+          "speed": 5,
+          "flee": 14,
+          "stay": true,
+          "backline": true,
+          "hit": 40,
+          "aps": 0.6,
+          "range": 35,
+          "minRange": 8,
+          "splash": 3,
+          "projSpeed": 22,
+          "lob": true
+        },
+        "rounds": [
+          {
+            "id": "minebots",
+            "name": "Minebots",
+            "cost": 100,
+            "text": "This round the tower sends out 2 minebots (100 health each). Each walks out into no man's land and plants 3 mines. Only enemies set them off: 200 damage to every enemy within 7 m.",
+            "bots": {
+              "count": 2,
+              "unit": {
+                "name": "Minebot",
+                "cost": 0,
+                "hp": 100,
+                "hit": 0,
+                "aps": 1,
+                "range": 0,
+                "speed": 5,
+                "splash": 0,
+                "bot": "mine",
+                "shape": "circle",
+                "color": "#8F7B5E",
+                "tag": "MNB"
+              }
+            },
+            "mines": {
+              "each": 3,
+              "hit": 200,
+              "radius": 7
+            }
+          },
+          {
+            "id": "repairbots",
+            "name": "Repairbots",
+            "cost": 50,
+            "text": "This round the tower sends out 2 repairbots (100 health each). Each goes to your nearest damaged or unfinished building (the tower too) and works on it like one builder.",
+            "bots": {
+              "count": 2,
+              "unit": {
+                "name": "Repairbot",
+                "cost": 0,
+                "hp": 100,
+                "hit": 0,
+                "aps": 1,
+                "range": 0,
+                "speed": 4,
+                "splash": 0,
+                "bot": "repair",
+                "shape": "circle",
+                "color": "#7FA37A",
+                "tag": "RPB"
+              }
+            }
+          }
+        ]
       },
       "units": [
         {
@@ -368,7 +454,7 @@
           "id": "awoken",
           "name": "Core Awoken",
           "cost": 800,
-          "text": "This round your construct buildings become units when the fight starts: the Factory rolls out on caterpillar tracks with a big tank gun, the altar rises on four spider legs and its Cog Spire fires 6 beams like a Sun Priest, and your turrets get wheels: they keep away from enemies at 4 m/s while lobbing mortar shells at the enemy's back line.",
+          "text": "This round your construct buildings become units when the fight starts: the Factory rolls out on caterpillar tracks with a big tank gun, the altar rises on four spider legs and its Cog Spire fires 6 beams like a Sun Priest, your turrets get wheels: they keep away from enemies at 4 m/s while lobbing mortar shells at the enemy's back line, and the Mecha Tower drives on wheels at 5 m/s, keeping away from enemies while it lobs mortar shells at their back line (its drone keeps circling it).",
           "awake": {
             "built": {
               "speed": 4,

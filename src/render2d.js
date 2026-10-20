@@ -414,6 +414,17 @@ const Render2D = (cv, view) => {
     ctx.fillStyle = '#1B2326'; ctx.fillRect(-L * 0.25, H * 0.75, L * 0.5, H * 0.45); // gondola
     ctx.restore(); ctx.globalAlpha = 1;
   }
+  // the Mecha Tower's drone: a little quadcopter in the team colour, rotors spinning (t: tile size in px)
+  function drawDrone(b, t) {
+    const x = PX(b.x), y = PY(b.y), c = teamCol(b.side), s = t * 0.16, spin = (bt ? bt.time() : 0) * 30;
+    ctx.save(); ctx.translate(x, y); ctx.rotate(Math.PI / 4);
+    ctx.strokeStyle = '#2B2F33'; ctx.lineWidth = Math.max(1, s * 0.25);
+    ctx.beginPath(); ctx.moveTo(-s * 1.4, 0); ctx.lineTo(s * 1.4, 0); ctx.moveTo(0, -s * 1.4); ctx.lineTo(0, s * 1.4); ctx.stroke();
+    ctx.globalAlpha = 0.55; ctx.fillStyle = '#C9D3D6';
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { ctx.beginPath(); ctx.ellipse(dx * s * 1.4, dy * s * 1.4, s * 0.6, s * 0.6 * Math.abs(Math.sin(spin + dx + dy * 2)), 0, 0, Math.PI * 2); ctx.fill(); }
+    ctx.globalAlpha = 1; ctx.fillStyle = c; ctx.fillRect(-s * 0.55, -s * 0.55, s * 1.1, s * 1.1);
+    ctx.restore();
+  }
   // A small picture of a match's board for the map picker: the board at the start of a match, with both towers
   // (and the elf tower). Drawn with the board's own drawing code, by pointing it at a small canvas for a moment.
   function thumb(match) {
@@ -678,6 +689,7 @@ const Render2D = (cv, view) => {
     for (const b of bt.bodies) {
       if (!b.alive || !b.u.structure) continue;
       const hpr = b.hp / b.u.hp, t = tilePx();
+      if (b.u.awake) { ctx.fillStyle = '#2B2F33'; for (const [dx, dy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) { ctx.beginPath(); ctx.arc(PX(b.x) + dx * t * 0.36, PY(b.y) + dy * t * 0.3, t * 0.12, 0, Math.PI * 2); ctx.fill(); } } // Core Awoken: the Mecha Tower on wheels
       drawKeep(PX(b.x), PY(b.y), t, b.side, hpr, b.u.kind, null, Game.charOf(battlePre || m, b.side));
       ctx.strokeStyle = teamCol(b.side); ctx.lineWidth = 2;
       ctx.beginPath(); ctx.arc(PX(b.x), PY(b.y), t * 0.5, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * hpr); ctx.stroke();
@@ -689,6 +701,13 @@ const Render2D = (cv, view) => {
       const info = Game.buildingInfo(b.u.building) || {}, t = tilePx();
       drawBuilding(b.u.building, PX(b.x), PY(b.y), t, b.side, info.color || b.u.color, { built: !b.site || b.site.work >= b.site.need, progress: b.site ? b.site.work / b.site.need : 1, level: b.level, hpr: b.hp / b.u.hp, time: bt.time(), awake: b.u.awake });
       if (b.produce && !b.produced && b.prodT != null) { ctx.strokeStyle = css('--gold'); ctx.lineWidth = 2.5; ctx.setLineDash([2, 2]); ctx.beginPath(); ctx.arc(PX(b.x), PY(b.y), t * 0.38, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * (1 - b.prodT / b.produce.time)); ctx.stroke(); ctx.setLineDash([]); }
+    }
+    // the Mecha Tower's mines: a small dark disc ringed in the team colour (the opponent's fainter)
+    for (const mn of bt.mines ? bt.mines() : []) {
+      const r = Math.max(2, tilePx() * 0.09);
+      ctx.fillStyle = '#2B2F33'; ctx.beginPath(); ctx.arc(PX(mn.x), PY(mn.y), r, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = teamCol(mn.side); ctx.globalAlpha = mn.side === me ? 0.9 : 0.5; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(PX(mn.x), PY(mn.y), r + 1.5, 0, Math.PI * 2); ctx.stroke(); ctx.globalAlpha = 1;
     }
     // a linked squad: a faint line joins its bodies (they share one health pool)
     for (const b of bt.bodies) {
@@ -715,6 +734,8 @@ const Render2D = (cv, view) => {
         ctx.strokeStyle = 'rgba(30,24,20,0.75)'; ctx.lineWidth = Math.max(1, r * 0.18);
         ctx.beginPath(); ctx.moveTo(PX(b.x) + Math.cos(a) * r * 0.85, PY(b.y) + Math.sin(a) * r * 0.85); ctx.lineTo(PX(b.x) - Math.cos(a) * r * 0.85, PY(b.y) - Math.sin(a) * r * 0.85); ctx.stroke();
       }
+      if (b.u.bot === 'repair') { ctx.fillStyle = '#6FD08C'; ctx.fillRect(PX(b.x) - r * 0.45, PY(b.y) - r * 0.12, r * 0.9, r * 0.24); ctx.fillRect(PX(b.x) - r * 0.12, PY(b.y) - r * 0.45, r * 0.24, r * 0.9); } // a repairbot: a green cross
+      if (b.u.bot === 'mine' && b.plant && b.plant.spots.length) { ctx.fillStyle = '#2B2F33'; ctx.beginPath(); ctx.arc(PX(b.x), PY(b.y), r * 0.4, 0, Math.PI * 2); ctx.fill(); } // a minebot still carrying mines
       if (b.u.construct) puffs(PX(b.x) + r * 0.4, PY(b.y) - r * 0.8, Math.max(1.2, r * 0.22), bt.time(), b.x * 0.13 + b.y * 0.07);
       if (b.u.awake) { ctx.fillStyle = '#2B2F33'; for (const o of [-1, 1]) { ctx.beginPath(); ctx.arc(PX(b.x) + o * r * 0.8, PY(b.y) + r * 0.8, Math.max(1.5, r * 0.35), 0, Math.PI * 2); ctx.fill(); } } // Core Awoken: wheels
       if (b.delay > 0) { // flank squads arrive a few seconds late: a shrinking ring shows the wait
@@ -776,7 +797,7 @@ const Render2D = (cv, view) => {
         ctx.globalAlpha = 1;
       }
     }
-    for (const b of bt.bodies) if (b.alive && b.u.aloft) drawAirship(b, tilePx()); // airships fly over everything
+    for (const b of bt.bodies) if (b.alive && b.u.aloft) (b.u.kind === 'drone' ? drawDrone : drawAirship)(b, tilePx()); // airships and drones fly over everything
     for (const e of fx) {
       const a = 1 - e.age / e.life;
       if (e.kind === 'heal') {

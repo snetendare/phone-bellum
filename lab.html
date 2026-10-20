@@ -637,6 +637,19 @@ const Engine = (() => {
   // shells over the heads of whoever is in the way: they only land where they were aimed.
   //   What it makes earns it XP (credit). result().buildings tells the game how each building did.
   const SITE_REACH = 3.5;
+  // The Mechites' Mecha Tower (the game sets these up on bodies):
+  //   b.orbit = { anchor, r }: a drone circling its anchor (the tower) r metres out at its own speed. It is aloft (can't
+  //   be hit) and attacks like any unit; it falls with its anchor.
+  //   u.bot = 'mine' | 'repair': a little bot that never attacks.
+  //     'mine': b.plant = { spots: [{ x, y }], mine: { hit, radius } }: it walks to each spot in turn and leaves a mine
+  //     there. A mine goes off when an enemy body (not aloft) comes within MINE_TRIGGER metres: hit to every enemy
+  //     within radius. Then the bot stands still.
+  //     'repair': it walks to the nearest of its side's buildings or tower that is damaged or not built yet and works on
+  //     it like one builder: a site gets a second of work a second; a damaged one regains its max health /
+  //     (u.buildSecs, or REPAIR_SECS) a second.
+  // u.stay: the unit never walks toward enemies (a flee unit still keeps away from them).
+  const MINE_TRIGGER = 2;
+  const REPAIR_SECS = 20;
   // link: the bodies of a squad share one health pool. Damage to any of them is split across all that are alive
   // (by max health), healing is shared the same way, and they all fall together when the pool runs out. Bodies with a
   // linked squad can't be won over by a Gentleman.
@@ -936,7 +949,7 @@ const Engine = (() => {
       cd: ((i * 7) % 11) / 11 * interval, // deterministic stagger
       moved: 0, firing: -1, burstLeft: 0, burstTimer: 0, burstDir: [0, 1], windTarget: null, windT: 0, setUp: false,
       hidden: !!u.stealth || !!u.aloft, poison: null, shrinkM: 0, shrinkT: 0, slowT: 0, slowMove: 0, slowAtk: 0,
-      spawnT: u.spawn ? u.spawn.every : 0, kids: null,
+      spawnT: u.spawn ? u.spawn.every : 0, kids: null, orbit: null, plant: null,
       shield: u.shield || 0, // hits left that the Shield skill blocks completely
       frenzy: 0, // hits landed so far (Frenzy skill)
       stunT: 0, lastAtk: 0, // seconds of stun left (chargeStun); fight time of its last attack (stealth returns)
@@ -1549,6 +1562,48 @@ const Engine = (() => {
       return true;
     }
 
+    // a drone circles its anchor (it falls with it): the offset turns by speed / r radians a tick, kept at r metres
+    function orbitMove(b) {
+      const o = b.orbit, a = o.anchor;
+      if (!a.alive) { kill(null, b); return; }
+      let ox = b.x - a.x, oy = b.y - a.y, d = hyp(ox, oy);
+      if (d < 1e-6) { ox = o.r; oy = 0; d = o.r; }
+      ox = ox / d * o.r; oy = oy / d * o.r;
+      const c = cosDeg(Math.min(90, b.u.speed * moveMul(b) * dt / o.r * 57.29577951308232)), sn = Math.sqrt(Math.max(0, 1 - c * c));
+      const nx = ox * c - oy * sn, ny = ox * sn + oy * c;
+      b.hx = -ny / o.r; b.hy = nx / o.r;
+      b.x = a.x + nx; b.y = a.y + ny;
+    }
+    // walk toward (x, y), stopping `stop` metres short; true once there
+    function walkTo(b, x, y, stop) {
+      const dx = x - b.x, dy = y - b.y, d = hyp(dx, dy);
+      if (d <= stop + 1e-6) return true;
+      const mv = Math.min(d - stop, b.u.speed * moveMul(b) * dt);
+      b.hx = dx / d; b.hy = dy / d;
+      b.x += b.hx * mv; b.y += b.hy * mv; b.moved += mv;
+      return d - mv <= stop + 1e-6;
+    }
+    const mines = []; // { x, y, side, owner, hit, radius }
+    // what a repairbot works on: the nearest of its side's buildings or tower that is damaged or not built yet
+    const needsRepair = (v) => v.alive && (v.u.building || v.u.structure) && ((v.site && v.site.work < v.site.need) || v.hp < v.u.hp - 1e-9);
+    function botMove(b) {
+      if (b.u.bot === 'mine' && b.plant) {
+        const sp = b.plant.spots[0];
+        if (!sp) { b.plant = null; return; }
+        if (walkTo(b, sp.x, sp.y, 0.1)) {
+          const mn = b.plant.mine;
+          mines.push({ x: sp.x, y: sp.y, side: b.side, owner: b, hit: mn.hit, radius: mn.radius });
+          b.plant.spots.shift();
+        }
+        return;
+      }
+      if (b.u.bot === 'repair') {
+        let best = null, bd = Infinity;
+        for (const v of sides[b.side]) if (needsRepair(v)) { const d = dist(v, b); if (d < bd) { bd = d; best = v; } }
+        b.repairing = best && walkTo(b, best.x, best.y, SITE_REACH * 0.8) ? best : null;
+      }
+    }
+
     function step() {
       if (over) return false;
       if (t >= g.timeCap || !aliveCount(A) || !aliveCount(B)) { over = true; return false; }
@@ -1602,6 +1657,8 @@ const Engine = (() => {
           continue;
         }
         if (b.u.idle) continue; // a building
+        if (b.orbit) { orbitMove(b); continue; }
+        if (b.u.bot) { botMove(b); continue; }
         if (b.siteJob && siteWork(b)) continue;
         if (b.u.ram) { ram(b, foes); continue; }
         if (b.u.roll > 0) { roll(b, foes); continue; }
@@ -1631,6 +1688,7 @@ const Engine = (() => {
           if (g.bounds) { b.x = Math.max(g.bounds.x0, Math.min(g.bounds.x1, b.x)); b.y = Math.max(g.bounds.y0, Math.min(g.bounds.y1, b.y)); }
           continue;
         }
+        if (b.u.stay) continue; // keeps its ground: it only ever moves away
         // a builder that hasn't built yet stops to build once an enemy is within its constructs' range (see the builders below)
         if (b.u.build && !b.built) {
           if (b.buildT > 0) continue;
@@ -1708,6 +1766,25 @@ const Engine = (() => {
         if (s.work >= s.need) { b.siteJob = null; b.siteAt = false; }
       }
       for (const b of all) if (b.alive && b.site && b.site.self > 0 && b.site.work < b.site.need && !manned.has(b)) b.site.work = Math.min(b.site.need, b.site.work + dt * b.site.self);
+      // repairbots at work (one builder each)
+      for (const b of all) {
+        const v = b.repairing;
+        if (!b.alive || !v || !needsRepair(v)) continue;
+        if (v.site && v.site.work < v.site.need) v.site.work = Math.min(v.site.need, v.site.work + dt);
+        else v.hp = Math.min(v.u.hp, v.hp + v.u.hp / (v.u.buildSecs > 0 ? v.u.buildSecs : REPAIR_SECS) * dt);
+        b.healFx = (b.healFx || 0) - dt;
+        if (b.healFx <= 0) { b.healFx = 1; if (opts.record) shots.push([b.x, b.y, v.x, v.y, b.side, 0, 0, 1]); }
+      }
+      // mines: an enemy body close by sets one off
+      for (let i = mines.length - 1; i >= 0; i--) {
+        const mn = mines[i];
+        let hitBy = null;
+        for (const f of sides[1 - mn.side]) if (f.alive && !f.u.aloft && hyp(f.x - mn.x, f.y - mn.y) <= MINE_TRIGGER) { hitBy = f; break; }
+        if (!hitBy) continue;
+        mines.splice(i, 1);
+        if (opts.record) shots.push([mn.x, mn.y, mn.x, mn.y, mn.side, mn.radius, 1, 0, 0]);
+        for (const f of sides[1 - mn.side]) if (f.alive && hyp(f.x - mn.x, f.y - mn.y) <= mn.radius) hurt(mn.owner, f, mn.hit, mn.x, mn.y);
+      }
       // separation between allies
       const minSep = g.spacing * 0.7;
       for (let s = 0; s < 2; s++) {
@@ -1805,7 +1882,7 @@ const Engine = (() => {
       // wins a trade just by being processed first (side 0 used to win one-shot duels like Sniper vs Sniper)
       for (const b of all) {
         if ((!b.alive && b.diedTick !== tick) || b.delay > 0 || b.u.ram || b.boarded || b.turning) continue;
-        if (b.u.roll > 0 || b.follow || b.buildT > 0 || b.siteJob || b.u.idle) continue; // rollers hit by rolling; healbots and buildings never attack; builders at work don't
+        if (b.u.roll > 0 || b.follow || b.buildT > 0 || b.siteJob || b.u.idle || b.u.bot) continue; // rollers hit by rolling; healbots, bots and buildings never attack; builders at work don't
         b.cd -= dt * (b.slowT > 0 ? 1 - b.slowAtk / 100 : 1); // slowed units reload slower
         if (b.firing >= 0) b.firing += dt;
         if (b.stunT > 0) continue; // stunned after a charge
@@ -2052,7 +2129,7 @@ const Engine = (() => {
       };
     }
 
-    return { step, frame, result, bodies: all, neutrals, isOver: () => over, time: () => t, lastShots: () => shots, projectiles: () => projectiles, crippled: (side) => cripple[side], charm: (side, squad) => (charm[side] && charm[side][squad]) || 0 };
+    return { step, frame, result, bodies: all, neutrals, mines: () => mines, isOver: () => over, time: () => t, lastShots: () => shots, projectiles: () => projectiles, crippled: (side) => cripple[side], charm: (side, squad) => (charm[side] && charm[side][squad]) || 0 };
   }
 
   function matrix(units, g) {
@@ -2073,7 +2150,7 @@ const Engine = (() => {
     return m;
   }
 
-  return { TOWER_DOWN, RULES, ruleOn, STEALTH_BACK, SKILL_SLOTS, SLOTS, SKILL_TYPES, skillParam, describeSkill, applySkills, innateUnit, fairBudget, battle, makeArmy, matrix, createBattle, buildSquad, rawStrength, squadsFor, withTraits, leveled, TRAIT_DEFAULTS, SPIN_CAP, CHARGE_RUN, TRAMPLE_RUN, BLAST_RADIUS, RAM_REACH, ROLL_START, ROLL_PAST, BUILD_GAP, BUILD_COOP, SITE_REACH, LEVEL_BONUS, MAX_LEVEL, CHARM_MAX, CONVERT_HP, CONVERT_SQUAD };
+  return { TOWER_DOWN, RULES, ruleOn, STEALTH_BACK, SKILL_SLOTS, SLOTS, SKILL_TYPES, skillParam, describeSkill, applySkills, innateUnit, fairBudget, battle, makeArmy, matrix, createBattle, buildSquad, rawStrength, squadsFor, withTraits, leveled, TRAIT_DEFAULTS, SPIN_CAP, CHARGE_RUN, TRAMPLE_RUN, BLAST_RADIUS, RAM_REACH, ROLL_START, ROLL_PAST, BUILD_GAP, BUILD_COOP, SITE_REACH, MINE_TRIGGER, REPAIR_SECS, LEVEL_BONUS, MAX_LEVEL, CHARM_MAX, CONVERT_HP, CONVERT_SQUAD };
 })();
 if (typeof module !== 'undefined') module.exports = Engine;
 
@@ -2089,11 +2166,97 @@ if (typeof module !== 'undefined') module.exports = Engine;
       "color": "#C2873F",
       "theme": "Rock elementals with clockwork hearts. They move smooth as magic; the machines they build rattle and smoke.",
       "tower": {
-        "name": "Mechite Tower",
-        "text": "For now the standard tower. The Mechites' own tower comes later.",
+        "name": "Mecha Tower",
+        "text": "A squat clockwork tower that doesn't shoot itself: its drone circles it and shoots any enemy it sees, a Keep's shots at a faster rate. Every round it can send out minebots or repairbots for that round's fight.",
         "unit": {
-          "hp": 650
-        }
+          "hp": 700,
+          "hit": 0,
+          "aps": 1,
+          "range": 0,
+          "idle": true,
+          "drone": {
+            "orbit": 5,
+            "unit": {
+              "name": "Mecha Drone",
+              "cost": 0,
+              "hp": 1,
+              "hit": 30,
+              "aps": 2,
+              "range": 9,
+              "speed": 4,
+              "splash": 0,
+              "shape": "diamond",
+              "color": "#C2873F",
+              "tag": "DRN"
+            }
+          }
+        },
+        "awake": {
+          "speed": 5,
+          "flee": 14,
+          "stay": true,
+          "backline": true,
+          "hit": 40,
+          "aps": 0.6,
+          "range": 35,
+          "minRange": 8,
+          "splash": 3,
+          "projSpeed": 22,
+          "lob": true
+        },
+        "rounds": [
+          {
+            "id": "minebots",
+            "name": "Minebots",
+            "cost": 100,
+            "text": "This round the tower sends out 2 minebots (100 health each). Each walks out into no man's land and plants 3 mines. Only enemies set them off: 200 damage to every enemy within 7 m.",
+            "bots": {
+              "count": 2,
+              "unit": {
+                "name": "Minebot",
+                "cost": 0,
+                "hp": 100,
+                "hit": 0,
+                "aps": 1,
+                "range": 0,
+                "speed": 5,
+                "splash": 0,
+                "bot": "mine",
+                "shape": "circle",
+                "color": "#8F7B5E",
+                "tag": "MNB"
+              }
+            },
+            "mines": {
+              "each": 3,
+              "hit": 200,
+              "radius": 7
+            }
+          },
+          {
+            "id": "repairbots",
+            "name": "Repairbots",
+            "cost": 50,
+            "text": "This round the tower sends out 2 repairbots (100 health each). Each goes to your nearest damaged or unfinished building (the tower too) and works on it like one builder.",
+            "bots": {
+              "count": 2,
+              "unit": {
+                "name": "Repairbot",
+                "cost": 0,
+                "hp": 100,
+                "hit": 0,
+                "aps": 1,
+                "range": 0,
+                "speed": 4,
+                "splash": 0,
+                "bot": "repair",
+                "shape": "circle",
+                "color": "#7FA37A",
+                "tag": "RPB"
+              }
+            }
+          }
+        ]
       },
       "units": [
         {
@@ -2451,7 +2614,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
           "id": "awoken",
           "name": "Core Awoken",
           "cost": 800,
-          "text": "This round your construct buildings become units when the fight starts: the Factory rolls out on caterpillar tracks with a big tank gun, the altar rises on four spider legs and its Cog Spire fires 6 beams like a Sun Priest, and your turrets get wheels: they keep away from enemies at 4 m/s while lobbing mortar shells at the enemy's back line.",
+          "text": "This round your construct buildings become units when the fight starts: the Factory rolls out on caterpillar tracks with a big tank gun, the altar rises on four spider legs and its Cog Spire fires 6 beams like a Sun Priest, your turrets get wheels: they keep away from enemies at 4 m/s while lobbing mortar shells at the enemy's back line, and the Mecha Tower drives on wheels at 5 m/s, keeping away from enemies while it lobs mortar shells at their back line (its drone keeps circling it).",
           "awake": {
             "built": {
               "speed": 4,
