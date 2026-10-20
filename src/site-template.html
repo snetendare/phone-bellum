@@ -84,6 +84,19 @@ a { color: var(--you); }
 .roles .rng { color: var(--muted); margin-left: auto; }
 .ucard .roles { margin: 2px -26px 1px 0; }
 .ucard[data-locked] .roles { filter: grayscale(1); }
+/* compact unit cards, so the shop and the Ready button fit under the board */
+.uwrap { flex-basis: 118px; }
+.ucard { padding: 6px 24px 6px 8px; gap: 1px; }
+.ucard .n { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ucard .t, .ucard .c, .ucard .lock { font-size: 11px; }
+.ucard .c { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ucard .roles { margin: 1px -18px 0 0; }
+.ucard .roles svg { width: 13px; height: 13px; }
+.uwrap .info { top: 4px; right: 4px; width: 20px; height: 20px; font-size: 11px; }
+.tiers button { padding: 3px 6px 4px; font-size: 13px; }
+/* the Ready / Fight bar stays in sight at the bottom of the screen (of the side column on a PC) */
+.panel > .bar:last-child { position: sticky; bottom: 0; z-index: 1; background: var(--panel); margin: -6px -10px -10px; padding: 6px 10px calc(10px + env(safe-area-inset-bottom, 0px)); border-radius: 0 0 6px 6px; }
+html.pc .panel > .bar:last-child { margin: -6px -12px -12px; padding: 6px 12px 12px; }
 .roleline { margin: 0; display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--muted); }
 .roleline .roles .rng { margin-left: 0; }
 .confirm { display: grid; gap: 8px; border: 1px solid var(--gold); border-radius: 6px; padding: 10px; }
@@ -159,14 +172,17 @@ a { color: var(--you); }
 .fgrid .fac[aria-pressed="true"] { border-color: var(--gold); border-left-color: var(--fc); box-shadow: 0 0 0 1px var(--gold); }
 .fgrid .fac:disabled { opacity: 0.45; cursor: default; }
 @media (prefers-reduced-motion: reduce) { .status.wait::after { animation: none; content: "…"; } }
-#wrap { aspect-ratio: 12 / 16; width: min(100%, calc((100svh - 300px) * 0.75)); margin: 0 auto; }
+#wrap { aspect-ratio: 12 / 16; width: min(100%, calc((100svh - 440px) * 0.75)); min-width: 240px; margin: 0 auto; }
+html:not(.pc) .panel { padding: 10px; gap: 8px; }
+html:not(.pc) .panel .hint { font-size: 12px; line-height: 1.35; }
+html:not(.pc) body { padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px)); }
 /* PC (mouse and a wide window, see the script below): the board fills the window height, the controls sit beside it */
 html.pc .app { max-width: none; grid-template-columns: auto 440px; justify-content: center; align-items: start; gap: 12px 20px; }
 html.pc .app:has(> .panel:empty) { grid-template-columns: auto; }
 html.pc .hud, html.pc .net, html.pc #wrap { grid-column: 1; }
 html.pc .panel { grid-column: 2; grid-row: 1 / span 3; min-width: 0; max-height: calc(100svh - 40px); overflow-y: auto; }
 html.pc #wrap { width: min(calc(100vw - 32px - 460px), calc((100svh - 110px) * 0.75)); min-width: 360px; }
-html.pc .shop { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); overflow-x: visible; }
+html.pc .shop { display: grid; grid-template-columns: repeat(auto-fill, minmax(124px, 1fr)); overflow-x: visible; }
 html.pc .sheet { max-width: 640px; }
 </style>
 <script>
@@ -224,9 +240,9 @@ html.pc .sheet { max-width: 640px; }
     'Earth Wizard': 'Slow, crushing boulders that roll through every enemy in their path.',
     'Flame Wizard': 'A slow fortress that sprays fire across everything in front of it.',
     'Steel Wizard': 'Heavy caster that hammers everything in reach.',
-    'Slime Wizard': 'Lobs huge, slow globs of slime that splash over a wide area.',
+    'Slime Wizard': 'Lobs huge, slow globs of slime that splash over a wide area. Poison heals it and speeds it up.',
     'Ether Golem': 'A walking wall. Heavy armor shrugs off small hits while it holds its lane.',
-    'Slimeshots': 'A pack of slime spitters lobbing small splashing globs. Shreds packed swarms.',
+    'Slimeshots': 'A pack of slime spitters lobbing small splashing globs. Shreds packed swarms. Poison heals them and speeds them up.',
     'Ent': 'Slow tree guardians sweeping a wide arc in front. Each one explodes when it falls, hurting everything around it.',
     'Sun Priest': 'Channels a beam that burns hotter the longer it holds one target. Melts giants.',
     'Meteor Caller': 'Drops slow meteors from far behind the lines. Helpless once something reaches it.',
@@ -366,6 +382,11 @@ html.pc .sheet { max-width: 640px; }
   let battlePre = null;     // match as it stood when the running battle began (for the HUD)
   let speed = 2, lastTs = 0, acc = 0, raf = 0;
   let fx = [];
+  // battle cam: the last CAM.secs of a high-stakes fight play a little slower, zoomed in on the action.
+  // High stakes: both sides still have units fighting then, and the fight ends the match, or it is close (the weaker
+  // side still has at least CAM.close of the stronger side's health) from round CAM.round on. k eases from 0 to 1 as it kicks in.
+  const CAM = { secs: 5, slow: 0.55, zoom: 1.18, ease: 0.6, close: 0.5, round: 4 };
+  let cam = null; // { end, decided, on, k, x, y } while a fight plays back
   let lastSummary = null;
   let lastAiLevels = [];
   let hoverTile = null;
@@ -1458,7 +1479,12 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
     syncMusic();
     cv.style.touchAction = phase === 'deploy' ? 'none' : ''; // so a finger can drag squads without scrolling the page
     if (!m) { drawBoard(); return; }
-    if (bt && (phase === 'battle' || phase === 'result' || phase === 'end')) drawBattle();
+    if (bt && phase === 'battle' && cam && cam.k > 0) { // the battle cam, zoomed in around its focus
+      const z = 1 + (CAM.zoom - 1) * cam.k, fx0 = PX(cam.x), fy0 = PY(cam.y);
+      ctx.save(); ctx.translate(fx0, fy0); ctx.scale(z, z); ctx.translate(-fx0, -fy0);
+      drawBattle();
+      ctx.restore();
+    } else if (bt && (phase === 'battle' || phase === 'result' || phase === 'end')) drawBattle();
     else drawDeploy();
   }
 
@@ -2480,6 +2506,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     battlePre = withUnits(pre);
     bt = Game.startBattle(battlePre);
     fx = []; acc = 0; lastTs = 0;
+    cam = { end: lastSummary && lastSummary.round === pre.round ? lastSummary.time : null, decided: false, on: false, k: 0, x: 0, y: 0 };
     closeSheet(); overlay(null); hud(); panelBattle(); render();
     cancelAnimationFrame(raf);
     if (reduced) { while (bt.step()) {} finishBattle(); return; }
@@ -2493,10 +2520,32 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     for (const b of bt.bodies) if (!b.alive && !b._gone) { b._gone = true; fx.push({ kind: 'death', x: b.x, y: b.y, r: radius(b.u), side: b.side, age: 0, life: 0.5 }); }
   }
 
+  const fighters = (side) => bt.bodies.filter(b => b.alive && b.side === side && !b.u.structure && !b.u.aloft);
+  function highStakes() {
+    const f = [fighters(0), fighters(1)];
+    if (!f[0].length || !f[1].length) return false;
+    const lethal = [0, 1].some(i => battlePre.hp[i] - (lastSummary.dmg[i] || 0) <= 0);
+    const hp = f.map(a => a.reduce((t, b) => t + b.hp, 0));
+    return lethal || (battlePre.round >= CAM.round && Math.min(hp[0], hp[1]) >= Math.max(hp[0], hp[1]) * CAM.close);
+  }
+  // the battle cam's focus: the middle of everything still fighting, followed smoothly
+  function camFollow(dtReal, snap) {
+    const all = fighters(0).concat(fighters(1));
+    if (!all.length) return;
+    const x = all.reduce((t, b) => t + b.x, 0) / all.length, y = all.reduce((t, b) => t + b.y, 0) / all.length;
+    const a = snap ? 1 : Math.min(1, dtReal * 3);
+    cam.x += (x - cam.x) * a; cam.y += (y - cam.y) * a;
+  }
+
   function loop(ts) {
     if (phase !== 'battle') return;
     const dtReal = lastTs ? Math.min(0.1, (ts - lastTs) / 1000) : 0.016; lastTs = ts;
-    const boost = bt.time() > 20 ? 2 : 1;
+    if (cam && !cam.decided && cam.end != null && bt.time() >= cam.end - CAM.secs) {
+      cam.decided = true; cam.on = cam.end > CAM.secs + 1 && highStakes();
+      if (cam.on) camFollow(dtReal, true);
+    }
+    if (cam && cam.on) { cam.k = Math.min(1, cam.k + dtReal / CAM.ease); camFollow(dtReal); }
+    const boost = (bt.time() > 20 ? 2 : 1) * (cam && cam.on ? 1 - (1 - CAM.slow) * cam.k : 1);
     acc += dtReal * speed * boost;
     while (acc >= Game.SETTINGS.dt) {
       acc -= Game.SETTINGS.dt;
@@ -2505,7 +2554,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     }
     for (const e of fx) e.age += dtReal * speed * boost;
     fx = fx.filter(e => e.age < e.life);
-    $('clock').textContent = `${bt.time().toFixed(1)} s${boost > 1 ? ' · speeding up' : ''}`;
+    $('clock').textContent = `${bt.time().toFixed(1)} s${cam && cam.on ? ' · final seconds' : boost > 1 ? ' · speeding up' : ''}`;
     render();
     if (bt.isOver()) { finishBattle(); return; }
     raf = requestAnimationFrame(loop);
@@ -2514,7 +2563,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   function finishBattle() {
     if (phase !== 'battle') return;
     cancelAnimationFrame(raf);
-    fx = [];
+    fx = []; cam = null;
     const res = bt.result();
     $('clock').textContent = `${res.time.toFixed(1)} s`;
     if (lastSummary && (res.winner !== lastSummary.winner || Math.abs(res.time - lastSummary.time) > 1e-6)) {

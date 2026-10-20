@@ -104,11 +104,11 @@ const Game = (() => {
   }
   // Some tower types have a second skill (skill2), bought once per match for its own price, like the first.
   // m.towerSkill2[side] = round it was bought (0 = not). skill2.needs: the first skill must be bought first.
-  // Blixten: the first tower or map purchase each round is free (skill2.noFree: never free)
-  const towerSkillCost = (m, side) => (m.towerSkill && m.towerSkill[side] === m.round ? isMapFree(m, side, { kind: 'tskill' }) : mapFreeLeft(m, side)) ? 0 : TOWER_SKILL.cost;
+  // Blixten: the first tower or map purchase each round is BLIX_OFF gold cheaper (skill2.noFree: never cheaper)
+  const towerSkillCost = (m, side) => (m.towerSkill && m.towerSkill[side] === m.round ? isMapFree(m, side, { kind: 'tskill' }) : mapFreeLeft(m, side)) ? blix(TOWER_SKILL.cost) : TOWER_SKILL.cost;
   const towerSkill2Of = (m, side) => !!(m && m.towerSkill2 && m.towerSkill2[side] > 0);
   const towerSkill2Visible = (m, side) => towerSkill2Of(m, side) && m.towerSkill2[side] < m.round;
-  const towerSkill2Cost = (m, side) => { const sk = towerType(m, side).skill2; if (!sk) return 0; return !sk.noFree && (m.towerSkill2 && m.towerSkill2[side] === m.round ? isMapFree(m, side, { kind: 'tskill2' }) : mapFreeLeft(m, side)) ? 0 : sk.cost; };
+  const towerSkill2Cost = (m, side) => { const sk = towerType(m, side).skill2; if (!sk) return 0; return !sk.noFree && (m.towerSkill2 && m.towerSkill2[side] === m.round ? isMapFree(m, side, { kind: 'tskill2' }) : mapFreeLeft(m, side)) ? blix(sk.cost) : sk.cost; };
   const canBuyTowerSkill2 = (m, side) => { const sk = towerType(m, side).skill2; return towerPicked(m, side) && !!sk && !towerSkill2Of(m, side) && (!sk.needs || towerSkillOf(m, side)) && m.gold[side] >= towerSkill2Cost(m, side); };
   function buyTowerSkill2(m, side) {
     if (!canBuyTowerSkill2(m, side)) return false;
@@ -157,29 +157,30 @@ const Game = (() => {
   const mageTpOf = (m, side) => !!(mageCalled(m, side) || {}).tp;       // the teleport general called this round
   const mageGenCost = (id) => (mageGenInfo(id) || {}).cost || 0;
   const setMageGen = (m, side, id, tp) => { if (!m.mageGen) m.mageGen = [null, null]; m.mageGen[side] = id || tp ? { round: m.round, id: id || null, tp: !!tp } : null; };
-  // Blixten: a general can take the round's free purchase ({ kind: 'mgen' }, or { kind: 'mtp' } for teleport); swapping generals keeps it
+  // Blixten: a general can take the round's discounted purchase ({ kind: 'mgen' }, or { kind: 'mtp' } for teleport); swapping generals keeps it
   const mageGenFree = (m, side) => !!mageGenOf(m, side) && isMapFree(m, side, { kind: 'mgen' });
   const mageTpFree = (m, side) => mageTpOf(m, side) && isMapFree(m, side, { kind: 'mtp' });
-  // what calling id costs a player now (a free general swapped for another stays free)
-  const mageGenPrice = (m, side, id) => isExtraGen(id) ? (mageTpFree(m, side) || (!mageTpOf(m, side) && mapFreeLeft(m, side)) ? 0 : mageGenCost(id))
-    : mageGenFree(m, side) || (!mageGenOf(m, side) && mapFreeLeft(m, side)) ? 0 : mageGenCost(id);
+  // what calling id costs a player now (a discounted general swapped for another stays discounted)
+  const mageGenPrice = (m, side, id) => isExtraGen(id) ? (mageTpFree(m, side) || (!mageTpOf(m, side) && mapFreeLeft(m, side)) ? blix(mageGenCost(id)) : mageGenCost(id))
+    : mageGenFree(m, side) || (!mageGenOf(m, side) && mapFreeLeft(m, side)) ? blix(mageGenCost(id)) : mageGenCost(id);
+  const mageGenPaid = (m, side) => { const c = mageGenCost(mageGenOf(m, side)); return mageGenFree(m, side) ? blix(c) : c; }; // what the current general cost
   // a general already called this round is swapped out and paid back
   const canBuyMageGen = (m, side, id) => !!mageGenInfo(id) && towerPicked(m, side) && towerType(m, side).id === 'mage' && (isExtraGen(id)
     ? !mageTpOf(m, side) && m.gold[side] >= mageGenPrice(m, side, id)
-    : mageGenOf(m, side) !== id && m.gold[side] + (mageGenFree(m, side) ? 0 : mageGenCost(mageGenOf(m, side))) >= mageGenPrice(m, side, id));
+    : mageGenOf(m, side) !== id && m.gold[side] + mageGenPaid(m, side) >= mageGenPrice(m, side, id));
   function buyMageGen(m, side, id) {
     if (!canBuyMageGen(m, side, id)) return false;
     if (isExtraGen(id)) {
       const free = mapFreeLeft(m, side);
       if (free) useMapFree(m, side, { kind: 'mtp' });
-      m.gold[side] -= free ? 0 : mageGenCost(id);
+      m.gold[side] -= free ? blix(mageGenCost(id)) : mageGenCost(id);
       setMageGen(m, side, mageGenOf(m, side), true);
       return true;
     }
     const cur = mageGenOf(m, side), free = mageGenFree(m, side) || (!cur && mapFreeLeft(m, side));
-    if (cur && !mageGenFree(m, side)) m.gold[side] += mageGenCost(cur);
+    if (cur) m.gold[side] += mageGenPaid(m, side);
     if (free && !mageGenFree(m, side)) useMapFree(m, side, { kind: 'mgen' });
-    m.gold[side] -= free ? 0 : mageGenCost(id);
+    m.gold[side] -= free ? blix(mageGenCost(id)) : mageGenCost(id);
     setMageGen(m, side, id, mageTpOf(m, side));
     return true;
   }
@@ -188,7 +189,7 @@ const Game = (() => {
     const tp = isExtraGen(id), cur = tp ? (mageTpOf(m, side) ? id : null) : mageGenOf(m, side);
     if (!cur) return false;
     const wasFree = tp ? mageTpFree(m, side) : mageGenFree(m, side);
-    m.gold[side] += wasFree ? 0 : mageGenCost(cur);
+    m.gold[side] += wasFree ? blix(mageGenCost(cur)) : mageGenCost(cur);
     setMageGen(m, side, tp ? mageGenOf(m, side) : null, tp ? false : mageTpOf(m, side));
     if (wasFree) passMapFree(m, side);
     return true;
@@ -256,7 +257,7 @@ const Game = (() => {
     { id: 'zoe', name: 'Zoe', ability: 'Every round, 2 random tiles in your zone become buff tiles. A squad that starts the fight on one gets +20% damage, +20% health and +10% attack speed for the whole fight.' },
     { id: 'emile', name: 'Emile', ability: 'Tier 1 units are free to unlock.' },
     { id: 'wilhelm', name: 'Wilhelm', ability: 'Your squads on flank tiles and in no man’s land get +4 armor, and flank squads start twice as fast.' },
-    { id: 'blixten', name: 'Blixten', ability: 'Your first map or tower purchase each round is free: a bribe, an offering at the altar of ice, your own elf tower, removing a mushroom tile, a tower skill or a mage general (not the bank’s Major investment).' },
+    { id: 'blixten', name: 'Blixten', ability: 'Your first map or tower purchase each round is 100 gold cheaper: a bribe, an offering at the altar of ice, your own elf tower, removing a mushroom tile, a tower skill or a mage general (not the bank’s Major investment).' },
     { id: 'noah', name: 'Noah - The Bog', ability: 'Squads you buy in the shop start at level 2. Each costs its price plus one upgrade. All your units have 10% less health and damage.' },
     { id: 'phil', name: 'Phil', ability: 'Tier 4 units are 100 gold cheaper to unlock.' },
     { id: 'yotyot', name: 'Yot-Yot', ability: 'Every fight, Ember Imps pop up on random free tiles on your side of the board (your zone, no man’s land and, once open, your flank tiles): 1 in round 1, 2 in round 2, and so on. From round 3 they are level 2, from round 6 level 3. They get the skills you bought for Ember Imps.' },
@@ -295,9 +296,11 @@ const Game = (() => {
   const charmMap = (m, side) => charOf(m, side) === 'matteo' ? Object.fromEntries(m.armies[side].map(q => [q.id, charmOf(q)])) : null;
   const charOf = (m, side) => (m && m.chars && m.chars[side]) || null;
   const charInfo = (id) => CHARACTERS.find(c => c.id === id) || null;
-  // Blixten: the first map or tower purchase each round is free. m.mapFree[side][round] = the purchase that got it:
+  // Blixten: the first map or tower purchase each round is BLIX_OFF gold cheaper. m.mapFree[side][round] = the purchase that got it:
   // { kind: 'bribe' } (the round's first bribe), { kind: 'altar', type }, { kind: 'shroom', col, row }, { kind: 'elf' },
   // { kind: 'tskill' }, { kind: 'tskill2' } (not Major investment), { kind: 'mgen' } (a mage general) or { kind: 'mtp' } (the teleport general)
+  const BLIX_OFF = 100;
+  const blix = (c) => Math.max(0, c - BLIX_OFF); // a price with Blixten's discount
   const mapFreeOf = (m, side) => (m && m.mapFree && m.mapFree[side] && m.mapFree[side][m.round]) || null;
   const mapFreeLeft = (m, side) => side != null && charOf(m, side) === 'blixten' && !mapFreeOf(m, side);
   const isMapFree = (m, side, rec) => { const f = mapFreeOf(m, side); return !!f && f.kind === rec.kind && f.type === rec.type && f.col === rec.col && f.row === rec.row; };
@@ -305,7 +308,7 @@ const Game = (() => {
     if (!m.mapFree) m.mapFree = [{}, {}];
     m.mapFree[side][m.round] = rec;
   }
-  // the free purchase was taken back: the free slot passes to another map purchase of this round, if there is one, refunding it
+  // the discounted purchase was taken back: the discount passes to another map purchase of this round, if there is one, refunding the difference
   function passMapFree(m, side) {
     delete m.mapFree[side][m.round];
     const alt = altarBuys(m).find(b => b.side === side && b.round === m.round);
@@ -320,7 +323,7 @@ const Game = (() => {
     else if (m.towerSkill2 && m.towerSkill2[side] === m.round && !(towerType(m, side).skill2 || {}).noFree) { rec = { kind: 'tskill2' }; back = towerType(m, side).skill2.cost; }
     else if (mageGenOf(m, side)) { rec = { kind: 'mgen' }; back = mageGenCost(mageGenOf(m, side)); }
     else if (mageTpOf(m, side)) { rec = { kind: 'mtp' }; back = mageGenCost('teleport'); }
-    if (rec) { useMapFree(m, side, rec); m.gold[side] += back; }
+    if (rec) { useMapFree(m, side, rec); m.gold[side] += back - blix(back); }
   }
   // ---------- maps ----------
   // Each match is fought on one map, picked by the host when the match is created (or at random). A map can change the
@@ -330,7 +333,7 @@ const Game = (() => {
   const MAPS = [
     { id: 'standard', name: 'Standard', short: 'No special rules.', text: 'No special rules.', plain: true }, // only when picked, never random
     { id: 'forest', name: 'Forest Clearing', short: 'Bribe the elf tower to fight for you.', text: 'Ents and Earth Wizards have 15% more health. Healing and regeneration are 1.5× as strong. A neutral elf tower in no man’s land sides with whoever has bribed the elves the most times: it heals their units and shoots the other player’s. With bribes level, it shoots both. Bribe as often as you like: 50 gold, and 50 more for each extra bribe in the same round. Totals stay secret; the flag on the tower shows who is ahead. After round 5 the elves hit and heal twice as hard. From the round after 10 bribes have been paid in all, each player who has bribed can buy one elf tower of their own for 400 gold.', boostHp: 15, boostUnits: ['Ent', 'Earth Wizard'], healMul: 1.5, elfTower: true },
-    { id: 'cavern', name: 'Mushroom Cavern', short: 'Shorter range. Mushroom tiles buff, speed up or poison.', text: 'All units have 25% less range (units with 5 m range or less keep theirs). Stealth units deal 20% more damage. Glowing mushroom tiles stay on the same tiles all match, mirrored on both halves. Purple: a squad that starts the fight there gets +10% damage, +10% health and +5% attack speed. Yellow: a unit that starts on it or walks over it moves 30% faster for the rest of the fight. Green: a unit that starts on it or walks over it is poisoned and slowed. Yellow and green work once per unit, for both sides. Either player can remove a mushroom tile for 50 gold.', stealthDmg: 20, rangeCut: 25, rangeKeep: 5, shrooms: true, pointMirror: true },
+    { id: 'cavern', name: 'Mushroom Cavern', short: 'Shorter range. Mushroom tiles buff, speed up or poison.', text: 'All units have 25% less range (units with 5 m range or less keep theirs). Stealth units deal 20% more damage. Glowing mushroom tiles stay on the same tiles all match, mirrored on both halves. Purple: a squad that starts the fight there gets +10% damage, +10% health and +5% attack speed. Yellow: a unit that starts on it or walks over it moves 30% faster for the rest of the fight. Green: a unit that starts on it or walks over it is poisoned and slowed (slime units are healed and sped up instead). Yellow and green work once per unit, for both sides. Either player can remove a mushroom tile for 50 gold.', stealthDmg: 20, rangeCut: 25, rangeKeep: 5, shrooms: true, pointMirror: true },
     { id: 'ice', name: 'Frozen Peak', short: 'Hail from round 2. An ice altar rises on even rounds.', text: 'Every fight from round 2: a hailstorm drops 10 hail tiles in the storm band (no man’s land at first); units standing in hail take 20 damage per second. Even rounds: the altar of ice rises in the middle of the board. Tap it to buy ice walls for your tower, push the storm band toward your opponent, or summon a Snowgre.', ice: true },
   ];
   // ---------- Frozen Peak: hailstorm and the altar of ice ----------
@@ -373,10 +376,10 @@ const Game = (() => {
   const altarCost = (m, side, type) => {
     const c = altarBase(m, side, type);
     if (c == null) return c;
-    return (altarBought(m, side, type) && !altarRepeat(type) ? isMapFree(m, side, { kind: 'altar', type }) : mapFreeLeft(m, side)) ? 0 : c;
+    return (altarBought(m, side, type) && !altarRepeat(type) ? isMapFree(m, side, { kind: 'altar', type }) : mapFreeLeft(m, side)) ? blix(c) : c;
   };
-  // what taking back this round's last one of an offering gives back (Blixten's free one gives nothing)
-  const altarRefund = (m, side, type) => { const n = altarCount(m, side, type); return !n || (n === 1 && isMapFree(m, side, { kind: 'altar', type })) ? 0 : altarBase(m, side, type); };
+  // what taking back this round's last one of an offering gives back (Blixten's discounted one: what was paid)
+  const altarRefund = (m, side, type) => { const n = altarCount(m, side, type); return !n ? 0 : n === 1 && isMapFree(m, side, { kind: 'altar', type }) ? blix(altarBase(m, side, type)) : altarBase(m, side, type); };
   // whether one more push would still move the band: it stops at the edge of the opponent's zone
   const pushRoom = (m, side) => { const off = stormShift(m, m.round + 1); return side === 0 ? off < ZONE : off > -ZONE; };
   const altarBought = (m, side, type) => altarBuys(m).some(b => b.side === side && b.type === type && b.round === m.round);
@@ -441,23 +444,23 @@ const Game = (() => {
   const bribeGold = (m, side, pub) => {
     const per = {}; // bribes per round: n of them cost BRIBE_COST * (1 + 2 + ... + n)
     for (const r of bribeList(m, side)) if (!pub || r < m.round) per[r] = (per[r] || 0) + 1;
-    const free = Object.keys(per).filter(r => ((m.mapFree && m.mapFree[side]) || {})[r]?.kind === 'bribe').length; // Blixten's free first bribes
-    return Object.values(per).reduce((a, n) => a + BRIBE_COST * n * (n + 1) / 2, 0) - BRIBE_COST * free;
+    const free = Object.keys(per).filter(r => ((m.mapFree && m.mapFree[side]) || {})[r]?.kind === 'bribe').length; // Blixten's discounted first bribes
+    return Object.values(per).reduce((a, n) => a + BRIBE_COST * n * (n + 1) / 2, 0) - (BRIBE_COST - blix(BRIBE_COST)) * free;
   };
   // how many times a player has bribed; pub = only bribes from earlier rounds
   const bribeCount = (m, side, pub) => bribeList(m, side).filter(r => !pub || r < m.round).length;
   const bribeNow = (m, side) => bribeList(m, side).filter(r => r === m.round).length; // bribes paid this round
-  const bribeCost = (m, side) => bribeNow(m, side) === 0 && mapFreeLeft(m, side) ? 0 : BRIBE_COST * (bribeNow(m, side) + 1); // what the next bribe this round costs
-  // what taking back this round's last bribe gives back: the last one bought was the dearest (Blixten's free one gives nothing)
-  const bribeRefund = (m, side) => bribeNow(m, side) === 1 && isMapFree(m, side, { kind: 'bribe' }) ? 0 : BRIBE_COST * bribeNow(m, side);
+  const bribeCost = (m, side) => bribeNow(m, side) === 0 && mapFreeLeft(m, side) ? blix(BRIBE_COST) : BRIBE_COST * (bribeNow(m, side) + 1); // what the next bribe this round costs
+  // what taking back this round's last bribe gives back: the last one bought was the dearest (Blixten's discounted one: what was paid)
+  const bribeRefund = (m, side) => bribeNow(m, side) === 1 && isMapFree(m, side, { kind: 'bribe' }) ? blix(BRIBE_COST) : BRIBE_COST * bribeNow(m, side);
   // who is ahead in the bribe-off: 0, 1, or -1 when level. pub: counting earlier rounds only (as the flag shows it while deploying)
   const bribeLeader = (m, pub) => { const a = bribeCount(m, 0, pub), b = bribeCount(m, 1, pub); return a > b ? 0 : b > a ? 1 : -1; };
   const canBribe = (m, side) => !!elfSpot(m) && m.gold[side] >= bribeCost(m, side);
   function bribe(m, side) {
     if (!canBribe(m, side)) return false;
     if (!m.bribe) m.bribe = [[], []];
+    m.gold[side] -= bribeCost(m, side);
     if (bribeNow(m, side) === 0 && mapFreeLeft(m, side)) useMapFree(m, side, { kind: 'bribe' });
-    else m.gold[side] -= bribeCost(m, side);
     m.bribe[side] = bribeList(m, side).concat(m.round);
     return true;
   }
@@ -485,7 +488,7 @@ const Game = (() => {
   // offered to a player only if they have bribed the elves themselves (in an earlier round too)
   const elfOwnOffered = (m, side) => elfOwnUnlocked(m) && bribeCount(m, side, true) > 0;
   // what it costs a player: what they paid if they bought it this round, else what it costs them now
-  const elfOwnCost = (m, side) => { const e = elfOwnOf(m, side); return (e && e.round === m.round ? isMapFree(m, side, { kind: 'elf' }) : mapFreeLeft(m, side)) ? 0 : ELF_OWN.cost; };
+  const elfOwnCost = (m, side) => { const e = elfOwnOf(m, side); return (e && e.round === m.round ? isMapFree(m, side, { kind: 'elf' }) : mapFreeLeft(m, side)) ? blix(ELF_OWN.cost) : ELF_OWN.cost; };
   const canBuyElfOwn = (m, side) => elfOwnOffered(m, side) && !elfOwnOf(m, side) && m.gold[side] >= elfOwnCost(m, side);
   const elfOwnSpotOk = (m, side, col, row) => col >= 0 && col < COLS && inZone(side, row) && !reserved(side, col, row) && !occupied(m, side, col, row);
   function buyElfOwn(m, side, col, row) {
@@ -541,7 +544,7 @@ const Game = (() => {
   // what removing a tile costs a player; with col, row of a tile they removed this round: what they paid for it
   const shroomCost = (m, side, col, row) => {
     const mine = col != null && (m.map && m.map.removed || []).some(x => x.col === col && x.row === row && x.side === side && x.round === m.round);
-    return (mine ? isMapFree(m, side, { kind: 'shroom', col, row }) : mapFreeLeft(m, side)) ? 0 : SHROOM_REMOVE;
+    return (mine ? isMapFree(m, side, { kind: 'shroom', col, row }) : mapFreeLeft(m, side)) ? blix(SHROOM_REMOVE) : SHROOM_REMOVE;
   };
   // (both players may pick the same tile in the same round, since neither can see the other's choice; both pay)
   function removeShroom(m, side, col, row) {
@@ -740,7 +743,7 @@ const Game = (() => {
       towerSkill2: [0, 0], // ...and its second skill (keep, bastion, bank)
       loan: [0, 0], // the round each player last took a bank loan in (Bank tower)
       mageGen: [null, null], // the mage generals each player called this round: { round, id, tp } (Mage tower)
-      mapFree: [{}, {}], // Blixten's free map purchase per round (see mapFreeOf)
+      mapFree: [{}, {}], // Blixten's discounted map purchase per round (see mapFreeOf)
       factions, // Factions mode: each player's drafted faction ids (null = a normal match)
     };
     m.towers = [towerSpot(m, 0), towerSpot(m, 1)];

@@ -1055,6 +1055,8 @@ const Engine = (() => {
       if (tl.type === 'speed') { b.u = { ...b.u, speed: b.u.speed * (1 + tl.speed / 100) }; b.fast = true; }
       if (tl.type === 'toxic') {
         (b.poison || (b.poison = [])).push({ src: null, dps: b.u.hp * tl.poisonPct / 100, t: tl.poisonDur });
+        // slime units get it the other way round: the poison heals them (see the ongoing effects) and the slow speeds them up
+        if (b.u.slime) { if (!(b.slowT > 0)) { b.slowMove = -tl.slowMove; b.slowAtk = -tl.slowAtk; b.slowT = tl.slowDur; } return; }
         if (!(b.slowT > 0)) { b.slowMove = 0; b.slowAtk = 0; }
         b.slowMove = Math.max(b.slowMove, tl.slowMove); b.slowAtk = Math.max(b.slowAtk, tl.slowAtk); b.slowT = Math.max(b.slowT, tl.slowDur);
       }
@@ -1709,7 +1711,7 @@ const Engine = (() => {
       return {
         t, shots: final ? [] : shots,
         p: final ? [] : projectiles.map(p => [p.x, p.y, p.owner.side]),
-        b: all.map(x => [x.x, x.y, x.alive ? x.hp / x.u.hp : 0, x.side, x.windTarget && x.u.windUp > 0 ? 1 - x.windT / x.u.windUp : 0, x.hidden ? 1 : 0, x.poison && x.poison.length ? 1 : 0, x.slowT > 0 ? 1 : 0, x.stunT > 0 ? 1 : 0]),
+        b: all.map(x => [x.x, x.y, x.alive ? x.hp / x.u.hp : 0, x.side, x.windTarget && x.u.windUp > 0 ? 1 - x.windT / x.u.windUp : 0, x.hidden ? 1 : 0, x.poison && x.poison.length ? 1 : 0, x.slowT > 0 && x.slowMove > 0 ? 1 : 0, x.stunT > 0 ? 1 : 0]),
       };
     }
 
