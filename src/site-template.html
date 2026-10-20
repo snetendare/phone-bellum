@@ -383,9 +383,10 @@ html.pc .sheet { max-width: 640px; }
   let speed = 2, lastTs = 0, acc = 0, raf = 0;
   let fx = [];
   // battle cam: the last CAM.secs of a high-stakes fight play a little slower, zoomed in on the action.
-  // High stakes: both sides still have units fighting then, and the fight ends the match, or it is close (the weaker
-  // side still has at least CAM.close of the stronger side's health) from round CAM.round on. k eases from 0 to 1 as it kicks in.
-  const CAM = { secs: 5, slow: 0.55, zoom: 1.18, ease: 0.6, close: 0.5, round: 4 };
+  // High stakes: both sides still have units fighting then, and the fight ends the match, or a player went into it under
+  // CAM.lowHp of the starting health, or it is close (the weaker side still has at least CAM.close of the stronger side's
+  // health) from round CAM.round on. k eases from 0 to 1 as it kicks in.
+  const CAM = { secs: 5, slow: 0.55, zoom: 1.18, ease: 0.6, close: 0.5, round: 4, lowHp: 0.5 };
   let cam = null; // { end, decided, on, k, x, y } while a fight plays back
   let lastSummary = null;
   let lastAiLevels = [];
@@ -2526,7 +2527,8 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (!f[0].length || !f[1].length) return false;
     const lethal = [0, 1].some(i => battlePre.hp[i] - (lastSummary.dmg[i] || 0) <= 0);
     const hp = f.map(a => a.reduce((t, b) => t + b.hp, 0));
-    return lethal || (battlePre.round >= CAM.round && Math.min(hp[0], hp[1]) >= Math.max(hp[0], hp[1]) * CAM.close);
+    const low = [0, 1].some(i => battlePre.hp[i] < Game.START_HP * CAM.lowHp);
+    return lethal || low || (battlePre.round >= CAM.round && Math.min(hp[0], hp[1]) >= Math.max(hp[0], hp[1]) * CAM.close);
   }
   // the battle cam's focus: the middle of everything still fighting, followed smoothly
   function camFollow(dtReal, snap) {
