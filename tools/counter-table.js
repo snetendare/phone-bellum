@@ -13,7 +13,8 @@ function table(label, out, rosterUnits, skills, extra) {
   if (n) {
     const g = { ...G, budget: E.fairBudget(units.map(u => u.cost), 2) };
     const bu = units.map(u => E.innateUnit(u, skills, units));
-    for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) { const s = +E.battle(bu[i], bu[j], g).score.toFixed(3); M[i][j] = s; M[j][i] = -s; }
+    // a building bought in the shop (the Altar of Build) doesn't fight on its own: it scores 0 against everything
+    for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) { if (units[i].building || units[j].building) continue; const s = +E.battle(bu[i], bu[j], g).score.toFixed(3); M[i][j] = s; M[j][i] = -s; }
     console.log(`${label}: counter table gold per side:`, g.budget * 100);
   } else console.log(`${label}: no units`);
   fs.writeFileSync(out, JSON.stringify({ ...extra, units, matrix: M, skills }));
@@ -33,7 +34,7 @@ for (const fc of f.factions || []) {
 }
 const names = fUnits.map(u => u.name), dup = names.find((x, i) => names.indexOf(x) !== i);
 if (dup) throw new Error(`two faction units are called ${dup}: unit names must be unique across factions`);
-const ft = table('factions', 'src/faction-units.json', fUnits, fSkills, { factions: meta });
+const ft = table('factions', 'src/faction-units.json', fUnits, fSkills, { factions: meta, buildings: f.buildings || [] });
 // each faction's average against every other faction
 meta.forEach((a) => {
   const A = ft.units.map((u, i) => u.faction === a.id ? i : -1).filter(i => i >= 0);

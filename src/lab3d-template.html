@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0D1315">
+<link rel="icon" href="icon.png">
+<title>No Mans Land · 3D test</title>
+<style>
+/*BASECSS*/
+html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; background: var(--bg); color: var(--ink); }
+/* the bars sit above and below the board, so the strategic view fits the board between them and nothing covers your zone */
+body { display: flex; flex-direction: column; }
+#view { position: relative; flex: 1; min-height: 0; touch-action: none; }
+#view canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; touch-action: none; }
+.hud { display: flex; gap: 8px; align-items: center; padding: 8px 12px; flex-wrap: wrap; }
+.top { padding-top: calc(8px + env(safe-area-inset-top, 0px)); justify-content: space-between; }
+.bottom { padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px)); flex-direction: column; gap: 6px; }
+.row { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
+.chip { font: 500 12px var(--font-data); padding: 6px 10px; cursor: pointer; border: 1px solid var(--line); border-radius: 999px; background: rgba(13,19,21,0.75); color: var(--muted); }
+.chip.on { color: var(--bg); background: var(--gold); border-color: var(--gold); }
+.levels { display: flex; gap: 4px; }
+.stats { font: 400 11px var(--font-data); color: var(--muted); background: rgba(13,19,21,0.75); padding: 4px 8px; border-radius: 4px; }
+.hud .btn { min-height: 36px; padding: 6px 12px; font-size: 14px; }
+.hud select { min-height: 36px; background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 4px; padding: 0 8px; font: inherit; }
+#msg { position: absolute; left: 50%; top: 8px; transform: translateX(-50%); font: 600 13px var(--font-data); color: var(--ink); background: rgba(13,19,21,0.8); padding: 6px 12px; border-radius: 4px; pointer-events: none; text-align: center; max-width: calc(100% - 32px); }
+#shop { width: 100%; max-width: 640px; display: grid; gap: 4px; }
+#shop[hidden], #help[hidden], #msg[hidden] { display: none; }
+#msg, #help { z-index: 1; }
+#shop .line { display: flex; justify-content: space-between; gap: 8px; font: 400 12px var(--font-body); color: var(--muted); }
+#gold { font: 500 12px var(--font-data); color: var(--gold); white-space: nowrap; }
+#cards { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
+#cards .ucard { flex: 0 0 auto; min-width: 84px; padding: 6px 8px; }
+#cards .ucard .n { font-size: 13px; }
+#help { position: absolute; left: 50%; bottom: 8px; transform: translateX(-50%); width: max-content; font: 400 12px var(--font-body); color: var(--muted); background: rgba(13,19,21,0.8); padding: 6px 10px; border-radius: 4px; pointer-events: none; text-align: center; max-width: min(520px, calc(100% - 24px)); box-sizing: border-box; }
+</style>
+</head>
+<body>
+<div class="hud top">
+  <div class="levels" id="levels"><button class="chip on">Strategic</button><button class="chip">Angled</button><button class="chip">Ground</button></div>
+  <span class="stats" id="stats"></span>
+</div>
+<div id="view"><div id="msg"></div><div id="help"></div></div>
+<div class="hud bottom">
+  <div id="shop" hidden><div class="line"><span id="hint"></span><span id="gold"></span></div><div id="cards"></div></div>
+  <div class="row">
+  <select id="map" aria-label="Map"><option value="standard">Standard</option><option value="forest">Forest Clearing</option><option value="cavern">Mushroom Cavern</option><option value="ice">Frozen Peak</option></select>
+  <select id="who" aria-label="Who deploys blue"><option value="you">Blue: you</option><option value="ai">Blue: AI</option></select>
+  <button class="btn" id="auto">Auto</button>
+  <button class="btn primary" id="fight">Fight</button>
+  <button class="btn" id="next">Next</button>
+  <button class="btn" id="new">New</button>
+  </div>
+</div>
+<script>
+/*SHAPES*/
+/*ENGINE*/
+</script>
+<script>
+/*GAME*/
+</script>
+<script>
+/*ART*/
+/*RENDER2D*/
+/*CAMERA3D*/
+const DATA = /*DATA*/;
+</script>
+<script type="module">
+import * as THREE from './vendor/three.module.min.js';
+/*MODELS3D*/
+/*RENDER3D*/
+/*LAB3D*/
+</script>
+</body>
+</html>

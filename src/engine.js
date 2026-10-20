@@ -1,6 +1,6 @@
 // ===== Battle engine (shared by headless tests and the page) =====
 const Engine = (() => {
-  const TRAIT_DEFAULTS = { burst: 1, pellets: 1, spinUp: 0, spinHit: 0, pierce: 0, projSpeed: 0, minRange: 0, charge: 1, knockback: 0, windUp: 0, flame: 0, trample: 0, chargeStun: 0, deathBlast: 0, pctHit: 0, ram: 0, noFlank: 0, carrier: 0, noPack: 0 };
+  const TRAIT_DEFAULTS = { burst: 1, pellets: 1, spinUp: 0, spinHit: 0, pierce: 0, projSpeed: 0, minRange: 0, charge: 1, knockback: 0, windUp: 0, flame: 0, trample: 0, chargeStun: 0, deathBlast: 0, pctHit: 0, ram: 0, noFlank: 0, carrier: 0, noPack: 0, roll: 0 };
   const BURST_GAP = 0.15;      // seconds between shots in a burst
   const SHOTGUN_COS = Math.sqrt(3) / 2; // pellets spread 30 degrees to each side of the target (cos 30)
   // Only + - * / and sqrt from here on: those give identical results in every browser,
@@ -13,7 +13,7 @@ const Engine = (() => {
     for (let k = 1; k <= 12; k++) { term = -term * a * a / ((2 * k - 1) * (2 * k)); sum += term; }
     return sum;
   }
-  const SPIN_CAP = 3;          // spin-up tops out at 3x attack speed
+  const SPIN_CAP = 3;          // spin-up tops out at 3x attack speed (a unit's spinCap can set its own top)
   // damage spin-up (spinHit) ramps hit size the same way, also up to SPIN_CAP
   const CHARGE_RUN = 5;        // metres a unit must run before its next attack counts as a charge
   const TRAMPLE_RUN = 8;       // after a charged hit, a trampler keeps running this far past its target
@@ -38,6 +38,36 @@ const Engine = (() => {
   // (see createBattle: bodies with `carrier` set stay out of the fight until that body dies). noFlank: can't be
   // deployed on flank tiles (the game checks it). noPack: never offered in a starting package (the game checks it)
   const RAM_REACH = 2;         // metres from its target at which a ram hits
+  // roll (seconds): the unit never stops to attack. It rolls at its target from ROLL_START m/s up to its move speed
+  // over this many seconds, running over every enemy body within TRAMPLE_WIDTH of its path for its hit (each body once
+  // per pass), carries on ROLL_PAST metres past its target, stops dead and rolls back at it. So how often it hits
+  // comes from how fast it gets going, not from its attack speed.
+  const ROLL_START = 1;
+  const ROLL_PAST = 6;         // a tile
+  // build = { time, range, count, unit }: the unit walks at the enemy until one is within range − 1 m, stands still
+  // for `time` seconds building `count` copies of `unit` (BUILD_GAP metres apart, side by side across the enemy's
+  // direction), then fights on. Once per fight. Builders building within BUILD_COOP metres of each other speed each
+  // other up: 1×, 1.5×, 1.75×, ... What it builds is a construct: it never moves, can't be pushed, doesn't count as
+  // a unit left standing (a side whose units are gone is beaten), levels with its builder and earns its builder XP.
+  const BUILD_GAP = 6;
+  const BUILD_COOP = 7;
+  // Buildings (the game sets these up; see Game's buildings). A body with u.idle never moves or attacks.
+  //   b.site = { work, need }: seconds of building done and needed. At the start of a fight the nearest builder without
+  //   a job walks to it (within SITE_REACH) and builds instead of fighting (u.buildSpeed seconds of work a second) until
+  //   it is done or falls; then the builder carries on like any builder (its turret, then melee).
+  //   A site nobody is assigned to builds itself at site.self seconds of work a second (0 = not at all).
+  //   b.produce = { units: [unit, ...], time }: once built, it makes one body of each after time seconds, side by side a
+  //   little in front of it.
+  // A unit with flee (metres) keeps away from enemies: whenever one is that close it moves straight away from it (it
+  // still shoots). A unit with backline picks the farthest enemy in reach instead of the nearest. A unit with lob fires
+  // shells over the heads of whoever is in the way: they only land where they were aimed.
+  //   What it makes earns it XP (credit). result().buildings tells the game how each building did.
+  const SITE_REACH = 3.5;
+  // link: the bodies of a squad share one health pool. Damage to any of them is split across all that are alive
+  // (by max health), healing is shared the same way, and they all fall together when the pool runs out. Bodies with a
+  // linked squad can't be won over by a Gentleman.
+  // escort = { unit, pct }: at the start of a fight a construct (the healbot) stands behind each squad, follows it,
+  // never attacks, and heals every body of its squad within unit.range by pct % of its max health a second.
   // chain = { jumps, hit, reach }: after each hit the attack jumps on to the nearest enemy body not hit yet within
   // reach metres of the last one, up to jumps times, dealing chain.hit each time (lightning).
   // mend: the body never attacks; each attack heals the most wounded ally in range (not structures) by this much
@@ -105,6 +135,11 @@ const Engine = (() => {
     frenzy:  { label: 'Frenzy', params: [['pct', 'Attack speed per hit (+% of base)', 10, 1], ['cap', 'Most attacks per second', 2, 0.1]] },
     spread:  { label: 'Spread', params: [['min', 'Least distance (m)', 1, 0.5], ['max', 'Most distance (m)', 6, 0.5]] },
     mortar:  { label: 'Mortar', params: [['range', 'Range (+m)', 15, 1], ['min', 'Minimum range (m)', 5, 0.5], ['aps', 'Attack speed (+ attacks per second)', 0.1, 0.05]] },
+    momentum: { label: 'Momentum', params: [['accel', 'Rolling acceleration (+%)', 100, 10]] },
+    link:    { label: 'Linked health', params: [['hp', 'Health (+%)', 15, 5]] },
+    healbot: { label: 'Healbot', params: [['hp', 'Healbot health', 300, 25], ['pct', 'Heals each body (% of max health per second)', 4, 0.5], ['range', 'Heal reach (m)', 8, 1], ['speed', 'Healbot move speed (m/s)', 3, 0.5]] },
+    building: { label: 'Building', params: [['building', 'Building (id)', 'factory', null]] },
+    builder: { label: 'Construct upgrades', params: [['extra', 'More constructs per build', 0, 1], ['faster', 'Build time (−%)', 0, 5], ['aps', 'Construct attack speed (+%)', 0, 5], ['shield', 'Construct shield (hits blocked)', 0, 1], ['armor', 'Construct armor', 0, 1]] },
   };
   const skillParam = (d, k) => {
     const v = d.params && d.params[k];
@@ -143,6 +178,18 @@ const Engine = (() => {
       case 'spread': return `At the start of a fight the bodies scatter in all directions, ${n('min')} to ${n('max')} m from where they stand (some stay on the tile), then charge. Splash catches fewer of them.`;
       case 'mortar': return `+${n('range')} m range and +${n('aps')} attacks per second, but it can’t attack enemies ${n('min')} m away or closer.`;
       case 'shield': return `Each body fully blocks the first ${n('hits')} ${+P('hits') === 1 ? 'hit' : 'hits'} it takes in a fight, however big. Poison already on it still ticks.`;
+      case 'building': return `Pick a free tile in your zone for a ${String(P('building'))}. Your nearest builder builds it during fights; once built it stays all match, and each round you can buy one of its own skills.`;
+      case 'momentum': return `Gets up to full rolling speed ${n('accel')}% faster, so it rolls over its targets more often.`;
+      case 'link': return `+${n('hp')}% health, and the bodies of a squad share one health pool: damage to any of them is shared by all, and they fall together.`;
+      case 'healbot': return `Each squad brings a healbot (${n('hp')} health) that follows it, never attacks, and heals every body of the squad within ${n('range')} m for ${n('pct')}% of its max health every second.`;
+      case 'builder': {
+        const parts = [];
+        if (+P('extra') > 0) parts.push(`builds ${+P('extra') === 1 ? 'one more construct' : `${n('extra')} more constructs`} at once, ${BUILD_GAP} m apart`);
+        if (+P('faster') > 0) parts.push(`builds ${n('faster')}% faster, its buildings too`);
+        const c = [+P('aps') > 0 && `+${n('aps')}% attack speed`, +P('shield') > 0 && `a shield that blocks ${n('shield')} ${+P('shield') === 1 ? 'hit' : 'hits'}`, +P('armor') > 0 && `+${n('armor')} armor`].filter(Boolean);
+        if (c.length) parts.push(`its constructs and what its buildings make get ${c.join(', ')}`);
+        return parts.length ? parts.join('; ').replace(/^./, s => s.toUpperCase()) + '.' : 'No change.';
+      }
     }
     return '';
   }
@@ -208,6 +255,24 @@ const Engine = (() => {
           u.range = Math.max(0.5, u.range * (1 - Math.min(90, P('range')) / 100));
           u.hit = u.hit * (1 - Math.min(90, P('hit')) / 100);
           break;
+        case 'momentum': if (u.roll > 0) u.roll = u.roll / (1 + Math.max(0, P('accel')) / 100); break;
+        case 'link': u.link = true; u.hp = u.hp * (1 + P('hp') / 100); break;
+        case 'healbot':
+          u.escort = { pct: Math.max(0, P('pct')), unit: withTraits({ name: 'Healbot', cost: 0, bodies: 1, hp: Math.max(1, P('hp')), hit: 0, aps: 1, range: Math.max(1, P('range')),
+            speed: Math.max(0.5, P('speed')), splash: 0, shape: 'diamond', color: '#8FD6A0', construct: true, noCount: true, follow: true }) };
+          break;
+        case 'builder': {
+          // buildings go up faster too, and what its buildings make gets the same upgrades (see the game's constructBuff)
+          const fast = Math.min(90, Math.max(0, P('faster')));
+          if (fast > 0) u.buildSpeed = (u.buildSpeed || 1) / (1 - fast / 100);
+          if (u.build && u.build.unit) {
+            const c = u.build.unit;
+            u.build = { ...u.build, count: Math.max(1, Math.round(u.build.count || 1) + Math.max(0, Math.round(P('extra')))),
+              time: (u.build.time || 0) * (1 - Math.min(90, Math.max(0, P('faster'))) / 100),
+              unit: { ...c, aps: c.aps * (1 + Math.max(0, P('aps')) / 100), shield: (c.shield || 0) + Math.max(0, Math.round(P('shield'))), bonusArmor: (c.bonusArmor || 0) + Math.max(0, P('armor')) } };
+          }
+          break;
+        }
       }
     }
     return u;
@@ -343,11 +408,34 @@ const Engine = (() => {
 
   // A steppable battle between two lists of bodies (side 0 and side 1)
   function createBattle(A, B, g, opts = {}) {
+    // linked squads and squads with a healbot: their bodies, in squads of u.bodies (a Counter Lab army puts all its
+    // squads under one id; a game squad has exactly u.bodies of them)
+    const groups = [];
+    for (const list of [A, B]) {
+      const open = {};
+      for (const b of list) {
+        if (!b.u.link && !b.u.escort) continue;
+        const k = b.squad + ':' + b.u.name;
+        if (!open[k] || open[k].length >= Math.max(1, Math.round(b.u.bodies))) groups.push(open[k] = []);
+        open[k].push(b);
+      }
+    }
+    for (const grp of groups) if (grp[0].u.link) for (const b of grp) b.link = grp;
+    // a healbot behind each squad that brings one (it levels with its squad)
+    let escortIdx = A.length + B.length;
+    for (const grp of groups) {
+      const lead = grp[0], e = lead.u.escort;
+      if (!e) continue;
+      const hb = newBody(leveled(e.unit, lead.level), lead.side, lead.x, lead.y - (lead.side === 0 ? 1 : -1) * 2.5, escortIdx++, -1);
+      hb.follow = grp; hb.healPct = e.pct; hb.credit = lead;
+      (lead.side === 0 ? A : B).push(hb);
+    }
     const all = A.concat(B);
     const sides = [A, B];
+    const counts = (b) => !(b.u.structure || b.u.aloft || b.u.noCount); // what makes up a side's army (towers, airships and constructs don't)
     const stats = [
-      { dealt: 0, wasted: 0, blocked: 0, missed: 0, windLost: 0, winds: 0, totalHp: A.reduce((s, b) => s + (b.u.structure || b.u.aloft ? 0 : b.u.hp), 0) },
-      { dealt: 0, wasted: 0, blocked: 0, missed: 0, windLost: 0, winds: 0, totalHp: B.reduce((s, b) => s + (b.u.structure || b.u.aloft ? 0 : b.u.hp), 0) },
+      { dealt: 0, wasted: 0, blocked: 0, missed: 0, windLost: 0, winds: 0, totalHp: A.reduce((s, b) => s + (counts(b) ? b.u.hp : 0), 0) },
+      { dealt: 0, wasted: 0, blocked: 0, missed: 0, windLost: 0, winds: 0, totalHp: B.reduce((s, b) => s + (counts(b) ? b.u.hp : 0), 0) },
     ];
     const dt = g.dt;
     const stealthOn = ruleOn(g, 'stealth'), stealthBack = ruleOn(g, 'stealthBack'), knockOn = ruleOn(g, 'knockback');
@@ -409,7 +497,7 @@ const Engine = (() => {
     function finishing(owner, v) {
       const c = charm[owner.side];
       if (!c || v.side === owner.side || v.u.structure || !(c[owner.squad] > 0)) return false;
-      if (c[owner.squad] >= CHARM_MAX && !charmUsed[owner.side][owner.squad] && !v.u.carrier && !v.convert) {
+      if (c[owner.squad] >= CHARM_MAX && !charmUsed[owner.side][owner.squad] && !v.u.carrier && !v.convert && !v.link && !v.u.construct) {
         charmUsed[owner.side][owner.squad] = true;
         v.hp = v.u.hp * CONVERT_HP / 100; v.turning = true; v.poison = null;
         turning.push(v);
@@ -458,25 +546,42 @@ const Engine = (() => {
       b.spreadTo.y = Math.max(g.bounds.y0, Math.min(g.bounds.y1, b.spreadTo.y));
     }
     const SPAWN_SPOTS = [[0.7, 0.7], [-0.7, 0.7], [0, 1], [1, 0], [-1, 0], [0.7, -0.7], [-0.7, -0.7], [0, -1]]; // (side, forward): front first
+    // the health a body has to lose: its own, or its linked squad's
+    const poolHp = (v) => { if (!v.link) return v.hp; let s = 0; for (const x of v.link) if (x.alive) s += x.hp; return s; };
+    // take health off a body; a linked squad shares it out by max health
+    function loseHp(v, dmg) {
+      if (!v.link) { v.hp -= dmg; return; }
+      let max = 0;
+      for (const x of v.link) if (x.alive) max += x.u.hp;
+      for (const x of v.link) if (x.alive) x.hp -= dmg * x.u.hp / max;
+    }
+    // v ran out of health: it falls (a linked squad all together). owner (or null): who gets the bounty for leveled bodies
+    function kill(owner, v) {
+      for (const x of v.link ? v.link.filter(x => x.alive) : [v]) {
+        x.hp = 0; x.alive = false; x.diedTick = tick;
+        if (owner) owner.xp += x.u.hp * x.level;
+        fell(x);
+      }
+    }
     // damage that skips armor and ward (poison)
     function direct(owner, v, amount) {
       if (v.turning || v.u.aloft) return;
-      const applied = Math.min(amount, v.hp);
+      const applied = Math.min(amount, poolHp(v));
       if (applied <= 0) return;
       stats[owner.side].dealt += applied;
       owner.dealt = (owner.dealt || 0) + applied;
       owner.xp += applied;
       v.xp += applied * (g.absorbXp == null ? 0.5 : g.absorbXp);
-      v.hp -= applied;
-      if (v.hp <= 1e-9 && finishing(owner, v)) return;
-      if (v.hp <= 1e-9) { v.hp = 0; v.alive = false; v.diedTick = tick; owner.xp += v.u.hp * v.level; fell(v); }
+      loseHp(v, applied);
+      if (poolHp(v) <= 1e-9 && finishing(owner, v)) return;
+      if (poolHp(v) <= 1e-9) kill(owner, v);
     }
     // damage from the map itself (elf tower, toxic tiles): counts for neither side, earns no experience
     function neutralDamage(v, dmg) {
       if (v.turning || v.u.aloft) return;
       if (cripple[v.side] > 0) dmg = dmg * (1 + towerDown.taken / 100);
-      v.hp -= dmg;
-      if (v.hp <= 1e-9) { v.hp = 0; v.alive = false; v.diedTick = tick; fell(v); }
+      loseHp(v, dmg);
+      if (poolHp(v) <= 1e-9) kill(null, v);
     }
     // a unit is on a map tile: its effect, once per unit and tile type
     function onTile(b, tl) {
@@ -494,7 +599,7 @@ const Engine = (() => {
       }
     }
     // structures (towers) and airships don't count: a side is beaten when its units are gone
-    const aliveCount = (arr) => { let c = 0; for (const b of arr) if (b.alive && !b.u.structure && !b.u.aloft) c++; return c; };
+    const aliveCount = (arr) => { let c = 0; for (const b of arr) if (b.alive && counts(b)) c++; return c; };
 
     function hurt(owner, v, hit, fromX, fromY) {
       if (v.turning) return; // being won over: nothing hurts it until it has switched sides
@@ -523,7 +628,7 @@ const Engine = (() => {
       }
       if (cripple[v.side] > 0) dmg = dmg * (1 + towerDown.taken / 100);
       st.blocked += hit - dmg;
-      const applied = Math.min(dmg, v.hp);
+      const applied = Math.min(dmg, poolHp(v));
       st.dealt += applied;
       owner.dealt = (owner.dealt || 0) + applied;
       if (owner.u.lifesteal > 0 && owner.alive) owner.hp = Math.min(owner.u.hp, owner.hp + applied * owner.u.lifesteal / 100);
@@ -531,9 +636,9 @@ const Engine = (() => {
       // experience: damage dealt, half of damage absorbed, and a bounty for killing leveled bodies
       owner.xp += applied;
       v.xp += applied * (g.absorbXp == null ? 0.5 : g.absorbXp);
-      v.hp -= dmg;
-      if (v.hp <= 0 && finishing(owner, v)) return;
-      if (v.hp <= 0) { v.hp = 0; v.alive = false; v.diedTick = tick; owner.xp += v.u.hp * v.level; fell(v); return; }
+      loseHp(v, dmg);
+      if (poolHp(v) <= 0 && finishing(owner, v)) return;
+      if (poolHp(v) <= 0) { kill(owner, v); return; }
       if (owner.u.poisonPct > 0) {
         // poison: a share of the hit, spread over its duration. Each attacker keeps one dose on the target;
         // its next hit refreshes that dose. Doses from different attackers add up.
@@ -553,7 +658,7 @@ const Engine = (() => {
         v.shrinkM = v.shrinkT > 0 ? Math.max(v.shrinkM, owner.u.shrinkM) : owner.u.shrinkM;
         v.shrinkT = Math.max(v.shrinkT, owner.u.shrinkDur);
       }
-      if (owner.u.knockback > 0 && knockOn && !v.u.structure) {
+      if (owner.u.knockback > 0 && knockOn && !v.u.structure && !v.u.anchored) {
         // big hits on small bodies push the full distance; on big bodies barely at all
         const push = owner.u.knockback * Math.min(1, hit / v.u.hp);
         const dx = v.x - fromX, dy = v.y - fromY, d = hyp(dx, dy) || 1;
@@ -601,7 +706,7 @@ const Engine = (() => {
         const d = dist(f, b);
         if (d <= reachOf(b) + 0.01 && d >= b.u.minRange) valid.push([d, f]);
       }
-      valid.sort((p, q) => p[0] - q[0]);
+      valid.sort((p, q) => b.u.backline ? q[0] - p[0] : p[0] - q[0]);
       return valid.map(v => v[1]);
     }
 
@@ -759,6 +864,117 @@ const Engine = (() => {
       if (b.alive) { b.hp = 0; b.alive = false; b.diedTick = tick; fell(b); }
     }
 
+    // share of its move speed a body walks at right now (slowed, or crippled by its fallen tower)
+    const moveMul = (b) => (b.slowT > 0 ? 1 - b.slowMove / 100 : 1) * (cripple[b.side] > 0 ? 1 - towerDown.move / 100 : 1);
+
+    // a roller's turn (see ROLL_START): marches like any unit until it spots an enemy, then rolls at its target
+    // gathering speed, runs over every enemy body in its path (each once per pass), carries on ROLL_PAST metres past
+    // the target, stops dead and rolls back
+    function roll(b, foes) {
+      const top = b.u.speed, start = Math.min(ROLL_START, top);
+      if (b.rollV == null) b.rollV = start;
+      if (!(b.rollPast > 0)) {
+        let near = null, nd = Infinity;
+        for (const f of foes) { if (!f.alive || f.hidden) continue; const d = dist(f, b); if (d < nd) { nd = d; near = f; } }
+        if (!near) return;
+        b.near = near;
+        const [mx, my] = b.march || [0, b.side === 0 ? 1 : -1];
+        if (!b.engaged) {
+          let spotted = nd <= Math.max(R(b) + sight, minSight);
+          if (!spotted) { // nothing left ahead to march toward: go for the nearest
+            spotted = true;
+            for (const f of foes) if (f.alive && !f.hidden && (f.x - b.x) * mx + (f.y - b.y) * my > 0) { spotted = false; break; }
+          }
+          if (spotted) b.engaged = true;
+        }
+        // once engaged it stays on its target until that dies or hides, like any unit
+        const tgt = b.engaged ? (b.lock && b.lock.alive && !b.lock.hidden ? b.lock : (b.lock = near)) : null;
+        let wx = mx, wy = my;
+        if (tgt) { const d = dist(tgt, b) || 1; wx = (tgt.x - b.x) / d; wy = (tgt.y - b.y) / d; }
+        // standing still it can set off any way; rolling, it swings round like a walking body
+        if (b.hx === undefined || b.rollV <= start) { b.hx = wx; b.hy = wy; }
+        else {
+          const k = Math.min(1, TURN * dt);
+          let hx = b.hx + (wx - b.hx) * k, hy = b.hy + (wy - b.hy) * k, hl = hyp(hx, hy);
+          if (hl < 1e-6) { hx = wx; hy = wy; hl = 1; }
+          b.hx = hx / hl; b.hy = hy / hl;
+        }
+        // about to reach the target: from here it runs straight on, through it and past it
+        if (tgt) {
+          const d = dist(tgt, b);
+          if (d <= b.rollV * dt + TRAMPLE_WIDTH) { b.rollDir = d > 1e-6 ? [(tgt.x - b.x) / d, (tgt.y - b.y) / d] : [b.hx, b.hy]; b.rollPast = d + ROLL_PAST; }
+        }
+      }
+      b.rollV = Math.min(top, b.rollV + (top - start) / b.u.roll * dt);
+      if (b.rollPast > 0) { b.hx = b.rollDir[0]; b.hy = b.rollDir[1]; }
+      const mv = b.rollV * moveMul(b) * dt;
+      b.x += b.hx * mv; b.y += b.hy * mv; b.moved += mv;
+      let stop = false;
+      if (b.rollPast > 0) { b.rollPast -= mv; if (b.rollPast <= 1e-9) stop = true; }
+      if (g.bounds) { // the edge of the board stops it too
+        const x = Math.max(g.bounds.x0, Math.min(g.bounds.x1, b.x)), y = Math.max(g.bounds.y0, Math.min(g.bounds.y1, b.y));
+        if (x !== b.x || y !== b.y) { b.x = x; b.y = y; stop = true; }
+      }
+      const seen = b.rolled || (b.rolled = []);
+      for (const f of foes) {
+        if (!f.alive || seen.includes(f) || hyp(f.x - b.x, f.y - b.y) > TRAMPLE_WIDTH) continue;
+        seen.push(f);
+        if (opts.record) shots.push([b.x, b.y, f.x, f.y, b.side, 1, 1, 0, 0]);
+        hurt(b, f, b.u.hit, b.x, b.y);
+      }
+      if (stop) { b.rollPast = 0; b.rollV = start; b.rolled = null; }
+    }
+
+    // a healbot keeps close behind its squad (the middle of its bodies still standing); with the squad gone it stays put
+    function escortMove(b) {
+      let sx = 0, sy = 0, n = 0;
+      for (const a of b.follow) if (a.alive) { sx += a.x; sy += a.y; n++; }
+      if (!n) return;
+      const dx = sx / n - b.x, dy = sy / n - b.y, d = hyp(dx, dy), keep = 2.5;
+      if (d <= keep) return;
+      const mv = Math.min(d - keep, b.u.speed * moveMul(b) * dt);
+      b.hx = dx / d; b.hy = dy / d;
+      b.x += b.hx * mv; b.y += b.hy * mv; b.moved += mv;
+    }
+
+    // a builder is done: its constructs stand where it worked, side by side across the direction of the enemy it saw
+    function finishBuild(b) {
+      b.buildT = 0; b.built = true;
+      const bd = b.u.build, n = Math.max(1, Math.round(bd.count || 1)), [dx, dy] = b.buildDir;
+      // a construct stands where it was built, unless it was made to move (Core Awoken)
+      const cu = leveled(withTraits({ ...bd.unit, bodies: 1, construct: true, noCount: true, ...(bd.unit.speed > 0 ? {} : { speed: 0, anchored: true }) }), b.level);
+      for (let k = 0; k < n; k++) {
+        const off = (k - (n - 1) / 2) * BUILD_GAP;
+        let x = b.x - dy * off, y = b.y + dx * off;
+        if (g.bounds) { x = Math.max(g.bounds.x0, Math.min(g.bounds.x1, x)); y = Math.max(g.bounds.y0, Math.min(g.bounds.y1, y)); }
+        const kid = newBody(cu, b.side, x, y, spawnIdx++, -1);
+        kid.credit = b; // its XP and damage count for its builder's squad
+        pendingKids.push(kid);
+      }
+    }
+
+    // each unfinished building site gets the nearest builder that has no job yet
+    for (const s of all) {
+      if (!s.site || !s.alive) continue;
+      s.site.start = s.site.work;
+      if (s.site.work >= s.site.need) continue;
+      let best = null, bd = Infinity;
+      for (const b of sides[s.side]) if (b.u.build && !b.siteJob && b.alive) { const d = dist(b, s); if (d < bd) { bd = d; best = b; } }
+      if (best) best.siteJob = s;
+    }
+    // a builder's turn while it has a site to build: walk there, then stand and build (see the builders in step())
+    function siteWork(b) {
+      const s = b.siteJob;
+      if (!s.alive || s.site.work >= s.site.need) { b.siteJob = null; b.siteAt = false; return false; }
+      const d = dist(s, b);
+      b.siteAt = d <= SITE_REACH;
+      if (b.siteAt) return true;
+      const mv = Math.min(d - SITE_REACH * 0.8, b.u.speed * moveMul(b) * dt);
+      b.hx = (s.x - b.x) / d; b.hy = (s.y - b.y) / d;
+      b.x += b.hx * mv; b.y += b.hy * mv; b.moved += mv;
+      return true;
+    }
+
     function step() {
       if (over) return false;
       if (t >= g.timeCap || !aliveCount(A) || !aliveCount(B)) { over = true; return false; }
@@ -811,7 +1027,11 @@ const Engine = (() => {
           if (b.trampleLeft <= 1e-9) { b.trampleLeft = 0; b.trampled = null; if (b.u.chargeStun > 0) b.stunT = b.u.chargeStun; }
           continue;
         }
+        if (b.u.idle) continue; // a building
+        if (b.siteJob && siteWork(b)) continue;
         if (b.u.ram) { ram(b, foes); continue; }
+        if (b.u.roll > 0) { roll(b, foes); continue; }
+        if (b.follow) { escortMove(b); continue; }
         if (b.spreadTo) { // Spread: run out to its own spot first
           const sx = b.spreadTo.x - b.x, sy = b.spreadTo.y - b.y, sd = hyp(sx, sy);
           const mv = Math.min(sd, b.u.speed * (b.slowT > 0 ? 1 - b.slowMove / 100 : 1) * dt);
@@ -830,6 +1050,22 @@ const Engine = (() => {
           if (d < nd) { nd = d; near = f; }
         }
         b.near = near;
+        if (b.u.flee > 0 && near && nd < b.u.flee) { // keeping away from the enemy
+          const mv = b.u.speed * moveMul(b) * dt;
+          b.hx = -(near.x - b.x) / (nd || 1); b.hy = -(near.y - b.y) / (nd || 1);
+          b.x += b.hx * mv; b.y += b.hy * mv; b.moved += mv;
+          if (g.bounds) { b.x = Math.max(g.bounds.x0, Math.min(g.bounds.x1, b.x)); b.y = Math.max(g.bounds.y0, Math.min(g.bounds.y1, b.y)); }
+          continue;
+        }
+        // a builder that hasn't built yet stops to build once an enemy is within its constructs' range (see the builders below)
+        if (b.u.build && !b.built) {
+          if (b.buildT > 0) continue;
+          if (near && nd <= b.u.build.range - 1) {
+            b.buildT = b.buildFull = Math.max(dt, b.u.build.time || 0);
+            b.buildDir = nd > 1e-6 ? [(near.x - b.x) / nd, (near.y - b.y) / nd] : [0, b.side === 0 ? 1 : -1];
+            continue;
+          }
+        }
         const rg = b.u.hover > 0 ? Math.min(R(b), b.u.hover) : R(b); // hover: an airship flies in closer than its range
         if (near && nd > (g.stopPct > 0 && g.stopPct < 1 && b.engaged ? stopAt(rg) : rg)) {
           const step = b.u.speed * (b.slowT > 0 ? 1 - b.slowMove / 100 : 1) * (cripple[b.side] > 0 ? 1 - towerDown.move / 100 : 1) * dt;
@@ -877,6 +1113,27 @@ const Engine = (() => {
           }
         }
       }
+      // builders at work: each builder building within BUILD_COOP of others speeds them up (1x, 1.5x, 1.75x, ...)
+      const builders = all.filter(b => b.alive && b.buildT > 0);
+      if (builders.length) {
+        const rate = builders.map(b => {
+          let mul = 1, add = 0.5;
+          for (const c of builders) if (c !== b && c.side === b.side && dist(c, b) <= BUILD_COOP) { mul += add; add *= 0.5; }
+          return mul;
+        });
+        builders.forEach((b, k) => { b.buildT -= dt * rate[k]; if (b.buildT <= 1e-9) finishBuild(b); });
+      }
+      // ...and at building sites (a site without a builder builds itself, slowly, if it can)
+      const manned = new Set();
+      for (const b of all) {
+        if (!b.alive || !b.siteJob) continue;
+        manned.add(b.siteJob);
+        if (!b.siteAt) continue;
+        const s = b.siteJob.site;
+        s.work = Math.min(s.need, s.work + dt * (b.u.buildSpeed || 1));
+        if (s.work >= s.need) { b.siteJob = null; b.siteAt = false; }
+      }
+      for (const b of all) if (b.alive && b.site && b.site.self > 0 && b.site.work < b.site.need && !manned.has(b)) b.site.work = Math.min(b.site.need, b.site.work + dt * b.site.self);
       // separation between allies
       const minSep = g.spacing * 0.7;
       for (let s = 0; s < 2; s++) {
@@ -888,7 +1145,7 @@ const Engine = (() => {
             const dx = c.x - a.x, dy = c.y - a.y;
             const d = hyp(dx, dy);
             // structures and bodies still waiting to start (flank squads) don't budge: the other body moves the whole way
-            const fa = a.u.structure || a.delay > 0, fc = c.u.structure || c.delay > 0;
+            const fa = a.u.structure || a.u.anchored || a.delay > 0, fc = c.u.structure || c.u.anchored || c.delay > 0;
             if (fa && fc) continue;
             const ka = fa ? 0 : fc ? 2 : 1, kc = fc ? 0 : fa ? 2 : 1;
             if (d > 0 && d < minSep) {
@@ -928,6 +1185,28 @@ const Engine = (() => {
           }
         }
         if (b.u.regen > 0 && b.hp < b.u.hp) b.hp = Math.min(b.u.hp, b.hp + b.u.hp * b.u.regen / 100 * healMul * dt);
+        if (b.produce && !b.produced && !(b.site && b.site.work < b.site.need)) { // a building makes its unit
+          b.prodT = (b.prodT == null ? b.produce.time : b.prodT) - dt;
+          if (b.prodT <= 1e-9) {
+            b.produced = true;
+            const list = b.produce.units || [], gap = g.spacing;
+            let y = b.y + (b.side === 0 ? 1 : -1) * BUILD_GAP * 0.7;
+            if (g.bounds) y = Math.max(g.bounds.y0, Math.min(g.bounds.y1, y));
+            list.forEach((pu, k) => {
+              let x = b.x + (k - (list.length - 1) / 2) * gap;
+              if (g.bounds) x = Math.max(g.bounds.x0, Math.min(g.bounds.x1, x));
+              const kid = newBody(pu, b.side, x, y, spawnIdx++, -1);
+              kid.credit = b;
+              pendingKids.push(kid);
+            });
+          }
+        }
+        if (b.follow && b.healPct > 0) { // a healbot mends the bodies of its squad within reach
+          let to = null;
+          for (const a of b.follow) if (a.alive && a.hp < a.u.hp && dist(a, b) <= b.u.range + 0.01) { a.hp = Math.min(a.u.hp, a.hp + a.u.hp * b.healPct / 100 * healMul * dt); to = to || a; }
+          b.healFx = (b.healFx || 0) - dt;
+          if (to && b.healFx <= 0) { b.healFx = 1; if (opts.record) shots.push([b.x, b.y, to.x, to.y, b.side, 0, 0, 1]); }
+        }
         if (b.shrinkT > 0) { b.shrinkT -= dt; if (b.shrinkT <= 0) { b.shrinkT = 0; b.shrinkM = 0; } }
         if (b.slowT > 0) { b.slowT -= dt; if (b.slowT <= 0) { b.slowT = 0; b.slowMove = 0; b.slowAtk = 0; } }
         if (b.u.spawn) {
@@ -952,6 +1231,7 @@ const Engine = (() => {
       // wins a trade just by being processed first (side 0 used to win one-shot duels like Sniper vs Sniper)
       for (const b of all) {
         if ((!b.alive && b.diedTick !== tick) || b.delay > 0 || b.u.ram || b.boarded || b.turning) continue;
+        if (b.u.roll > 0 || b.follow || b.buildT > 0 || b.siteJob || b.u.idle) continue; // rollers hit by rolling; healbots and buildings never attack; builders at work don't
         b.cd -= dt * (b.slowT > 0 ? 1 - b.slowAtk / 100 : 1); // slowed units reload slower
         if (b.firing >= 0) b.firing += dt;
         if (b.stunT > 0) continue; // stunned after a charge
@@ -1034,7 +1314,7 @@ const Engine = (() => {
           b.aims[0] = primary;
         }
         if (b.firing < 0) b.firing = 0;
-        const spin = b.u.spinUp > 0 ? Math.min(SPIN_CAP, 1 + b.u.spinUp / 100 * b.firing) : 1;
+        const spin = b.u.spinUp > 0 ? Math.min(b.u.spinCap > 0 ? b.u.spinCap : SPIN_CAP, 1 + b.u.spinUp / 100 * b.firing) : 1;
         b.spin = spin;
         // reload doesn't stack up while the unit has nothing to shoot: keep at most one step of carry-over
         b.cd = Math.max(b.cd, -dt) + 1 / Math.max(0.01, apsOf(b) * spin);
@@ -1105,7 +1385,7 @@ const Engine = (() => {
           while (mv > 0 && !done) {
             const sub = Math.min(0.5, mv, p.left);
             p.x += p.dirX * sub; p.y += p.dirY * sub; p.left -= sub; mv -= sub;
-            for (const f of foes) {
+            if (!p.owner.u.lob) for (const f of foes) {
               if (f.alive && hyp(f.x - p.x, f.y - p.y) <= PROJ_HIT_RADIUS) {
                 impact(p.owner, p.x, p.y, null, p.hit, p.dirX, p.dirY, p.fx, p.fy);
                 done = true; break;
@@ -1137,8 +1417,15 @@ const Engine = (() => {
       }
       turning.length = 0;
       // bodies spawned by deaths this tick join the fight
-      for (const kid of pendingKids) { all.push(kid); sides[kid.side].push(kid); stats[kid.side].totalHp += kid.u.hp; }
+      for (const kid of pendingKids) { all.push(kid); sides[kid.side].push(kid); if (counts(kid)) stats[kid.side].totalHp += kid.u.hp; }
       pendingKids.length = 0;
+      // a linked squad shares its health: whatever healed one of its bodies is shared by all
+      for (const grp of groups) {
+        if (!grp[0].link) continue;
+        let s = 0, mx = 0;
+        for (const x of grp) if (x.alive) { s += x.hp; mx += x.u.hp; }
+        if (mx > 0) for (const x of grp) if (x.alive) x.hp = x.u.hp * s / mx;
+      }
       t += dt;
       return true;
     }
@@ -1153,7 +1440,7 @@ const Engine = (() => {
 
     function result() {
       const inside = (b) => b.boarded && b.carrier && b.carrier.alive; // still riding in a carrier that made it
-      const remHp = sides.map(arr => arr.reduce((s, b) => s + ((b.alive || inside(b)) && !b.u.structure && !b.u.aloft ? b.hp : 0), 0));
+      const remHp = sides.map(arr => arr.reduce((s, b) => s + ((b.alive || inside(b)) && counts(b) ? b.hp : 0), 0));
       const frac = [remHp[0] / stats[0].totalHp, remHp[1] / stats[1].totalHp];
       const aliveA = aliveCount(A), aliveB = aliveCount(B);
       let winner = -1, timeout = false;
@@ -1163,6 +1450,12 @@ const Engine = (() => {
       // survivors per squad: { squadId: { side, total, alive } }
       const squads = {};
       for (const b of all) {
+        if (b.credit) { // a construct: its XP and damage go to the squad that built (or brought) it
+          const o = b.credit.convert || b.credit, k = o.side + ':' + o.squad;
+          const s = squads[k] || (squads[k] = { side: o.side, squad: o.squad, total: 0, alive: 0, xp: 0, dealt: 0 });
+          s.xp += b.xp; s.dealt += b.dealt || 0;
+          continue;
+        }
         if (b.convert) { // a body won over still counts, as lost, for the squad it came from
           const k = b.convert.side + ':' + b.convert.squad;
           const s = squads[k] || (squads[k] = { side: b.convert.side, squad: b.convert.squad, total: 0, alive: 0, xp: 0, dealt: 0 });
@@ -1180,6 +1473,8 @@ const Engine = (() => {
         stats, squads,
         charm, // charisma stacks after the fight, by side and squad id (null for a side without)
         converted: [0, 1].map(k => all.filter(b => b.convert && b.side === k).length), // bodies each side won over
+        // each building: still standing, seconds of building done at the end (null when it was already built), whether any was done this fight
+        buildings: all.filter(b => b.u.building).map(b => ({ side: b.side, squad: b.squad, alive: b.alive, work: b.site ? b.site.work : null, worked: !!(b.site && b.site.work > b.site.start) })),
       };
     }
 
@@ -1204,6 +1499,6 @@ const Engine = (() => {
     return m;
   }
 
-  return { TOWER_DOWN, RULES, ruleOn, STEALTH_BACK, SKILL_SLOTS, SLOTS, SKILL_TYPES, skillParam, describeSkill, applySkills, innateUnit, fairBudget, battle, makeArmy, matrix, createBattle, buildSquad, rawStrength, squadsFor, withTraits, leveled, TRAIT_DEFAULTS, SPIN_CAP, CHARGE_RUN, TRAMPLE_RUN, BLAST_RADIUS, RAM_REACH, LEVEL_BONUS, MAX_LEVEL, CHARM_MAX, CONVERT_HP, CONVERT_SQUAD };
+  return { TOWER_DOWN, RULES, ruleOn, STEALTH_BACK, SKILL_SLOTS, SLOTS, SKILL_TYPES, skillParam, describeSkill, applySkills, innateUnit, fairBudget, battle, makeArmy, matrix, createBattle, buildSquad, rawStrength, squadsFor, withTraits, leveled, TRAIT_DEFAULTS, SPIN_CAP, CHARGE_RUN, TRAMPLE_RUN, BLAST_RADIUS, RAM_REACH, ROLL_START, ROLL_PAST, BUILD_GAP, BUILD_COOP, SITE_REACH, LEVEL_BONUS, MAX_LEVEL, CHARM_MAX, CONVERT_HP, CONVERT_SQUAD };
 })();
 if (typeof module !== 'undefined') module.exports = Engine;

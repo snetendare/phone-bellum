@@ -4,7 +4,6 @@ const fs = require('fs'), path = require('path');
 const src = (f) => fs.readFileSync(path.join(__dirname, f), 'utf8');
 const shapes = src('shapes.js'), eng = src('engine.js');
 // Counter Lab
-const r = JSON.parse(src('r5.json'));
 const SK = JSON.parse(src('skills-default.json'));
 const withSkills = (u) => ({ ...u, skills: SK.assign[u.name] || [null, null, null], skillsOn: [false, false, false] });
 const sample = JSON.parse(src('default-roster.json')); // the default roster for Counter Lab
@@ -12,7 +11,8 @@ const ex = JSON.parse(src('r9.json')).units.slice(7).map(u => ({ ...u, cost: Mat
 ex.push({ name: 'Ogre Smasher', cost: 100, bodies: 1, hp: 1100, hit: 260, aps: 0.5, range: 3, speed: 7, splash: 2.5, defense: 'none', defVal: 0, windUp: 1.0, knockback: 4 });
 ex.forEach((u, i) => { ex[i] = withSkills(u); });
 const lab = src('template.html').replace('/*SHAPES*/', () => shapes).replace('/*ENGINE*/', () => eng)
-  .replace('/*SAMPLE*/', () => JSON.stringify(sample)).replace('/*EXAMPLES*/', () => JSON.stringify(ex));
+  .replace('/*SAMPLE*/', () => JSON.stringify(sample)).replace('/*EXAMPLES*/', () => JSON.stringify(ex))
+  .replace('/*FACTIONS*/', () => src('factions.json'));
 const cut = lab.indexOf('</style>') + '</style>'.length;
 const labDoc = `<!doctype html>
 <html lang="en">
@@ -33,11 +33,20 @@ ${lab.slice(cut)
 `;
 fs.writeFileSync('lab.html', labDoc);
 // Game
-const css = src('game-template.html').split('<style>')[1].split('</style>')[0];
-const game = src('site-template.html').replace('/*BASECSS*/', () => css)
+const game = src('site-template.html').replace('/*BASECSS*/', () => src('game.css'))
   .replace('/*SHAPES*/', () => shapes).replace('/*ENGINE*/', () => eng)
-  .replace('/*GAME*/', () => src('game.js')).replace('/*DATA*/', () => src('demo-units.json'))
+  .replace('/*GAME*/', () => src('game.js'))
+  .replace('/*ART*/', () => src('art.js')).replace('/*RENDER2D*/', () => src('render2d.js')).replace('/*DATA*/', () => src('demo-units.json'))
   .replace('/*FACTIONS*/', () => src('faction-units.json'));
 game.split('<script>').slice(1).map(s => s.split('</script>')[0]).forEach(s => new Function(s));
+// the 3D board's code is loaded on its own when 3D starts: make sure it parses too
+for (const f of ['camera3d.js', 'models3d.js', 'render3d.js']) new Function(src(f));
 fs.writeFileSync('index.html', game);
-console.log('built index.html and lab.html');
+// 3D test page
+const lab3d = src('lab3d-template.html').replace('/*BASECSS*/', () => src('game.css'))
+  .replace('/*SHAPES*/', () => shapes).replace('/*ENGINE*/', () => eng).replace('/*GAME*/', () => src('game.js'))
+  .replace('/*ART*/', () => src('art.js')).replace('/*RENDER2D*/', () => src('render2d.js')).replace('/*CAMERA3D*/', () => src('camera3d.js'))
+  .replace('/*MODELS3D*/', () => src('models3d.js')).replace('/*RENDER3D*/', () => src('render3d.js'))
+  .replace('/*DATA*/', () => src('demo-units.json')).replace('/*LAB3D*/', () => src('lab3d.js'));
+fs.writeFileSync('lab3d.html', lab3d);
+console.log('built index.html, lab.html and lab3d.html');

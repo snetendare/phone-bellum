@@ -1,4 +1,390 @@
 {
-  "factions": [],
-  "skills": []
+  "factions": [
+    {
+      "id": "mechites",
+      "name": "Mechites",
+      "color": "#C2873F",
+      "theme": "Rock elementals with clockwork hearts. They move smooth as magic; the machines they build rattle and smoke.",
+      "tower": {
+        "name": "Mechite Tower",
+        "text": "For now the standard tower. The Mechites' own tower comes later.",
+        "unit": {
+          "hp": 650
+        }
+      },
+      "units": [
+        {
+          "name": "Rollers",
+          "cost": 100,
+          "unlock": 50,
+          "bodies": 2,
+          "hp": 400,
+          "hit": 30,
+          "aps": 0.4,
+          "range": 1.5,
+          "speed": 7,
+          "splash": 0,
+          "roll": 2,
+          "shape": "circle",
+          "color": "#9A8B76",
+          "skills": [
+            "rollerMomentum",
+            "rollerPlating",
+            null
+          ],
+          "smooth": true,
+          "tag": "ROL"
+        },
+        {
+          "name": "Cog Builder",
+          "cost": 200,
+          "unlock": 50,
+          "bodies": 1,
+          "hp": 350,
+          "hit": 30,
+          "aps": 1,
+          "range": 2,
+          "speed": 4,
+          "splash": 0,
+          "shape": "pentagon",
+          "color": "#B98B5A",
+          "build": {
+            "time": 1.5,
+            "range": 25,
+            "count": 1,
+            "unit": {
+              "name": "Cog Turret",
+              "cost": 0,
+              "bodies": 1,
+              "hp": 100,
+              "hit": 14,
+              "aps": 1.5,
+              "range": 25,
+              "speed": 0,
+              "splash": 0,
+              "shape": "square",
+              "color": "#A8A296",
+              "tag": "TUR"
+            }
+          },
+          "skills": [
+            "buildFactory",
+            "twinTurrets",
+            "masterEngineering"
+          ],
+          "skillNeeds": [
+            null,
+            null,
+            [
+              0,
+              1
+            ]
+          ],
+          "smooth": true,
+          "tag": "BLD"
+        },
+        {
+          "name": "Mechite Guards",
+          "cost": 200,
+          "unlock": 50,
+          "bodies": 3,
+          "hp": 340,
+          "hit": 32,
+          "pellets": 5,
+          "aps": 0.3,
+          "range": 10,
+          "speed": 2,
+          "splash": 0,
+          "knockback": 4,
+          "defense": "armor",
+          "defVal": 2,
+          "shape": "hexagon",
+          "color": "#7E8A8F",
+          "skills": [
+            "guardRapid",
+            "guardLink",
+            "guardHealbot"
+          ],
+          "smooth": true,
+          "tag": "GRD"
+        },
+        {
+          "name": "Altar of Build",
+          "cost": 500,
+          "unlock": 150,
+          "bodies": 1,
+          "hp": 4000,
+          "hit": 0,
+          "aps": 1,
+          "range": 0,
+          "speed": 0,
+          "splash": 0,
+          "building": "altar",
+          "footprint": 2,
+          "idle": true,
+          "noCount": true,
+          "anchored": true,
+          "noPack": true,
+          "noFlank": true,
+          "shape": "star",
+          "color": "#9C8B6E",
+          "tag": "ALT",
+          "skills": [
+            null,
+            null,
+            null
+          ]
+        }
+      ]
+    }
+  ],
+  "skills": [
+    {
+      "id": "rollerMomentum",
+      "type": "momentum",
+      "name": "Momentum",
+      "cost": 100,
+      "params": {
+        "accel": 100
+      }
+    },
+    {
+      "id": "rollerPlating",
+      "type": "armorHp",
+      "name": "Stone plating",
+      "cost": 150,
+      "params": {
+        "armor": 4,
+        "hp": 15
+      }
+    },
+    {
+      "id": "buildFactory",
+      "type": "building",
+      "name": "Build factory",
+      "cost": 200,
+      "params": {
+        "building": "factory"
+      }
+    },
+    {
+      "id": "twinTurrets",
+      "type": "builder",
+      "name": "Twin turrets",
+      "cost": 200,
+      "params": {
+        "extra": 1
+      }
+    },
+    {
+      "id": "masterEngineering",
+      "type": "builder",
+      "name": "Master engineering",
+      "cost": 400,
+      "params": {
+        "faster": 50,
+        "aps": 20,
+        "shield": 2,
+        "armor": 2
+      }
+    },
+    {
+      "id": "guardRapid",
+      "type": "rapid",
+      "name": "Oiled pumps",
+      "cost": 100,
+      "params": {
+        "aps": 25,
+        "range": 0
+      }
+    },
+    {
+      "id": "guardLink",
+      "type": "link",
+      "name": "Linked cores",
+      "cost": 150,
+      "params": {
+        "hp": 15
+      }
+    },
+    {
+      "id": "guardHealbot",
+      "type": "healbot",
+      "name": "Healbot",
+      "cost": 200,
+      "params": {
+        "hp": 300,
+        "pct": 4,
+        "range": 8,
+        "speed": 3
+      }
+    }
+  ],
+  "buildings": [
+    {
+      "id": "factory",
+      "name": "Factory",
+      "faction": "mechites",
+      "hp": 1000,
+      "buildSecs": 20,
+      "rebuild": 50,
+      "levelCost": 100,
+      "color": "#B07A3C",
+      "text": "A small, smoking workshop. Your nearest Cog Builder builds it during fights; once built, buy one of its constructs each round.",
+      "skills": [
+        {
+          "id": "fighter",
+          "name": "Cogbot Fighter",
+          "cost": 100,
+          "time": 2,
+          "unit": {
+            "name": "Cogbot Fighter",
+            "cost": 1,
+            "bodies": 1,
+            "hp": 1500,
+            "hit": 300,
+            "aps": 0.5,
+            "range": 2,
+            "speed": 3,
+            "splash": 0,
+            "defense": "armor",
+            "defVal": 4,
+            "shield": 2,
+            "shape": "square",
+            "color": "#A88452",
+            "tag": "FGT"
+          }
+        },
+        {
+          "id": "gunner",
+          "name": "Cogbot Machinegunner",
+          "cost": 100,
+          "time": 2,
+          "unit": {
+            "name": "Cogbot Machinegunner",
+            "cost": 1,
+            "bodies": 1,
+            "hp": 500,
+            "hit": 50,
+            "aps": 0.3,
+            "spinUp": 225,
+            "spinCap": 10,
+            "range": 22,
+            "speed": 3,
+            "splash": 0,
+            "shape": "triangle",
+            "color": "#9C8F7A",
+            "tag": "MGN"
+          }
+        },
+        {
+          "id": "cogmech",
+          "name": "CogMech",
+          "cost": 300,
+          "time": 4,
+          "unit": {
+            "name": "CogMech",
+            "cost": 1,
+            "bodies": 1,
+            "hp": 2000,
+            "hit": 200,
+            "aps": 1,
+            "range": 18,
+            "speed": 2.5,
+            "splash": 2,
+            "defense": "armor",
+            "defVal": 4,
+            "shield": 3,
+            "turrets": 2,
+            "shape": "hexagon",
+            "color": "#B5895A",
+            "tag": "MCH"
+          }
+        }
+      ],
+      "survive": true,
+      "awake": {
+        "speed": 2,
+        "hit": 220,
+        "aps": 0.4,
+        "range": 22,
+        "splash": 3,
+        "projSpeed": 30
+      }
+    },
+    {
+      "id": "altar",
+      "name": "Altar of Build",
+      "faction": "mechites",
+      "hp": 4000,
+      "buildSecs": 30,
+      "selfBuild": 0.2,
+      "rebuild": 50,
+      "color": "#9C8B6E",
+      "text": "A stone ring with the Cog Spire in its middle, standing where four tiles meet. Your nearest free Cog Builder builds it during fights (with none free it builds itself, five times slower); once built, buy one of its blessings each round.",
+      "awake": {
+        "speed": 2.5,
+        "hit": 38,
+        "aps": 2,
+        "range": 18,
+        "spinUp": 50,
+        "spinHit": 50,
+        "beams": 6
+      },
+      "skills": [
+        {
+          "id": "blessing",
+          "name": "Blessing of the Cycle",
+          "cost": 200,
+          "text": "This round all your constructs (turrets, healbots, buildings and what they make) get +25% construct speed, +25% health, +15% move speed, +15% fire rate and regain 2% of their health every second.",
+          "bless": {
+            "build": 25,
+            "hp": 25,
+            "speed": 15,
+            "aps": 15,
+            "regen": 2
+          }
+        },
+        {
+          "id": "defense",
+          "name": "Cogbot Defensive Force",
+          "cost": 500,
+          "time": 4,
+          "text": "Four seconds into this round's fight the altar makes 2 Cogbot Fighters and 2 Cogbot Machinegunners.",
+          "make": [
+            [
+              "factory",
+              "fighter",
+              2
+            ],
+            [
+              "factory",
+              "gunner",
+              2
+            ]
+          ]
+        },
+        {
+          "id": "awoken",
+          "name": "Core Awoken",
+          "cost": 800,
+          "text": "This round your construct buildings become units when the fight starts: the Factory rolls out on caterpillar tracks with a big tank gun, the altar rises on four spider legs and its Cog Spire fires 6 beams like a Sun Priest, and your turrets get wheels: they keep away from enemies at 4 m/s while lobbing mortar shells at the enemy's back line.",
+          "awake": {
+            "built": {
+              "speed": 4,
+              "flee": 14,
+              "backline": true,
+              "hit": 28,
+              "aps": 0.75,
+              "range": 35,
+              "minRange": 8,
+              "splash": 3,
+              "projSpeed": 22,
+              "lob": true
+            }
+          }
+        }
+      ]
+    }
+  ]
 }
