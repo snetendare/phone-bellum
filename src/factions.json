@@ -116,7 +116,7 @@
           "skills": [
             "rollerMomentum",
             "rollerPlating",
-            null
+            "rollerUnfold"
           ],
           "smooth": true,
           "tag": "ROL"
@@ -243,6 +243,12 @@
         "armor": 4,
         "hp": 15
       }
+    },
+    {
+      "id": "rollerUnfold",
+      "type": "unfold",
+      "name": "Unfold",
+      "cost": 100
     },
     {
       "id": "buildFactory",

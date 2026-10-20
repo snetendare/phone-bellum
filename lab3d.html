@@ -485,6 +485,7 @@ const Engine = (() => {
     spread:  { label: 'Spread', params: [['min', 'Least distance (m)', 1, 0.5], ['max', 'Most distance (m)', 6, 0.5]] },
     mortar:  { label: 'Mortar', params: [['range', 'Range (+m)', 15, 1], ['min', 'Minimum range (m)', 5, 0.5], ['aps', 'Attack speed (+ attacks per second)', 0.1, 0.05]] },
     momentum: { label: 'Momentum', params: [['accel', 'Rolling acceleration (+%)', 100, 10]] },
+    unfold:  { label: 'Unfold (rolling units walk instead)', params: [] },
     link:    { label: 'Linked health', params: [['hp', 'Health (+%)', 15, 5]] },
     healbot: { label: 'Healbot', params: [['hp', 'Healbot health', 300, 25], ['pct', 'Heals each body (% of max health per second)', 4, 0.5], ['range', 'Heal reach (m)', 8, 1], ['speed', 'Healbot move speed (m/s)', 3, 0.5]] },
     building: { label: 'Building', params: [['building', 'Building (id)', 'factory', null]] },
@@ -529,6 +530,7 @@ const Engine = (() => {
       case 'shield': return `Each body fully blocks the first ${n('hits')} ${+P('hits') === 1 ? 'hit' : 'hits'} it takes in a fight, however big. Poison already on it still ticks.`;
       case 'building': return `Pick a free tile in your zone for a ${String(P('building'))}. Your nearest builder builds it during fights; once built it stays all match, and each round you can buy one of its own skills.`;
       case 'momentum': return `Gets up to full rolling speed ${n('accel')}% faster, so it rolls over its targets more often.`;
+      case 'unfold': return 'Folds out into a walking unit: it walks up to its target and hits it in melee, one enemy at a time, instead of rolling over everything in its path. Same health and stats.';
       case 'link': return `+${n('hp')}% health, and the bodies of a squad share one health pool: damage to any of them is shared by all, and they fall together.`;
       case 'healbot': return `Each squad brings a healbot (${n('hp')} health) that follows it, never attacks, and heals every body of the squad within ${n('range')} m for ${n('pct')}% of its max health every second.`;
       case 'builder': {
@@ -605,6 +607,7 @@ const Engine = (() => {
           u.hit = u.hit * (1 - Math.min(90, P('hit')) / 100);
           break;
         case 'momentum': if (u.roll > 0) u.roll = u.roll / (1 + Math.max(0, P('accel')) / 100); break;
+        case 'unfold': if (u.roll > 0) { u.roll = 0; u.unfolded = true; } break;
         case 'link': u.link = true; u.hp = u.hp * (1 + P('hp') / 100); break;
         case 'healbot':
           u.escort = { pct: Math.max(0, P('pct')), unit: withTraits({ name: 'Healbot', cost: 0, bodies: 1, hp: Math.max(1, P('hp')), hit: 0, aps: 1, range: Math.max(1, P('range')),
@@ -4634,6 +4637,7 @@ const Render2D = (cv, view) => {
       // what Mechites build rattles as it goes (the Mechites themselves move smoothly)
       const rattle = b.u.construct ? Math.sin(bt.time() * 47 + b.x * 3.1) * r * 0.08 : 0;
       Shapes.body(ctx, b.u.shape, PX(b.x) + rattle, PY(b.y), r, upOf(b.side), b.u.color, c, (0.35 + 0.65 * hpr) * (b.delay > 0 ? 0.45 : 1));
+      if (b.u.unfolded) { ctx.fillStyle = 'rgba(30,24,20,0.75)'; for (const o of [-1, 1]) ctx.fillRect(PX(b.x) + o * r * 0.45 - r * 0.15, PY(b.y) + r * 0.75, r * 0.3, r * 0.45); } // an unfolded roller: two stumpy legs
       if (b.u.roll > 0) { // a roller: a seam across the ball turns as it rolls
         const a = (b.moved || 0) / Math.max(0.3, r / S);
         ctx.strokeStyle = 'rgba(30,24,20,0.75)'; ctx.lineWidth = Math.max(1, r * 0.18);
@@ -5281,6 +5285,15 @@ const Models3D = (THREE) => {
       P(new THREE.TorusGeometry(0.88, 0.09, 4, 14), BRASS, [0, 0.9, 0], [0, Math.PI / 2, 0]),
       ...[...Array(10)].map((_, k) => { const a = k * Math.PI / 5; return P(box(0.12, 0.2, 0.2), BRASS, [0, 0.9 + Math.cos(a) * 0.98, Math.sin(a) * 0.98], [a, 0, 0]); }),
       P(new THREE.TorusGeometry(0.8, 0.07, 4, 14), 'team', [0, 0.9, 0], [0, 0, 0])],
+    // Rollers, unfolded (the Unfold skill): the ball opens into a rock elemental on two stumpy legs, the cog band
+    // round its waist, big boulder fists
+    'roller:unfolded': () => [
+      P(box(0.4, 0.75, 0.42), 'tint', [-0.32, 0.38, 0]), P(box(0.4, 0.75, 0.42), 'tint', [0.32, 0.38, 0]),
+      P(ball(0.72), 'tint', [0, 1.4, 0], [0.3, 0.5, 0], [1.1, 0.95, 0.9]),
+      P(new THREE.TorusGeometry(0.74, 0.08, 4, 14), BRASS, [0, 1.15, 0], [Math.PI / 2, 0, 0]),
+      P(new THREE.TorusGeometry(0.66, 0.06, 4, 14), 'team', [0, 1.6, 0], [Math.PI / 2, 0, 0]),
+      P(ball(0.38), 'tint', [-0.95, 1.05, -0.2]), P(ball(0.38), 'tint', [0.95, 1.05, -0.2]),
+      P(box(0.26, 0.06, 0.04), ETHER, [0, 1.75, -0.66])],
     // Cog Builder: a squat rock elemental with a backpack full of scrolls and a brass gadget for a right hand
     cogBuilder: () => [
       P(box(0.34, 0.6, 0.34), STONE, [-0.22, 0.3, 0]), P(box(0.34, 0.6, 0.34), STONE, [0.22, 0.3, 0]),
@@ -5470,7 +5483,7 @@ const Models3D = (THREE) => {
     if (u.building) { const k = 'building:' + u.building; return u.awake && BUILD[k + ':awake'] ? k + ':awake' : BUILD[k] ? k : 'building'; } // Core Awoken: its walking version
     if (u.structure) { const k = TOWERS[u.kind] ? 'tower:' + u.kind : /^f-/.test(u.kind || '') ? 'tower:faction' : 'tower:keep'; return u.awake && BUILD[k + ':awake'] ? k + ':awake' : k; } // Core Awoken: the Mecha Tower on wheels
     if (u.aloft) return u.kind === 'drone' ? 'drone' : 'airship';
-    if (NAMED[u.name]) return u.awake && BUILD[NAMED[u.name] + ':awake'] ? NAMED[u.name] + ':awake' : NAMED[u.name];
+    if (NAMED[u.name]) { const k = NAMED[u.name]; return u.awake && BUILD[k + ':awake'] ? k + ':awake' : u.unfolded && BUILD[k + ':unfolded'] ? k + ':unfolded' : k; } // Core Awoken, Unfold: their own versions
     if (u.shape === 'horse') return 'horse';
     if (u.shape === 'spider') return 'spider';
     if (u.shape === 'imp' || u.shape === 'ring') return 'flier';

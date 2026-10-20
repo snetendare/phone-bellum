@@ -729,6 +729,7 @@ const Render2D = (cv, view) => {
       // what Mechites build rattles as it goes (the Mechites themselves move smoothly)
       const rattle = b.u.construct ? Math.sin(bt.time() * 47 + b.x * 3.1) * r * 0.08 : 0;
       Shapes.body(ctx, b.u.shape, PX(b.x) + rattle, PY(b.y), r, upOf(b.side), b.u.color, c, (0.35 + 0.65 * hpr) * (b.delay > 0 ? 0.45 : 1));
+      if (b.u.unfolded) { ctx.fillStyle = 'rgba(30,24,20,0.75)'; for (const o of [-1, 1]) ctx.fillRect(PX(b.x) + o * r * 0.45 - r * 0.15, PY(b.y) + r * 0.75, r * 0.3, r * 0.45); } // an unfolded roller: two stumpy legs
       if (b.u.roll > 0) { // a roller: a seam across the ball turns as it rolls
         const a = (b.moved || 0) / Math.max(0.3, r / S);
         ctx.strokeStyle = 'rgba(30,24,20,0.75)'; ctx.lineWidth = Math.max(1, r * 0.18);

@@ -268,6 +268,15 @@ const Models3D = (THREE) => {
       P(new THREE.TorusGeometry(0.88, 0.09, 4, 14), BRASS, [0, 0.9, 0], [0, Math.PI / 2, 0]),
       ...[...Array(10)].map((_, k) => { const a = k * Math.PI / 5; return P(box(0.12, 0.2, 0.2), BRASS, [0, 0.9 + Math.cos(a) * 0.98, Math.sin(a) * 0.98], [a, 0, 0]); }),
       P(new THREE.TorusGeometry(0.8, 0.07, 4, 14), 'team', [0, 0.9, 0], [0, 0, 0])],
+    // Rollers, unfolded (the Unfold skill): the ball opens into a rock elemental on two stumpy legs, the cog band
+    // round its waist, big boulder fists
+    'roller:unfolded': () => [
+      P(box(0.4, 0.75, 0.42), 'tint', [-0.32, 0.38, 0]), P(box(0.4, 0.75, 0.42), 'tint', [0.32, 0.38, 0]),
+      P(ball(0.72), 'tint', [0, 1.4, 0], [0.3, 0.5, 0], [1.1, 0.95, 0.9]),
+      P(new THREE.TorusGeometry(0.74, 0.08, 4, 14), BRASS, [0, 1.15, 0], [Math.PI / 2, 0, 0]),
+      P(new THREE.TorusGeometry(0.66, 0.06, 4, 14), 'team', [0, 1.6, 0], [Math.PI / 2, 0, 0]),
+      P(ball(0.38), 'tint', [-0.95, 1.05, -0.2]), P(ball(0.38), 'tint', [0.95, 1.05, -0.2]),
+      P(box(0.26, 0.06, 0.04), ETHER, [0, 1.75, -0.66])],
     // Cog Builder: a squat rock elemental with a backpack full of scrolls and a brass gadget for a right hand
     cogBuilder: () => [
       P(box(0.34, 0.6, 0.34), STONE, [-0.22, 0.3, 0]), P(box(0.34, 0.6, 0.34), STONE, [0.22, 0.3, 0]),
@@ -457,7 +466,7 @@ const Models3D = (THREE) => {
     if (u.building) { const k = 'building:' + u.building; return u.awake && BUILD[k + ':awake'] ? k + ':awake' : BUILD[k] ? k : 'building'; } // Core Awoken: its walking version
     if (u.structure) { const k = TOWERS[u.kind] ? 'tower:' + u.kind : /^f-/.test(u.kind || '') ? 'tower:faction' : 'tower:keep'; return u.awake && BUILD[k + ':awake'] ? k + ':awake' : k; } // Core Awoken: the Mecha Tower on wheels
     if (u.aloft) return u.kind === 'drone' ? 'drone' : 'airship';
-    if (NAMED[u.name]) return u.awake && BUILD[NAMED[u.name] + ':awake'] ? NAMED[u.name] + ':awake' : NAMED[u.name];
+    if (NAMED[u.name]) { const k = NAMED[u.name]; return u.awake && BUILD[k + ':awake'] ? k + ':awake' : u.unfolded && BUILD[k + ':unfolded'] ? k + ':unfolded' : k; } // Core Awoken, Unfold: their own versions
     if (u.shape === 'horse') return 'horse';
     if (u.shape === 'spider') return 'spider';
     if (u.shape === 'imp' || u.shape === 'ring') return 'flier';

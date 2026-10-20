@@ -13,6 +13,18 @@ const squad = (u, side, x, y, id, level) => E.buildSquad(u, side, x, y, id, Game
 const run = (bt, secs) => { for (let k = 0; k < secs / g.dt - 1e-9 && bt.step(); k++); };
 
 // ---------- Rollers ----------
+// Unfold: the same stats, but it walks up and hits one enemy at a time, like an Ent without its sweep
+{
+  const base = unit('Rollers'), u = unit('Rollers', 'rollerUnfold');
+  assert.ok(!u.roll && u.unfolded && !u.flame && u.hp === base.hp && u.hit === base.hit && u.aps === base.aps && u.range === base.range && u.speed === base.speed, 'unfolded, nothing else changed');
+  const [r] = squad({ ...u, bodies: 1 }, 0, 0, -10, 1);
+  const d = squad({ ...DUMMY, bodies: 2 }, 1, 0, 10, 2);
+  const bt = E.createBattle([r], d, g);
+  run(bt, 8);
+  near(r.y, d[0].y - r.u.range, 2.5, 'it stops in front of its target');
+  assert.ok(r.dealt > 0 && r.dealt % base.hit < 1e-6, 'and hits it');
+  assert.ok(d.filter(x => x.hp < x.u.hp).length === 1, 'one enemy at a time');
+}
 {
   // speed climbs from 1 to 7 m/s over 2 s
   const [r] = squad({ ...unit('Rollers'), bodies: 1 }, 0, 0, -30, 1);
