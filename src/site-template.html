@@ -2020,8 +2020,8 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
 
   // ---------- match history ----------
   // Two-player matches only: the host's phone posts each round, once, to a Google Sheet web app
-  // (tools/match-history.gs). Empty URL: nothing is saved and the Match history button is hidden.
-  const HISTORY_URL = '';
+  // (tools/match-history.gs, deployed from the sheet). Empty URL: nothing is saved and the Match history button is hidden.
+  const HISTORY_URL = 'https://script.google.com/macros/s/AKfycbzEXvAprmkKnWLvx0RhqIwjW90EAuL4GSeeRN1vvN5kz6VxZEJQ9Xx_vcwSbDBNi3rI/exec';
   function saveHistory(pre, sum) {
     if (!HISTORY_URL || mode !== 'host') return;
     const p = withUnits(pre), charName = (sd) => { const c = Game.charInfo(Game.charOf(p, sd)); return c ? c.name : ''; };

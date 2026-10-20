@@ -6,7 +6,7 @@ const fs = require('fs'), path = require('path');
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const FAKE = 'https://sheet.test/exec';
 const TEST_PAGE = path.join(__dirname, '../../hist-test.html');
-fs.writeFileSync(TEST_PAGE, fs.readFileSync(path.join(__dirname, '../../index.html'), 'utf8').replace("const HISTORY_URL = '';", `const HISTORY_URL = '${FAKE}';`));
+fs.writeFileSync(TEST_PAGE, fs.readFileSync(path.join(__dirname, '../../index.html'), 'utf8').replace(/const HISTORY_URL = '[^']*';/, `const HISTORY_URL = '${FAKE}';`));
 process.on('exit', () => { try { fs.unlinkSync(TEST_PAGE); } catch (e) {} });
 (async () => {
   const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--disable-features=WebRtcHideLocalIpsWithMdns'] });
