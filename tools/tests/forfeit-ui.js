@@ -1,10 +1,11 @@
 // Main menu from the in-match cog: it asks first (No keeps the match), Yes forfeits. Vs the AI the match just ends;
 // in a live match the other player wins, and the host's saved match is cleared so the link can't resume it.
 const { chromium } = require('playwright-core');
+const ctx2d = require('./board2d'); // these checks are for the 2D board
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 (async () => {
   const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--disable-features=WebRtcHideLocalIpsWithMdns'] });
-  const mk = async (n) => { const p = await (await b.newContext({ viewport: { width: 390, height: 844 } })).newPage(); p.on('pageerror', e => console.log(`[${n}] PAGE ERROR`, e.message)); return p; };
+  const mk = async (n) => { const p = await (await ctx2d(b, { viewport: { width: 390, height: 844 } })).newPage(); p.on('pageerror', e => console.log(`[${n}] PAGE ERROR`, e.message)); return p; };
   const text = (p, sel) => p.locator(sel).innerText().then(t => t.replace(/\s+/g, ' ').trim());
   // vs AI
   const ai = await mk('ai');

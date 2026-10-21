@@ -1,10 +1,11 @@
 // Matteo in a live match: the guest gives the first Charisma stack, the host takes it, and the stacks after the
 // fight (worked out on the host) reach the guest. The host's stack given this round stays hidden from the guest.
 const { chromium } = require('playwright-core');
+const ctx2d = require('./board2d'); // these checks are for the 2D board
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 (async () => {
   const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--disable-features=WebRtcHideLocalIpsWithMdns'] });
-  const mk = async (n) => { const p = await (await b.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1 })).newPage(); p.on('pageerror', e => console.log(`[${n}] PAGE ERROR`, e.message)); return p; };
+  const mk = async (n) => { const p = await (await ctx2d(b, { viewport: { width: 390, height: 844 }, deviceScaleFactor: 1 })).newPage(); p.on('pageerror', e => console.log(`[${n}] PAGE ERROR`, e.message)); return p; };
   const host = await mk('host'), guest = await mk('guest');
   const BASE = 'http://127.0.0.1:8766/?test&peerhost=127.0.0.1&peerport=9000';
   await host.goto(BASE); await host.click('#friend');
@@ -17,7 +18,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   await host.dblclick('[data-pack="0"]'); await guest.dblclick('[data-pack="0"]'); await sleep(600);
   // both players are Matteo (forced on both phones)
   for (const p of [host, guest]) await p.evaluate(() => { const { m } = window.__pb(); m.chars = ['matteo', 'matteo']; });
-  const redraw = async (p) => { const u = p.locator('[data-i]:not([data-locked])').first(); await u.click(); await sleep(80); await u.click(); await sleep(150); };
+  const redraw = async (p) => { const u = p.locator('[data-i]:not([data-locked])').first(); await u.click(); await sleep(80); await p.click('#task-x'); await sleep(150); };
   await redraw(host); await redraw(guest);
   const giveFirst = async (p) => {
     const sq = await p.evaluate(() => { const { m, me } = window.__pb(); return m.armies[me][0]; });

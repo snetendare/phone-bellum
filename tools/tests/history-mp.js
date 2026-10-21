@@ -2,6 +2,7 @@
 // Writes hist-test.html (index.html with HISTORY_URL pointed at a fake sheet the test answers itself) next to
 // index.html for the run, and removes it afterwards.
 const { chromium } = require('playwright-core');
+const ctx2d = require('./board2d'); // these checks are for the 2D board
 const fs = require('fs'), path = require('path');
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const FAKE = 'https://sheet.test/exec';
@@ -12,7 +13,7 @@ process.on('exit', () => { try { fs.unlinkSync(TEST_PAGE); } catch (e) {} });
   const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--disable-features=WebRtcHideLocalIpsWithMdns'] });
   const rows = [], posts = { host: 0, guest: 0 };
   const mk = async (n) => {
-    const ctx = await b.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 });
+    const ctx = await ctx2d(b, { viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 });
     await ctx.route(FAKE + '**', r => {
       if (r.request().method() === 'POST') { posts[n]++; rows.unshift({ time: new Date().toISOString(), ...JSON.parse(r.request().postData()) }); return r.fulfill({ body: '{"ok":true}' }); }
       return r.fulfill({ contentType: 'application/json', headers: { 'Access-Control-Allow-Origin': '*' }, body: JSON.stringify({ rows }) });

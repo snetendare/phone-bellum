@@ -19,7 +19,10 @@
 /*BASECSS*/
 [hidden] { display: none !important; }
 .panel:empty { display: none; }
-body { padding-top: calc(12px + env(safe-area-inset-top, 0px)); padding-bottom: calc(28px + env(safe-area-inset-bottom, 0px)); margin: 0; }
+body { padding-top: calc(6px + env(safe-area-inset-top, 0px)); padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px)); margin: 0; }
+/* tight on purpose: the HUD, the board and the deploy panel should fit a phone screen with as little scrolling as possible */
+.app { gap: 8px; }
+html:not(.pc) #panel .btn.small { padding: 5px 10px; }
 .net { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 8px; justify-content: center; min-height: 18px; }
 .net i { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); display: inline-block; }
 .net.ok i { background: #6FD08C; }
@@ -39,6 +42,8 @@ body { padding-top: calc(12px + env(safe-area-inset-top, 0px)); padding-bottom: 
 @keyframes dots { 0% { content: ""; } 25% { content: "."; } 50% { content: ".."; } 75% { content: "..."; } }
 a { color: var(--you); }
 .round-sub { display: flex; align-items: center; justify-content: center; gap: 6px; }
+.hud .round { display: flex; align-items: center; gap: 6px; } /* the round number beside its phase and buttons: one row, not two */
+.hud .round b { font-size: 20px; }
 .cog { width: 24px; height: 24px; padding: 0; border: 1px solid var(--line); border-radius: 50%; background: transparent; color: var(--muted); display: grid; place-items: center; cursor: pointer; }
 .cog:hover, .cog:focus-visible { color: var(--gold); border-color: var(--gold); }
 .cog[aria-expanded="true"] { color: var(--gold); border-color: var(--gold); }
@@ -65,12 +70,17 @@ a { color: var(--you); }
 .volrow input { flex: 1; max-width: 220px; accent-color: var(--gold); }
 .volrow .num { width: 3ch; text-align: right; font-family: var(--font-data); font-size: 13px; }
 /* unit shop: one tab per tier, rarity colours, locked units greyed out */
-.tiers { display: grid; grid-template-columns: repeat(var(--n, 4), minmax(0, 1fr)); gap: 6px; }
-.tiers button { min-width: 0; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--muted); padding: 6px 6px; font: 600 14px var(--font-display); display: grid; gap: 1px; text-align: left; border-top: 3px solid var(--tier); }
-.tiers button em { font: 600 11px var(--font-display); font-style: normal; color: var(--tier); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tiers { display: grid; grid-template-columns: repeat(var(--n, 4), minmax(0, 1fr)); gap: 4px; }
+.tiers button { min-width: 0; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--muted); padding: 4px 5px; font: 600 13px var(--font-display); display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: baseline; gap: 0 3px; text-align: left; border-top: 3px solid var(--tier); }
+.tiers button small { grid-column: 1 / -1; }
+.tiers button em { font: 600 clamp(8px, 2.45vw, 11px) var(--font-display); letter-spacing: -0.02em; font-style: normal; color: var(--tier); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tiers button small { font: 500 10px var(--font-data); letter-spacing: -0.03em; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tiers button[aria-selected="true"] { color: var(--ink); background: var(--panel); box-shadow: inset 0 0 0 1px var(--tier); }
 .ucard { border-top: 3px solid var(--tier, var(--line)) !important; }
+.shop .ucard { padding: 7px 8px 6px; gap: 2px; }
+.shop .ucard .t { padding-right: 24px; }
+.shop .ucard .n { font-size: 14px; }
+.shop .ucard .c { white-space: nowrap; }
 .ucard .tier { font: 600 10px var(--font-data); letter-spacing: 0.08em; color: var(--tier); text-transform: uppercase; }
 .ucard[data-locked] { opacity: 0.55; background: repeating-linear-gradient(135deg, transparent 0 8px, rgba(255,255,255,0.03) 8px 16px), var(--bg); }
 .ucard[data-locked] .t > span:first-child { filter: grayscale(1); }
@@ -82,7 +92,7 @@ a { color: var(--you); }
 .roles .is, .roles .ex { color: var(--ink); }
 .roles .beats { color: var(--you); }
 .roles .rng { color: var(--muted); margin-left: auto; }
-.ucard .roles { margin: 2px -26px 1px 0; }
+.ucard .roles { margin: 1px 0 0; }
 .ucard[data-locked] .roles { filter: grayscale(1); }
 /* compact unit cards, so the shop and the Ready button fit under the board */
 .uwrap { flex-basis: 118px; }
@@ -134,6 +144,9 @@ html.pc .panel > .bar:last-child { margin: -6px -12px -12px; padding: 6px 12px 1
 .settings summary span::after { content: " ▾"; color: var(--gold); }
 .settings[open] summary span::after { content: " ▴"; }
 .settings-body { display: grid; gap: 12px; padding: 0 12px 12px; }
+.cog.help { width: 28px; height: 28px; font: 600 14px var(--font-display); }
+.cog.help.new { color: var(--bg); background: var(--gold); border-color: var(--gold); }
+.helplist { margin: 0; padding-left: 18px; display: grid; gap: 6px; font-size: 14px; color: var(--muted); }
 .linkbtn { border: 0; background: none; padding: 0; font: inherit; color: var(--gold); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
 /* choose one of 3 (starting package, tower): cards over the board, like a level-up pick */
 .pick { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 8px; padding: 12px 10px; overflow-y: auto; -webkit-overflow-scrolling: touch;
@@ -184,6 +197,34 @@ html.pc .panel { grid-column: 2; grid-row: 1 / span 3; min-width: 0; max-height:
 html.pc #wrap { width: min(calc(100vw - 32px - 460px), calc((100svh - 110px) * 0.75)); min-width: 360px; }
 html.pc .shop { display: grid; grid-template-columns: repeat(auto-fill, minmax(124px, 1fr)); overflow-x: visible; }
 html.pc .sheet { max-width: 640px; }
+/* Phone in a match (html.dock, see dock()): the board fills the screen above a panel docked at the bottom. While
+   deploying the panel is a drawer with a blue pull tab on its top edge: hold the tab and slide the drawer up over the
+   bottom of the board or down to its last row (a tap on the tab works too; picking a unit also puts it down). A task on the board (placing a unit, Move, Charisma, a tower) shows in a line over the board, with an X. */
+html.dock body { padding-inline: 6px; padding-bottom: calc(var(--dock-h, 64px) + 6px); }
+html.dock #wrap { width: min(100%, calc(var(--board-h, 480px) * 0.75)); min-width: 0; }
+html.dock #wrap:has(> .board3d) { width: 100%; aspect-ratio: auto; height: var(--board-h, 480px); } /* the 3D camera fits the board to any shape */
+html.dock .panel { position: fixed; left: 0; right: 0; bottom: 0; z-index: 4; max-width: 560px; margin: 0 auto; max-height: 62svh; overflow-y: auto; border-bottom: 0; border-radius: 10px 10px 0 0; box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.45); }
+/* tighter than the side panel: less padding, no overlap of the shop by the last row (the whole drawer is in sight, so
+   that row needn't stick), and the home bar's inset only partly kept (the row may come within 8 px of the edge) */
+html.dock .panel { padding: 8px 8px 0; gap: 6px; }
+html.dock .panel > .bar:last-child { margin: 0 -8px; padding: 2px 8px max(8px, calc(env(safe-area-inset-bottom, 0px) - 14px)); }
+html.dock .panel > .bar:last-child .btn { padding-block: 8px; }
+html.dock .shop { padding-bottom: 2px; }
+html.dock .xbtns { flex: 1 1 100%; gap: 5px !important; }
+html.dock .xbtns .btn.small { padding: 5px 8px; font-size: 12px; }
+html.dock .shop .ucard { padding: 6px 8px 5px; }
+html.dock .panel.shut > :not(:last-child) { display: none; }
+html.dock .panel.shut > .bar:last-child { margin-top: 0; padding-top: 0; }
+.dock-gold, .dock-tab { display: none; }
+html.dock .dock-tab { position: fixed; left: 50%; bottom: var(--dock-h, 64px); transform: translateX(-50%); z-index: 4; display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  height: 28px; min-width: 76px; padding: 0 16px; border: 0; border-radius: 14px 14px 0 0; background: var(--you); color: var(--bg); font: 600 13px var(--font-display);
+  letter-spacing: 0.04em; touch-action: none; user-select: none; -webkit-user-select: none; box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.35); cursor: grab; }
+html.dock .dock-tab:active { cursor: grabbing; }
+.dock-tab svg { display: block; }
+html.dock .panel.shut .dock-gold { display: inline; font-size: 15px; }
+.task { position: absolute; top: 30px; left: 10%; right: 10%; z-index: 3; display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 10px; border: 1px solid var(--you); border-radius: 6px; background: rgba(13, 19, 21, 0.9); font-size: 12px; line-height: 1.35; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45); }
+.task span { flex: 1; min-width: 0; }
+.task button { flex: none; width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel); font-size: 16px; line-height: 1; display: grid; place-items: center; }
 </style>
 <script>
 // PC or phone: a fine pointer that can hover (a mouse) and room for the board and controls side by side
@@ -208,9 +249,11 @@ html.pc .sheet { max-width: 640px; }
     <div class="overlay" id="overlay"></div>
     <div class="pick" id="pick" role="dialog" aria-modal="false" aria-labelledby="pick-h" hidden></div>
     <button class="btn primary small pick-peek" id="pick-peek" hidden></button>
+    <div class="task" id="task" role="status" hidden><span id="task-text"></span><button id="task-x" aria-label="Stop placing">✕</button></div>
   </div>
 
   <div class="panel" id="panel"></div>
+  <button class="dock-tab" id="dock-toggle" aria-controls="panel" hidden></button>
 </div>
 
 <div class="dd" id="stats-dd" hidden role="dialog" aria-label="Damage last round"></div>
@@ -223,6 +266,10 @@ html.pc .sheet { max-width: 640px; }
 </script>
 <script>
 /*GAME*/
+</script>
+<script>
+/*ART*/
+/*RENDER2D*/
 </script>
 <script>
 (() => {
@@ -361,10 +408,10 @@ html.pc .sheet { max-width: 640px; }
     const p = raw && JSON.parse(raw);
     if (validSet(p)) useSet(p, true); else useSet(BUILTIN, false);
   } catch (e) { useSet(BUILTIN, false); }
-  const tag = (u) => (u.name.replace(/[^A-Za-z]/g, '').slice(0, 3) || 'UNT').toUpperCase();
+  const tag = Shapes.tag;
   const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const $ = (id) => document.getElementById(id);
-  const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  const css = Art.css;
   const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
   const now = () => Date.now();
 
@@ -376,7 +423,7 @@ html.pc .sheet { max-width: 640px; }
   const foe = () => 1 - me;
   let m = null;             // match state (on the guest: a copy kept in step by the host)
   let phase = 'start';      // start | lobby | draft | deploy | battle | result | end
-  try { if (/[?&]test\b/.test(location.search)) window.__pb = () => ({ m, me }); } catch (e) {} // read-only peek for UI tests
+  try { if (/[?&]test\b/.test(location.search)) window.__pb = () => ({ m, me, board3d, board }); } catch (e) {} // read-only peek for UI tests
   let selected = null;      // unit index chosen in the shop
   let rangeOf = null;       // { side, id }: the squad last tapped on the board; its range shows as a dotted ring
   let bt = null;            // battle being played back
@@ -515,7 +562,7 @@ html.pc .sheet { max-width: 640px; }
     syncMusic();
     if (on) Object.values(music).forEach(pl => pl.wake());
   }
-  // the cog in a match opens it as Settings (music and Main menu), the menu's Music button as music only.
+  // the cog in a match opens it as Settings (music, the 2D / 3D board and Main menu), the menu's Music button as music only.
   // data-keep: phase changes leave this sheet open (closeSheet)
   function openSoundSheet() {
     const inMatch = !!m && phase !== 'start' && phase !== 'lobby';
@@ -531,7 +578,25 @@ html.pc .sheet { max-width: 640px; }
         <span class="hint">Music volume</span>
         <span class="volrow"><input type="range" id="vol" min="0" max="100" step="5" value="${snd.vol}" aria-label="Music volume"><span class="num" id="vol-n">${snd.vol}</span></span>
       </div>
-      ${inMatch ? '<button class="btn" id="to-menu">Main menu</button>' : ''}
+      ${inMatch ? `<div class="bar">
+        <span class="hint">Board</span>
+        <div class="seg" role="group" aria-label="Board">
+          <button data-board="2d" aria-pressed="${!want3d}">2D</button><button data-board="3d" aria-pressed="${want3d}">3D</button>
+        </div>
+      </div>
+      ${document.documentElement.classList.contains('pc') ? '' : `<div class="bar">
+        <span class="hint">Phone layout</span>
+        <div class="seg" role="group" aria-label="Phone layout">
+          <button data-lay="drawer" aria-pressed="${phoneLayout === 'drawer'}">Drawer</button><button data-lay="below" aria-pressed="${phoneLayout === 'below'}">Below the board</button>
+        </div>
+      </div>`}
+      <div class="bar q3d-bar" id="q3d-bar"${want3d ? '' : ' hidden'}>
+        <span class="hint">3D quality</span>
+        <div class="seg" role="group" aria-label="3D quality">
+          ${Q3D.map(q => `<button data-q3d="${q}" aria-pressed="${meter.q === q}">${q[0].toUpperCase() + q.slice(1)}</button>`).join('')}
+        </div>
+      </div>
+      <button class="btn" id="to-menu">Main menu</button>` : ''}
       <div class="songs" role="group" aria-label="Menu music">
         <span class="hint">Menu music</span>
         <button data-song="" aria-pressed="${!snd.song}">All menu songs<span>${PLAYLISTS.menu.map(songName).join(', ')}</span></button>
@@ -558,6 +623,19 @@ html.pc .sheet { max-width: 640px; }
       $('vol').value = snd.vol; $('vol-n').textContent = snd.vol; showOn();
     }));
     if ($('to-menu')) $('to-menu').addEventListener('click', askForfeit);
+    $('sheet').querySelectorAll('[data-board]').forEach(b => b.addEventListener('click', () => {
+      set3d(b.dataset.board === '3d');
+      $('sheet').querySelectorAll('[data-board]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+      $('sheet').querySelectorAll('.q3d-bar').forEach(x => { x.hidden = !want3d; });
+    }));
+    $('sheet').querySelectorAll('[data-lay]').forEach(b => b.addEventListener('click', () => {
+      setPhoneLayout(b.dataset.lay);
+      $('sheet').querySelectorAll('[data-lay]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+    }));
+    $('sheet').querySelectorAll('[data-q3d]').forEach(b => b.addEventListener('click', () => {
+      setQuality(b.dataset.q3d);
+      $('sheet').querySelectorAll('[data-q3d]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+    }));
   }
   let mapPick = '';         // the map the host picked for the next match ('' = random)
   let pickFor = '', pickSel = null, pickPeek = false, pickHtml = ''; // the choose-one-of-3 cards over the board (syncPick)
@@ -651,853 +729,149 @@ html.pc .sheet { max-width: 640px; }
   let resultShownAt = 0;
   let shopScroll = 0;
 
-  // ---------- canvas ----------
+  // ---------- board: drawn by the renderer (src/render2d.js), which reads what to show from view() ----------
   const cv = $('board');
-  let ctx = cv.getContext('2d'); // swapped for a moment while drawing map thumbnails (mapThumb)
-  let W = 0, H = 0, S = 0;
-  function size() {
-    const r = cv.getBoundingClientRect();
-    const dpr = Math.min(2, window.devicePixelRatio || 1);
-    W = r.width; H = W * Game.ROWS / Game.COLS;
-    cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    S = W / (Game.COLS * Game.TILE);
+  const boardView = () => ({ m, me, phase, units, mode, bt, battlePre, fx, selected, moving, drag, hoverTile, rangeOf,
+    editable: editable(), placingUnit: placingUnit(), placingElf: placingElf(), placingTower: placingTower(),
+    battleCam: cam && cam.k > 0 ? { zoom: 1 + (CAM.zoom - 1) * cam.k, x: cam.x, y: cam.y, k: cam.k } : null });
+  const board = Render2D(cv, boardView);
+  let board3d = null; // the 3D board when it's on (see "the 3D board" below)
+  const size = () => (board3d || board).size();
+  // ---------- phone layout: the board fills the screen, the panel docks at the bottom (CSS: html.dock) ----------
+  // In a match on a phone the panel is fixed to the bottom of the screen and the board takes the height above it.
+  // While deploying the panel is a drawer: open at the start of each round. Its blue pull tab (#dock-toggle, sitting on
+  // the drawer's top edge) slides it: hold it and drag the drawer up or down, or tap it. A pick from the shop or a task
+  // that needs the board (dockTask, set by panelDeploy) also puts it down; a task shows as a line over the board, and
+  // its X stops it (stopTask). Runs whenever the panel changes, the window resizes or the connection line comes or goes.
+  // Settings → Phone layout: 'drawer' (this) or 'below' (the panel under the board, the page scrolls), saved on the device
+  const LAYOUT_STORE = 'phone-bellum-phone-layout';
+  let phoneLayout = 'drawer';
+  try { if (localStorage.getItem(LAYOUT_STORE) === 'below') phoneLayout = 'below'; } catch (e) {}
+  function setPhoneLayout(v) {
+    phoneLayout = v === 'below' ? 'below' : 'drawer';
+    try { localStorage.setItem(LAYOUT_STORE, phoneLayout); } catch (e) {}
+    stopTask(); dock();
   }
-  const half = Game.COLS * Game.TILE / 2, halfY = Game.ROWS * Game.TILE / 2;
-  // The board is turned around for side 1, so both players see their own zone at the bottom
-  const flip = () => me === 1 ? -1 : 1;
-  const PX = (x) => (half + x * flip()) * S;
-  const PY = (y) => (halfY - y * flip()) * S;
-  const scol = (c) => me === 1 ? Game.COLS - 1 - c : c;   // model column -> screen column (and back)
-  const srow = (r) => me === 1 ? Game.ROWS - 1 - r : r;
-  const tilePx = () => Game.TILE * S;
-  // size from health, but a leveled unit (2x, 3x health) only counts part of its extra health, and swarms
-  // (5+ bodies) even less, so level 2 and 3 squads don't crowd the board
-  const LEVEL_SIZE = [1, 0.8, 0.65], SWARM_SIZE = [1, 0.72, 0.56];
-  const radius = (u) => Math.max(0.6, Math.min(2.4, 0.55 + Math.sqrt(u.hp * ((u.bodies >= 5 ? SWARM_SIZE : LEVEL_SIZE)[u.level | 0] || 1)) / 30)) * S;
-  const ELF_COL = '#D8E68C'; // the neutral elf tower and its arrows
-  const teamCol = (side) => side === 2 ? ELF_COL : side === me ? css('--you') : css('--foe');
-  const upOf = (side) => side === me ? 1 : -1;
-
-  // ---------- map backgrounds ----------
-  // Forest Clearing: an open, faded green glade in the middle, with the edge of a dense forest
-  // closing in on both flanks. Kept dark and muted so the squads stand out. Drawn once per board size.
-  let mapBg = null;
-  function forestBg() {
-    const key = 'forest' + W + 'x' + H;
-    if (mapBg && mapBg.key === key) return mapBg.cv;
-    const dpr = Math.min(2, window.devicePixelRatio || 1);
-    const oc = document.createElement('canvas'); oc.width = Math.round(W * dpr); oc.height = Math.round(H * dpr);
-    const c = oc.getContext('2d'); c.setTransform(dpr, 0, 0, dpr, 0, 0);
-    let sd = 1234567; const rr = () => { sd = (sd * 1103515245 + 12345) % 2147483648; return sd / 2147483648; };
-    const t = tilePx();
-    // the clearing: a soft lighter patch in the middle of a dark green floor
-    c.fillStyle = '#132219'; c.fillRect(0, 0, W, H);
-    const gl = c.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, Math.max(W, H) * 0.62);
-    gl.addColorStop(0, '#1F3923'); gl.addColorStop(0.55, '#1A301F'); gl.addColorStop(1, '#13241A');
-    c.fillStyle = gl; c.fillRect(0, 0, W, H);
-    // patches of slightly different greens and faint grass tufts
-    const tints = ['#223D27', '#1B321F', '#26392A', '#182C1C'];
-    for (let k = 0; k < 26; k++) {
-      c.globalAlpha = 0.35; c.fillStyle = tints[k % tints.length];
-      c.beginPath(); c.ellipse(t + rr() * (W - 2 * t), rr() * H, t * (0.6 + rr() * 1.4), t * (0.4 + rr() * 0.9), rr() * 3, 0, Math.PI * 2); c.fill();
+  let dockOpen = true, dockRound = 0, dockTask = null, dockH = 64, boardH = 0, dockDrag = null;
+  const TAB_H = 28; // the pull tab's height, kept clear above the drawer's last row
+  const CHEVRONS = (up) => `<svg width="20" height="9" viewBox="0 0 20 9" aria-hidden="true"><path d="${up ? 'M1 7.5 5 2.5 9 7.5M11 7.5 15 2.5 19 7.5' : 'M1 1.5 5 6.5 9 1.5M11 1.5 15 6.5 19 1.5'}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  function dock() {
+    if (dockDrag) return; // the tab is being slid: dock() runs again when it lets go
+    const root = document.documentElement, panel = $('panel');
+    const on = !root.classList.contains('pc') && phoneLayout === 'drawer' && ['deploy', 'battle', 'result', 'end'].includes(phase) && !!m;
+    const was = root.classList.contains('dock');
+    root.classList.toggle('dock', on);
+    const deploying = on && phase === 'deploy', picking = deploying && (choosingPack() || choosingTower());
+    if (deploying && dockRound !== m.round && !picking && !placingTower()) { dockRound = m.round; dockOpen = true; }
+    const shut = deploying && (!!dockTask || picking || !dockOpen);
+    panel.classList.toggle('shut', shut);
+    const tb = $('dock-toggle');
+    tb.hidden = !deploying || !!dockTask || picking;
+    if (!tb.hidden && tb.dataset.shut !== String(shut)) { // up: arrows down; down: "Shop" and arrows up
+      tb.dataset.shut = String(shut);
+      tb.innerHTML = shut ? `Shop ${CHEVRONS(true)}` : CHEVRONS(false);
+      tb.setAttribute('aria-expanded', String(!shut));
+      tb.setAttribute('aria-label', shut ? 'Shop: slide up or tap to open' : 'Slide down or tap to close the shop');
     }
-    c.strokeStyle = '#3E5E40'; c.lineWidth = 1;
-    for (let k = 0; k < 260; k++) {
-      const x = rr() * W, y = rr() * H, h = 2 + rr() * 3;
-      c.globalAlpha = 0.12 + rr() * 0.1;
-      c.beginPath(); c.moveTo(x, y); c.lineTo(x - 1, y - h); c.moveTo(x, y); c.lineTo(x + 1.2, y - h * 0.8); c.stroke();
+    tb.style.bottom = on ? panel.offsetHeight + 'px' : '';
+    $('task').hidden = !(deploying && dockTask);
+    if (deploying && dockTask) { $('task-text').innerHTML = dockTask.text; $('task-x').hidden = !dockTask.x; }
+    let h = boardH;
+    if (on) {
+      if (shut || phase !== 'deploy') dockH = panel.offsetHeight || dockH; // the drawer's height when down
+      root.style.setProperty('--dock-h', dockH + 'px');
+      const top = $('wrap').getBoundingClientRect().top + scrollY;
+      h = Math.max(240, Math.floor(innerHeight - top - dockH - (deploying ? TAB_H : 0) - 8));
+      root.style.setProperty('--board-h', h + 'px');
     }
-    // the forest edge: shade darkening toward both sides of the board
-    for (const left of [true, false]) {
-      const x0 = left ? 0 : W, x1 = left ? t * 1.6 : W - t * 1.6;
-      const sh = c.createLinearGradient(x0, 0, x1, 0);
-      sh.addColorStop(0, 'rgba(6,14,9,0.85)'); sh.addColorStop(0.45, 'rgba(8,18,11,0.45)'); sh.addColorStop(1, 'rgba(8,18,11,0)');
-      c.globalAlpha = 1; c.fillStyle = sh; c.fillRect(Math.min(x0, x1), 0, Math.abs(x1 - x0), H);
-    }
-    // trees: crowded canopies at the very edge, thinning out toward the clearing
-    const trees = [];
-    for (const left of [true, false]) {
-      for (let k = 0; k < Math.round(H / t * 5); k++) {
-        const depth = rr() * rr();                       // most trees close to the edge
-        const r = t * (0.28 + rr() * 0.3) * (1 - depth * 0.35);
-        const dx = -t * 0.25 + depth * t * 1.15;          // from just past the edge to a little into column 2
-        trees.push({ x: left ? dx : W - dx, y: rr() * (H + t) - t / 2, r, depth });
-      }
-    }
-    trees.sort((a, b) => a.y - b.y);
-    const leaf = ['#0B1C10', '#0F2414', '#132B18', '#17311C'];
-    for (const tr of trees) { // shadow cast down and away from the clearing
-      c.globalAlpha = 0.35; c.fillStyle = '#050B07';
-      c.beginPath(); c.ellipse(tr.x + (tr.x < W / 2 ? -1 : 1) * tr.r * 0.15, tr.y + tr.r * 0.35, tr.r * 1.05, tr.r * 0.8, 0, 0, Math.PI * 2); c.fill();
-    }
-    for (const tr of trees) {
-      const a = 0.92 - tr.depth * 0.45;                  // trees further into the clearing are fainter
-      c.globalAlpha = a; c.fillStyle = leaf[Math.floor(rr() * leaf.length)];
-      c.beginPath();
-      for (let k = 0; k < 7; k++) { // a lumpy canopy: a ring of overlapping blobs
-        const ang = k / 7 * Math.PI * 2, br = tr.r * (0.55 + rr() * 0.15);
-        c.moveTo(tr.x + Math.cos(ang) * tr.r * 0.5 + br, tr.y + Math.sin(ang) * tr.r * 0.5);
-        c.arc(tr.x + Math.cos(ang) * tr.r * 0.5, tr.y + Math.sin(ang) * tr.r * 0.5, br, 0, Math.PI * 2);
-      }
-      c.fill();
-      c.globalAlpha = a * 0.3; c.fillStyle = '#2A4A2C'; // light from the top left
-      c.beginPath(); c.arc(tr.x - tr.r * 0.25, tr.y - tr.r * 0.3, tr.r * 0.45, 0, Math.PI * 2); c.fill();
-    }
-    c.globalAlpha = 1;
-    mapBg = { key, cv: oc };
-    return oc;
+    if (on !== was || h !== boardH) { boardH = h; size(); if (on !== was || !board3d) render(); }
   }
-
-  // Mushroom Cavern: a dim purple cave floor, darker rock shading the flanks, and faded glowing mushrooms
-  // (big and small) scattered around. Drawn once per board size.
-  function cavernBg() {
-    const key = 'cavern' + W + 'x' + H;
-    if (mapBg && mapBg.key === key) return mapBg.cv;
-    const dpr = Math.min(2, window.devicePixelRatio || 1);
-    const oc = document.createElement('canvas'); oc.width = Math.round(W * dpr); oc.height = Math.round(H * dpr);
-    const c = oc.getContext('2d'); c.setTransform(dpr, 0, 0, dpr, 0, 0);
-    let sd = 7654321; const rr = () => { sd = (sd * 1103515245 + 12345) % 2147483648; return sd / 2147483648; };
-    const t = tilePx();
-    c.fillStyle = '#16111D'; c.fillRect(0, 0, W, H);
-    const gl = c.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, Math.max(W, H) * 0.6);
-    gl.addColorStop(0, '#221A2C'); gl.addColorStop(0.6, '#1B1524'); gl.addColorStop(1, '#130F19');
-    c.fillStyle = gl; c.fillRect(0, 0, W, H);
-    // uneven rock floor: soft darker and lighter patches
-    for (let k = 0; k < 30; k++) {
-      c.globalAlpha = 0.3; c.fillStyle = k % 2 ? '#2A2033' : '#120E17';
-      c.beginPath(); c.ellipse(rr() * W, rr() * H, t * (0.5 + rr() * 1.3), t * (0.3 + rr() * 0.8), rr() * 3, 0, Math.PI * 2); c.fill();
-    }
-    // the flanks: cave walls closing in, darker toward the edge, with rough boulders
-    for (const left of [true, false]) {
-      const x0 = left ? 0 : W, x1 = left ? t * 1.5 : W - t * 1.5;
-      const sh = c.createLinearGradient(x0, 0, x1, 0);
-      sh.addColorStop(0, 'rgba(5,3,8,0.9)'); sh.addColorStop(0.5, 'rgba(8,5,12,0.5)'); sh.addColorStop(1, 'rgba(8,5,12,0)');
-      c.globalAlpha = 1; c.fillStyle = sh; c.fillRect(Math.min(x0, x1), 0, Math.abs(x1 - x0), H);
-      for (let k = 0; k < Math.round(H / t * 3); k++) {
-        const depth = rr() * rr(), r = t * (0.25 + rr() * 0.3) * (1 - depth * 0.4), dx = -t * 0.2 + depth * t;
-        const x = left ? dx : W - dx, y = rr() * H;
-        c.globalAlpha = 0.8 - depth * 0.5; c.fillStyle = ['#0B0810', '#100C16', '#151019'][Math.floor(rr() * 3)];
-        c.beginPath(); c.ellipse(x, y, r * 1.2, r, rr() * 3, 0, Math.PI * 2); c.fill();
-        c.globalAlpha = (0.8 - depth * 0.5) * 0.35; c.fillStyle = '#2A2135'; // a faint lit edge
-        c.beginPath(); c.ellipse(x - r * 0.25, y - r * 0.3, r * 0.5, r * 0.3, 0, 0, Math.PI * 2); c.fill();
-      }
-    }
-    // faded glowing mushrooms, big and small
-    const shroom = (x, y, sz, a) => {
-      const glow = c.createRadialGradient(x, y - sz * 0.4, 0, x, y - sz * 0.4, sz * 2.2);
-      glow.addColorStop(0, 'rgba(176,110,240,0.35)'); glow.addColorStop(1, 'rgba(176,110,240,0)');
-      c.globalAlpha = a; c.fillStyle = glow; c.beginPath(); c.arc(x, y - sz * 0.4, sz * 2.2, 0, Math.PI * 2); c.fill();
-      c.fillStyle = '#6B5A78'; c.fillRect(x - sz * 0.13, y - sz * 0.5, sz * 0.26, sz * 0.75); // stem
-      c.fillStyle = '#8A5DB8'; c.beginPath(); c.ellipse(x, y - sz * 0.5, sz * 0.6, sz * 0.38, 0, Math.PI, 0); c.fill(); // cap
-      c.fillStyle = '#D2B4F2'; for (let k = 0; k < 3; k++) { c.beginPath(); c.arc(x + (k - 1) * sz * 0.25, y - sz * 0.68 + (k === 1 ? -sz * 0.06 : 0), sz * 0.06, 0, Math.PI * 2); c.fill(); }
-    };
-    const list = [];
-    for (let k = 0; k < 34; k++) { // clusters: one bigger mushroom with a couple of small ones next to it
-      const x = rr() * W, y = rr() * H, edge = Math.min(x, W - x) < t * 1.3;
-      list.push({ x, y, sz: t * (edge ? 0.35 : 0.22 + rr() * 0.28), a: edge ? 0.26 : 0.16 });
-      const n = Math.floor(rr() * 3);
-      for (let j = 0; j < n; j++) list.push({ x: x + (rr() - 0.5) * t * 0.7, y: y + (rr() - 0.2) * t * 0.4, sz: t * (0.1 + rr() * 0.08), a: 0.18 });
-    }
-    list.sort((a, b) => a.y - b.y).forEach(q => shroom(q.x, q.y, q.sz, q.a));
-    c.globalAlpha = 1;
-    mapBg = { key, cv: oc };
-    return oc;
+  // the X on the task line: stop placing that unit (or the Move, the Charisma, the elf tower)
+  function stopTask() {
+    selected = null; moveMode = false; moving = null; charmMode = false; elfPlacing = false;
+    if (phase === 'deploy') panelDeploy();
+    render();
   }
-  // a mushroom tile: tinted tile with a small glowing mushroom in the tile's colour
-  const SHROOM_COL = { purple: '#B57BFF', yellow: '#F2D25C', green: '#7BD66A' };
-  // Frozen Peak: a dark icy floor with snow drifts and cracks in the ice, and snow-capped rock on both flanks.
-  function iceBg() {
-    const key = 'ice' + W + 'x' + H;
-    if (mapBg && mapBg.key === key) return mapBg.cv;
-    const dpr = Math.min(2, window.devicePixelRatio || 1);
-    const oc = document.createElement('canvas'); oc.width = Math.round(W * dpr); oc.height = Math.round(H * dpr);
-    const c = oc.getContext('2d'); c.setTransform(dpr, 0, 0, dpr, 0, 0);
-    let sd = 4242421; const rr = () => { sd = (sd * 1103515245 + 12345) % 2147483648; return sd / 2147483648; };
-    const t = tilePx();
-    c.fillStyle = '#131B22'; c.fillRect(0, 0, W, H);
-    const gl = c.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, Math.max(W, H) * 0.6);
-    gl.addColorStop(0, '#1D2833'); gl.addColorStop(0.6, '#18212A'); gl.addColorStop(1, '#121920');
-    c.fillStyle = gl; c.fillRect(0, 0, W, H);
-    // snow drifts: soft pale patches
-    for (let k = 0; k < 30; k++) {
-      c.globalAlpha = 0.12 + rr() * 0.08; c.fillStyle = k % 3 ? '#3A4B5A' : '#4B5E6E';
-      c.beginPath(); c.ellipse(rr() * W, rr() * H, t * (0.6 + rr() * 1.5), t * (0.25 + rr() * 0.5), (rr() - 0.5) * 0.6, 0, Math.PI * 2); c.fill();
-    }
-    // cracks in the ice
-    c.strokeStyle = '#9FC3D9'; c.lineWidth = 0.8;
-    for (let k = 0; k < 14; k++) {
-      let x = t + rr() * (W - 2 * t), y = rr() * H;
-      c.globalAlpha = 0.1 + rr() * 0.08; c.beginPath(); c.moveTo(x, y);
-      for (let j = 0; j < 4; j++) { x += (rr() - 0.5) * t * 0.9; y += (rr() - 0.5) * t * 0.9; c.lineTo(x, y); }
-      c.stroke();
-    }
-    // the flanks: mountain rock rising on both sides, with snow on top
-    for (const left of [true, false]) {
-      const x0 = left ? 0 : W, x1 = left ? t * 1.5 : W - t * 1.5;
-      const sh = c.createLinearGradient(x0, 0, x1, 0);
-      sh.addColorStop(0, 'rgba(6,9,12,0.9)'); sh.addColorStop(0.5, 'rgba(8,12,16,0.5)'); sh.addColorStop(1, 'rgba(8,12,16,0)');
-      c.globalAlpha = 1; c.fillStyle = sh; c.fillRect(Math.min(x0, x1), 0, Math.abs(x1 - x0), H);
-      const rocks = [];
-      for (let k = 0; k < Math.round(H / t * 2.6); k++) {
-        const depth = rr() * rr(), r = t * (0.3 + rr() * 0.35) * (1 - depth * 0.4), dx = -t * 0.2 + depth * t * 1.05;
-        rocks.push({ x: left ? dx : W - dx, y: rr() * (H + t) - t / 2, r, depth });
-      }
-      rocks.sort((a, b) => a.y - b.y);
-      for (const q of rocks) {
-        const a = 0.9 - q.depth * 0.5;
-        c.globalAlpha = a; c.fillStyle = ['#0D1318', '#111920', '#151E26'][Math.floor(rr() * 3)];
-        c.beginPath(); // a jagged rock
-        for (let j = 0; j < 6; j++) { const ang = j / 6 * Math.PI * 2 + rr() * 0.4, rad = q.r * (0.75 + rr() * 0.35); const px = q.x + Math.cos(ang) * rad, py = q.y + Math.sin(ang) * rad * 0.8; j ? c.lineTo(px, py) : c.moveTo(px, py); }
-        c.closePath(); c.fill();
-        c.globalAlpha = a * 0.45; c.fillStyle = '#C8D7E2'; // snow cap
-        c.beginPath(); c.ellipse(q.x - q.r * 0.1, q.y - q.r * 0.45, q.r * 0.55, q.r * 0.2, 0, 0, Math.PI * 2); c.fill();
-      }
-    }
-    // a few snowflakes
-    c.fillStyle = '#DCE8F0';
-    for (let k = 0; k < 120; k++) { c.globalAlpha = 0.08 + rr() * 0.14; c.beginPath(); c.arc(rr() * W, rr() * H, 0.6 + rr() * 0.9, 0, Math.PI * 2); c.fill(); }
-    c.globalAlpha = 1;
-    mapBg = { key, cv: oc };
-    return oc;
-  }
-  const ICE_COL = '#BFE3F5';
-  // the storm band (a faint frost) and this round's hail tiles (animated during the fight)
-  function drawStorm(v) {
-    const t = tilePx(), rows = Game.stormRows(v);
-    const y0 = Math.min(...rows.map(srow)) * t;
-    ctx.fillStyle = ICE_COL; ctx.globalAlpha = 0.05; ctx.fillRect(0, y0, W, rows.length * t);
-    ctx.strokeStyle = ICE_COL; ctx.globalAlpha = 0.25; ctx.lineWidth = 1; ctx.setLineDash([2, 5]);
-    ctx.strokeRect(1, y0 + 1, W - 2, rows.length * t - 2); ctx.setLineDash([]);
-    const time = phase === 'battle' && bt ? bt.time() : 0;
-    for (const h of Game.hailTiles(v)) {
-      const x = scol(h.col) * t, y = srow(h.row) * t;
-      ctx.fillStyle = ICE_COL; ctx.globalAlpha = 0.16; ctx.fillRect(x, y, t, t);
-      ctx.strokeStyle = ICE_COL; ctx.globalAlpha = 0.5; ctx.strokeRect(x + 1.5, y + 1.5, t - 3, t - 3);
-      // hailstones: falling streaks during the fight, resting pellets while deploying
-      ctx.save(); ctx.beginPath(); ctx.rect(x, y, t, t); ctx.clip();
-      for (let k = 0; k < 6; k++) {
-        const fx = ((k * 0.37 + h.col * 0.13) % 1), sp = 0.9 + (k % 3) * 0.25;
-        const fy = time ? (time * sp + k * 0.21 + h.row * 0.07) % 1 : ((k * 0.53 + h.row * 0.29) % 1);
-        const px = x + fx * t, py = y + fy * t;
-        ctx.globalAlpha = 0.7;
-        if (time) { ctx.strokeStyle = '#EAF6FF'; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(px + t * 0.06, py - t * 0.16); ctx.lineTo(px, py); ctx.stroke(); }
-        ctx.fillStyle = '#EAF6FF'; ctx.beginPath(); ctx.arc(px, py, Math.max(1, t * 0.035), 0, Math.PI * 2); ctx.fill();
-      }
-      ctx.restore();
-    }
-    ctx.globalAlpha = 1;
-  }
-  // the altar of ice: a cluster of pale ice shards on a frosted plinth, in the middle of the board
-  function drawAltar() {
-    const x = W / 2, y = H / 2, s = tilePx();
-    const glow = ctx.createRadialGradient(x, y, 0, x, y, s * 1.1);
-    glow.addColorStop(0, 'rgba(191,227,245,0.35)'); glow.addColorStop(1, 'rgba(191,227,245,0)');
-    ctx.fillStyle = glow; ctx.beginPath(); ctx.arc(x, y, s * 1.1, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = '#5E7C8E'; ctx.globalAlpha = 0.9;
-    ctx.beginPath(); ctx.ellipse(x, y + s * 0.28, s * 0.42, s * 0.14, 0, 0, Math.PI * 2); ctx.fill();
-    const shard = (dx, h, w, col) => { ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(x + dx - w, y + s * 0.26); ctx.lineTo(x + dx, y + s * 0.26 - h); ctx.lineTo(x + dx + w, y + s * 0.26); ctx.closePath(); ctx.fill(); };
-    ctx.globalAlpha = 0.95;
-    shard(-s * 0.2, s * 0.45, s * 0.1, '#9CCBE3'); shard(s * 0.2, s * 0.5, s * 0.1, '#9CCBE3');
-    shard(0, s * 0.75, s * 0.14, '#D8F0FB');
-    ctx.strokeStyle = '#FFFFFF'; ctx.globalAlpha = 0.6; ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(x, y + s * 0.26 - s * 0.75); ctx.lineTo(x - s * 0.04, y + s * 0.1); ctx.stroke();
-    ctx.globalAlpha = 1;
-  }
-  // ice walls around a tower: one arc per side, fading as it takes hits. walls = [north, east, south, west] (world)
-  function drawWalls(wx, wy, walls) {
-    const t = tilePx();
-    const dirs = [[0, 1], [1, 0], [0, -1], [-1, 0]];
-    walls.forEach((n, k) => {
-      if (!(n > 0)) return;
-      const cx = PX(wx + dirs[k][0] * Game.TILE * 0.5), cy = PY(wy + dirs[k][1] * Game.TILE * 0.5);
-      const horiz = Math.abs(PX(wx + dirs[k][0]) - PX(wx)) < 1e-6; // a wall facing up/down on screen lies flat
-      ctx.globalAlpha = 0.35 + 0.55 * n / Game.ICE.wallHits; ctx.fillStyle = '#CFEAF7'; ctx.strokeStyle = '#FFFFFF'; ctx.lineWidth = 1;
-      const L = t * 0.8, D = t * 0.12;
-      if (horiz) { ctx.fillRect(cx - L / 2, cy - D / 2, L, D); ctx.strokeRect(cx - L / 2, cy - D / 2, L, D); }
-      else { ctx.fillRect(cx - D / 2, cy - L / 2, D, L); ctx.strokeRect(cx - D / 2, cy - L / 2, D, L); }
+  $('task-x').addEventListener('click', stopTask);
+  // the pull tab: hold and slide the drawer, or tap it. While sliding, the drawer shows all of it, moved down by t px
+  // (0 = up, range = down to its last row), and follows the finger; on letting go it settles on the nearer end.
+  {
+    const tab = $('dock-toggle');
+    let tapAt = 0;
+    const slide = (t) => { const d = dockDrag; d.t = Math.max(0, Math.min(d.range, t)); $('panel').style.transform = `translateY(${d.t}px)`; tab.style.bottom = (d.openH - d.t) + 'px'; };
+    tab.addEventListener('pointerdown', (e) => {
+      if (tab.hidden || dockDrag) return;
+      const panel = $('panel'), wasShut = panel.classList.contains('shut');
+      panel.classList.remove('shut');
+      const openH = panel.offsetHeight, range = Math.max(0, openH - dockH);
+      dockDrag = { y: e.clientY, t0: wasShut ? range : 0, t: 0, range, openH, wasShut, moved: false, id: e.pointerId };
+      slide(dockDrag.t0);
+      try { tab.setPointerCapture(e.pointerId); } catch (err) {}
+      e.preventDefault();
     });
-    ctx.globalAlpha = 1;
+    tab.addEventListener('pointermove', (e) => {
+      const d = dockDrag; if (!d || d.id !== e.pointerId || d.settling) return;
+      if (Math.abs(e.clientY - d.y) > 6) d.moved = true;
+      if (d.moved) slide(d.t0 + e.clientY - d.y);
+    });
+    const letGo = (e) => {
+      const d = dockDrag; if (!d || d.id !== e.pointerId || d.settling) return;
+      tapAt = performance.now();
+      const open = d.moved ? d.t < d.range / 2 : d.wasShut; // a tap toggles
+      d.settling = true;
+      const panel = $('panel');
+      panel.style.transition = tab.style.transition = 'transform 0.18s ease-out, bottom 0.18s ease-out';
+      slide(open ? 0 : d.range);
+      setTimeout(() => {
+        panel.style.transition = tab.style.transition = ''; panel.style.transform = '';
+        dockOpen = open; dockDrag = null; dock();
+      }, 190);
+    };
+    tab.addEventListener('pointerup', letGo);
+    tab.addEventListener('pointercancel', letGo);
+    // keyboard (Enter, Space): a click with no pointer before it
+    tab.addEventListener('click', () => { if (performance.now() - tapAt < 500 || dockDrag || tab.hidden) return; dockOpen = $('panel').classList.contains('shut'); dock(); });
   }
-  // whether this screen may show a player's altar purchase: an opponent's stays hidden until the fight
-  const altarShown = (v, b) => b.side === me || phase !== 'deploy' || b.round < v.round;
-  // a mushroom tile as this screen shows it: an opponent's removal stays hidden until the fight
-  function shroomShown(v, col, row) {
-    const tl = Game.shroomTileAt(v, col, row); if (!tl) return null;
-    const gone = (v.map.removed || []).filter(x => x.col === col && x.row === row);
-    return gone.some(x => x.side === me || phase !== 'deploy' || x.round < v.round) ? null : tl;
+  new MutationObserver(dock).observe($('panel'), { childList: true });
+  addEventListener('resize', dock);
+  function render() {
+    syncMusic();
+    cv.style.touchAction = phase === 'deploy' ? 'none' : ''; // so a finger can drag squads without scrolling the page
+    if (board3d) wake3d(); else board.draw();
   }
-  const myRemovalNow = (col, row) => !!m && phase === 'deploy' && (m.map && m.map.removed || []).some(x => x.col === col && x.row === row && x.side === me && x.round === m.round);
-  function drawShroomTile(tl) {
-    const t = tilePx(), x = scol(tl.col) * t, y = srow(tl.row) * t, col = SHROOM_COL[tl.type];
-    ctx.fillStyle = col; ctx.globalAlpha = 0.13; ctx.fillRect(x, y, t, t);
-    ctx.strokeStyle = col; ctx.globalAlpha = 0.45; ctx.lineWidth = 1; ctx.strokeRect(x + 1.5, y + 1.5, t - 3, t - 3);
-    const cx = x + t / 2, cy = y + t * 0.62, sz = t * 0.34;
-    const glow = ctx.createRadialGradient(cx, cy - sz * 0.4, 0, cx, cy - sz * 0.4, sz * 1.4);
-    glow.addColorStop(0, col); glow.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.globalAlpha = 0.22; ctx.fillStyle = glow; ctx.beginPath(); ctx.arc(cx, cy - sz * 0.4, sz * 1.4, 0, Math.PI * 2); ctx.fill();
-    ctx.globalAlpha = 0.6; ctx.fillStyle = '#CFC3D6'; ctx.fillRect(cx - sz * 0.12, cy - sz * 0.5, sz * 0.24, sz * 0.7);
-    ctx.fillStyle = col; ctx.beginPath(); ctx.ellipse(cx, cy - sz * 0.5, sz * 0.62, sz * 0.4, 0, Math.PI, 0); ctx.fill();
-    ctx.globalAlpha = 1;
-  }
-
-  function drawBoard() {
-    const t = tilePx();
-    const Z = Game.ZONE, mine = (Game.ROWS - Z) * t;
-    const v = phase === 'battle' && battlePre ? battlePre : m; // during a fight: the board as it was when the fight began, not the next round's
-    const mp = Game.mapOf(v);
-    if (mp && mp.id === 'forest') ctx.drawImage(forestBg(), 0, 0, W, H);
-    else if (mp && mp.id === 'cavern') ctx.drawImage(cavernBg(), 0, 0, W, H);
-    else if (mp && mp.id === 'ice') ctx.drawImage(iceBg(), 0, 0, W, H);
-    else { ctx.fillStyle = css('--board'); ctx.fillRect(0, 0, W, H); }
-    ctx.globalAlpha = 0.08;
-    ctx.fillStyle = css('--foe'); ctx.fillRect(0, 0, W, t * Z);
-    ctx.fillStyle = css('--you'); ctx.fillRect(0, mine, W, t * Z);
-    if (v) for (const side of [0, 1]) { // flank tiles inside the other zone: reserved from the start, usable from round 3
-      ctx.fillStyle = side === me ? css('--you') : css('--foe'); ctx.globalAlpha = Game.flankOpen(v) ? 0.22 : 0.12;
-      for (const col of Game.FLANK.cols) for (const row of Game.flankRows(side)) ctx.fillRect(scol(col) * t, srow(row) * t, t, t);
-    }
-    ctx.globalAlpha = 1;
-    if (mp && mp.ice) { drawStorm(v); if (phase === 'deploy' && Game.altarRound(v)) drawAltar(); } // the altar only stands while deploying
-    if (mp && mp.shrooms) for (const tl of v.map.tiles || []) {
-      if (shroomShown(v, tl.col, tl.row)) drawShroomTile(tl);
-      else if (myRemovalNow(tl.col, tl.row)) { // removed by you this round: a faint dashed outline until the fight
-        const t = tilePx(), x = scol(tl.col) * t, y = srow(tl.row) * t;
-        ctx.strokeStyle = SHROOM_COL[tl.type]; ctx.globalAlpha = 0.35; ctx.lineWidth = 1; ctx.setLineDash([3, 4]);
-        ctx.strokeRect(x + 2.5, y + 2.5, t - 5, t - 5); ctx.setLineDash([]); ctx.globalAlpha = 1;
-      }
-    }
-    if (v && v.buff) for (const side of [0, 1]) { // Zoe's buff tiles: a gold tile with a star
-      if (!charVisible(side)) continue;
-      for (const b of v.buff[side] || []) {
-        const x = scol(b.col) * t, y = srow(b.row) * t;
-        ctx.fillStyle = css('--gold'); ctx.globalAlpha = 0.16; ctx.fillRect(x, y, t, t);
-        ctx.globalAlpha = 0.75; ctx.font = `${Math.round(t * 0.42)}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.fillText('★', x + t / 2, y + t / 2);
-      }
-      ctx.globalAlpha = 1;
-    }
-    ctx.strokeStyle = 'rgba(200, 230, 225, 0.06)'; ctx.lineWidth = 1;
-    for (let i = 1; i < Game.COLS; i++) { ctx.beginPath(); ctx.moveTo(i * t, 0); ctx.lineTo(i * t, H); ctx.stroke(); }
-    for (let i = 1; i < Game.ROWS; i++) { ctx.beginPath(); ctx.moveTo(0, i * t); ctx.lineTo(W, i * t); ctx.stroke(); }
-    ctx.setLineDash([5, 6]); ctx.lineWidth = 1.2;
-    ctx.strokeStyle = css('--foe'); ctx.globalAlpha = 0.5;
-    ctx.beginPath(); ctx.moveTo(0, t * Z); ctx.lineTo(W, t * Z); ctx.stroke();
-    ctx.strokeStyle = css('--you');
-    ctx.beginPath(); ctx.moveTo(0, mine); ctx.lineTo(W, mine); ctx.stroke();
-    ctx.setLineDash([]); ctx.globalAlpha = 1;
-  }
-
-  function drawSquad(sq, side, fresh) {
-    const u = units[sq.unit];
-    const w = Game.tileToWorld(sq.col, sq.row);
-    const bodies = Engine.buildSquad(u, side, w.x, w.y, sq.id, Game.TILE);
-    const col = teamCol(side);
-    const t = tilePx(), c = scol(sq.col), r0 = srow(sq.row);
-    if (fresh) {
-      ctx.strokeStyle = col; ctx.setLineDash([3, 3]); ctx.lineWidth = 1;
-      ctx.strokeRect(c * t + 1.5, r0 * t + 1.5, t - 3, t - 3); ctx.setLineDash([]);
-    }
-    const r = radius(u);
-    for (const b of bodies) Shapes.body(ctx, u.shape, PX(b.x), PY(b.y), r, upOf(side), u.color, col, 0.95);
-    ctx.globalAlpha = 1;
-    if (side === me && phase === 'deploy' && Game.isReady(m, sq)) { // ready to level up: gold plus badge
-      const br = Math.max(5, t * 0.17), bx = (c + 1) * t - br - 2, by = r0 * t + br + 2;
-      ctx.fillStyle = css('--gold'); ctx.beginPath(); ctx.arc(bx, by, br, 0, Math.PI * 2); ctx.fill();
-      ctx.strokeStyle = css('--bg'); ctx.lineWidth = Math.max(1.5, br * 0.3);
-      ctx.beginPath(); ctx.moveTo(bx - br * 0.5, by); ctx.lineTo(bx + br * 0.5, by); ctx.moveTo(bx, by - br * 0.5); ctx.lineTo(bx, by + br * 0.5); ctx.stroke();
-    }
-    if (Game.charmOf(sq) > 0) { // Matteo's charisma: a pink pip per stack up the left edge, a top hat for a Gentleman
-      const pr = Math.max(1.5, t * 0.05);
-      ctx.fillStyle = CHARM_COL;
-      for (let k = 0; k < Game.charmOf(sq); k++) { ctx.beginPath(); ctx.arc(c * t + pr + 2, (r0 + 1) * t - pr - 3 - k * (pr * 2.6), pr, 0, Math.PI * 2); ctx.fill(); }
-      if (Game.isGentleman(sq)) drawHat((c + 0.5) * t, r0 * t + t * 0.2, t * 0.22);
-    }
-    if (sq.level > 0) {
-      ctx.fillStyle = css('--gold');
-      const pr = Math.max(2, t * 0.07);
-      for (let k = 0; k < sq.level; k++) {
-        ctx.beginPath(); ctx.arc(c * t + pr + 3 + k * (pr * 2.6), r0 * t + pr + 3, pr, 0, Math.PI * 2); ctx.fill();
-      }
-    }
-    if (t >= 26) {
-      ctx.font = `500 ${Math.max(8, Math.round(t * 0.26))}px "IBM Plex Mono", monospace`;
-      ctx.fillStyle = css('--ink'); ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
-      ctx.globalAlpha = 0.85; ctx.fillText(tag(u), (c + 0.5) * t, (r0 + 1) * t - 1); ctx.globalAlpha = 1;
-    }
-  }
-
-  // the squad Matteo gave his first Charisma stack to this round, if he did
-  const charmGivenNow = () => m && m.armies[me].find(q => q.charmGiven === m.round && q.charm === 1);
-  // Matteo's charisma colour, and the Gentleman's top hat (brim centred on x, y; s = its width)
-  const CHARM_COL = '#FF7AB6';
-  function drawHat(x, y, s) {
-    ctx.fillStyle = '#16161C'; ctx.strokeStyle = '#EDEFF2'; ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.rect(x - s / 2, y - s * 0.12, s, s * 0.12); ctx.rect(x - s * 0.3, y - s * 0.75, s * 0.6, s * 0.65); ctx.fill(); ctx.stroke();
-    ctx.fillStyle = CHARM_COL; ctx.fillRect(x - s * 0.3, y - s * 0.3, s * 0.6, s * 0.12);
-  }
-  // a little keep with battlements, in the team colour. kind: 'keep', 'outpost' (a smaller keep), 'sniper' (tall
-  // and skinny, a yellow stripe) or 'bastion' (wide and squat, a shield on the front). g: another canvas to draw on
-  // Each character's coat of arms: a field colour and a bold charge, drawn on a small shield.
-  // Shield coordinates: 1 wide, from -0.55 (top) to 0.65 (the point), centred on (0, 0).
-  const ARMS = {
-    cage: { field: '#A8323C', charge: '#F2C94C', draw(g) { // a heart: more health
-      g.beginPath(); g.moveTo(0, 0.38); g.bezierCurveTo(-0.5, 0.02, -0.32, -0.36, 0, -0.14); g.bezierCurveTo(0.32, -0.36, 0.5, 0.02, 0, 0.38); g.fill(); } },
-    zoe: { field: '#6B43A6', charge: '#F2C94C', draw(g) { // a star: the buff tiles
-      g.beginPath(); for (let k = 0; k < 10; k++) { const a = -Math.PI / 2 + k * Math.PI / 5, rr = k % 2 ? 0.15 : 0.36; g.lineTo(rr * Math.cos(a), 0.04 + rr * Math.sin(a)); } g.closePath(); g.fill(); } },
-    emile: { field: '#2F7D4A', charge: '#EDEFF2', draw(g) { // a key: free unlocks
-      g.lineWidth = 0.1; g.beginPath(); g.arc(0, -0.2, 0.13, 0, Math.PI * 2); g.stroke();
-      g.fillRect(-0.05, -0.08, 0.1, 0.5); g.fillRect(0.05, 0.2, 0.13, 0.08); g.fillRect(0.05, 0.33, 0.1, 0.08); } },
-    wilhelm: { field: '#2E5C8A', charge: '#EDEFF2', draw(g) { // a saltire: attacks from the flanks
-      g.lineWidth = 0.16; g.lineCap = 'butt'; g.beginPath(); g.moveTo(-0.5, -0.55); g.lineTo(0.42, 0.5); g.moveTo(0.5, -0.55); g.lineTo(-0.42, 0.5); g.stroke(); } },
-    blixten: { field: '#E2B23A', charge: '#1E1E24', draw(g) { // a lightning bolt
-      g.beginPath(); g.moveTo(0.12, -0.46); g.lineTo(-0.24, 0.06); g.lineTo(-0.02, 0.06); g.lineTo(-0.14, 0.5); g.lineTo(0.26, -0.06); g.lineTo(0.04, -0.06); g.closePath(); g.fill(); } },
-    noah: { field: '#1F7272', charge: '#EDEFF2', draw(g) { // two chevrons: squads that start at level 2
-      g.lineWidth = 0.12; g.lineJoin = 'miter'; g.beginPath(); for (const dy of [-0.12, 0.16]) { g.moveTo(-0.3, dy + 0.14); g.lineTo(0, dy - 0.14); g.lineTo(0.3, dy + 0.14); } g.stroke(); } },
-    phil: { field: '#2A2A36', charge: '#F2C94C', draw(g) { // a crown: the top tier
-      g.beginPath(); g.moveTo(-0.32, 0.22); g.lineTo(-0.34, -0.2); g.lineTo(-0.16, 0.0); g.lineTo(0, -0.28); g.lineTo(0.16, 0.0); g.lineTo(0.34, -0.2); g.lineTo(0.32, 0.22); g.closePath(); g.fill();
-      g.fillRect(-0.32, 0.27, 0.64, 0.08); } },
-    yotyot: { field: '#3A1E16', charge: '#FFA94D', draw(g) { // the Ember Imp: a horned square
-      g.beginPath(); for (const pt of Shapes.IMP) pt.p.forEach(([px, py], i) => i ? g.lineTo(px * 0.3, 0.06 + py * 0.3) : g.moveTo(px * 0.3, 0.06 + py * 0.3)); g.fill(); } },
-    mubarak: { field: '#245C2A', charge: '#8BEA4A', draw(g) { // a crowned slime blob
-      g.beginPath(); g.moveTo(-0.34, 0.38); g.quadraticCurveTo(-0.4, -0.06, -0.12, -0.1); g.quadraticCurveTo(0, -0.16, 0.12, -0.1); g.quadraticCurveTo(0.4, -0.06, 0.34, 0.38); g.closePath(); g.fill();
-      g.fillStyle = '#F2C94C'; g.beginPath(); g.moveTo(-0.2, -0.14); g.lineTo(-0.22, -0.4); g.lineTo(-0.1, -0.26); g.lineTo(0, -0.44); g.lineTo(0.1, -0.26); g.lineTo(0.22, -0.4); g.lineTo(0.2, -0.14); g.closePath(); g.fill();
-      g.fillStyle = '#245C2A'; for (const ex of [-0.12, 0.12]) { g.beginPath(); g.arc(ex, 0.12, 0.05, 0, Math.PI * 2); g.fill(); } } },
-    felix: { field: '#3E6B2F', charge: '#F2C94C', draw(g) { // a stack of coins: more gold
-      for (const dy of [0.3, 0.12, -0.06]) { g.beginPath(); g.ellipse(0, dy, 0.28, 0.1, 0, 0, Math.PI * 2); g.fill(); }
-      g.lineWidth = 0.035; g.strokeStyle = '#3E6B2F'; for (const dy of [0.3, 0.12, -0.06]) { g.beginPath(); g.ellipse(0, dy, 0.28, 0.1, 0, 0, Math.PI * 2); g.stroke(); } } },
-    enzo: { field: '#5A2E6E', charge: '#EDEFF2', draw(g) { // a die: a random skill
-      g.beginPath(); g.roundRect(-0.3, -0.26, 0.6, 0.6, 0.08); g.fill();
-      g.fillStyle = '#5A2E6E'; for (const [px, py] of [[-0.15, -0.11], [0, 0.04], [0.15, 0.19]]) { g.beginPath(); g.arc(px, py, 0.06, 0, Math.PI * 2); g.fill(); } } },
-    matteo: { field: '#5B1F3A', charge: '#EDEFF2', draw(g) { // a top hat with a pink band: the Gentleman
-      g.fillRect(-0.38, 0.22, 0.76, 0.1); g.fillRect(-0.22, -0.34, 0.44, 0.58);
-      g.fillStyle = '#FF7AB6'; g.fillRect(-0.22, 0.06, 0.44, 0.1); } },
-  };
-  function drawArms(g, id, x, y, w) {
-    const a = ARMS[id]; if (!a) return;
-    const shield = () => { g.beginPath(); g.moveTo(-0.5, -0.55); g.lineTo(0.5, -0.55); g.lineTo(0.5, 0.05); g.quadraticCurveTo(0.5, 0.45, 0, 0.65); g.quadraticCurveTo(-0.5, 0.45, -0.5, 0.05); g.closePath(); };
-    g.save(); g.translate(x, y); g.scale(w, w);
-    shield(); g.fillStyle = a.field; g.fill();
-    g.save(); g.clip(); g.fillStyle = a.charge; g.strokeStyle = a.charge; a.draw(g); g.restore();
-    shield(); g.lineWidth = Math.max(0.09, 1 / w); g.strokeStyle = '#15151B'; g.stroke();
-    g.restore();
-  }
-  // a coat of arms on a little swallowtailed flag flying right from (x, y) on a pole, w wide, edged in edge (a team colour)
-  function drawArmsFlag(g, id, x, y, w, edge) {
-    const a = ARMS[id]; if (!a) return;
-    const h = w * 0.68;
-    const flag = () => { g.beginPath(); g.moveTo(0, 0); g.quadraticCurveTo(w * 0.5, -h * 0.14, w, 0); g.lineTo(w * 0.8, h * 0.5); g.lineTo(w, h); g.quadraticCurveTo(w * 0.5, h * 0.86, 0, h); g.closePath(); };
-    g.save(); g.translate(x, y);
-    flag(); g.fillStyle = a.field; g.fill();
-    g.save(); g.clip(); g.translate(w * 0.4, h * 0.52); g.scale(h * 0.95, h * 0.95); g.fillStyle = a.charge; g.strokeStyle = a.charge; a.draw(g); g.restore();
-    flag(); g.lineWidth = Math.max(1, w * 0.09); g.lineJoin = 'round'; g.strokeStyle = edge; g.stroke();
-    g.restore();
-  }
-  // a coat of arms as an image, for the character lines in the panels
-  const armsImgs = {};
-  function armsImg(id) {
-    if (!ARMS[id]) return '';
-    if (armsImgs[id] == null) {
-      const oc = document.createElement('canvas'); oc.width = 40; oc.height = 48;
-      const g = oc.getContext('2d'); drawArms(g, id, 20, 22.5, 34);
-      armsImgs[id] = oc.toDataURL();
-    }
-    return `<img src="${armsImgs[id]}" alt="" width="14" height="17" style="vertical-align:-3px;margin-right:4px">`;
-  }
-  // arms: the owner's character id, drawn on a small shield on the tower's corner
-  // the sniper tower's airship: a see-through blimp in the team colour, nose toward where it flies (t: tile size in px)
-  function drawAirship(b, t) {
-    const x = PX(b.x), y = PY(b.y), c = teamCol(b.side), L = t * 0.42, H = t * 0.17;
-    const ang = Math.atan2(-(b.hy == null ? (b.side === 0 ? 1 : -1) : b.hy) * flip(), (b.hx || 0) * flip());
-    ctx.save(); ctx.translate(x, y); ctx.rotate(ang); ctx.globalAlpha = 0.45;
-    ctx.fillStyle = c; ctx.strokeStyle = c; ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(-L * 0.8, 0); ctx.lineTo(-L * 1.1, -H * 0.9); ctx.lineTo(-L * 1.1, H * 0.9); ctx.closePath(); ctx.fill(); // tail fins
-    ctx.beginPath(); ctx.ellipse(0, 0, L, H, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.globalAlpha = 0.8; ctx.stroke();
-    ctx.fillStyle = '#1B2326'; ctx.fillRect(-L * 0.25, H * 0.75, L * 0.5, H * 0.45); // gondola
-    ctx.restore(); ctx.globalAlpha = 1;
-  }
-  function drawKeep(x, y, s, side, hpr, kind, g, arms) {
-    const ctx = g || cv.getContext('2d');
-    const c = teamCol(side), tt = Game.towerTypeById(kind) || Game.TOWER_TYPES[0];
-    ctx.globalAlpha = 0.35 + 0.65 * (hpr == null ? 1 : hpr);
-    ctx.fillStyle = tt.unit.color; ctx.strokeStyle = c; ctx.lineWidth = Math.max(1.5, s * 0.08);
-    const [w, h, n] = tt.id === 'sniper' ? [s * 0.36, s * 0.74, 3] : tt.id === 'bastion' ? [s * 0.86, s * 0.54, 7] : tt.id === 'outpost' ? [s * 0.46, s * 0.5, 5] : tt.id === 'mage' ? [s * 0.5, s * 0.5, 5] : tt.id === 'bank' ? [s * 0.74, s * 0.52, 7] : tt.id === 'slime' ? [s * 0.56, s * 0.56, 5] : [s * 0.62, s * 0.62, 5];
-    const x0 = x - w / 2, y0 = y - h / 2 + s * 0.06, m = w / n, mh = Math.min(m, s * 0.124) * 0.9;
-    ctx.beginPath();
-    ctx.moveTo(x0, y0 + h); ctx.lineTo(x0, y0);
-    for (let k = 0; k < n; k++) { const xa = x0 + k * m; if (k % 2 === 0) { ctx.lineTo(xa, y0 - mh); ctx.lineTo(xa + m, y0 - mh); ctx.lineTo(xa + m, y0); } else ctx.lineTo(xa + m, y0); }
-    ctx.lineTo(x0 + w, y0 + h); ctx.closePath(); ctx.fill(); ctx.stroke();
-    if (tt.id === 'sniper') { // a yellow band across the top, a slit window below it
-      ctx.fillStyle = '#F2C94C'; ctx.fillRect(x0 + ctx.lineWidth / 2, y0 + h * 0.18, w - ctx.lineWidth, h * 0.14);
-      ctx.fillStyle = c; ctx.fillRect(x - w * 0.09, y0 + h * 0.5, w * 0.18, h * 0.3);
-    } else if (tt.id === 'bastion') { // a shield in the team colour
-      const sw = h * 0.68, sh = h * 0.78, sx = x - sw / 2, sy = y0 + h * 0.12;
-      ctx.fillStyle = c; ctx.beginPath();
-      ctx.moveTo(sx, sy); ctx.lineTo(sx + sw, sy); ctx.lineTo(sx + sw, sy + sh * 0.5);
-      ctx.quadraticCurveTo(sx + sw, sy + sh * 0.85, x, sy + sh); ctx.quadraticCurveTo(sx, sy + sh * 0.85, sx, sy + sh * 0.5);
-      ctx.closePath(); ctx.fill();
-      ctx.fillStyle = tt.unit.color; ctx.fillRect(x - sw * 0.07, sy + sh * 0.12, sw * 0.14, sh * 0.62); ctx.fillRect(sx + sw * 0.2, sy + sh * 0.3, sw * 0.6, sh * 0.13);
-    } else if (tt.id === 'bank') { // a gold coin in the team colour over a door
-      ctx.fillStyle = c; ctx.beginPath(); ctx.arc(x, y0 + h * 0.36, h * 0.24, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = tt.unit.color; ctx.font = `700 ${Math.max(6, h * 0.34)}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('$', x, y0 + h * 0.38);
-      ctx.fillStyle = c; ctx.fillRect(x - m * 0.5, y0 + h - m * 1.1, m, m * 1.1);
-    } else if (tt.id === 'slime') { // slime dripping down from the battlements, a round door
-      ctx.fillStyle = '#3FA81E'; ctx.beginPath(); ctx.moveTo(x0, y0);
-      for (let k = 0; k <= 4; k++) { const xa = x0 + w * k / 4; ctx.lineTo(xa, y0 + h * (k % 2 ? 0.34 : 0.18)); }
-      ctx.lineTo(x0 + w, y0); ctx.closePath(); ctx.fill();
-      ctx.fillStyle = c; ctx.beginPath(); ctx.arc(x, y0 + h - m * 0.5, m * 0.6, Math.PI, 0); ctx.lineTo(x + m * 0.6, y0 + h); ctx.lineTo(x - m * 0.6, y0 + h); ctx.closePath(); ctx.fill();
-    } else if (tt.id === 'mage') { // a pointed wizard roof in the team colour with a star, and an arched door
-      ctx.fillStyle = c; ctx.beginPath(); ctx.moveTo(x0 - w * 0.12, y0 - mh); ctx.lineTo(x + w * 0.08, y0 - mh - h * 0.95); ctx.lineTo(x0 + w * 1.12, y0 - mh); ctx.closePath(); ctx.fill();
-      ctx.fillStyle = '#F2C94C'; ctx.beginPath(); const sx = x + w * 0.02, sy = y0 - mh - h * 0.36, sr = Math.max(1.5, s * 0.07);
-      for (let k = 0; k < 10; k++) { const a = -Math.PI / 2 + k * Math.PI / 5, rr = k % 2 ? sr * 0.45 : sr; ctx.lineTo(sx + rr * Math.cos(a), sy + rr * Math.sin(a)); } ctx.closePath(); ctx.fill();
-      ctx.fillStyle = c; ctx.beginPath(); ctx.moveTo(x - m * 0.5, y0 + h); ctx.lineTo(x - m * 0.5, y0 + h - m * 1.1); ctx.arc(x, y0 + h - m * 1.1, m * 0.5, Math.PI, 0); ctx.lineTo(x + m * 0.5, y0 + h); ctx.closePath(); ctx.fill();
-    } else { ctx.fillStyle = c; ctx.fillRect(x - m * 0.5, y0 + h - m * 1.6, m, m * 1.6); }
-    if (arms) drawArms(ctx, arms, x + Math.min(w / 2, s * 0.28), y + s * 0.18, Math.max(8, s * 0.38));
-    ctx.globalAlpha = 1;
-  }
-  // A small picture of a map for the map picker: the board at the start of a match, with both towers (and the
-  // elf tower). Drawn once per map with the board's own drawing code, by pointing it at a small canvas for a moment.
+  const teamCol = (side) => Art.teamCol(side, me);
+  const { SHROOM_COL, CHARM_COL, armsImg } = Art;
+  // A small picture of each map for the map picker, drawn once per map
   const thumbs = {};
   function mapThumb(id) {
-    if (thumbs[id] != null) return thumbs[id];
-    const tw = 96, th = tw * Game.ROWS / Game.COLS, dpr = 2;
-    const oc = document.createElement('canvas'); oc.width = tw * dpr; oc.height = th * dpr;
-    const g = oc.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0);
-    const keep = { ctx, W, H, S, m, me, phase, mapBg };
-    try {
-      ctx = g; W = tw; H = th; S = W / (Game.COLS * Game.TILE); me = 0; phase = 'start'; mapBg = null;
-      m = id ? Game.createMatch(units, M, 12345, id) : null;
-      drawBoard();
-      const t = tilePx();
-      if (m) {
-        for (const side of [0, 1]) { const p = m.towers[side]; drawKeep((scol(p.col) + 0.5) * t, (srow(p.row) + 0.5) * t, t * 1.6, side, null, 'keep', g); }
-        drawElfTower(m, false);
-      } else { // Random: a question mark on the plain board
-        g.fillStyle = css('--gold'); g.font = `700 ${Math.round(tw * 0.5)}px "Chakra Petch", sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle';
-        g.fillText('?', tw / 2, th / 2);
-      }
-      thumbs[id] = oc.toDataURL();
-    } catch (e) { thumbs[id] = ''; }
-    finally { ({ ctx, W, H, S, m, me, phase, mapBg } = keep); }
+    if (thumbs[id] == null) {
+      try { thumbs[id] = board.thumb(id ? Game.createMatch(units, M, 12345, id) : null); } catch (e) { thumbs[id] = ''; }
+    }
     return thumbs[id];
   }
+  // what this screen may show of the opponent (see Game.charShown)
   const towerVisible = (side) => !!(m && m.towers && m.towers[side]);
-  // the opponent's character (and Zoe's buff tiles) stay hidden until the first fight starts
-  const charVisible = (side) => !!m && (side === me || m.round > 1 || phase !== 'deploy');
-  // the opponent's tower pick stays hidden until the fight of the pick round
-  const towerTypeVisible = (side) => !!m && (side === me || m.round !== Game.TOWER_PICK_ROUND || phase !== 'deploy');
+  const charVisible = (side) => Game.charShown(m, me, phase === 'deploy', side);
+  const towerTypeVisible = (side) => Game.towerTypeShown(m, me, phase === 'deploy', side);
+  const shroomShown = (v, col, row) => Game.shroomShown(v, me, phase === 'deploy', col, row);
+  const myRemovalNow = (col, row) => Game.removingShroom(m, me, phase === 'deploy', col, row);
+  const bribeLeadShown = (v) => Game.bribeLeader(v, phase === 'deploy');
+  // the squad Matteo gave his first Charisma stack to this round, if he did
+  const charmGivenNow = () => m && m.armies[me].find(q => q.charmGiven === m.round && q.charm === 1);
   const choosingTower = () => phase === 'deploy' && m && !Game.needsPack(m, me) && Game.needsTowerPick(m, me);
   const charLine = (id) => { const c = Game.charInfo(id); return c ? `${armsImg(id)}<b>${esc(c.name)}</b> · ${esc(c.ability)}` : ''; };
-  function drawTowerTile(side) {
-    const tw = m.towers[side], t = tilePx();
-    drawKeep((scol(tw.col) + 0.5) * t, (srow(tw.row) + 0.5) * t, t, side, null, towerTypeVisible(side) ? Game.towerType(m, side).id : 'outpost', null, charVisible(side) ? Game.charOf(m, side) : null);
-  }
-  // the neutral elf tower: a slim pale spire with a leaf-green roof. range = show its reach as a faint ring.
-  // Players' own elf towers are drawn too (an opponent's new one only from the fight on).
-  function drawElfTower(v, range) {
-    const e = Game.elfSpot(v); if (!e) return;
-    const x = PX(e.x), y = PY(e.y);
-    if (range) {
-      ctx.strokeStyle = ELF_COL; ctx.globalAlpha = 0.22; ctx.lineWidth = 1; ctx.setLineDash([3, 5]);
-      ctx.beginPath(); ctx.arc(x, y, Game.ELF_TOWER.range * S, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
-      ctx.globalAlpha = 1;
-    }
-    // the flag on the roof: the coat of arms of whoever is ahead in the bribe-off, edged in their colour; plain white while it's level
-    const lead = bribeLeadShown(v);
-    drawSpire(x, y, tilePx() * 1.25, lead < 0 ? '#F4F1E6' : teamCol(lead), Game.elfPowered(v), lead < 0 ? null : armsShown(v, lead));
-    for (const sd of [me, foe()]) {
-      const own = Game.elfOwnOf(v, sd);
-      if (!own || !elfOwnShown(v, sd)) continue;
-      const w = Game.tileToWorld(own.col, own.row);
-      drawSpire(PX(w.x), PY(w.y), tilePx() * 1.05, teamCol(sd), Game.elfPowered(v), armsShown(v, sd));
-    }
-  }
-  // a player's coat of arms where this screen may show it (null while their character is hidden)
-  const armsShown = (v, side) => charVisible(side) ? Game.charOf(v, side) : null;
-  // one elf spire at (x, y), size s, its flag in flagCol. strong (after round 5): a golden glow and a gilded roof.
-  // arms: a character's coat of arms, flown on a flag edged in flagCol instead of the plain pennant
-  function drawSpire(x, y, s, flagCol, strong, arms) {
-    if (strong) {
-      const gl = ctx.createRadialGradient(x, y - s * 0.1, 0, x, y - s * 0.1, s * 0.75);
-      gl.addColorStop(0, 'rgba(255, 214, 90, 0.5)'); gl.addColorStop(1, 'rgba(255, 214, 90, 0)');
-      ctx.fillStyle = gl; ctx.beginPath(); ctx.arc(x, y - s * 0.1, s * 0.75, 0, Math.PI * 2); ctx.fill();
-    }
-    ctx.globalAlpha = 0.35; ctx.fillStyle = '#000';
-    ctx.beginPath(); ctx.ellipse(x, y + s * 0.26, s * 0.22, s * 0.08, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.globalAlpha = 1;
-    const w = s * 0.2, top = y - s * 0.12, base = y + s * 0.26;
-    ctx.fillStyle = '#CFC6A8'; ctx.strokeStyle = strong ? '#8A6A12' : '#3F5A35'; ctx.lineWidth = Math.max(1, s * 0.035);
-    ctx.beginPath(); ctx.moveTo(x - w / 2 - s * 0.03, base); ctx.lineTo(x - w / 2, top); ctx.lineTo(x + w / 2, top); ctx.lineTo(x + w / 2 + s * 0.03, base); ctx.closePath(); ctx.fill(); ctx.stroke();
-    ctx.fillStyle = strong ? '#E8B931' : '#5E9A4E';
-    ctx.beginPath(); ctx.moveTo(x - w * 0.85, top + s * 0.02); ctx.lineTo(x, top - s * 0.3); ctx.lineTo(x + w * 0.85, top + s * 0.02); ctx.closePath(); ctx.fill(); ctx.stroke();
-    ctx.fillStyle = strong ? '#FFE27A' : ELF_COL; ctx.fillRect(x - s * 0.025, top + s * 0.08, s * 0.05, s * 0.09); // a lit window
-    const py = top - s * 0.3;
-    ctx.strokeStyle = '#3F5A35'; ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(x, py); ctx.lineTo(x, py - s * 0.28); ctx.stroke();
-    if (arms) { drawArmsFlag(ctx, arms, x, py - s * 0.28, Math.max(10, s * 0.3), flagCol); return; }
-    ctx.fillStyle = flagCol;
-    ctx.beginPath(); ctx.moveTo(x, py - s * 0.28); ctx.lineTo(x + s * 0.2, py - s * 0.23); ctx.lineTo(x, py - s * 0.18); ctx.closePath(); ctx.fill();
-  }
-  // whether this screen may show a player's own elf tower: an opponent's new one stays hidden until the fight
-  const elfOwnShown = (v, sd) => sd === me || phase !== 'deploy' || Game.elfOwnOf(v, sd).round < v.round;
-  // who the flag shows ahead in the bribe-off: while deploying, this round's bribes (either player's) don't count
-  // yet, as the opponent's stay hidden until the fight; from the fight on, every bribe counts
-  const bribeLeadShown = (v) => Game.bribeLeader(v, phase === 'deploy');
   // tiers by squad price: 100 = tier 1, 200 = tier 2, 400 = tier 3, 600 = tier 4 (any other prices rank in between)
   const TIER_COLORS = ['#9AA5A8', '#6FD08C', '#5BA8F5', '#C58BF2', '#F2B84B'];
   const tierOf = (i) => Game.tierOf(units, i);
   const TIER_NAMES = ['Basic', 'Strong', 'Elite', 'Legendary', 'Mythic'];
-const tierName = (t) => TIER_NAMES[Math.min(TIER_NAMES.length-1, t-1)];
-const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
+  const tierName = (t) => TIER_NAMES[Math.min(TIER_NAMES.length - 1, t - 1)];
+  const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
   const LOCK_SVG = '<svg width="11" height="12" viewBox="0 0 11 12" aria-hidden="true"><rect x="1" y="5" width="9" height="7" rx="1.5" fill="currentColor"/><path d="M3 5V3.5a2.5 2.5 0 0 1 5 0V5" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>';
   let shopTier = 1, unlockAsk = null;
   const choosingPack = () => phase === 'deploy' && m && Game.needsPack(m, me);
   const placingTower = () => phase === 'deploy' && m && !Game.needsPack(m, me) && Game.needsTower(m, me);
   let elfPlacing = false; // picking the tile for the elf tower this player is buying
   const placingElf = () => elfPlacing && phase === 'deploy' && !!m && Game.canBuyElfOwn(m, me);
-  const packText = (p) => { const n = {}; p.squads.forEach(ui => { n[ui] = (n[ui] || 0) + 1; }); return p.units.map(ui => `${n[ui]}× ${esc(units[ui].name)}`).join(' + '); };
-
-  function drawDeploy() {
-    drawBoard();
-    const t = tilePx();
-    if (placingElf() && editable()) { // where the elf tower may go: any free tile of your zone
-      ctx.strokeStyle = ELF_COL; ctx.globalAlpha = 0.6; ctx.lineWidth = 1.5;
-      for (const row of Game.zoneRows(me)) for (let c = 0; c < Game.COLS; c++) if (Game.elfOwnSpotOk(m, me, c, row)) ctx.strokeRect(scol(c) * t + 3, srow(row) * t + 3, t - 6, t - 6);
-      ctx.globalAlpha = 1;
-    }
-    if (placingTower() && editable()) { // where the tower may go: the sides of your zone, not the middle columns
-      ctx.strokeStyle = css('--gold'); ctx.globalAlpha = 0.5; ctx.lineWidth = 1.5;
-      for (const row of Game.zoneRows(me)) for (let c = 0; c < Game.COLS; c++) {
-        if (Game.towerColOk(c) && !Game.reserved(me, c, row) && !Game.occupied(m, me, c, row)) ctx.strokeRect(scol(c) * t + 3, srow(row) * t + 3, t - 6, t - 6);
-      }
-      ctx.globalAlpha = 1;
-    }
-    if ((selected !== null || (drag && drag.moved) || moving != null) && phase === 'deploy') {
-      ctx.strokeStyle = css('--you'); ctx.globalAlpha = 0.25; ctx.lineWidth = 1;
-      const pu = placingUnit();
-      for (let row = 0; row < Game.ROWS; row++) for (let c = 0; c < Game.COLS; c++) {
-        if (Game.canPlaceAt(m, me, c, row, pu) && !Game.occupied(m, me, c, row)) ctx.strokeRect(scol(c) * t + 3, srow(row) * t + 3, t - 6, t - 6);
-      }
-      // your carriers with room for this unit
-      ctx.strokeStyle = css('--gold'); ctx.globalAlpha = 0.8; ctx.lineWidth = 1.5;
-      if (pu != null) for (const sq of m.armies[me]) if (Game.boardable(m, me, sq.col, sq.row, pu) && !(drag && drag.id === sq.id)) ctx.strokeRect(scol(sq.col) * t + 2, srow(sq.row) * t + 2, t - 4, t - 4);
-      ctx.globalAlpha = 1;
-    }
-    if (hoverTile && (selected !== null || moving != null) && Game.canPlaceAt(m, me, hoverTile.col, hoverTile.row, placingUnit()) && (!Game.occupied(m, me, hoverTile.col, hoverTile.row) || (placingUnit() != null && Game.boardable(m, me, hoverTile.col, hoverTile.row, placingUnit())))) {
-      ctx.fillStyle = css('--you'); ctx.globalAlpha = 0.18;
-      ctx.fillRect(scol(hoverTile.col) * t, srow(hoverTile.row) * t, t, t); ctx.globalAlpha = 1;
-    }
-    // the opponent's squads from this round stay hidden until the fight
-    // a squad they moved this round still shows on its old tile
-    for (const sq of m.armies[foe()]) if ((sq.round < m.round || phase !== 'deploy') && !Game.hiddenFromFoe(m, sq)) {
-      const p = phase === 'deploy' ? Game.seenAt(m, sq) : sq;
-      drawSquad(phase === 'deploy' ? { ...sq, col: p.col, row: p.row, level: Game.seenLevel(m, sq) } : sq, foe(), false); // a level-up bought this round stays hidden
-    }
-    for (const sq of m.armies[me]) {
-      if (phase === 'deploy' && sq.from && sq.movedRound === m.round) { // where your moved squad came from
-        ctx.strokeStyle = css('--muted'); ctx.setLineDash([2, 4]); ctx.lineWidth = 1;
-        ctx.strokeRect(scol(sq.from.col) * t + 4, srow(sq.from.row) * t + 4, t - 8, t - 8); ctx.setLineDash([]);
-      }
-      if (Game.isRider(sq)) continue; // drawn as a badge on its carrier
-      const at = drag && drag.moved && drag.id === sq.id ? { ...sq, col: drag.over.col, row: drag.over.row } : sq;
-      drawSquad(at, me, (sq.round === m.round || sq.movedRound === m.round) && phase === 'deploy');
-      const rider = Game.riderOf(m, me, sq);
-      if (rider) { // what rides inside: a small disc with its shape, bottom left of the tile (only you see it)
-        const ru = units[rider.unit], br = Math.max(6, t * 0.2), bx = scol(at.col) * t + br + 2, by = (srow(at.row) + 1) * t - br - 2;
-        ctx.fillStyle = css('--bg'); ctx.strokeStyle = teamCol(me); ctx.lineWidth = 1.5;
-        ctx.beginPath(); ctx.arc(bx, by, br, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-        ctx.fillStyle = ru.color; Shapes.draw(ctx, ru.shape, bx, by, br * 0.55, 1);
-      }
-      if (moving === sq.id && phase === 'deploy') {
-        ctx.strokeStyle = css('--gold'); ctx.lineWidth = 2;
-        ctx.strokeRect(scol(sq.col) * t + 1, srow(sq.row) * t + 1, t - 2, t - 2);
-      }
-    }
-    for (const side of [me, foe()]) if (towerVisible(side)) drawTowerTile(side);
-    // the squad tapped last: its range as a dotted ring round its tile (theirs as you can know it)
-    const rs = rangeOf && phase === 'deploy' && m.armies[rangeOf.side].find(s => s.id === rangeOf.id);
-    if (rs) {
-      const p = rangeOf.side !== me ? Game.seenAt(m, rs) : drag && drag.moved && drag.id === rs.id ? drag.over : rs;
-      const w = Game.tileToWorld(p.col, p.row);
-      ctx.strokeStyle = teamCol(rangeOf.side); ctx.globalAlpha = 0.9; ctx.lineWidth = 1.5; ctx.setLineDash([4, 5]);
-      ctx.beginPath(); ctx.arc(PX(w.x), PY(w.y), Game.squadRange(m, rangeOf.side, rs, rangeOf.side !== me) * S, 0, Math.PI * 2); ctx.stroke();
-      ctx.setLineDash([]); ctx.globalAlpha = 1;
-    }
-    drawElfTower(m, true);
-    if (Game.isIce(m)) for (const side of [me, foe()]) {
-      // Snowgres on their tiles in no man's land (an opponent's new one shows up at the fight)
-      const buys = (m.altar || []).filter(b => b.side === side && b.type === 'snowgre');
-      Game.snowgres(m, side).forEach((sg, k) => {
-        if (!altarShown(m, buys[k])) return;
-        const u = Game.snowgreUnit(m, sg.strength), w = Game.tileToWorld(sg.col, sg.row);
-        Shapes.body(ctx, 'square', PX(w.x), PY(w.y), radius(u), upOf(side), u.color, teamCol(side), 0.95);
-      });
-      const wb = (m.altar || []).find(b => b.side === side && b.type === 'walls' && b.round === m.round);
-      if (wb && altarShown(m, wb) && m.towers && m.towers[side]) { const w = Game.tileToWorld(m.towers[side].col, m.towers[side].row); drawWalls(w.x, w.y, [1, 1, 1, 1].map(() => Game.ICE.wallHits)); }
-    }
-  }
-
-  function drawBattle() {
-    drawBoard();
-    const muted = css('--muted'), gold = css('--gold');
-    for (const e of fx) {
-      const a = 1 - e.age / e.life;
-      if (e.kind === 'flame') { // fire cone, drawn under the bodies
-        const cx = PX(e.x1), cy = PY(e.y1), ex = PX(e.x2), ey = PY(e.y2);
-        const ang = Math.atan2(ey - cy, ex - cx), half = e.half * Math.PI / 180, rr = Math.hypot(ex - cx, ey - cy);
-        const grd = ctx.createRadialGradient(cx, cy, 0, cx, cy, rr);
-        grd.addColorStop(0, 'rgba(255,210,90,0.6)'); grd.addColorStop(0.6, 'rgba(255,120,40,0.35)'); grd.addColorStop(1, 'rgba(255,70,20,0.05)');
-        ctx.fillStyle = grd; ctx.globalAlpha = 0.4 + 0.6 * a;
-        ctx.beginPath(); ctx.moveTo(cx, cy); ctx.arc(cx, cy, rr, ang - half, ang + half); ctx.closePath(); ctx.fill();
-      }
-      if (e.kind === 'death') {
-        ctx.strokeStyle = teamCol(e.side); ctx.globalAlpha = 0.5 * a; ctx.lineWidth = 1;
-        ctx.beginPath(); ctx.arc(PX(e.x), PY(e.y), e.r * (1 + e.age / e.life), 0, Math.PI * 2); ctx.stroke();
-      }
-    }
-    ctx.globalAlpha = 1;
-    for (const b of bt.bodies) {
-      if (b.alive || b.boarded) continue; // a rider still inside its carrier isn't a corpse
-      ctx.fillStyle = muted; ctx.globalAlpha = 0.18;
-      ctx.beginPath(); ctx.arc(PX(b.x), PY(b.y), Math.max(1.5, radius(b.u) * 0.45), 0, Math.PI * 2); ctx.fill();
-    }
-    for (const b of bt.bodies) {
-      if (!b.alive || !b.u.structure) continue;
-      const hpr = b.hp / b.u.hp, t = tilePx();
-      drawKeep(PX(b.x), PY(b.y), t, b.side, hpr, b.u.kind, null, Game.charOf(battlePre || m, b.side));
-      ctx.strokeStyle = teamCol(b.side); ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.arc(PX(b.x), PY(b.y), t * 0.5, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * hpr); ctx.stroke();
-      if (b.walls) drawWalls(b.x, b.y, b.walls);
-    }
-    drawElfTower(battlePre || m, false);
-    for (const b of bt.bodies) {
-      if (!b.alive || b.u.structure || b.u.aloft) continue;
-      const c = teamCol(b.side), r = radius(b.u), hpr = b.hp / b.u.hp;
-      if (b.hidden) { // stealthed: a dashed ghost while hidden (fainter for the enemy's)
-        ctx.globalAlpha = b.side === me ? 0.6 : 0.3; ctx.strokeStyle = c; ctx.lineWidth = 1.5; ctx.setLineDash([2, 2]);
-        Shapes.outline(ctx, b.u.shape, PX(b.x), PY(b.y), r, upOf(b.side));
-        ctx.setLineDash([]); ctx.globalAlpha = 1;
-        continue;
-      }
-      Shapes.body(ctx, b.u.shape, PX(b.x), PY(b.y), r, upOf(b.side), b.u.color, c, (0.35 + 0.65 * hpr) * (b.delay > 0 ? 0.45 : 1));
-      if (b.delay > 0) { // flank squads arrive a few seconds late: a shrinking ring shows the wait
-        ctx.strokeStyle = css('--gold'); ctx.lineWidth = 1.5;
-        ctx.beginPath(); ctx.arc(PX(b.x), PY(b.y), r + 3, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * b.delay / Game.FLANK.delay); ctx.stroke();
-      }
-      if (b.poison && b.poison.length) { ctx.fillStyle = '#6FD08C'; ctx.beginPath(); ctx.arc(PX(b.x) + r * 0.9, PY(b.y) - r * 0.9, Math.max(2, r * 0.3), 0, Math.PI * 2); ctx.fill(); }
-      if (b.slowT > 0) { ctx.fillStyle = '#9BD0FF'; ctx.beginPath(); ctx.arc(PX(b.x) - r * 0.9, PY(b.y) - r * 0.9, Math.max(2, r * 0.3), 0, Math.PI * 2); ctx.fill(); } // slowed
-      if (b.stunT > 0) { // stunned after a charge: three dots circling over its head
-        ctx.fillStyle = '#FFD23F';
-        for (let k = 0; k < 3; k++) { const a = bt.time() * 6 + k * 2.094; ctx.beginPath(); ctx.arc(PX(b.x) + Math.cos(a) * r * 0.8, PY(b.y) - r * 1.2 + Math.sin(a) * r * 0.3, Math.max(1.5, r * 0.2), 0, Math.PI * 2); ctx.fill(); }
-      }
-      if (b.u.hp >= 500 && hpr < 1) {
-        ctx.strokeStyle = c; ctx.lineWidth = 1.5;
-        ctx.beginPath(); ctx.arc(PX(b.x), PY(b.y), r + 2.5, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * hpr); ctx.stroke();
-      }
-      if (b.windTarget && b.u.windUp > 0) {
-        ctx.strokeStyle = c; ctx.lineWidth = 2.5;
-        ctx.beginPath(); ctx.arc(PX(b.x), PY(b.y), r + 4, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * (1 - b.windT / b.u.windUp)); ctx.stroke();
-      }
-      const ch = bt.charm ? bt.charm(b.side, b.squad) : 0;
-      if (ch >= Engine.CHARM_MAX) drawHat(PX(b.x), PY(b.y) - r * 0.8, Math.max(6, r * 1.3)); // a Gentleman
-      else if (ch > 0) { ctx.fillStyle = CHARM_COL; ctx.beginPath(); ctx.arc(PX(b.x), PY(b.y) - r * 1.1, Math.max(1.5, r * 0.25), 0, Math.PI * 2); ctx.fill(); }
-      if (b.convert) { // won over by a Gentleman: a pink ring
-        ctx.strokeStyle = CHARM_COL; ctx.lineWidth = 1.5; ctx.setLineDash([2, 2]);
-        ctx.beginPath(); ctx.arc(PX(b.x), PY(b.y), r + 3, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
-      }
-      if (b.level > 0) {
-        ctx.strokeStyle = gold; ctx.lineWidth = Math.min(2.5, 0.8 + b.level * 0.5);
-        Shapes.outline(ctx, b.u.shape, PX(b.x), PY(b.y), r + 3.5, upOf(b.side));
-      }
-      if (b.shroom) { // purple mushroom buff: faint purple spores drifting up, looping
-        ctx.fillStyle = SHROOM_COL.purple;
-        for (let k = 0; k < 2; k++) {
-          const s0 = (b.squad * 0.29 + b.x * 0.11 + k * 0.5) % 1, p = (bt.time() * 0.6 + s0) % 1;
-          ctx.globalAlpha = 0.5 * Math.sin(p * Math.PI);
-          ctx.beginPath(); ctx.arc(PX(b.x) + (k ? 1 : -1) * r * (0.3 + 0.3 * Math.sin((p + s0) * 6)), PY(b.y) - r * (0.4 + 1.6 * p), Math.max(1.2, r * 0.16), 0, Math.PI * 2); ctx.fill();
-        }
-        ctx.globalAlpha = 1;
-      }
-      if (b.fast) { // yellow mushroom: a short speed streak behind the body
-        ctx.strokeStyle = SHROOM_COL.yellow; ctx.globalAlpha = 0.55; ctx.lineWidth = 1.2;
-        const hx = (b.hx || 0) * flip(), hy = -(b.hy || 0) * flip();
-        for (const o of [-0.4, 0.4]) { ctx.beginPath(); ctx.moveTo(PX(b.x) - hx * r * 1.2 + hy * r * o, PY(b.y) - hy * r * 1.2 - hx * r * o); ctx.lineTo(PX(b.x) - hx * r * 2.2 + hy * r * o, PY(b.y) - hy * r * 2.2 - hx * r * o); ctx.stroke(); }
-        ctx.globalAlpha = 1;
-      }
-      if (b.zoe) { // Zoe buff: two faint stars drifting up from the body, looping
-        ctx.fillStyle = gold; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.font = `${Math.max(7, Math.round(r * 0.7))}px sans-serif`;
-        for (let k = 0; k < 2; k++) {
-          const s = (b.squad * 0.37 + b.x * 0.13 + k * 0.5) % 1, p = (bt.time() * 0.7 + s) % 1;
-          ctx.globalAlpha = 0.55 * Math.sin(p * Math.PI);
-          ctx.fillText('★', PX(b.x) + (k ? 1 : -1) * r * (0.35 + 0.25 * Math.sin((p + s) * 6)), PY(b.y) - r * (0.4 + 1.8 * p));
-        }
-        ctx.globalAlpha = 1;
-      }
-    }
-    for (const b of bt.bodies) if (b.alive && b.u.aloft) drawAirship(b, tilePx()); // airships fly over everything
-    for (const e of fx) {
-      const a = 1 - e.age / e.life;
-      if (e.kind === 'heal') {
-        ctx.strokeStyle = '#6FD08C'; ctx.globalAlpha = 0.8 * a; ctx.lineWidth = 1.5; ctx.setLineDash([2, 3]);
-        ctx.beginPath(); ctx.moveTo(PX(e.x1), PY(e.y1)); ctx.lineTo(PX(e.x2), PY(e.y2)); ctx.stroke(); ctx.setLineDash([]);
-        if (e.splash > 0) { ctx.globalAlpha = 0.5 * a; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(PX(e.x2), PY(e.y2), e.splash * S, 0, Math.PI * 2); ctx.stroke(); } // the elves' splash heal
-      }
-      if (e.kind === 'bolt') { // lightning: a jagged white-blue line with a glow in the team colour
-        const x1 = PX(e.x1), y1 = PY(e.y1), x2 = PX(e.x2), y2 = PY(e.y2), dx = x2 - x1, dy = y2 - y1, L = Math.hypot(dx, dy) || 1, n = Math.max(3, Math.round(L / 8));
-        const pts = [[x1, y1]];
-        for (let k = 1; k < n; k++) { const o = (Math.sin((e.seed * 97 + k) * 12.9898) * 43758.5453 % 1) * Math.min(6, L * 0.12); pts.push([x1 + dx * k / n - dy / L * o, y1 + dy * k / n + dx / L * o]); }
-        pts.push([x2, y2]);
-        for (const [col, lw, al] of [[teamCol(e.side), 4, 0.35], ['#E8F1FF', 1.5, 0.95]]) {
-          ctx.strokeStyle = col; ctx.lineWidth = lw; ctx.globalAlpha = al * a; ctx.beginPath(); pts.forEach(([px, py], k) => k ? ctx.lineTo(px, py) : ctx.moveTo(px, py)); ctx.stroke();
-        }
-      }
-      if (e.kind === 'shot') {
-        ctx.strokeStyle = teamCol(e.side); ctx.globalAlpha = 0.7 * a; ctx.lineWidth = Math.max(e.charged ? 3 : 1, 1 + (e.spin - 1) * 1.5); // spun-up beams get thicker
-        ctx.beginPath(); ctx.moveTo(PX(e.x1), PY(e.y1)); ctx.lineTo(PX(e.x2), PY(e.y2)); ctx.stroke();
-        if (e.splash > 0) { ctx.globalAlpha = 0.4 * a; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(PX(e.x2), PY(e.y2), e.splash * S, 0, Math.PI * 2); ctx.stroke(); }
-      }
-    }
-    ctx.globalAlpha = 1;
-    for (const p of bt.projectiles()) {
-      if (p.owner.u.shape === 'spear') { // a thrown spear: shaft and head along its flight, in the unit's colour
-        const L = Math.max(12, 3 * S), dx = p.dirX * flip(), dy = -p.dirY * flip(), hx = PX(p.x), hy = PY(p.y), tx = hx - dx * L, ty = hy - dy * L;
-        ctx.strokeStyle = teamCol(p.owner.side); ctx.lineWidth = 3.5; ctx.lineCap = 'round';
-        ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(hx, hy); ctx.stroke();
-        ctx.strokeStyle = p.owner.u.color; ctx.lineWidth = 1.5; ctx.stroke();
-        const hl = L * 0.32, hw = L * 0.14;
-        ctx.fillStyle = p.owner.u.color; ctx.strokeStyle = teamCol(p.owner.side); ctx.lineWidth = 1;
-        ctx.beginPath(); ctx.moveTo(hx + dx * hl * 0.6, hy + dy * hl * 0.6); ctx.lineTo(hx - dx * hl * 0.4 - dy * hw, hy - dy * hl * 0.4 + dx * hw); ctx.lineTo(hx - dx * hl * 0.4 + dy * hw, hy - dy * hl * 0.4 - dx * hw); ctx.closePath(); ctx.fill(); ctx.stroke();
-        ctx.lineCap = 'butt';
-        continue;
-      }
-      ctx.fillStyle = teamCol(p.owner.side);
-      ctx.fillRect(PX(p.x) - 2.5, PY(p.y) - 2.5, 5, 5);
-    }
-    // a fallen tower cripples its army for a few seconds
-    const crip = [me, foe()].filter(sd => bt.crippled(sd) > 0);
-    crip.forEach((sd, k) => {
-      const txt = sd === me ? `Your tower fell · crippled ${Math.ceil(bt.crippled(sd))} s` : `${mode === 'claude' ? 'Claude’s' : 'Enemy'} tower fell · crippled ${Math.ceil(bt.crippled(sd))} s`;
-      ctx.font = `600 ${Math.max(11, Math.round(W * 0.035))}px "IBM Plex Mono", monospace`;
-      const tw = ctx.measureText(txt).width + 16, th = Math.max(20, W * 0.06), x = (W - tw) / 2, y = H * (sd === me ? 0.62 : 0.32) + k * 2;
-      ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(x, y, tw, th);
-      ctx.fillStyle = teamCol(sd); ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(txt, W / 2, y + th / 2);
-    });
-  }
-
-  function render() {
-    syncMusic();
-    cv.style.touchAction = phase === 'deploy' ? 'none' : ''; // so a finger can drag squads without scrolling the page
-    if (!m) { drawBoard(); return; }
-    if (bt && phase === 'battle' && cam && cam.k > 0) { // the battle cam, zoomed in around its focus
-      const z = 1 + (CAM.zoom - 1) * cam.k, fx0 = PX(cam.x), fy0 = PY(cam.y);
-      ctx.save(); ctx.translate(fx0, fy0); ctx.scale(z, z); ctx.translate(-fx0, -fy0);
-      drawBattle();
-      ctx.restore();
-    } else if (bt && (phase === 'battle' || phase === 'result' || phase === 'end')) drawBattle();
-    else drawDeploy();
-  }
 
   // ---------- HUD ----------
   function hud() {
@@ -1525,6 +899,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
     else if (phase === 'lobby') setNet('');
     else if (phase === 'draft' && mode === 'guest') setNet('Connection lost. Reconnecting…', 'bad');
     else setNet(mode === 'host' ? `Opponent disconnected. Waiting for them to come back…` : 'Connection lost. Reconnecting…', 'bad');
+    dock(); // the line above the board moves it
   }
 
   // ---------- countdown ----------
@@ -1616,7 +991,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
       <div class="row"><button class="btn small" id="pick-hide">Hide</button><button class="btn primary" id="pick-go" disabled>Choose</button></div>`;
     if (html !== pickHtml) { // only redraw when the options change, so the cards don't fly in again
       pickHtml = html; el.innerHTML = html;
-      el.querySelectorAll('[data-ticon]').forEach(c => drawKeep(48, 54, 92, me, null, c.dataset.ticon, c.getContext('2d')));
+      el.querySelectorAll('[data-ticon]').forEach(c => Art.keep(c.getContext('2d'), 48, 54, 92, teamCol(me), null, c.dataset.ticon));
       el.querySelectorAll('[data-opt]').forEach(b => b.addEventListener('click', () => {
         const cur = pickOptions(); if (!cur) return;
         if (pickSel === b.dataset.opt) choosePick(cur, pickSel); else { pickSel = b.dataset.opt; syncPick(); }
@@ -1635,6 +1010,31 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
   // ---------- panel ----------
   // the picked tower's skill, not bought yet: offered as a button in the deploy panel
   const MORE = (id) => `<button class="linkbtn" id="${id}">More</button>`; // opens the full rules in a sheet
+  // the "More" links in hints, on the panel or in the Help sheet
+  function wireMore() {
+    if ($('map-more')) $('map-more').addEventListener('click', () => openMapSheet());
+    if ($('flank-more')) $('flank-more').addEventListener('click', () => overlayMsgSheet('Flanks', `From round ${Game.FLANK.round}, the blue edge columns on the enemy’s half are yours to deploy on too, and the red ones on your half are theirs. A squad placed on a flank can’t move or attack for the first ${Game.FLANK.delay} s of its first fight. Flank squads march in sideways, toward the middle of the board, until they spot an enemy.`));
+  }
+  // Help while deploying: the current tip (set by panelDeploy), then how the board works
+  let helpTip = '', helpSeen = 0; // helpSeen: the round whose news the player has opened
+  function openHelp() {
+    if (m) helpSeen = m.round;
+    $('sheet').innerHTML = `<div class="bar"><h3 id="sheet-h">Help</h3><button class="btn small" id="close">Close</button></div>
+      ${helpTip ? `<p style="margin:0">${helpTip}</p>` : ''}
+      <ul class="helplist">
+        <li>Pick a unit card, then tap a highlighted tile in your zone, the bottom six rows. Each squad costs its gold and one deployment.</li>
+        <li>Drag a squad you placed this round to move it, or tap it to take it back. Your round 1 package squads are free.</li>
+        <li>A squad with a gold badge can level up: tap it. Tap an older squad, a tower or an enemy squad to see what it does.</li>
+        ${document.documentElement.classList.contains('dock') ? '<li>Hold the blue tab on the deploy panel and slide it up or down (or tap it). Picking a unit puts it down so you can see every tile; the ✕ on the board stops placing.</li>' : ''}
+        ${board3d ? '<li>3D board: spread two fingers (or scroll) to go in a view: Strategic, Tilted (the whole board from your side, still for placing), Angled, Cinematic. Pinch (or press Esc) to go back.</li>' : ''}
+      </ul>
+      <div class="bar"><span></span><button class="btn small" id="help-how">How to play</button></div>`;
+    $('sheet-back').hidden = false;
+    $('close').addEventListener('click', closeSheet);
+    $('help-how').addEventListener('click', openHowTo);
+    wireMore();
+    if (phase === 'deploy') panelDeploy(); // the button stops glowing
+  }
   function overlayMsgSheet(head, text) {
     $('sheet').innerHTML = `<div class="bar"><h3 id="sheet-h">${esc(head)}</h3><button class="btn small" id="close">Close</button></div><p style="margin:0">${esc(text)}</p>`;
     $('sheet-back').hidden = false;
@@ -1680,7 +1080,16 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
       if (placingElf()) hint = 'Tap a free tile in your zone to place your elf tower. Tap anywhere else to cancel.';
       if (placingTower()) hint = 'Next, place your tower: tap a gold tile on the left or right side of your zone. If it falls in a fight, your army is crippled for a few seconds.';
     }
-    const extraBtns = `<span style="display:flex;gap:6px;flex-wrap:wrap">
+    // Only hints about what the next tap does (or why it can't) stay on the panel; the rest (tips, this round's
+    // news) go to the Help sheet, whose button turns gold while there's news not read yet this round.
+    const inline = !can || placingTower() || placingElf() || choosingTower() || choosingPack() || moveMode || (charmMode && Game.canGiveCharm(m, me))
+      || (selected !== null && !canBuy(selected)) ? hint : '';
+    helpTip = inline ? '' : hint;
+    // phone: the task the next board tap is for, shown over the board while the drawer is down (dock())
+    dockTask = !can ? null : placingTower() ? { text: hint, x: false }
+      : selected !== null || moveMode || (charmMode && Game.canGiveCharm(m, me)) || placingElf() ? { text: hint, x: true } : null;
+    const news = can && selected === null && !fresh && !inline && (Game.hailRound(m) || Game.altarRound(m) || m.round === Game.FLANK.round || (tskillOffer() && m.round === Game.TOWER_PICK_ROUND));
+    const extraBtns = `<span class="xbtns" style="display:flex;gap:6px;flex-wrap:wrap">
         <button class="btn small" id="buy-deploy" ${can && Game.canBuyDeploy(m, me) ? '' : 'disabled'}>+1 deployment · ${Game.CONFIG.extraDeployCost}</button>
         ${loanOffer() ? (Game.loanNow(m, me) ? `<button class="btn small" id="loan-undo" ${can && m.gold[me] >= Game.LOAN.gold ? '' : 'disabled'}>Pay back loan · −${Game.LOAN.gold}</button>` : `<button class="btn small" id="loan" ${can && Game.canTakeLoan(m, me) ? '' : 'disabled'}>Loan · +${Game.LOAN.gold}</button>`) : ''}
         ${mageOffer() ? `<button class="btn small" id="mage-gen" ${can ? '' : 'disabled'}>${Game.mageGenOf(m, me) || Game.mageTpOf(m, me) ? [Game.mageGenOf(m, me), Game.mageTpOf(m, me) && 'teleport'].filter(Boolean).map(id => esc(Game.mageGenInfo(id).name)).join(' + ') : 'Mage general'}…</button>` : ''}
@@ -1703,14 +1112,14 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
       action = `<button class="btn ${ready[me] ? '' : 'primary'}" id="ready" ${timeUp || choosingTower() ? 'disabled' : ''}>${ready[me] ? 'Not ready' : 'Ready'}</button>`;
     }
     $('panel').innerHTML = `
-      <div class="bar"><span class="gold num">${g} gold</span><span class="deploys num">${Math.max(0, left)} of ${allowed} deployments left</span><span class="timer" id="timer">${deadline ? fmtClock(deadline - now()) : ''}</span></div>
-      <div class="bar"><span class="hint">${hint}</span>${(choosingPack() || choosingTower()) && can ? '' : extraBtns}</div>
+      <div class="bar"><span class="gold num">${g} gold</span><span class="deploys num">${Math.max(0, left)} of ${allowed} deployments left</span><span class="timer" id="timer">${deadline ? fmtClock(deadline - now()) : ''}</span><button class="cog help${news && helpSeen !== m.round ? ' new' : ''}" id="help-btn" aria-label="${news && helpSeen !== m.round ? 'Help, news this round' : 'Help'}">?</button></div>
+      <div class="bar">${inline ? `<span class="hint">${inline}</span>` : ''}${(choosingPack() || choosingTower()) && can ? '' : extraBtns}</div>
       ${(choosingPack() || choosingTower()) && can ? '' : (() => {
         const tiers = [...new Set(units.map((u, i) => Game.isOff(m, i, me) ? 0 : tierOf(i)))].filter(t => t > 0).sort((a, b) => a - b); // units left out of the match aren't in the shop
         if (!tiers.includes(shopTier)) shopTier = tiers[0];
         return `<div class="tiers" role="tablist" aria-label="Unit tiers, higher is stronger" style="--n:${tiers.length}">${tiers.map(t => {
           const idx = units.map((u, i) => i).filter(i => tierOf(i) === t && !Game.isOff(m, i, me)), open = idx.filter(i => !locked(i)).length, free = idx.some(i => freeN(i) > 0);
-          return `<button role="tab" data-tier="${t}" aria-selected="${t === shopTier}" aria-label="Tier ${t}, ${tierName(t)}, ${price(idx[0])} gold, ${open} of ${idx.length} unlocked${free ? ', has free squads' : ''}" style="--tier:${tierColor(t)}">Tier ${t}<em>${tierName(t)}</em><small>${price(idx[0])}g · ${open}/${idx.length}</small></button>`;
+          return `<button role="tab" data-tier="${t}" aria-selected="${t === shopTier}" aria-label="Tier ${t}, ${tierName(t)}, ${price(idx[0])} gold, ${open} of ${idx.length} unlocked${free ? ', has free squads' : ''}" style="--tier:${tierColor(t)}">T${t}<em>${tierName(t)}</em><small>${price(idx[0])}g · ${open}/${idx.length}</small></button>`;
         }).join('')}</div>`;
       })()}
       ${(choosingPack() || choosingTower()) && can ? '' : `<div class="shop" id="shop">${units.map((u, i) => tierOf(i) !== shopTier || Game.isOff(m, i, me) ? '' : `
@@ -1724,7 +1133,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
           </button>
           <button class="info" data-info="${i}" aria-label="About ${esc(u.name)}">i</button>
         </div>`).join('')}</div>`}
-      <div class="bar"><span class="hint">${status}</span>${action}</div>`;
+      <div class="bar"><span class="dock-gold gold num">${g}g</span><span class="hint">${status}</span>${action}</div>`;
     syncPick();
     $('panel').querySelectorAll('[data-tier]').forEach(b => b.addEventListener('click', () => { shopTier = +b.dataset.tier; shopScroll = 0; panelDeploy(); }));
     const shop = $('shop') || document.createElement('div');
@@ -1741,8 +1150,8 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
     if ($('fight')) $('fight').addEventListener('click', runFight);
     if ($('ready')) $('ready').addEventListener('click', toggleReady);
     if ($('buy-deploy')) $('buy-deploy').addEventListener('click', () => { if (editable() && Game.buyDeploy(m, me)) changed(); });
-    if ($('map-more')) $('map-more').addEventListener('click', () => openMapSheet());
-    if ($('flank-more')) $('flank-more').addEventListener('click', () => overlayMsgSheet('Flanks', `From round ${Game.FLANK.round}, the blue edge columns on the enemy’s half are yours to deploy on too, and the red ones on your half are theirs. A squad placed on a flank can’t move or attack for the first ${Game.FLANK.delay} s of its first fight. Flank squads march in sideways, toward the middle of the board, until they spot an enemy.`));
+    wireMore();
+    $('help-btn').addEventListener('click', openHelp);
     if ($('mage-gen')) $('mage-gen').addEventListener('click', () => openTowerSheet(me));
     if ($('loan')) $('loan').addEventListener('click', () => { if (editable() && Game.takeLoan(m, me)) changed(); });
     if ($('loan-undo')) $('loan-undo').addEventListener('click', () => { if (editable() && Game.undoLoan(m, me)) changed(); });
@@ -2536,7 +1945,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     for (const s of bt.lastShots()) if (s[8] > 0) fx.push({ kind: 'flame', x1: s[0], y1: s[1], x2: s[2], y2: s[3], side: s[4], half: s[8], age: 0, life: 0.3 });
     else if (s[10] === 1) fx.push({ kind: 'bolt', x1: s[0], y1: s[1], x2: s[2], y2: s[3], side: s[4], age: 0, life: 0.22, seed: Math.random() });
     else fx.push({ kind: s[7] === 1 ? 'heal' : 'shot', x1: s[0], y1: s[1], x2: s[2], y2: s[3], side: s[4], splash: s[5], charged: s[6], spin: s[9] || 1, age: 0, life: s[7] === 1 ? 0.35 : 0.18 });
-    for (const b of bt.bodies) if (!b.alive && !b._gone) { b._gone = true; fx.push({ kind: 'death', x: b.x, y: b.y, r: radius(b.u), side: b.side, age: 0, life: 0.5 }); }
+    for (const b of bt.bodies) if (!b.alive && !b._gone) { b._gone = true; fx.push({ kind: 'death', x: b.x, y: b.y, u: b.u, side: b.side, age: 0, life: 0.5 }); }
   }
 
   const fighters = (side) => bt.bodies.filter(b => b.alive && b.side === side && !b.u.structure && !b.u.aloft);
@@ -2595,54 +2004,58 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   }
 
   // ---------- board input ----------
-  function tileAt(ev) {
-    const r = cv.getBoundingClientRect();
-    const c = Math.floor((ev.clientX - r.left) / r.width * Game.COLS);
-    const rw = Math.floor((ev.clientY - r.top) / r.height * Game.ROWS);
-    if (c < 0 || rw < 0 || c >= Game.COLS || rw >= Game.ROWS) return null;
-    return { col: scol(c), row: srow(rw) }; // screen -> model (the flip is its own inverse)
-  }
-  // drag one of your squads: this round's squads move for free; an older one only with the Move ability
-  cv.addEventListener('pointerdown', (ev) => {
-    if (phase !== 'deploy' || !m || !editable() || choosingPack() || placingTower()) return;
-    const t = tileAt(ev); if (!t) return;
+  // The rules work on tiles (model columns / rows), so the 2D canvas below and the 3D board (opts of Render3D) share
+  // them: boardPress / boardDrag / boardDrop for dragging a squad, boardHover for the mouse, boardTap for a tap.
+  const tileAt = (ev) => board.tileAt(ev.clientX, ev.clientY);
+  // drag one of your squads: this round's squads move for free; an older one only with the Move ability.
+  // Returns true when a drag starts.
+  function boardPress(t) {
+    if (!t || phase !== 'deploy' || !m || !editable() || choosingPack() || placingTower()) return false;
     const sq = Game.squadAt(m, me, t.col, t.row);
-    if (!sq) return;
-    if (sq.round < m.round && !(moveMode || Game.movedId(m, me) === sq.id)) return;
-    if (!Game.canMove(m, me, sq)) return;
+    if (!sq) return false;
+    if (sq.round < m.round && !(moveMode || Game.movedId(m, me) === sq.id)) return false;
+    if (!Game.canMove(m, me, sq)) return false;
     drag = { id: sq.id, from: t, over: t, moved: false };
-    try { cv.setPointerCapture(ev.pointerId); } catch (e) {}
-  });
-  cv.addEventListener('pointerup', () => {
+    return true;
+  }
+  function boardDrag(t) {
+    if (drag && t && (t.col !== drag.over.col || t.row !== drag.over.row)) { drag.over = t; drag.moved = true; render(); }
+  }
+  // the drag ends on tile t (null: the last tile it was over); ended is false when it was cancelled
+  function boardDrop(t, ended) {
     if (!drag) return;
+    if (ended) boardDrag(t);
     const d = drag; drag = null;
-    if (!d.moved || (d.over.col === d.from.col && d.over.row === d.from.row)) { render(); return; }
+    if (!ended || !d.moved || (d.over.col === d.from.col && d.over.row === d.from.row)) { render(); return; }
     dragEndAt = performance.now(); // the click that follows a drag is not a tap
     if (Game.moveSquad(m, me, d.id, d.over.col, d.over.row) && m.armies[me].find(s => s.id === d.id).round < m.round) { moveMode = false; moving = null; }
     changed();
-  });
-  cv.addEventListener('pointercancel', () => { if (drag) { drag = null; render(); } });
+  }
+  // the mouse over a tile (null: off the board), for the placement preview while deploying
+  function boardHover(t) {
+    if (t && phase !== 'deploy') return;
+    hoverTile = t; if (phase === 'deploy') render();
+  }
+  cv.addEventListener('pointerdown', (ev) => { if (boardPress(tileAt(ev))) try { cv.setPointerCapture(ev.pointerId); } catch (e) {} });
+  cv.addEventListener('pointerup', () => boardDrop(null, true));
+  cv.addEventListener('pointercancel', () => boardDrop(null, false));
   cv.addEventListener('pointermove', (ev) => {
-    if (drag) {
-      const t = tileAt(ev);
-      if (t && (t.col !== drag.over.col || t.row !== drag.over.row)) { drag.over = t; drag.moved = true; render(); }
-      return;
-    }
-    if (phase !== 'deploy' || ev.pointerType !== 'mouse') return;
-    hoverTile = tileAt(ev); render();
+    if (drag) { boardDrag(tileAt(ev)); return; }
+    if (ev.pointerType === 'mouse') boardHover(tileAt(ev));
   });
-  cv.addEventListener('pointerleave', () => { hoverTile = null; if (phase === 'deploy') render(); });
-  // a tap on the board clears the range ring; tapping a squad shows its range (a squad of yours from this round
-  // is taken back with a second tap)
-  cv.addEventListener('click', (ev) => {
+  cv.addEventListener('pointerleave', () => boardHover(null));
+  cv.addEventListener('click', (ev) => boardTap(tileAt(ev)));
+  // a tap on a tile (2D or 3D board). It clears the range ring; tapping a squad shows its range (a squad of yours
+  // from this round is taken back with a second tap)
+  function boardTap(t) {
     const had = rangeOf;
     rangeOf = null;
-    boardTap(ev, had);
+    tapTile(t, had);
     if (rangeOf !== had && phase === 'deploy') render();
-  });
-  function boardTap(ev, had) {
-    if (phase !== 'deploy') return;
-    const t = tileAt(ev); if (!t) return;
+  }
+  // place, take back, the abilities (Move, Charisma), the elf tower, and the unit, tower, altar and map sheets
+  function tapTile(t, had) {
+    if (phase !== 'deploy' || !t) return;
     if (choosingPack() || choosingTower()) return; // the package (and in round 3 the tower) comes first
     if (performance.now() - dragEndAt < 400) return;
     if (placingTower()) { if (editable() && Game.placeTower(m, me, t.col, t.row)) changed(); return; }
@@ -2694,6 +2107,164 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
         changed();
       }
     }
+  }
+
+  // ---------- the 3D board (src/render3d.js): the default, with a setting (Board: 2D / 3D in the in-match Settings) ----------
+  // It draws from the same view() as the 2D board and hands taps, drags and the mouse to the board input above, as
+  // tiles; while deploying, the angled view takes them too. three.js (THREE_URL) and the 3D code (src/, unless a build
+  // inlined it) load only then, so the 2D game opens as fast as without 3D.
+  // ?board=3d in the address, or a build that sets PB_FORCE3D (the phone-test artifact), forces it on for testing:
+  // that also shows the speed meter and skips the too-slow rule. ?board=2d starts on the 2D board (the 2D checks).
+  // Saved 2D (chosen in Settings, or after 3D couldn't start or was too slow) stays 2D.
+  // It falls back to the 2D board when it can't start (no WebGL), when the phone drops the WebGL context, and when
+  // fights run under 20 fps at low quality (slower fights step the quality down first), with one line on the board.
+  const THREE_URL = './vendor/three.module.min.js'; // the artifact build points this at jsDelivr
+  const B3D_STORE = 'phone-bellum-board';
+  const force2d = /[?&]board=2d\b/.test(location.search);
+  const force3d = !force2d && (/[?&]board=3d\b/.test(location.search) || window.PB_FORCE3D === true);
+  let want3d = !force2d;
+  try { want3d = force3d || (!force2d && localStorage.getItem(B3D_STORE) !== '2d'); } catch (e) {}
+  const save3d = (on) => { try { localStorage.setItem(B3D_STORE, on ? '3d' : '2d'); } catch (e) {} };
+  let starting3d = null;
+  function start3d() {
+    if (board3d || starting3d) return starting3d;
+    return (starting3d = (async () => {
+      const load = (src) => new Promise((ok, no) => { const sc = document.createElement('script'); sc.src = src; sc.onload = ok; sc.onerror = () => no(new Error('could not load ' + src)); document.head.appendChild(sc); });
+      const el = document.createElement('div');
+      let b = null, loaded = false;
+      try {
+        const THREE = await import(THREE_URL);
+        if (typeof Render3D !== 'function') for (const f of ['camera3d', 'models3d', 'render3d']) await load(`src/${f}.js`);
+        loaded = true;
+        if (!want3d) return; // switched back to 2D while loading
+        el.className = 'board3d';
+        cv.after(el);
+        b = Render3D(THREE, el, boardView, { onTap: boardTap, onPress: boardPress, onDrag: boardDrag, onDrop: boardDrop, onHover: boardHover, placing: () => phase === 'deploy', onInput: wake3d });
+        const can = el.querySelector('canvas');
+        can.setAttribute('aria-label', cv.getAttribute('aria-label'));
+        can.addEventListener('webglcontextlost', () => { if (board3d === b) fallback2d('lost'); });
+        board3d = b;
+        cv.style.display = 'none';
+        startMeter(el);
+        size(); wake3d();
+      } catch (e) {
+        if (b) try { b.dispose(); } catch (e2) {}
+        board3d = null; el.remove(); cv.style.display = ''; size(); render();
+        console.warn('No Mans Land: the 3D board could not start; staying on the 2D board.', e);
+        if (want3d) fallback2d(loaded ? 'failed' : 'load');
+      } finally { starting3d = null; }
+    })());
+  }
+  // back to the 2D board: frees the WebGL context
+  function stop3d() {
+    const b = board3d;
+    if (!b) return;
+    board3d = null;
+    if (raf3d) { cancelAnimationFrame(raf3d); raf3d = 0; }
+    stopMeter();
+    try { b.dispose(); } catch (e) {}
+    const el = $('wrap').querySelector('.board3d');
+    if (el) el.remove();
+    cv.style.display = '';
+    size(); render();
+  }
+  // the Board setting (on: true for 3D); saved on this device
+  function set3d(on) {
+    want3d = on; save3d(on);
+    if (on) start3d(); else stop3d();
+  }
+  // 3D can't run here: back to 2D, and one line on the board to say so. When it failed to start or was too slow, the
+  // setting goes back to 2D; a lost context or a download that failed (offline) may work next time, so the setting stays.
+  function fallback2d(why) {
+    want3d = false;
+    if (why !== 'lost' && why !== 'load' && !force3d) save3d(false);
+    stop3d();
+    note3d(why === 'slow' ? '3D was too slow here, so the board is back to 2D.'
+      : why === 'lost' ? 'The 3D board stopped, so it’s back to 2D.'
+      : why === 'load' ? 'The 3D board couldn’t load, so it’s 2D for now.'
+      : '3D can’t run on this device, so the board is 2D.');
+  }
+  function note3d(text) {
+    let n = $('note3d');
+    if (!n) { n = document.createElement('button'); n.id = 'note3d'; n.type = 'button'; n.className = 'note3d'; n.setAttribute('role', 'status'); n.addEventListener('click', () => { n.hidden = true; }); $('wrap').appendChild(n); }
+    n.textContent = text; n.hidden = false;
+    clearTimeout(n.timer); n.timer = setTimeout(() => { n.hidden = true; }, 8000);
+  }
+  if (want3d) start3d();
+  // Unlike the 2D board, which draws only when render() is called, the 3D board draws in frames. To spare the battery
+  // it draws only during fights, while the camera moves on its own, and for a moment after a change (render()) or a
+  // touch on the board, so squads finish gliding and the floor catches up.
+  let raf3d = 0, wakeUntil = 0;
+  function wake3d() {
+    wakeUntil = performance.now() + 700;
+    if (board3d && !raf3d) raf3d = requestAnimationFrame(frame3d);
+  }
+  function frame3d(ts) {
+    raf3d = 0;
+    if (!board3d) return;
+    board3d.draw();
+    meterFrame(ts);
+    if (board3d && (phase === 'battle' || !board3d.still() || performance.now() < wakeUntil)) raf3d = requestAnimationFrame(frame3d);
+  }
+  // The speed meter counts frames and sums up each fight for the too-slow rule. When 3D is forced for testing, it
+  // shows top right on the 3D board: frames drawn in the last second (0 while the board idles), the slowest frame among
+  // frames drawn in a row, the quality and pixels per CSS pixel; during a fight the live bodies and draw calls, after
+  // it that fight's average, its slowest second and the most bodies at once. Tap it to step the quality.
+  // The quality (high, medium, low) is also in Settings while the 3D board is on.
+  const meter = { el: null, timer: 0, n: 0, last: 0, worst: 0, fight: null, lastFight: '', q: 'high' };
+  const Q3D_STORE = 'phone-bellum-3d-quality';
+  const Q3D = ['high', 'medium', 'low'];
+  try { const q = localStorage.getItem(Q3D_STORE); if (Q3D.includes(q)) meter.q = q; } catch (e) {}
+  function setQuality(q) {
+    meter.q = Q3D.includes(q) ? q : 'high';
+    try { localStorage.setItem(Q3D_STORE, meter.q); } catch (e) {}
+    if (board3d) { board3d.quality(meter.q); wake3d(); }
+    showMeter();
+  }
+  function startMeter(at) {
+    board3d.quality(meter.q);
+    meter.fight = null; meter.last = 0;
+    if (!force3d) return;
+    meter.el = document.createElement('button');
+    meter.el.className = 'meter3d'; meter.el.type = 'button';
+    meter.el.setAttribute('aria-label', '3D board speed. Tap to change the quality.');
+    meter.el.addEventListener('click', () => setQuality(Q3D[(Q3D.indexOf(meter.q) + 1) % Q3D.length]));
+    at.after(meter.el);
+    meter.timer = setInterval(() => { showMeter(); meter.n = 0; meter.worst = 0; }, 1000);
+  }
+  function stopMeter() {
+    clearInterval(meter.timer); meter.timer = 0;
+    if (meter.el) { meter.el.remove(); meter.el = null; }
+    meter.fight = null; meter.last = 0;
+  }
+  function meterFrame(ts) {
+    const gap = meter.last ? ts - meter.last : 0;
+    if (meter.last && gap < 250) meter.worst = Math.max(meter.worst, gap);
+    meter.last = ts; meter.n++;
+    const live = phase === 'battle' && bt;
+    if (live) {
+      const f = meter.fight || (meter.fight = { t0: ts, n: 0, sn: 0, st: ts, secs: [], bodies: 0, paused: false });
+      f.n++; f.sn++; f.end = ts;
+      if (gap > 1000) f.paused = true; // the page was hidden (rAF stops), so the average says nothing
+      f.bodies = Math.max(f.bodies, bt.bodies.reduce((k, b) => k + (b.alive ? 1 : 0), 0));
+      if (ts - f.st >= 1000) { f.secs.push(f.sn * 1000 / (ts - f.st)); f.sn = 0; f.st = ts; }
+    } else if (meter.fight) {
+      const f = meter.fight; meter.fight = null;
+      const avg = f.n * 1000 / Math.max(1, f.end - f.t0), low = f.secs.length ? Math.min(...f.secs) : avg;
+      meter.lastFight = `last fight ${Math.round(avg)} fps · slowest second ${Math.round(low)} · ${f.bodies} bodies`;
+      console.log('No Mans Land 3D:', meter.lastFight, '·', meter.q);
+      // too slow: a fight of 4 s or more, on screen the whole time, under 20 fps: a step down in quality, then 2D
+      if (!force3d && !f.paused && f.end - f.t0 >= 4000 && avg < 20) {
+        if (meter.q === 'low') fallback2d('slow');
+        else setQuality(Q3D[Q3D.indexOf(meter.q) + 1]);
+      }
+    }
+  }
+  function showMeter() {
+    if (!meter.el || !board3d) return;
+    const head = `${meter.n} fps · slowest ${Math.round(meter.worst)} ms · ${meter.q} ×${board3d.pixelRatio()}`;
+    const live = bt && phase === 'battle' ? `${bt.bodies.reduce((k, b) => k + (b.alive ? 1 : 0), 0)} bodies · ${board3d.info().calls} draws` : meter.lastFight;
+    meter.el.textContent = live ? head + '\n' + live : head;
   }
 
   // ---------- unit sheet ----------

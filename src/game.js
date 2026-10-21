@@ -602,6 +602,21 @@ const Game = (() => {
   // a tile the other player already holds with a squad (or tower) you can see
   // Where the other player sees a squad: a squad moved this round still shows on its old tile until the fight
   const seenAt = (m, sq) => sq.from && sq.movedRound === m.round ? sq.from : sq;
+  // What a player's screen may show of the other side. viewer: the side looking; deploying: the deploy phase is on.
+  // While deploying, the opponent's character (and Zoe's buff tiles) stays hidden until the first fight, their tower
+  // pick until the fight of the pick round, and this round's altar buys, mushroom removals and new elf tower until the fight.
+  const charShown = (m, viewer, deploying, side) => !!m && (side === viewer || m.round > 1 || !deploying);
+  const towerTypeShown = (m, viewer, deploying, side) => !!m && (side === viewer || m.round !== TOWER_PICK_ROUND || !deploying);
+  const altarShown = (m, viewer, deploying, b) => b.side === viewer || !deploying || b.round < m.round;
+  const elfOwnShown = (m, viewer, deploying, side) => side === viewer || !deploying || elfOwnOf(m, side).round < m.round;
+  // a mushroom tile as the viewer sees it (null once it's removed and the viewer may know)
+  function shroomShown(m, viewer, deploying, col, row) {
+    const tl = shroomTileAt(m, col, row); if (!tl) return null;
+    const gone = (m.map.removed || []).filter(x => x.col === col && x.row === row);
+    return gone.some(x => x.side === viewer || !deploying || x.round < m.round) ? null : tl;
+  }
+  // the viewer is removing this mushroom tile this round (it still stands until the fight)
+  const removingShroom = (m, viewer, deploying, col, row) => !!m && deploying && (m.map && m.map.removed || []).some(x => x.col === col && x.row === row && x.side === viewer && x.round === m.round);
   const enemyHolds = (m, side, col, row) => !!m && (m.armies[1 - side].some(s => { const p = seenAt(m, s); return !hiddenFromFoe(m, s) && p.col === col && p.row === row && s.round < m.round; }) ||
     (m.round > 1 && m.towers && m.towers[1 - side] && m.towers[1 - side].col === col && m.towers[1 - side].row === row));
   // the edge tiles of your zone that are the enemy's flank are reserved for them for the whole match
@@ -1554,7 +1569,7 @@ const Game = (() => {
   }
 
   return {
-    MAX_ROUND_DMG, TIER_DMG, bankBusy, seenAt, movedId, canMove, moveSquad, undoMove,
+    MAX_ROUND_DMG, TIER_DMG, bankBusy, seenAt, charShown, towerTypeShown, altarShown, elfOwnShown, shroomShown, removingShroom, movedId, canMove, moveSquad, undoMove,
     COLS, ROWS, TILE, ZONE, START_HP, START_GOLD, INCOME, incomeFor, LOSER_BONUS, SQUAD_COST, SQUAD_POINTS, SETTINGS, XP_STEPS, xpNeeded, unitCostOf,
     levelCost, isReady, levelUp, undoLevel, seenLevel, aiLevel, AI, CONFIG,
     deploysAllowed, deploysLeft, deployedThisRound, canBuyDeploy, buyDeploy, refundDeploy,
