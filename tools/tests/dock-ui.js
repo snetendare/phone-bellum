@@ -1,7 +1,7 @@
 // The phone layout and the new 3D camera bits. On a phone (390 x 664) in a match, on both boards: the board fills the
 // screen width, the deploy panel is a drawer docked at the bottom, up at the start of the round; a pick from the shop
 // puts it down and shows the task line over the board, whose X stops placing (the drawer comes back up); the blue pull tab slides it (held and dragged) or toggles it (a tap) and
-// move it; a fight docks the speed bar. On a PC window, none of that (the panel sits beside the board, on 3D too).
+// move it; Settings → Phone layout switches to the panel below the board and back; a fight docks the speed bar. On a PC window, none of that (the panel sits beside the board, on 3D too).
 // On the 3D board: the Tilted view, one step in from Strategic (the whole board fits, a tap still places a squad there), and the
 // battle cam's focus (closer in on its point, then back out). Screenshots go to the current folder.
 const { chromium } = require('playwright-core');
@@ -56,6 +56,19 @@ const dock = require('./dock');
     check(l.shut, `${board}: a tap on the tab puts it down`);
     await dock.up(p); l = await lay(p);
     check(!l.shut, `${board}: a tap brings it up`);
+    // Settings → Phone layout: Below the board (the old phone layout), saved; then the drawer again
+    await p.click('#cog'); await p.click('[data-lay="below"]'); await p.click('#close'); await p.waitForTimeout(400);
+    l = await lay(p);
+    check(!l.dock && l.panelTop >= l.wrapBottom - 1 && !l.task && await p.evaluate(() => localStorage.getItem('phone-bellum-phone-layout') === 'below' && document.getElementById('dock-toggle').offsetParent === null),
+      `${board}: Phone layout: Below the board puts the panel under the board, no tab, saved`);
+    await p.screenshot({ path: `dock-${board}-below.png`, fullPage: true });
+    await p.click('#cog'); await p.click('[data-lay="drawer"]'); await p.click('#close'); await p.waitForTimeout(400);
+    l = await lay(p);
+    check(l.dock && !l.shut, `${board}: and Drawer brings the drawer back`);
+    // the drawer, up, ends at the screen's bottom with its last row 8 px from the edge, and nothing overlaps the shop
+    const fit = await p.evaluate(() => { const pn = document.getElementById('panel'), q = pn.getBoundingClientRect(), last = pn.lastElementChild.getBoundingClientRect(), shop = document.getElementById('shop').getBoundingClientRect(), f = pn.lastElementChild.querySelector('.btn').getBoundingClientRect();
+      return { bottom: Math.round(innerHeight - q.bottom), below: Math.round(q.bottom - f.bottom), overlap: Math.round(shop.bottom - last.top) }; });
+    check(fit.bottom === 0 && fit.below <= 9 && fit.overlap <= 0, `${board}: the drawer is compact (${JSON.stringify(fit)})`);
     await p.click('#fight'); await p.waitForTimeout(800);
     l = await lay(p);
     check(l.dock && await p.locator('#panel [data-s]').count() === 3, `${board}: the fight's speed bar is docked`);

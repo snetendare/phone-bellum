@@ -306,6 +306,15 @@ html.dock body { padding-inline: 6px; padding-bottom: calc(var(--dock-h, 64px) +
 html.dock #wrap { width: min(100%, calc(var(--board-h, 480px) * 0.75)); min-width: 0; }
 html.dock #wrap:has(> .board3d) { width: 100%; aspect-ratio: auto; height: var(--board-h, 480px); } /* the 3D camera fits the board to any shape */
 html.dock .panel { position: fixed; left: 0; right: 0; bottom: 0; z-index: 4; max-width: 560px; margin: 0 auto; max-height: 62svh; overflow-y: auto; border-bottom: 0; border-radius: 10px 10px 0 0; box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.45); }
+/* tighter than the side panel: less padding, no overlap of the shop by the last row (the whole drawer is in sight, so
+   that row needn't stick), and the home bar's inset only partly kept (the row may come within 8 px of the edge) */
+html.dock .panel { padding: 8px 8px 0; gap: 6px; }
+html.dock .panel > .bar:last-child { margin: 0 -8px; padding: 2px 8px max(8px, calc(env(safe-area-inset-bottom, 0px) - 14px)); }
+html.dock .panel > .bar:last-child .btn { padding-block: 8px; }
+html.dock .shop { padding-bottom: 2px; }
+html.dock .xbtns { flex: 1 1 100%; gap: 5px !important; }
+html.dock .xbtns .btn.small { padding: 5px 8px; font-size: 12px; }
+html.dock .shop .ucard { padding: 6px 8px 5px; }
 html.dock .panel.shut > :not(:last-child) { display: none; }
 html.dock .panel.shut > .bar:last-child { margin-top: 0; padding-top: 0; }
 .dock-gold, .dock-tab { display: none; }
@@ -4469,6 +4478,12 @@ const Render2D = (cv, view) => {
           <button data-board="2d" aria-pressed="${!want3d}">2D</button><button data-board="3d" aria-pressed="${want3d}">3D</button>
         </div>
       </div>
+      ${document.documentElement.classList.contains('pc') ? '' : `<div class="bar">
+        <span class="hint">Phone layout</span>
+        <div class="seg" role="group" aria-label="Phone layout">
+          <button data-lay="drawer" aria-pressed="${phoneLayout === 'drawer'}">Drawer</button><button data-lay="below" aria-pressed="${phoneLayout === 'below'}">Below the board</button>
+        </div>
+      </div>`}
       <div class="bar q3d-bar" id="q3d-bar"${want3d ? '' : ' hidden'}>
         <span class="hint">3D quality</span>
         <div class="seg" role="group" aria-label="3D quality">
@@ -4506,6 +4521,10 @@ const Render2D = (cv, view) => {
       set3d(b.dataset.board === '3d');
       $('sheet').querySelectorAll('[data-board]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
       $('sheet').querySelectorAll('.q3d-bar').forEach(x => { x.hidden = !want3d; });
+    }));
+    $('sheet').querySelectorAll('[data-lay]').forEach(b => b.addEventListener('click', () => {
+      setPhoneLayout(b.dataset.lay);
+      $('sheet').querySelectorAll('[data-lay]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
     }));
     $('sheet').querySelectorAll('[data-q3d]').forEach(b => b.addEventListener('click', () => {
       setQuality(b.dataset.q3d);
@@ -4618,13 +4637,22 @@ const Render2D = (cv, view) => {
   // the drawer's top edge) slides it: hold it and drag the drawer up or down, or tap it. A pick from the shop or a task
   // that needs the board (dockTask, set by panelDeploy) also puts it down; a task shows as a line over the board, and
   // its X stops it (stopTask). Runs whenever the panel changes, the window resizes or the connection line comes or goes.
+  // Settings → Phone layout: 'drawer' (this) or 'below' (the panel under the board, the page scrolls), saved on the device
+  const LAYOUT_STORE = 'phone-bellum-phone-layout';
+  let phoneLayout = 'drawer';
+  try { if (localStorage.getItem(LAYOUT_STORE) === 'below') phoneLayout = 'below'; } catch (e) {}
+  function setPhoneLayout(v) {
+    phoneLayout = v === 'below' ? 'below' : 'drawer';
+    try { localStorage.setItem(LAYOUT_STORE, phoneLayout); } catch (e) {}
+    stopTask(); dock();
+  }
   let dockOpen = true, dockRound = 0, dockTask = null, dockH = 64, boardH = 0, dockDrag = null;
   const TAB_H = 28; // the pull tab's height, kept clear above the drawer's last row
   const CHEVRONS = (up) => `<svg width="20" height="9" viewBox="0 0 20 9" aria-hidden="true"><path d="${up ? 'M1 7.5 5 2.5 9 7.5M11 7.5 15 2.5 19 7.5' : 'M1 1.5 5 6.5 9 1.5M11 1.5 15 6.5 19 1.5'}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
   function dock() {
     if (dockDrag) return; // the tab is being slid: dock() runs again when it lets go
     const root = document.documentElement, panel = $('panel');
-    const on = !root.classList.contains('pc') && ['deploy', 'battle', 'result', 'end'].includes(phase) && !!m;
+    const on = !root.classList.contains('pc') && phoneLayout === 'drawer' && ['deploy', 'battle', 'result', 'end'].includes(phase) && !!m;
     const was = root.classList.contains('dock');
     root.classList.toggle('dock', on);
     const deploying = on && phase === 'deploy', picking = deploying && (choosingPack() || choosingTower());
@@ -4949,7 +4977,7 @@ const Render2D = (cv, view) => {
     dockTask = !can ? null : placingTower() ? { text: hint, x: false }
       : selected !== null || moveMode || (charmMode && Game.canGiveCharm(m, me)) || placingElf() ? { text: hint, x: true } : null;
     const news = can && selected === null && !fresh && !inline && (Game.hailRound(m) || Game.altarRound(m) || m.round === Game.FLANK.round || (tskillOffer() && m.round === Game.TOWER_PICK_ROUND));
-    const extraBtns = `<span style="display:flex;gap:6px;flex-wrap:wrap">
+    const extraBtns = `<span class="xbtns" style="display:flex;gap:6px;flex-wrap:wrap">
         <button class="btn small" id="buy-deploy" ${can && Game.canBuyDeploy(m, me) ? '' : 'disabled'}>+1 deployment · ${Game.CONFIG.extraDeployCost}</button>
         ${loanOffer() ? (Game.loanNow(m, me) ? `<button class="btn small" id="loan-undo" ${can && m.gold[me] >= Game.LOAN.gold ? '' : 'disabled'}>Pay back loan · −${Game.LOAN.gold}</button>` : `<button class="btn small" id="loan" ${can ? '' : 'disabled'}>Loan · +${Game.LOAN.gold}</button>`) : ''}
         ${mageOffer() ? `<button class="btn small" id="mage-gen" ${can ? '' : 'disabled'}>${Game.mageGenOf(m, me) || Game.mageTpOf(m, me) ? [Game.mageGenOf(m, me), Game.mageTpOf(m, me) && 'teleport'].filter(Boolean).map(id => esc(Game.mageGenInfo(id).name)).join(' + ') : 'Mage general'}…</button>` : ''}
