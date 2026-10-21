@@ -4,6 +4,8 @@ Repo `snetendare/phone-bellum`. **Merged into `main`** (PR #1, merge commit `74b
 
 Checked on the merged `main`, on both boards: `music-ui.js` (the same songs in the same places on 2D and 3D), `history-mp.js`, `timer-mp.js`, `timer-r1.js`, `forfeit-ui.js`, `map-pick.js`, plus `game3d-mp.js` and `foe3d-mp.js` for live matches on 3D. The checks written for 2D run on 3D with `PB_BOARD=3d` in the environment (`board2d.js`); `board2d.js`'s `tap(p, c, r)` clicks a tile on either board (needs `?test` in the page address). Those that still click `#board` by hand only run on 2D. `chars-ui.js` fails on 2D as well (a button it clicks stays disabled), from before.
 
+Fixed after the merge: on a PC the deploy panel flickered, its scrollbars popping in and out. The branch's compact phone CSS had an unscoped `.panel { padding: 10px }` that beat `main`'s PC padding (12 px), while the PC rule for the panel's last row still pulls it out by 12 px, so the panel overflowed itself by 2 px both ways. The phone padding is `html:not(.pc)` only again (as on `main`), and so is `#panel .btn.small`; the PC panel measures as on `main`, with no overflow.
+
 **All nine steps are done; 3D is the default on this branch.** The owner's answers to the last open questions:
 1. Board size on phones: a new phone layout. The board fills the screen, and the deploy panel is a drawer (see "Phone layout"). Done.
 2. Open a PR into `main` once everything is done: opened.
