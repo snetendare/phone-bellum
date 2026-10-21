@@ -1,10 +1,11 @@
 // Matteo: the Give Charisma button on a squad sheet, the pips on the board, and charisma growing in a fight.
 const { chromium } = require('playwright-core');
+const ctx2d = require('./board2d'); // these checks are for the 2D board
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const OUT = process.env.OUT || '.';
 (async () => {
   const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome' });
-  const p = await (await b.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 })).newPage();
+  const p = await (await ctx2d(b, { viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 })).newPage();
   p.on('pageerror', e => console.log('PAGE ERROR', e.message));
   await p.goto('http://127.0.0.1:8766/?test'); await sleep(500);
   await p.click('#settings summary'); await p.click('[data-tm="0"]'); await p.click('#go'); await sleep(300);
@@ -14,8 +15,8 @@ const OUT = process.env.OUT || '.';
   console.log('squads:', JSON.stringify(sq));
   const tap = async (c, r) => { const bb = await p.locator('#board').boundingBox(); await p.mouse.click(bb.x + (c + .5) * bb.width / 12, bb.y + (r + .5) * bb.height / 16); };
   // the panel button, then a squad (round 1 squads are fresh, so their sheets can't be opened)
-  // the panel was drawn before Matteo was forced in: pick a shop unit and drop it again to redraw it
-  const u = p.locator('[data-i]:not([data-locked])').first(); await u.click(); await sleep(100); await u.click(); await sleep(150);
+  // the panel was drawn before Matteo was forced in: pick a shop unit and drop it again (the X on the task line) to redraw it
+  const u = p.locator('[data-i]:not([data-locked])').first(); await u.click(); await sleep(100); await p.click('#task-x'); await sleep(150);
   console.log('give button:', await p.locator('#charm-btn').count());
   await p.click('#charm-btn'); await sleep(150);
   console.log('hint:', await p.locator('#panel .hint').first().textContent());

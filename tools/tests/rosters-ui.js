@@ -2,12 +2,13 @@
 // packages, a friend's match). Counter Lab: several rosters, a new one starts empty, units import from another
 // roster, rules switch mechanics off, and changes are saved per roster or for all; the game loads any saved roster.
 const { chromium } = require('playwright-core');
+const ctx2d = require('./board2d'); // these checks are for the 2D board
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 let fails = 0;
 const check = (ok, what) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) fails++; };
 (async () => {
   const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--disable-features=WebRtcHideLocalIpsWithMdns'] });
-  const ctx = await b.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 });
+  const ctx = await ctx2d(b, { viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 });
   const mk = async (n, c = ctx) => { const p = await c.newPage(); p.on('pageerror', e => { console.log(`[${n}] PAGE ERROR`, e.message); fails++; }); return p; };
 
   // ---- menu: Leaders and Units menus ----
@@ -81,7 +82,7 @@ const check = (ok, what) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (
   check(rules && rules.stealth === false, 'match carries the roster rules');
 
   // ---- friend match: the guest gets the units left out ----
-  const c2 = await b.newContext({ viewport: { width: 390, height: 844 } });
+  const c2 = await ctx2d(b, { viewport: { width: 390, height: 844 } });
   const host = await mk('host'), guest = await mk('guest', c2);
   const BASE = 'http://127.0.0.1:8766/?test&peerhost=127.0.0.1&peerport=9000';
   await host.goto(BASE); await host.evaluate(() => { localStorage.removeItem('phonebellum.units.v1'); localStorage.setItem('pb-off-units', JSON.stringify(['Brute'])); });

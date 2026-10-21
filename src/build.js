@@ -4,7 +4,6 @@ const fs = require('fs'), path = require('path');
 const src = (f) => fs.readFileSync(path.join(__dirname, f), 'utf8');
 const shapes = src('shapes.js'), eng = src('engine.js');
 // Counter Lab
-const r = JSON.parse(src('r5.json'));
 const SK = JSON.parse(src('skills-default.json'));
 const withSkills = (u) => ({ ...u, skills: SK.assign[u.name] || [null, null, null], skillsOn: [false, false, false] });
 const sample = JSON.parse(src('default-roster.json')); // the default roster for Counter Lab
@@ -33,11 +32,18 @@ ${lab.slice(cut)
 `;
 fs.writeFileSync('lab.html', labDoc);
 // Game
-const css = src('game-template.html').split('<style>')[1].split('</style>')[0];
-const game = src('site-template.html').replace('/*BASECSS*/', () => css)
+const game = src('site-template.html').replace('/*BASECSS*/', () => src('game.css'))
   .replace('/*SHAPES*/', () => shapes).replace('/*ENGINE*/', () => eng)
-  .replace('/*GAME*/', () => src('game.js')).replace('/*DATA*/', () => src('demo-units.json'))
+  .replace('/*GAME*/', () => src('game.js'))
+  .replace('/*ART*/', () => src('art.js')).replace('/*RENDER2D*/', () => src('render2d.js')).replace('/*DATA*/', () => src('demo-units.json'))
   .replace('/*FACTIONS*/', () => src('faction-units.json'));
 game.split('<script>').slice(1).map(s => s.split('</script>')[0]).forEach(s => new Function(s));
 fs.writeFileSync('index.html', game);
-console.log('built index.html and lab.html');
+// 3D test page
+const lab3d = src('lab3d-template.html').replace('/*BASECSS*/', () => src('game.css'))
+  .replace('/*SHAPES*/', () => shapes).replace('/*ENGINE*/', () => eng).replace('/*GAME*/', () => src('game.js'))
+  .replace('/*ART*/', () => src('art.js')).replace('/*RENDER2D*/', () => src('render2d.js')).replace('/*CAMERA3D*/', () => src('camera3d.js'))
+  .replace('/*MODELS3D*/', () => src('models3d.js')).replace('/*RENDER3D*/', () => src('render3d.js'))
+  .replace('/*DATA*/', () => src('demo-units.json')).replace('/*LAB3D*/', () => src('lab3d.js'));
+fs.writeFileSync('lab3d.html', lab3d);
+console.log('built index.html, lab.html and lab3d.html');

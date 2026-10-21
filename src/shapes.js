@@ -15,6 +15,8 @@ const Shapes = (() => {
     'Sniper': '#F7D154', 'Brute': '#8D99AE', 'Wisps': '#B4A7F5', 'Crossbow Volley': '#B08155', 'Ballista': '#D9C49A',
     'Boar Riders': '#E07A9B', 'Spinning Golem': '#7FA650', 'Blunderbuss Crew': '#3FD39A', 'Ogre Smasher': '#B08155',
   };
+  // a unit's short label on the board: the first three letters of its name
+  const tag = (u) => (u.name.replace(/[^A-Za-z]/g, '').slice(0, 3) || 'UNT').toUpperCase();
   const validColor = (c) => typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c);
 
   // Give every unit a shape and a colour: keep valid ones, else a known default, else the first one not used yet
@@ -173,5 +175,5 @@ const Shapes = (() => {
     outline(ctx, shape, x, y, shape === 'ring' ? r * 1.05 : r + 0.6, up);
   }
 
-  return { IMP, LIST, LABELS, PALETTE, valid, validColor, assign, draw, outline, path, svg, body };
+  return { IMP, LIST, tag, LABELS, PALETTE, valid, validColor, assign, draw, outline, path, svg, body };
 })();
