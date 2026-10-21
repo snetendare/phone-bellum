@@ -1,61 +1,143 @@
-// The tutorial, on both boards on a phone (390 x 744): the menu leads with it on a first visit; round 1 starts with only
-// your tower (and the coach's ring on it), then one card; a pick puts the drawer down, a tap places; taking the squad
-// back steps the coach back; the enemy tower shows up with Fight; the hidden archers win round 1 (your health drops);
-// round 2 offers Fire Mage and Sniper, Sniper is turned away, Fire Mage wins the fight; the end saves the tutorial as
-// done, and the menu then shows it as a small button. Screenshots go to the current folder.
+// The tutorial, on both boards on a phone (390 x 744), then the range circle on a PC window.
+// Tutorial: the menu leads with it on a first visit. Round 1: only your tower (the coach's ring on it), then your zone
+// blinks, then one card; a pick puts the drawer down, a tap places; taking the squad back steps the coach back; the enemy
+// tower shows up with Fight; the hidden archers win (your health drops). Round 2: Fire Mage and Sniper, Sniper is turned
+// away, Fire Mage wins. Round 3: the tower pick, a tap on your tower opens its sheet, a shop of five with the deployment
+// cap (a squad picked stays picked); the result names the enemy's hidden Brute. Round 4: a squad ready to level up (the
+// ring on it, its sheet levels it), the flanks blink and only a flank tile takes the next squad, Fight. Then the
+// tutorial is saved as done and Keep playing hands the match to the AI with the full shop.
+// Range: with the mouse over a squad (yours or the enemy's) while deploying, and over a body in a fight, a dotted circle
+// shows its reach; off it, none. Screenshots go to the current folder.
 const { chromium } = require('playwright-core');
 (async () => {
   const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--use-gl=angle', '--use-angle=swiftshader'] });
   let fails = 0;
   const check = (ok, what) => { console.log(ok ? 'ok  ' : 'FAIL', what); if (!ok) fails++; };
-  for (const board of ['2d', '3d']) {
-    const ctx = await b.newContext({ viewport: { width: 390, height: 744 }, deviceScaleFactor: 1, hasTouch: true, isMobile: true });
+  const open = async (board, pc) => {
+    const ctx = await b.newContext(pc ? { viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 } : { viewport: { width: 390, height: 744 }, deviceScaleFactor: 1, hasTouch: true, isMobile: true });
     const p = await ctx.newPage();
     p.on('pageerror', e => { console.log('PAGE ERROR', e.message); fails++; });
     await p.goto(`http://127.0.0.1:8766/?test&board=${board}`);
     if (board === '3d') await p.waitForFunction(() => window.__pb && window.__pb().board3d, null, { timeout: 15000 });
-    const coach = () => p.evaluate(() => document.getElementById('coach').hidden ? '' : document.getElementById('coach-text').textContent);
-    const st = () => p.evaluate(() => { const { m, me } = window.__pb(); return { round: m.round, hp: m.hp.slice(), mine: m.armies[me].length, foeTower: !!m.towers[1 - me], shut: document.getElementById('panel').classList.contains('shut'), cards: document.querySelectorAll('#shop .ucard').length, ring: !document.getElementById('coach-ring').hidden }; });
-    const tap = async (c, r) => {
-      if (board === '2d') { const bb = await p.locator('#board').boundingBox(); return p.mouse.click(bb.x + (c + .5) * bb.width / 12, bb.y + (r + .5) * bb.height / 16); }
-      const [x, y] = await p.evaluate(([c, r]) => window.__pb().board3d.screenAt(c, r, 0), [c, r]); return p.mouse.click(x, y);
-    };
-    const wait = (ms = 400) => p.waitForTimeout(ms);
+    return { ctx, p };
+  };
+  const helpers = (p, board) => ({
+    coach: () => p.evaluate(() => document.getElementById('coach').hidden ? '' : document.getElementById('coach-text').textContent),
+    st: () => p.evaluate(() => { const { m, me } = window.__pb(); return { round: m.round, hp: m.hp.slice(), mine: m.armies[me].length, fresh: m.armies[me].filter(s => s.round === m.round).length, foeTower: !!m.towers[1 - me], shut: document.getElementById('panel').classList.contains('shut'), cards: document.querySelectorAll('#shop .ucard').length, ring: !document.getElementById('coach-ring').hidden, tiles: document.querySelectorAll('#marks .tut-tile').length, sheet: !document.getElementById('sheet-back').hidden, pick: !document.getElementById('pick').hidden }; }),
+    pt: (c, r) => board === '2d'
+      ? p.locator('#board').boundingBox().then(bb => [bb.x + (c + .5) * bb.width / 12, bb.y + (r + .5) * bb.height / 16])
+      : p.evaluate(([c, r]) => window.__pb().board3d.screenAt(c, r, 0), [c, r]),
+  });
+  const wait = (p, ms = 400) => p.waitForTimeout(ms);
+
+  for (const board of ['2d', '3d']) {
+    const { ctx, p } = await open(board, false), { coach, st, pt } = helpers(p, board);
+    const tap = async (c, r) => { const [x, y] = await pt(c, r); await p.mouse.click(x, y); await wait(p); };
     check(await p.locator('#panel #tutorial.primary').count() === 1, `${board}: a first visit leads the menu with the tutorial`);
-    await p.click('#tutorial'); await wait();
+    await p.click('#tutorial'); await wait(p);
     let s = await st();
-    check(/your Tower/.test(await coach()) && s.ring && s.mine === 0 && !s.foeTower && await p.evaluate(() => document.getElementById('panel').innerHTML === ''), `${board}: it starts with only your tower, a ring on it, no panel`);
-    await p.click('#coach-btns .btn'); await wait();
+    check(/^This is your Tower\. Protect it\.$/.test(await coach()) && s.ring && s.mine === 0 && !s.foeTower && await p.evaluate(() => document.getElementById('panel').innerHTML === ''), `${board}: only your tower, "Protect it", a ring on it, no panel`);
+    await p.click('#coach-btns .btn'); await wait(p);
     s = await st();
-    check(/Goblin Swarm/.test(await coach()) && s.cards === 1 && !s.ring && await p.locator('#shop .ucard.tut-glow').count() === 1, `${board}: then one glowing card`);
-    await p.click('#shop .ucard'); await wait();
+    check(/deployment zone/.test(await coach()) && s.tiles === 59 && !s.ring && s.cards === 0, `${board}: then your zone blinks (${s.tiles} tiles), still no panel`);
+    await p.screenshot({ path: `tutorial-${board}-zone.png` });
+    await p.click('#coach-btns .btn'); await wait(p);
+    s = await st();
+    check(/Goblin Swarm/.test(await coach()) && s.cards === 1 && s.tiles === 0 && await p.locator('#shop .ucard.tut-glow').count() === 1, `${board}: then one glowing card`);
+    await p.click('#shop .ucard'); await wait(p);
     s = await st();
     check(/tap a tile/.test(await coach()) && s.shut && await p.evaluate(() => document.getElementById('task').hidden && document.getElementById('dock-toggle').hidden), `${board}: a pick puts the drawer down; no task line or pull tab`);
-    await tap(5, 11); await wait();
+    await tap(5, 11);
     s = await st();
-    check(s.mine === 1 && s.foeTower && /hidden until the fight/.test(await coach()) && await p.locator('#fight.tut-glow').count() === 1, `${board}: placed; the enemy tower and a glowing Fight show up`);
-    await tap(5, 11); await wait();
-    s = await st();
-    check(s.mine === 0 && /Goblin Swarm/.test(await coach()), `${board}: taking the squad back steps the coach back`);
-    await p.click('#shop .ucard'); await wait(); await tap(5, 11); await wait();
-    await p.screenshot({ path: `tutorial-${board}-1.png` });
-    await p.click('#fight'); await wait(600);
+    check(s.mine === 1 && s.foeTower && /hidden until the fight/.test(await coach()), `${board}: placed; the enemy tower and Fight show up`);
+    await tap(5, 11);
+    check((await st()).mine === 0 && /Goblin Swarm/.test(await coach()), `${board}: taking the squad back steps the coach back`);
+    await p.click('#shop .ucard'); await wait(p); await tap(5, 11);
+    await p.click('#fight'); await wait(p, 600);
     check(await coach() === '', `${board}: no coach during the fight`);
-    await p.click('#skip'); await wait();
+    await p.click('#skip'); await wait(p);
     s = await st();
-    check(s.round === 2 && s.hp[0] < 60 && s.hp[1] === 60 && /Round lost/.test(await coach()) && await p.locator('.hud .side.you.tut-glow').count() === 1, `${board}: round 1 is lost, your health glows (${s.hp})`);
-    await p.click('#coach-btns .btn'); await wait();
+    check(s.round === 2 && s.hp[0] < 60 && /Round lost/.test(await coach()), `${board}: round 1 is lost (${s.hp})`);
+    await p.click('#coach-btns .btn'); await wait(p);
+    await p.click('#shop .ucard >> nth=1'); await wait(p);
+    check(/Try Fire Mage/.test(await coach()), `${board}: Sniper is turned away with a hint`);
+    await p.click('#shop .ucard >> nth=0'); await wait(p); await tap(4, 12);
+    await p.click('#fight'); await wait(p, 600); await p.click('#skip'); await wait(p);
     s = await st();
-    check(s.cards === 2 && /Skeleton Archers/.test(await coach()), `${board}: round 2 offers two cards`);
-    await p.click('#shop .ucard >> nth=1'); await wait();
-    check(/Try Fire Mage/.test(await coach()) && !(await st()).shut, `${board}: Sniper is turned away with a hint`);
-    await p.click('#shop .ucard >> nth=0'); await wait(); await tap(4, 12); await wait();
-    await p.screenshot({ path: `tutorial-${board}-2.png` });
-    await p.click('#fight'); await wait(600); await p.click('#skip'); await wait();
+    check(s.round === 3 && s.hp[1] < 60 && /Round won/.test(await coach()), `${board}: round 2 is won (${s.hp}), on to round 3`);
+    // round 3: the tower, the deployment cap
+    await p.click('#coach-btns .btn'); await wait(p);
     s = await st();
-    check(s.hp[1] < 60 && /Round won/.test(await coach()) && await p.evaluate(() => localStorage.getItem('phonebellum.tutorial.v1') === 'done'), `${board}: round 2 is won and the tutorial is saved as done (${s.hp})`);
-    await p.click('#coach-btns .btn >> nth=0'); await wait();
-    check(await coach() === '' && await p.locator('.card #tutorial').count() === 1 && await p.locator('#panel #tutorial').count() === 0, `${board}: Main menu; the tutorial is now a small button`);
+    check(s.pick && await coach() === '', `${board}: round 3 opens with the tower pick, no coach over it`);
+    await p.click('[data-opt] >> nth=0'); await p.click('[data-opt] >> nth=0'); await wait(p);
+    s = await st();
+    check(!s.pick && /Tap your Tower/.test(await coach()) && s.ring, `${board}: then: tap your tower, with the ring on it`);
+    await tap(8, 14);
+    check((await st()).sheet, `${board}: a tap on the tower opens its sheet`);
+    await p.click('#close'); await wait(p);
+    s = await st();
+    check(/2 new squads/.test(await coach()) && s.cards === 5 && await p.locator('#buy-deploy').count() === 1 && await p.locator('#fight').count() === 1, `${board}: then the shop of five, +1 deployment and Fight`);
+    await p.click('#shop .ucard >> nth=1'); await wait(p);
+    check(await p.evaluate(() => !document.getElementById('task').hidden), `${board}: a pick in the open shop shows the task line with its X`);
+    await tap(3, 11); await tap(7, 11);
+    s = await st();
+    check(s.fresh === 2, `${board}: the picked squad stays picked: two placed (${s.fresh})`);
+    await p.screenshot({ path: `tutorial-${board}-r3.png` });
+    await p.click('#fight'); await wait(p, 600); await p.click('#skip'); await wait(p);
+    check(/Brute/.test(await coach()), `${board}: the round 3 result names their hidden Brute`);
+    // round 4: level up, flanks
+    await p.click('#coach-btns .btn'); await wait(p);
+    s = await st();
+    check(s.round === 4 && /level up/.test(await coach()) && s.ring, `${board}: round 4: a squad can level up, the ring on it`);
+    const ready = await p.evaluate(() => { const { m, me } = window.__pb(); const q = m.armies[me].find(s => Game.isReady(m, s)); return [q.col, q.row]; });
+    await tap(...ready);
+    check(await p.locator('[data-act="lvl-up"]').count() === 1 && await p.locator('[data-act="sell"]').count() === 1, `${board}: its sheet has Level up, Move and Sell`);
+    await p.click('[data-act="lvl-up"]'); await wait(p); await p.click('#close'); await wait(p);
+    s = await st();
+    check(/flanks/.test(await coach()) && s.tiles > 0, `${board}: then the flanks blink (${s.tiles} tiles)`);
+    await p.click('#shop .ucard >> nth=0'); await wait(p);
+    await tap(5, 12);
+    check((await st()).fresh === 0, `${board}: a tile in your zone doesn't take it`);
+    await tap(0, 6);
+    s = await st();
+    check(s.fresh === 1 && /Spend the rest/.test(await coach() || '') || s.fresh === 1, `${board}: a flank tile does (${s.fresh})`);
+    await p.click('#task-x').catch(() => {}); await wait(p);
+    await p.click('#fight'); await wait(p, 600); await p.click('#skip'); await wait(p);
+    check(/That’s the basics/.test(await coach()) && await p.evaluate(() => localStorage.getItem('phonebellum.tutorial.v1') === 'done'), `${board}: after round 4 the tutorial is saved as done`);
+    await p.click('#coach-btns .btn >> nth=1'); await wait(p, 800);
+    s = await st();
+    check(s.round === 5 && await coach() === '' && await p.locator('#panel .tiers').count() === 1, `${board}: Keep playing: round 5 against the AI, with the full shop`);
+    await p.screenshot({ path: `tutorial-${board}-r5.png` });
+    await ctx.close();
+  }
+
+  // the range circle under the mouse, on a PC window
+  for (const board of ['2d', '3d']) {
+    const { ctx, p } = await open(board, true), { pt } = helpers(p, board);
+    const tap = async (c, r) => { const [x, y] = await pt(c, r); await p.mouse.click(x, y); await wait(p); };
+    const range = () => p.evaluate(() => { const e = document.querySelector('#marks .range'); if (!e) return null; const b = e.getBBox(); return { w: Math.round(b.width), stroke: e.style.stroke }; });
+    const hover = async (c, r) => { const [x, y] = await pt(c, r); await p.mouse.move(x, y, { steps: 3 }); await wait(p, 300); };
+    await p.click('#tutorial'); await wait(p); await p.click('#coach-btns .btn'); await wait(p); await p.click('#coach-btns .btn'); await wait(p);
+    await p.click('#shop .ucard'); await wait(p); await tap(5, 11);
+    await p.click('#fight'); await wait(p, 300); await p.click('#skip'); await wait(p); await p.click('#coach-btns .btn'); await wait(p);
+    // round 2: your goblins (2 m reach) and their archers (19 m) in sight
+    const tile = await p.evaluate(() => { const r = document.getElementById('wrap').getBoundingClientRect(); return r.width / 12; });
+    await hover(5, 11); let g = await range();
+    check(!!g && g.w > 0 && g.w < tile * 1.2, `${board}: over your goblins, a small circle (${g && g.w} px, a tile ${Math.round(tile)} px)`);
+    await hover(6, 4); const a = await range();
+    check(!!a && a.w > tile * 5 && a.stroke !== (g && g.stroke), `${board}: over their archers, a big one in their colour (${a && a.w} px)`);
+    await p.screenshot({ path: `range-${board}-deploy.png` });
+    await hover(1, 8);
+    check(!(await range()), `${board}: over an empty tile, none`);
+    await p.click('#shop .ucard >> nth=0'); await wait(p); await tap(4, 12);
+    await p.click('#fight'); await p.click('[data-s="1"]'); await wait(p, 600);
+    // a live body of yours, as a fractional tile (bodies move: ask for it, then hover it right away)
+    const at = await p.evaluate(() => { const { bt, me } = window.__pb(), q = bt.bodies.find(x => x.alive && x.side === me && !x.u.structure); return [q.x / Game.TILE + (Game.COLS - 1) / 2, (Game.ROWS - 1) / 2 - q.y / Game.TILE]; });
+    const [hx, hy] = board === '2d' ? await pt(at[0] - 0.5, at[1] - 0.5) : await pt(at[0], at[1]);
+    await p.mouse.move(hx, hy); await wait(p, 120);
+    const f = await range();
+    check(!!f, `${board}: in the fight, over a body, its circle${f ? ` (${f.w} px)` : ''}`);
+    await p.screenshot({ path: `range-${board}-fight.png` });
     await ctx.close();
   }
   await b.close();

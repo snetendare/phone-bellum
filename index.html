@@ -335,12 +335,17 @@ html.dock .panel.shut .dock-gold { display: inline; font-size: 15px; }
 .coach .btnrow:empty { display: none; }
 .coach-ring { position: absolute; z-index: 2; width: 56px; height: 56px; margin: -28px 0 0 -28px; border: 2px solid var(--gold); border-radius: 50%; pointer-events: none; animation: coach-ring 1.4s ease-out infinite; }
 .tut-glow { animation: tut-glow 1.4s ease-in-out infinite; }
+.marks .tut-tile { fill: rgba(92, 198, 223, 0.28); stroke: var(--you); stroke-width: 1.5; animation: tut-blink 1.1s ease-in-out infinite; }
+@keyframes tut-blink { 50% { opacity: 0.2; } }
 .ucard.tut-glow { animation-name: tut-glow-in; } /* the shop scrolls sideways and would clip a glow outside the card */
 @keyframes coach-in { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
 @keyframes coach-ring { from { transform: scale(0.7); opacity: 1; } to { transform: scale(1.5); opacity: 0; } }
 @keyframes tut-glow { 50% { box-shadow: 0 0 0 3px rgba(230, 184, 74, 0.6), 0 0 16px rgba(230, 184, 74, 0.5); } }
 @keyframes tut-glow-in { 50% { box-shadow: inset 0 0 0 2px var(--gold); } }
-@media (prefers-reduced-motion: reduce) { .coach, .coach-ring, .tut-glow { animation: none; } .tut-glow { box-shadow: inset 0 0 0 2px var(--gold); } }
+/* marks drawn over either board: a unit's range under the mouse (a dotted circle), the tutorial's blinking tiles */
+.marks { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 1; pointer-events: none; overflow: visible; }
+.marks .range { fill: none; stroke-width: 2; stroke-linecap: round; stroke-dasharray: 0.1 6; opacity: 0.9; }
+@media (prefers-reduced-motion: reduce) { .coach, .coach-ring, .tut-glow, .marks .tut-tile { animation: none; } .tut-glow { box-shadow: inset 0 0 0 2px var(--gold); } }
 </style>
 <script>
 // PC or phone: a fine pointer that can hover (a mouse) and room for the board and controls side by side
@@ -368,6 +373,7 @@ html.dock .panel.shut .dock-gold { display: inline; font-size: 15px; }
     <div class="task" id="task" role="status" hidden><span id="task-text"></span><button id="task-x" aria-label="Stop placing">✕</button></div>
     <div class="coach" id="coach" role="status" aria-live="polite" hidden><p id="coach-text"></p><span class="btnrow" id="coach-btns"></span></div>
     <div class="coach-ring" id="coach-ring" hidden></div>
+    <svg class="marks" id="marks" aria-hidden="true"></svg>
   </div>
 
   <div class="panel" id="panel"></div>
@@ -4334,7 +4340,7 @@ const Render2D = (cv, view) => {
   const foe = () => 1 - me;
   let m = null;             // match state (on the guest: a copy kept in step by the host)
   let phase = 'start';      // start | lobby | draft | deploy | battle | result | end
-  try { if (/[?&]test\b/.test(location.search)) window.__pb = () => ({ m, me, board3d, board }); } catch (e) {} // read-only peek for UI tests
+  try { if (/[?&]test\b/.test(location.search)) window.__pb = () => ({ m, me, board3d, board, bt }); } catch (e) {} // read-only peek for UI tests
   let selected = null;      // unit index chosen in the shop
   let bt = null;            // battle being played back
   let battlePre = null;     // match as it stood when the running battle began (for the HUD)
@@ -4677,7 +4683,7 @@ const Render2D = (cv, view) => {
     const shut = deploying && (!!dockTask || picking || !dockOpen);
     panel.classList.toggle('shut', shut);
     const tb = $('dock-toggle');
-    tb.hidden = !deploying || !!dockTask || picking || mode === 'tutorial'; // the tutorial's drawer is a card or two: nothing to slide
+    tb.hidden = !deploying || !!dockTask || picking || (mode === 'tutorial' && m.round < 3); // the tutorial's first drawers are a card or two: nothing to slide
     if (!tb.hidden && tb.dataset.shut !== String(shut)) { // up: arrows down; down: "Shop" and arrows up
       tb.dataset.shut = String(shut);
       tb.innerHTML = shut ? `Shop ${CHEVRONS(true)}` : CHEVRONS(false);
@@ -4685,7 +4691,7 @@ const Render2D = (cv, view) => {
       tb.setAttribute('aria-label', shut ? 'Shop: slide up or tap to open' : 'Slide down or tap to close the shop');
     }
     tb.style.bottom = on ? panel.offsetHeight + 'px' : '';
-    $('task').hidden = !(deploying && dockTask) || mode === 'tutorial'; // the tutorial's coach line says it instead
+    $('task').hidden = !(deploying && dockTask && dockTask.text); // the tutorial's coach line can say it instead (no text)
     if (deploying && dockTask) { $('task-text').innerHTML = dockTask.text; $('task-x').hidden = !dockTask.x; }
     let h = boardH;
     if (on) {
@@ -4696,7 +4702,7 @@ const Render2D = (cv, view) => {
       root.style.setProperty('--board-h', h + 'px');
     }
     if (on !== was || h !== boardH) { boardH = h; size(); if (on !== was || !board3d) render(); }
-    tutRing();
+    boardMarks();
   }
   // the X on the task line: stop placing that unit (or the Move, the Charisma, the elf tower)
   function stopTask() {
@@ -4749,8 +4755,7 @@ const Render2D = (cv, view) => {
   function render() {
     syncMusic();
     cv.style.touchAction = phase === 'deploy' ? 'none' : ''; // so a finger can drag squads without scrolling the page
-    if (board3d) wake3d(); else board.draw();
-    tutRing();
+    if (board3d) wake3d(); else { board.draw(); boardMarks(); }
   }
   const teamCol = (side) => Art.teamCol(side, me);
   const { SHROOM_COL, CHARM_COL, armsImg } = Art;
@@ -5765,15 +5770,22 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if ($('draft-go')) $('draft-go').addEventListener('click', () => { if (draftSel) draftPick(draftSel); });
   }
 
-  // ---------- tutorial: two scripted rounds against a fixed enemy, the screen built up one step at a time ----------
-  // Round 1: the board holds only your tower, then the deploy panel comes in with one card (Goblin Swarm). The enemy's
-  // Skeleton Archers stay hidden until the fight and beat the goblins wherever they stand, which shows how damage works.
-  // Round 2: the archers are in sight now. Of the two cards on offer, Fire Mage beats crowds and wins the fight from any
-  // tile; Sniper beats giants and is turned away with a hint (it would lose nearly always). A coach line over the board
-  // says what to do; the step comes from the match itself (tutStep), so taking a squad back steps back too. Always on
-  // the built-in units, on the Standard map, with no clock, packages, characters or AI level-ups.
+  // ---------- tutorial: four guided rounds of one match, the screen built up one step at a time ----------
+  // Round 1: the board holds only your tower, then your zone blinks, then the deploy panel comes in with one card
+  // (Goblin Swarm). The enemy's Skeleton Archers stay hidden until the fight and beat the goblins wherever they stand,
+  // which shows how damage works. Round 2: the archers are in sight now. Of the two cards on offer, Fire Mage beats
+  // crowds and wins the fight from any tile; Sniper beats giants and is turned away with a hint (it nearly always loses).
+  // From round 3 the gates open a little, in the same match: the tower pick and its ability, the deployment cap with a
+  // shop of five basic units (the enemy adds a Brute, hidden until the fight), then in round 4 a level-up (whose sheet
+  // also has Move and Sell), no man's land and the flanks. After round 4 the enemy plays for real, as the AI, with every
+  // unit in the shop. A coach line over the board says what to do; the step comes from the match itself (tutStep), so
+  // taking a squad back steps back too. Always on the built-in units, on the Standard map, with no clock, packages or
+  // characters, and no AI level-ups until the handover.
   const TUT_STORE = 'phonebellum.tutorial.v1';
-  const TUT = { start: 'Goblin Swarm', foe: 'Skeleton Archers', foeAt: [6, 4], counter: 'Fire Mage', wrong: 'Sniper' };
+  const TUT = { start: 'Goblin Swarm', foe: 'Skeleton Archers', foeAt: [6, 4], counter: 'Fire Mage', wrong: 'Sniper',
+    shop: ['Goblin Swarm', 'Skeleton Archers', 'Ember Imps', 'Fire Mage', 'Sniper'], // the shop from round 3
+    adds: { 3: [['Brute', 5, 4]], 4: [['Wisps', 3, 2], ['Ember Imps', 8, 4]] }, // the enemy's new squads by round: [unit, column, row]
+    last: 4 }; // the round after which the enemy plays for real
   let tutDone = false;
   try { tutDone = localStorage.getItem(TUT_STORE) === 'done'; } catch (e) {}
   const unitIx = (name) => units.findIndex(u => u.name === name);
@@ -5784,66 +5796,101 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     useSet(BUILTIN, false);
     m = Game.createMatch(units, M, 1, 'standard');
     m.packages = [[], []];
-    for (const n of [TUT.start, TUT.counter, TUT.wrong]) m.unlocks[0][unitIx(n)] = 1;
-    m.unlocks[1][unitIx(TUT.foe)] = 1;
-    Game.place(m, 1, unitIx(TUT.foe), TUT.foeAt[0], TUT.foeAt[1]);
+    for (const n of TUT.shop) m.unlocks[0][unitIx(n)] = 1;
+    tutEnemy([[TUT.foe, ...TUT.foeAt]]);
     m.gold = [Game.SQUAD_COST, 0]; // just the first squad
     m.towers[1] = null;            // the enemy's tower comes with the enemy (the fight step)
-    tut = { intro: true, wrong: false };
+    tut = { intro: 0, wrong: false, towerSeen: false }; // intro: 0 the tower, 1 the zone, 2 on to the shop
     nextReady = [false, false]; rematch = [false, false];
     enterDeploy(0);
   }
-  // tower (round 1's first look), pick, place, fight, counter (round 2's pick), result, or null (the fight is on)
+  // the enemy's scripted squads (they don't pay for them)
+  function tutEnemy(list) {
+    for (const [n, c, r] of list) { m.unlocks[1][unitIx(n)] = m.round; m.gold[1] = Game.SQUAD_COST * 9; Game.place(m, 1, unitIx(n), c, r); }
+    m.gold[1] = 0;
+  }
+  // a new round of the tutorial: the enemy's new squads, and in round 4 a squad of yours ready to level up
+  function tutRound() {
+    tutEnemy(TUT.adds[m.round] || []);
+    if (m.round === 4 && !m.armies[me].some(s => Game.isReady(m, s)) && m.armies[me].length) {
+      const sq = m.armies[me][0]; sq.xp = Math.max(sq.xp, Game.xpNeeded(units[sq.unit], sq.level));
+    }
+  }
+  // tower, zone, pick, place, fight, counter (rounds 1-2); towerpick, tower2, free (round 3); level, flank, free
+  // (round 4); result; or null (the fight is on)
   function tutStep() {
     if (mode !== 'tutorial' || !m) return null;
     if (phase === 'result') return 'result';
     if (phase !== 'deploy') return null;
-    if (m.round === 1 && tut.intro) return 'tower';
-    if (m.armies[me].some(s => s.round === m.round)) return 'fight';
-    return selected !== null ? 'place' : m.round === 1 ? 'pick' : 'counter';
+    const r = m.round;
+    if (r === 1 && tut.intro < 2) return tut.intro ? 'zone' : 'tower';
+    if (r <= 2) return m.armies[me].some(s => s.round === r) ? 'fight' : selected !== null ? 'place' : r === 1 ? 'pick' : 'counter';
+    if (r === 3) return choosingTower() ? 'towerpick' : tut.towerSeen ? 'free' : 'tower2';
+    if (!m.armies[me].some(s => s.boughtLevels && s.boughtLevels[r]) && m.armies[me].some(s => Game.isReady(m, s))) return 'level';
+    if (!m.armies[me].some(s => s.round === r && Game.isFlank(me, s.col, s.row))) return 'flank';
+    return 'free';
   }
-  // the coach line over the board: text and buttons ([label, onClick, primary]); null hides it, with the ring and the glows
+  // the tile the coach's ring is on: your tower, or the squad that can level up
+  function tutTarget() {
+    const st = tutStep();
+    if (st === 'tower' || st === 'tower2') return m.towers[me];
+    if (st === 'level') return m.armies[me].find(s => Game.isReady(m, s)) || null;
+    return null;
+  }
+  // the tiles that blink: your zone, then the flanks
+  function tutTiles() {
+    const st = tutStep(), out = [];
+    if (st !== 'zone' && st !== 'flank') return out;
+    for (let r = 0; r < Game.ROWS; r++) for (let c = 0; c < Game.COLS; c++) {
+      if (Game.occupied(m, me, c, r) || !Game.canPlaceAt(m, me, c, r)) continue;
+      if (st === 'zone' ? Game.inZone(me, r) : Game.isFlank(me, c, r)) out.push({ col: c, row: r });
+    }
+    return out;
+  }
+  // the coach line over the board: text and buttons ([label, onClick, primary]); null hides it, with the glows
   function coach(text, btns = []) {
     const el = $('coach');
     document.querySelectorAll('.tut-glow').forEach(x => x.classList.remove('tut-glow'));
-    if (!text) { el.hidden = true; tutRing(); return; }
+    if (!text) { el.hidden = true; boardMarks(); return; }
     if (el.hidden || $('coach-text').innerHTML !== text) { el.hidden = true; void el.offsetWidth; } // each new line slides in
     el.hidden = false;
     $('coach-text').innerHTML = text;
     $('coach-btns').innerHTML = btns.map(([label, , primary], k) => `<button class="btn small${primary ? ' primary' : ''}" data-cb="${k}">${label}</button>`).join('');
     $('coach-btns').querySelectorAll('[data-cb]').forEach(b => b.addEventListener('click', btns[+b.dataset.cb][1]));
-    tutRing();
-  }
-  // a ring on your tower while the coach introduces it
-  function tutRing() {
-    const ring = $('coach-ring'), tw = tutStep() === 'tower' && m.towers[me];
-    ring.hidden = !tw;
-    if (!tw) return;
-    const w = $('wrap').getBoundingClientRect();
-    let x, y;
-    if (board3d) [x, y] = board3d.screenAt(tw.col, tw.row, 0);
-    else { const r = cv.getBoundingClientRect(); x = r.left + (tw.col + 0.5) * r.width / Game.COLS; y = r.top + (tw.row + 0.5) * r.height / Game.ROWS; }
-    ring.style.left = (x - w.left) + 'px'; ring.style.top = (y - w.top) + 'px';
+    boardMarks();
   }
   const glow = (el) => { if (el) el.classList.add('tut-glow'); };
   // the tutorial's deploy panel: only what the current step needs, built up as the steps go
   function panelTutorial() {
-    const step = tutStep();
-    if (step === 'fight' && m.round === 1) Game.ensureTower(m, foe());
-    const cards = step === 'pick' ? [TUT.start] : step === 'counter' ? [TUT.counter, TUT.wrong] : [];
-    dockTask = step === 'place' ? { text: '', x: false } : null; // puts the drawer down, so the whole zone is in sight
-    $('panel').innerHTML = step === 'tower' ? '' : `
-      ${cards.length ? `<div class="shop" id="shop">${cards.map(n => shopCard(unitIx(n), false)).join('')}</div>` : ''}
-      <div class="bar"><span class="gold num">${m.gold[me]} gold</span>${step === 'fight' ? '<button class="btn primary" id="fight">Fight</button>' : ''}</div>`;
+    const step = tutStep(), r = m.round, g = m.gold[me], left = Game.deploysLeft(m, me);
+    const open = step === 'free' || step === 'flank'; // the freer rounds: the shop, the deployment cap, a squad picked stays picked
+    if (step === 'fight' && r === 1) Game.ensureTower(m, foe());
+    const cards = step === 'pick' ? [TUT.start] : step === 'counter' ? [TUT.counter, TUT.wrong] : open ? TUT.shop : [];
+    const canBuy = (i) => !open || (g >= Game.shopCost(m, me, i) && left > 0);
+    if (selected !== null && !canBuy(selected)) selected = null;
+    const sel = selected !== null && esc(units[selected].name);
+    dockTask = moveMode ? { text: moving == null ? 'Tap a squad from an earlier round to move it.' : 'Tap a free tile to move it there.', x: true }
+      : step === 'place' ? { text: '', x: false } // the coach says it; the drawer goes down, so the whole zone is in sight
+      : open && sel ? { text: step === 'flank' ? `Tap a blinking flank tile to place ${sel}.` : `Tap a tile in your zone to place ${sel}.`, x: true } : null;
+    $('panel').innerHTML = step === 'tower' || step === 'zone' || step === 'towerpick' ? '' : `
+      ${r >= 3 ? `<div class="bar"><span class="deploys num">${Math.max(0, left)} of ${Game.deploysAllowed(m, me)} deployments left</span><span class="xbtns" style="display:flex;gap:6px"><button class="btn small" id="buy-deploy" ${editable() && Game.canBuyDeploy(m, me) ? '' : 'disabled'}>+1 deployment · ${Game.CONFIG.extraDeployCost}</button></span></div>` : ''}
+      ${cards.length ? `<div class="shop" id="shop">${cards.map(n => shopCard(unitIx(n), !canBuy(unitIx(n)))).join('')}</div>` : ''}
+      <div class="bar"><span class="gold num">${g} gold</span>${step === 'fight' || step === 'free' ? '<button class="btn primary" id="fight">Fight</button>' : ''}</div>`;
     $('panel').querySelectorAll('.ucard').forEach(b => b.addEventListener('click', () => {
       const i = +b.dataset.i;
-      if (units[i].name === TUT.wrong) { tut.wrong = true; panelDeploy(); return; }
-      selected = i; tut.wrong = false; panelDeploy(); render();
+      if (b.getAttribute('aria-disabled') === 'true') return;
+      if (step === 'counter' && units[i].name === TUT.wrong) { tut.wrong = true; panelDeploy(); return; }
+      selected = selected === i ? null : i; tut.wrong = false; moveMode = false; moving = null; panelDeploy(); render();
     }));
     $('panel').querySelectorAll('[data-info]').forEach(el => el.addEventListener('click', () => openSheet(+el.dataset.info)));
     if ($('fight')) $('fight').addEventListener('click', runFight);
+    if ($('buy-deploy')) $('buy-deploy').addEventListener('click', () => { if (editable() && Game.buyDeploy(m, me)) changed(); });
+    syncPick();
     const card = (n) => $('panel').querySelector(`.ucard[data-i="${unitIx(n)}"]`);
-    if (step === 'tower') coach(`This is your <b>Tower</b>. Your army deploys around it, in your zone: the bottom six rows.`, [['Next', () => { tut.intro = false; panelDeploy(); render(); }, true]]);
+    const next = () => { tut.intro++; panelDeploy(); render(); };
+    if (dockTask && dockTask.text) coach(null); // the task line on the board says what the next tap does
+    else if (step === 'tower') coach('This is your <b>Tower</b>. Protect it.', [['Next', next, true]]);
+    else if (step === 'zone') coach('This is your <b>deployment zone</b>. You can put troops here.', [['Next', next, true]]);
     else if (step === 'pick') { coach(`Tap <b>${esc(TUT.start)}</b> to recruit your first squad.`); glow(card(TUT.start)); }
     else if (step === 'place') coach('Now tap a tile in your zone to place it.');
     else if (step === 'counter') {
@@ -5851,23 +5898,36 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
         : `Squads stay all match, so now you can see theirs: <b>${esc(TUT.foe)}</b>, a crowd. ${esc(TUT.counter)} beats crowds, ${esc(TUT.wrong)} beats giants. Recruit the right one.`);
       if (tut.wrong) glow(card(TUT.counter));
     } else if (step === 'fight') {
-      coach(m.round === 1 ? 'The enemy’s army stays hidden until the fight. Tap <b>Fight</b>, then watch: squads fight on their own.' : 'Your goblins are back too. Tap <b>Fight</b>.');
+      coach(r === 1 ? 'The enemy’s army stays hidden until the fight. Tap <b>Fight</b>, then watch: squads fight on their own.' : 'Your goblins are back too. Tap <b>Fight</b>.');
       glow($('fight'));
+    } else if (step === 'towerpick') coach(null); // the pick says it
+    else if (step === 'tower2') coach('Your tower has its own ability. Tap your <b>Tower</b> to see it.');
+    else if (step === 'level') {
+      const q = tutTarget();
+      coach(`Squads earn experience in fights. Your <b>${esc(units[q.unit].name)}</b> can level up now: tap them. Their sheet can also <b>Move</b> them (${Game.CONFIG.moveCost} gold, once a round) or <b>Sell</b> them for half their worth.`);
+    } else if (step === 'flank') coach(`The middle rows are <b>no man’s land</b>: nobody deploys there. But from round ${Game.FLANK.round}, the blinking edge columns on their half are yours too: <b>flanks</b>. A squad there waits ${Game.FLANK.delay} s, then attacks from the side. Place one there.`);
+    else if (step === 'free') {
+      coach(r === 3 ? `You can place <b>${Game.CONFIG.deploysPerRound} new squads</b> a round. Need more? Buy <b>+1 deployment</b> for ${Game.CONFIG.extraDeployCost} gold. Recruit what you like, then Fight.` : 'Spend the rest as you like, then <b>Fight</b>.');
+      glow(r === 3 ? $('buy-deploy') : null);
     }
   }
   function tutResult(sum) {
     phase = 'result'; resultShownAt = 0; // no clock moving on by itself: the player reads at their own pace
     overlay(null); $('panel').innerHTML = ''; hud(); netStatus();
     const won = sum.winner === me && !sum.timeout, lost = sum.winner === foe() && !sum.timeout;
-    const line = lost ? `<b>Round lost.</b> You take ${sum.dmg[me]} damage: each enemy squad still standing hits your health, top left. At 0, you lose the match.`
+    let line = lost ? `<b>Round lost.</b> You take ${sum.dmg[me]} damage: each enemy squad still standing hits your health, top left. At 0, you lose the match.`
       : won ? `<b>Round won!</b> They take ${sum.dmg[foe()]} damage: each of your squads still standing hits their health. At 0, they lose the match.`
       : '<b>A draw.</b> Nobody takes damage.';
-    if (sum.round === 1) coach(line, [['Next round', tapNext, true]]);
+    if (sum.round > 2) line = lost ? `<b>Round lost.</b> You take ${sum.dmg[me]} damage.` : won ? `<b>Round won!</b> They take ${sum.dmg[foe()]} damage.` : '<b>A draw.</b>';
+    const added = (TUT.adds[sum.round] || []).map(a => a[0]);
+    if (added.length) line += ` They added ${added.map(esc).join(' and ')}: new squads stay hidden until the fight.`;
+    if (m.over) coach(`${line} The match is over.`, [['Main menu', showStart], ['Play vs AI', () => { matchKind = 'standard'; startAiMatch(); }, true]]);
+    else if (sum.round < TUT.last) coach(line, [['Next round', tapNext, true]]);
     else {
       tutDone = true;
       try { localStorage.setItem(TUT_STORE, 'done'); } catch (e) {}
-      coach(`${line} ${won ? 'That’s the game: see their army, counter it, fight.' : 'Counters help, and where you place squads matters too.'}`,
-        [['Main menu', showStart], ['Play vs AI', () => { matchKind = 'standard'; startAiMatch(); }, true]]);
+      coach(`${line} That’s the basics. From here the enemy plays for real, and every unit is in the shop. Finish the match!`,
+        [['Main menu', showStart], ['Keep playing', () => { mode = 'ai'; coach(null); beginAiRound(); }, true]]);
     }
     glow(document.querySelector(`.hud .side.${lost ? 'you' : 'foe'}`));
   }
@@ -5885,7 +5945,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   }
 
   function beginAiRound() {
-    if (mode === 'tutorial') { enterDeploy(0); return; } // the enemy's army is set by the script; no clock
+    if (mode === 'tutorial') { tutRound(); enterDeploy(0); return; } // the enemy's army is set by the script; no clock
     if (mode === 'claude') { startClaudeTurn(); enterDeploy(timerOn ? deployMs() : 0); return; }
     Game.aiDeploy(m, 1);       // the AI commits first; its new squads stay hidden until the fight
     enterDeploy(timerOn ? deployMs() : 0);
@@ -6057,8 +6117,8 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   }
   // the mouse over a tile (null: off the board), for the placement preview while deploying
   function boardHover(t) {
-    if (t && phase !== 'deploy') return;
-    hoverTile = t; if (phase === 'deploy') render();
+    hoverAny = t; hoverTile = phase === 'deploy' ? t : null;
+    if (phase !== 'battle') render(); // a fight draws every frame anyway
   }
   cv.addEventListener('pointerdown', (ev) => { if (boardPress(tileAt(ev))) try { cv.setPointerCapture(ev.pointerId); } catch (e) {} });
   cv.addEventListener('pointerup', () => boardDrop(null, true));
@@ -6074,11 +6134,18 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (phase !== 'deploy' || !t) return;
     if (choosingPack() || choosingTower()) return; // the package (and in round 3 the tower) comes first
     if (performance.now() - dragEndAt < 400) return;
-    if (mode === 'tutorial') { // only placing and taking back, so no sheet pulls the player off the script
-      const own = Game.squadAt(m, me, t.col, t.row);
-      if (own) { if (editable() && own.round === m.round && Game.unplace(m, me, t.col, t.row)) changed(); }
-      else if (selected !== null && editable() && Game.place(m, me, selected, t.col, t.row)) { selected = null; changed(); }
-      return;
+    if (mode === 'tutorial') {
+      const step = tutStep(), own = Game.squadAt(m, me, t.col, t.row);
+      if (m.round >= 3 && Game.towerAt(m, me, t.col, t.row)) { tut.towerSeen = true; openTowerSheet(me); panelDeploy(); return; }
+      if (m.round < 4) { // only placing and taking back, so no sheet pulls the player off the script
+        if (own) { if (editable() && own.round === m.round && Game.unplace(m, me, t.col, t.row)) changed(); }
+        else if (selected !== null && editable() && Game.place(m, me, selected, t.col, t.row)) {
+          if (m.round < 3 || m.gold[me] < Game.shopCost(m, me, selected) || Game.deploysLeft(m, me) <= 0) selected = null;
+          changed();
+        }
+        return;
+      }
+      if (step === 'flank' && selected !== null && !own && !Game.isFlank(me, t.col, t.row)) return; // this one goes on a flank
     }
     if (placingTower()) { if (editable() && Game.placeTower(m, me, t.col, t.row)) changed(); return; }
     if (placingElf()) { if (editable() && Game.buyElfOwn(m, me, t.col, t.row)) { elfPlacing = false; changed(); } else if (!Game.elfOwnSpotOk(m, me, t.col, t.row)) { elfPlacing = false; render(); hud(); panelDeploy(); } return; }
@@ -6128,6 +6195,74 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
         changed();
       }
     }
+  }
+
+  // ---------- marks over the board: a unit's range under the mouse, the tutorial's tiles and ring ----------
+  // Drawn in an SVG over either board, through its own projection (the 3D camera, or the 2D canvas and its battle cam),
+  // so they sit right in every view. Redrawn with the board: render() on 2D, every frame on 3D.
+  let marksHtml = '';
+  let hoverAny = null; // the tile under the mouse in any phase (hoverTile is the placing preview, while deploying only)
+  // how far a unit reaches, in metres: the map's cut (cut: for a squad's unit; a fight's bodies have it already) and flame cones' longer reach
+  function reachOf(u, cut) {
+    const mp = cut && Game.mapOf(m);
+    let r = u.range || 0;
+    if (mp && mp.rangeCut && r > mp.rangeKeep) r = Math.max(mp.rangeKeep, r * (1 - mp.rangeCut / 100));
+    return u.flame > 0 ? r * Game.SETTINGS.flameReach : r;
+  }
+  // what's under the mouse: { x, y, r, side } in metres (its middle, its reach), or null. Only what this screen shows:
+  // the opponent's squads from earlier rounds while deploying (their base unit: skills bought stay theirs), no stealthed enemy in a fight
+  function hoverRange() {
+    const t = hoverAny;
+    if (!t || !m) return null;
+    const w = Game.tileToWorld(t.col, t.row);
+    if (bt && phase !== 'deploy') {
+      let best = null, bd = Game.TILE * 0.8;
+      for (const b of bt.bodies) {
+        if (!b.alive || b.u.spire || (b.hidden && b.side !== me)) continue;
+        const d = Math.hypot(b.x - w.x, b.y - w.y);
+        if (d < bd) { bd = d; best = b; }
+      }
+      return best && best.u.range > 0 ? { x: best.x, y: best.y, r: reachOf(best.u, false), side: best.side } : null;
+    }
+    if (phase !== 'deploy') return null;
+    for (const side of [me, foe()]) if (towerVisible(side) && Game.towerAt(m, side, t.col, t.row)) {
+      const tt = side === me || towerTypeVisible(side) ? Game.towerType(m, side) : Game.OUTPOST;
+      return { x: w.x, y: w.y, r: reachOf(tt.unit, true), side };
+    }
+    const own = Game.squadAt(m, me, t.col, t.row);
+    if (own) return { x: w.x, y: w.y, r: reachOf(Game.unitFor(m, me, own.unit, own), true), side: me };
+    const en = m.armies[foe()].find(s => { const p = Game.seenAt(m, s); return !Game.hiddenFromFoe(m, s) && p.col === t.col && p.row === t.row && s.round < m.round; });
+    return en ? { x: w.x, y: w.y, r: reachOf(units[en.unit], true), side: foe() } : null;
+  }
+  // board metres -> a point in #wrap
+  function wrapMap() {
+    const w = $('wrap').getBoundingClientRect(), T = Game.TILE, C = Game.COLS, R = Game.ROWS;
+    const tile = (x, y) => [x / T + (C - 1) / 2, (R - 1) / 2 - y / T];
+    if (board3d) return (x, y) => { const [c, r] = tile(x, y), [sx, sy] = board3d.screenAt(c, r, 0); return [sx - w.left, sy - w.top]; };
+    const b = cv.getBoundingClientRect(), f = me === 1;
+    const at = (x, y) => { const [c, r] = tile(x, y); return [b.left - w.left + ((f ? C - 1 - c : c) + 0.5) * b.width / C, b.top - w.top + ((f ? R - 1 - r : r) + 0.5) * b.height / R]; };
+    if (!(phase === 'battle' && cam && cam.k > 0)) return at;
+    const z = 1 + (CAM.zoom - 1) * cam.k, o = at(cam.x, cam.y); // the 2D battle cam zooms around its focus
+    return (x, y) => { const p = at(x, y); return [o[0] + (p[0] - o[0]) * z, o[1] + (p[1] - o[1]) * z]; };
+  }
+  function boardMarks() {
+    const svg = $('marks');
+    if (!svg) return;
+    const h = hoverRange(), tiles = mode === 'tutorial' ? tutTiles() : [], ring = mode === 'tutorial' ? tutTarget() : null;
+    const cinematic = board3d && board3d.camera.level() >= 3; // the ground view shows no markers
+    let html = '';
+    if ((h || tiles.length || ring) && !cinematic) {
+      const at = wrapMap(), pt = (x, y) => at(x, y).map(v => v.toFixed(1)).join(',');
+      for (const t of tiles) {
+        const c = Game.tileToWorld(t.col, t.row), d = Game.TILE / 2 - 0.4;
+        html += `<polygon class="tut-tile" points="${pt(c.x - d, c.y - d)} ${pt(c.x + d, c.y - d)} ${pt(c.x + d, c.y + d)} ${pt(c.x - d, c.y + d)}"/>`;
+      }
+      if (h) html += `<polygon class="range" style="stroke:${teamCol(h.side)}" points="${Array.from({ length: 72 }, (_, k) => { const a = k / 72 * Math.PI * 2; return pt(h.x + Math.cos(a) * h.r, h.y + Math.sin(a) * h.r); }).join(' ')}"/>`;
+      const el = $('coach-ring');
+      if (ring) { const c = Game.tileToWorld(ring.col, ring.row), [x, y] = at(c.x, c.y); el.style.left = x + 'px'; el.style.top = y + 'px'; }
+    }
+    $('coach-ring').hidden = !ring || cinematic;
+    if (marksHtml !== html) { marksHtml = html; svg.innerHTML = html; } // only on a change, so the blinking runs on
   }
 
   // ---------- the 3D board (src/render3d.js): the default, with a setting (Board: 2D / 3D in the in-match Settings) ----------
@@ -6224,6 +6359,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     raf3d = 0;
     if (!board3d) return;
     board3d.draw();
+    boardMarks();
     meterFrame(ts);
     if (board3d && (phase === 'battle' || !board3d.still() || performance.now() < wakeUntil)) raf3d = requestAnimationFrame(frame3d);
   }
