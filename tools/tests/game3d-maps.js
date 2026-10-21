@@ -7,6 +7,7 @@
 // - Matteo: Give Charisma, then a tap on one of your squads gives it the first stack.
 // Screenshots go to the current folder. Headless Chromium needs software WebGL (the args below), about 5-10 fps.
 const { chromium } = require('playwright-core');
+const dock = require('./dock'); // the phone layout's deploy drawer
 (async () => {
   const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--use-gl=angle', '--use-angle=swiftshader'] });
   let fails = 0;
@@ -25,7 +26,7 @@ const { chromium } = require('playwright-core');
       for (let y = bx.top; y < bx.bottom; y += 4) for (let x = bx.left; x < bx.right; x += 4) { const t = bd.tileAt(x, y); if (t && t.col === c && t.row === r) { sx += x; sy += y; n++; } }
       return n ? [sx / n, sy / n] : null;
     }, [c, r]);
-    const tap = async (c, r) => { const [x, y] = await at(c, r); await p.mouse.click(x, y); await p.waitForTimeout(300); };
+    const tap = async (c, r) => { await dock.down(p); const [x, y] = await at(c, r); await p.mouse.click(x, y); await p.waitForTimeout(300); };
     const sheet = async () => (await p.locator('#sheet-back').isVisible()) ? (await p.locator('#sheet-h').textContent()).trim() : null;
     const closeSheet = async () => { await p.click('#sheet #close'); await p.waitForTimeout(150); };
     const pb = (f, a) => p.evaluate(f, a);
@@ -94,8 +95,8 @@ const { chromium } = require('playwright-core');
     const { p, tap, pb } = await game('standard');
     const sq = await pb(() => { const { m, me } = window.__pb(); m.chars[me] = 'matteo'; return m.armies[me].map(q => [q.col, q.row, q.id]); });
     // the panel was drawn before Matteo was forced in: pick a shop unit and drop it again to redraw it
-    const u = p.locator('[data-i]:not([data-locked])').first(); await u.click(); await p.waitForTimeout(100); await u.click(); await p.waitForTimeout(150);
-    await p.click('#charm-btn'); await p.waitForTimeout(150);
+    await dock.up(p); const u = p.locator('[data-i]:not([data-locked])').first(); await u.click(); await p.waitForTimeout(100); await p.click('#task-x'); await p.waitForTimeout(150);
+    await dock.up(p); await p.click('#charm-btn'); await p.waitForTimeout(150);
     await tap(sq[0][0], sq[0][1]);
     const charm = await pb(() => { const { m, me } = window.__pb(); return m.armies[me].map(q => [q.id, q.charm || 0]); });
     check(charm.some(([id, c]) => id === sq[0][2] && c > 0) && await p.locator('#charm-undo').count() === 1, `Give Charisma, then a tap on a squad: ${JSON.stringify(charm)}`);

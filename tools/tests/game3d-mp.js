@@ -5,6 +5,7 @@
 // Needs the peer server (node tools/peer-server.js, port 9000) and the game on port 8766. Screenshots go to the
 // current folder. Headless Chromium needs software WebGL (the args below) and runs at about 5-10 fps.
 const { chromium } = require('playwright-core');
+const dock = require('./dock'); // the phone layout's deploy drawer
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 (async () => {
   const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--disable-features=WebRtcHideLocalIpsWithMdns', '--use-gl=angle', '--use-angle=swiftshader'] });
@@ -20,8 +21,8 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
     for (let y = bx.top; y < bx.bottom; y += 4) for (let x = bx.left; x < bx.right; x += 4) { const t = bd.tileAt(x, y); if (t && t.col === c && t.row === r) { sx += x; sy += y; n++; } }
     return n ? [sx / n, sy / n] : null;
   }, [c, r]);
-  const tap = async (p, c, r) => { const [x, y] = await at(p, c, r); await p.mouse.click(x, y); await sleep(250); };
-  const dragT = async (p, c1, r1, c2, r2) => { const [x1, y1] = await at(p, c1, r1), [x2, y2] = await at(p, c2, r2); await p.mouse.move(x1, y1); await p.mouse.down(); await p.mouse.move((x1 + x2) / 2, (y1 + y2) / 2, { steps: 4 }); await p.mouse.move(x2, y2, { steps: 4 }); await p.mouse.up(); await sleep(500); };
+  const tap = async (p, c, r) => { await dock.down(p); const [x, y] = await at(p, c, r); await p.mouse.click(x, y); await sleep(250); };
+  const dragT = async (p, c1, r1, c2, r2) => { await dock.down(p); const [x1, y1] = await at(p, c1, r1), [x2, y2] = await at(p, c2, r2); await p.mouse.move(x1, y1); await p.mouse.down(); await p.mouse.move((x1 + x2) / 2, (y1 + y2) / 2, { steps: 4 }); await p.mouse.move(x2, y2, { steps: 4 }); await p.mouse.up(); await sleep(500); };
   const army = (p, side) => p.evaluate((sd) => { const { m, me } = window.__pb(); const s = sd == null ? me : sd; return m.armies[s].map(q => ({ id: q.id, unit: q.unit, col: q.col, row: q.row })); }, side);
   const free = (p, ui) => p.evaluate((ui) => { const { m, me } = window.__pb(), out = []; for (const row of Game.zoneRows(me)) for (let col = 1; col < Game.COLS - 1; col++) if (!Game.occupied(m, me, col, row) && Game.canPlaceAt(m, me, col, row, ui)) out.push([col, row]); return out; }, ui);
 
@@ -46,7 +47,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
     const a2 = await army(p);
     check(a2.some(q => q.id === pk.id && q.col === to[0] && q.row === to[1]), `${name}: package squad dragged to ${to}`);
     const card = p.locator('#shop .ucard[aria-disabled="false"]:not([data-locked])').first();
-    const ui = +(await card.getAttribute('data-i')); await card.click(); await sleep(150);
+    await dock.up(p); const ui = +(await card.getAttribute('data-i')); await card.click(); await sleep(150);
     const [t] = await free(p, ui);
     await tap(p, ...t);
     await p.evaluate(() => { const c = document.querySelector('#shop .ucard[aria-pressed="true"]'); if (c) c.click(); }); await sleep(150);

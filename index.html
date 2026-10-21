@@ -299,6 +299,21 @@ html.pc .panel { grid-column: 2; grid-row: 1 / span 3; min-width: 0; max-height:
 html.pc #wrap { width: min(calc(100vw - 32px - 460px), calc((100svh - 110px) * 0.75)); min-width: 360px; }
 html.pc .shop { display: grid; grid-template-columns: repeat(auto-fill, minmax(124px, 1fr)); overflow-x: visible; }
 html.pc .sheet { max-width: 640px; }
+/* Phone in a match (html.dock, see dock()): the board fills the screen above a panel docked at the bottom. While
+   deploying the panel is a drawer: Shop opens it over the bottom of the board, Hide (or picking a unit) closes it to
+   its last row. A task on the board (placing a unit, Move, Charisma, a tower) shows in a line over the board, with an X. */
+html.dock body { padding-inline: 6px; padding-bottom: calc(var(--dock-h, 64px) + 6px); }
+html.dock #wrap { width: min(100%, calc(var(--board-h, 480px) * 0.75)); min-width: 0; }
+html.dock #wrap:has(> .board3d) { width: 100%; aspect-ratio: auto; height: var(--board-h, 480px); } /* the 3D camera fits the board to any shape */
+html.dock .panel { position: fixed; left: 0; right: 0; bottom: 0; z-index: 4; max-width: 560px; margin: 0 auto; max-height: 62svh; overflow-y: auto; border-bottom: 0; border-radius: 10px 10px 0 0; box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.45); }
+html.dock .panel.shut > :not(:last-child) { display: none; }
+html.dock .panel.shut > .bar:last-child { margin-top: 0; padding-top: 0; }
+.dock-toggle, .dock-gold { display: none; }
+html.dock .dock-toggle { display: inline-flex; align-items: center; }
+html.dock .panel.shut .dock-gold { display: inline; font-size: 15px; }
+.task { position: absolute; top: 30px; left: 10%; right: 10%; z-index: 3; display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 10px; border: 1px solid var(--you); border-radius: 6px; background: rgba(13, 19, 21, 0.9); font-size: 12px; line-height: 1.35; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45); }
+.task span { flex: 1; min-width: 0; }
+.task button { flex: none; width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel); font-size: 16px; line-height: 1; display: grid; place-items: center; }
 </style>
 <script>
 // PC or phone: a fine pointer that can hover (a mouse) and room for the board and controls side by side
@@ -323,6 +338,7 @@ html.pc .sheet { max-width: 640px; }
     <div class="overlay" id="overlay"></div>
     <div class="pick" id="pick" role="dialog" aria-modal="false" aria-labelledby="pick-h" hidden></div>
     <button class="btn primary small pick-peek" id="pick-peek" hidden></button>
+    <div class="task" id="task" role="status" hidden><span id="task-text"></span><button id="task-x" aria-label="Stop placing">✕</button></div>
   </div>
 
   <div class="panel" id="panel"></div>
@@ -4448,7 +4464,13 @@ const Render2D = (cv, view) => {
           <button data-board="2d" aria-pressed="${!want3d}">2D</button><button data-board="3d" aria-pressed="${want3d}">3D</button>
         </div>
       </div>
-      <div class="bar" id="q3d-bar"${want3d ? '' : ' hidden'}>
+      <div class="bar q3d-bar"${want3d ? '' : ' hidden'}>
+        <span class="hint">3D view</span>
+        <div class="seg" role="group" aria-label="3D view">
+          <button data-v3d="top" aria-pressed="${view3d === 'top'}">From above</button><button data-v3d="tilted" aria-pressed="${view3d === 'tilted'}">Tilted</button>
+        </div>
+      </div>
+      <div class="bar q3d-bar" id="q3d-bar"${want3d ? '' : ' hidden'}>
         <span class="hint">3D quality</span>
         <div class="seg" role="group" aria-label="3D quality">
           ${Q3D.map(q => `<button data-q3d="${q}" aria-pressed="${meter.q === q}">${q[0].toUpperCase() + q.slice(1)}</button>`).join('')}
@@ -4484,7 +4506,11 @@ const Render2D = (cv, view) => {
     $('sheet').querySelectorAll('[data-board]').forEach(b => b.addEventListener('click', () => {
       set3d(b.dataset.board === '3d');
       $('sheet').querySelectorAll('[data-board]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
-      $('q3d-bar').hidden = !want3d;
+      $('sheet').querySelectorAll('.q3d-bar').forEach(x => { x.hidden = !want3d; });
+    }));
+    $('sheet').querySelectorAll('[data-v3d]').forEach(b => b.addEventListener('click', () => {
+      setView3d(b.dataset.v3d);
+      $('sheet').querySelectorAll('[data-v3d]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
     }));
     $('sheet').querySelectorAll('[data-q3d]').forEach(b => b.addEventListener('click', () => {
       setQuality(b.dataset.q3d);
@@ -4587,10 +4613,48 @@ const Render2D = (cv, view) => {
   const cv = $('board');
   const boardView = () => ({ m, me, phase, units, mode, bt, battlePre, fx, selected, moving, drag, hoverTile,
     editable: editable(), placingUnit: placingUnit(), placingElf: placingElf(), placingTower: placingTower(),
-    battleCam: cam && cam.k > 0 ? { zoom: 1 + (CAM.zoom - 1) * cam.k, x: cam.x, y: cam.y } : null });
+    battleCam: cam && cam.k > 0 ? { zoom: 1 + (CAM.zoom - 1) * cam.k, x: cam.x, y: cam.y, k: cam.k } : null });
   const board = Render2D(cv, boardView);
   let board3d = null; // the 3D board when it's on (see "the 3D board" below)
   const size = () => (board3d || board).size();
+  // ---------- phone layout: the board fills the screen, the panel docks at the bottom (CSS: html.dock) ----------
+  // In a match on a phone the panel is fixed to the bottom of the screen and the board takes the height above it.
+  // While deploying the panel is a drawer: open at the start of each round, shut by its button, by a pick from the shop,
+  // or a task that needs the board (dockTask, set by panelDeploy); a task shows as a line over the board, and its X
+  // stops it (stopTask). Runs whenever the panel changes, the window resizes or the connection line comes or goes.
+  let dockOpen = true, dockRound = 0, dockTask = null, dockH = 64, boardH = 0;
+  function dock() {
+    const root = document.documentElement, panel = $('panel');
+    const on = !root.classList.contains('pc') && ['deploy', 'battle', 'result', 'end'].includes(phase) && !!m;
+    const was = root.classList.contains('dock');
+    root.classList.toggle('dock', on);
+    const deploying = on && phase === 'deploy', picking = deploying && (choosingPack() || choosingTower());
+    if (deploying && dockRound !== m.round && !picking && !placingTower()) { dockRound = m.round; dockOpen = true; }
+    const shut = deploying && (!!dockTask || picking || !dockOpen);
+    panel.classList.toggle('shut', shut);
+    const tb = $('dock-toggle');
+    if (tb) { tb.textContent = shut ? 'Shop ▴' : 'Hide ▾'; tb.setAttribute('aria-expanded', String(!shut)); tb.hidden = !!dockTask || picking; }
+    $('task').hidden = !(deploying && dockTask);
+    if (deploying && dockTask) { $('task-text').innerHTML = dockTask.text; $('task-x').hidden = !dockTask.x; }
+    let h = boardH;
+    if (on) {
+      if (shut || phase !== 'deploy') dockH = panel.offsetHeight || dockH; // the drawer's height when down
+      root.style.setProperty('--dock-h', dockH + 'px');
+      const top = $('wrap').getBoundingClientRect().top + scrollY;
+      h = Math.max(240, Math.floor(innerHeight - top - dockH - 8));
+      root.style.setProperty('--board-h', h + 'px');
+    }
+    if (on !== was || h !== boardH) { boardH = h; size(); if (on !== was || !board3d) render(); }
+  }
+  // the X on the task line: stop placing that unit (or the Move, the Charisma, the elf tower)
+  function stopTask() {
+    selected = null; moveMode = false; moving = null; charmMode = false; elfPlacing = false;
+    if (phase === 'deploy') panelDeploy();
+    render();
+  }
+  $('task-x').addEventListener('click', stopTask);
+  new MutationObserver(dock).observe($('panel'), { childList: true });
+  addEventListener('resize', dock);
   function render() {
     syncMusic();
     cv.style.touchAction = phase === 'deploy' ? 'none' : ''; // so a finger can drag squads without scrolling the page
@@ -4656,6 +4720,7 @@ const Render2D = (cv, view) => {
     else if (phase === 'lobby') setNet('');
     else if (phase === 'draft' && mode === 'guest') setNet('Connection lost. Reconnecting…', 'bad');
     else setNet(mode === 'host' ? `Opponent disconnected. Waiting for them to come back…` : 'Connection lost. Reconnecting…', 'bad');
+    dock(); // the line above the board moves it
   }
 
   // ---------- countdown ----------
@@ -4775,7 +4840,8 @@ const Render2D = (cv, view) => {
         <li>Pick a unit card, then tap a highlighted tile in your zone, the bottom six rows. Each squad costs its gold and one deployment.</li>
         <li>Drag a squad you placed this round to move it, or tap it to take it back. Your round 1 package squads are free.</li>
         <li>A squad with a gold badge can level up: tap it. Tap an older squad, a tower or an enemy squad to see what it does.</li>
-        ${board3d ? '<li>3D board: spread two fingers (or scroll) for the angled view, pinch (or press Esc) to go back to the view from above.</li>' : ''}
+        ${document.documentElement.classList.contains('dock') ? '<li>Shop brings the deploy panel up, Hide puts it down. Picking a unit puts it down so you can see every tile; the ✕ on the board stops placing.</li>' : ''}
+        ${board3d ? '<li>3D board: spread two fingers (or scroll) for the angled view, pinch (or press Esc) to go back. Settings → 3D view: From above or Tilted (the whole board from your side).</li>' : ''}
       </ul>
       <div class="bar"><span></span><button class="btn small" id="help-how">How to play</button></div>`;
     $('sheet-back').hidden = false;
@@ -4834,6 +4900,9 @@ const Render2D = (cv, view) => {
     const inline = !can || placingTower() || placingElf() || choosingTower() || choosingPack() || moveMode || (charmMode && Game.canGiveCharm(m, me))
       || (selected !== null && !canBuy(selected)) ? hint : '';
     helpTip = inline ? '' : hint;
+    // phone: the task the next board tap is for, shown over the board while the drawer is down (dock())
+    dockTask = !can ? null : placingTower() ? { text: hint, x: false }
+      : selected !== null || moveMode || (charmMode && Game.canGiveCharm(m, me)) || placingElf() ? { text: hint, x: true } : null;
     const news = can && selected === null && !fresh && !inline && (Game.hailRound(m) || Game.altarRound(m) || m.round === Game.FLANK.round || (tskillOffer() && m.round === Game.TOWER_PICK_ROUND));
     const extraBtns = `<span style="display:flex;gap:6px;flex-wrap:wrap">
         <button class="btn small" id="buy-deploy" ${can && Game.canBuyDeploy(m, me) ? '' : 'disabled'}>+1 deployment · ${Game.CONFIG.extraDeployCost}</button>
@@ -4879,8 +4948,9 @@ const Render2D = (cv, view) => {
           </button>
           <button class="info" data-info="${i}" aria-label="About ${esc(u.name)}">i</button>
         </div>`).join('')}</div>`}
-      <div class="bar"><span class="hint">${status}</span>${action}</div>`;
+      <div class="bar"><span class="dock-gold gold num">${g}g</span><span class="hint">${status}</span><span class="btnrow"><button class="btn dock-toggle" id="dock-toggle" aria-controls="panel">Shop</button>${action}</span></div>`;
     syncPick();
+    $('dock-toggle').addEventListener('click', () => { dockOpen = $('panel').classList.contains('shut'); dock(); });
     $('panel').querySelectorAll('[data-tier]').forEach(b => b.addEventListener('click', () => { shopTier = +b.dataset.tier; shopScroll = 0; panelDeploy(); }));
     const shop = $('shop') || document.createElement('div');
     shop.scrollLeft = shopScroll;
@@ -5860,6 +5930,15 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   let want3d = !force2d;
   try { want3d = force3d || (!force2d && localStorage.getItem(B3D_STORE) !== '2d'); } catch (e) {}
   const save3d = (on) => { try { localStorage.setItem(B3D_STORE, on ? '3d' : '2d'); } catch (e) {} };
+  // the 3D view setting: the home view straight down ('top') or tilted, showing the whole board from your side
+  const V3D_STORE = 'phone-bellum-3d-view';
+  let view3d = 'top';
+  try { if (localStorage.getItem(V3D_STORE) === 'tilted') view3d = 'tilted'; } catch (e) {}
+  function setView3d(v) {
+    view3d = v === 'tilted' ? 'tilted' : 'top';
+    try { localStorage.setItem(V3D_STORE, view3d); } catch (e) {}
+    if (board3d) { board3d.camera.setHome(view3d); wake3d(); }
+  }
   let starting3d = null;
   function start3d() {
     if (board3d || starting3d) return starting3d;
@@ -5874,7 +5953,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
         if (!want3d) return; // switched back to 2D while loading
         el.className = 'board3d';
         cv.after(el);
-        b = Render3D(THREE, el, boardView, { onTap: boardTap, onPress: boardPress, onDrag: boardDrag, onDrop: boardDrop, onHover: boardHover, placing: () => phase === 'deploy', onInput: wake3d });
+        b = Render3D(THREE, el, boardView, { onTap: boardTap, onPress: boardPress, onDrag: boardDrag, onDrop: boardDrop, onHover: boardHover, placing: () => phase === 'deploy', onInput: wake3d, home: view3d });
         const can = el.querySelector('canvas');
         can.setAttribute('aria-label', cv.getAttribute('aria-label'));
         can.addEventListener('webglcontextlost', () => { if (board3d === b) fallback2d('lost'); });

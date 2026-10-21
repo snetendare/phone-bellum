@@ -15,8 +15,8 @@ const OUT = process.env.OUT || '.';
   console.log('squads:', JSON.stringify(sq));
   const tap = async (c, r) => { const bb = await p.locator('#board').boundingBox(); await p.mouse.click(bb.x + (c + .5) * bb.width / 12, bb.y + (r + .5) * bb.height / 16); };
   // the panel button, then a squad (round 1 squads are fresh, so their sheets can't be opened)
-  // the panel was drawn before Matteo was forced in: pick a shop unit and drop it again to redraw it
-  const u = p.locator('[data-i]:not([data-locked])').first(); await u.click(); await sleep(100); await u.click(); await sleep(150);
+  // the panel was drawn before Matteo was forced in: pick a shop unit and drop it again (the X on the task line) to redraw it
+  const u = p.locator('[data-i]:not([data-locked])').first(); await u.click(); await sleep(100); await p.click('#task-x'); await sleep(150);
   console.log('give button:', await p.locator('#charm-btn').count());
   await p.click('#charm-btn'); await sleep(150);
   console.log('hint:', await p.locator('#panel .hint').first().textContent());

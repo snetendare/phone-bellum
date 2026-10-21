@@ -5,20 +5,22 @@
 // (frame rate, quality steps, the last fight's summary). Screenshots go to the current folder.
 // Headless Chromium needs software WebGL (the args below) and runs at about 10-15 fps.
 const { chromium } = require('playwright-core');
+const dock = require('./dock'); // the phone layout's deploy drawer
 (async () => {
   const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--use-gl=angle', '--use-angle=swiftshader'] });
   const p = await (await b.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 })).newPage();
   let fails = 0;
   const check = (ok, what) => { console.log(ok ? 'ok  ' : 'FAIL', what); if (!ok) fails++; };
   p.on('pageerror', e => { console.log('PAGE ERROR', e.message); fails++; });
-  // the screen point at the middle of a tile (model columns / rows), found by asking the 3D board which tile is where
+  // the screen point at the middle of a tile (model columns / rows), found by asking the 3D board which tile a touch
+  // picks where (in the angled view a model standing in front can cover a tile)
   const at = (c, r) => p.evaluate(([c, r]) => {
     const bd = window.__pb().board3d, el = document.querySelector('.board3d canvas'), bx = el.getBoundingClientRect(); let sx = 0, sy = 0, n = 0;
-    for (let y = bx.top; y < bx.bottom; y += 4) for (let x = bx.left; x < bx.right; x += 4) { const t = bd.tileAt(x, y); if (t && t.col === c && t.row === r) { sx += x; sy += y; n++; } }
+    for (let y = bx.top; y < bx.bottom; y += 4) for (let x = bx.left; x < bx.right; x += 4) { const t = bd.pickAt(x, y); if (t && t.col === c && t.row === r) { sx += x; sy += y; n++; } }
     return n ? [sx / n, sy / n] : null;
   }, [c, r]);
-  const tap = async (c, r) => { const [x, y] = await at(c, r); await p.mouse.click(x, y); await p.waitForTimeout(200); };
-  const dragT = async (c1, r1, c2, r2) => { const [x1, y1] = await at(c1, r1), [x2, y2] = await at(c2, r2); await p.mouse.move(x1, y1); await p.mouse.down(); await p.mouse.move((x1 + x2) / 2, (y1 + y2) / 2, { steps: 4 }); await p.mouse.move(x2, y2, { steps: 4 }); await p.mouse.up(); await p.waitForTimeout(500); };
+  const tap = async (c, r) => { await dock.down(p); const [x, y] = await at(c, r); await p.mouse.click(x, y); await p.waitForTimeout(200); };
+  const dragT = async (c1, r1, c2, r2) => { await dock.down(p); const [x1, y1] = await at(c1, r1), [x2, y2] = await at(c2, r2); await p.mouse.move(x1, y1); await p.mouse.down(); await p.mouse.move((x1 + x2) / 2, (y1 + y2) / 2, { steps: 4 }); await p.mouse.move(x2, y2, { steps: 4 }); await p.mouse.up(); await p.waitForTimeout(500); };
   const st = () => p.evaluate(() => { const { m, me } = window.__pb(); return { round: m.round, gold: m.gold[me], tower: m.towers[me], moved: m.moved[me], army: m.armies[me].map(s => ({ id: s.id, col: s.col, row: s.row, round: s.round, unit: s.unit })) }; });
   // free tiles in your zone where unit ui may go, and that the camera shows
   const freeTiles = async (ui) => {
@@ -48,7 +50,7 @@ const { chromium } = require('playwright-core');
   if (await sheet()) await closeSheet();
   // the unit sheet of a squad from this round's package... is a take-back tap; a pick from the shop, then a tap places it
   const card = p.locator('#shop .ucard[aria-disabled="false"]:not([data-locked])').first();
-  const ui = +(await card.getAttribute('data-i')); await card.click(); await p.waitForTimeout(150);
+  await dock.up(p); const ui = +(await card.getAttribute('data-i')); await card.click(); await p.waitForTimeout(150);
   const [a] = await freeTiles(ui), g0 = s.gold;
   await tap(...a);
   s = await st(); const placed = s.army.find(q => q.col === a[0] && q.row === a[1] && q.unit === ui);
@@ -82,14 +84,14 @@ const { chromium } = require('playwright-core');
   await tap(old.col, old.row);
   check(!!(await sheet()), `tap on an older squad opens its sheet (${await sheet()})`);
   if (await sheet()) await closeSheet();
-  await p.click('#move-btn'); await p.waitForTimeout(150);
+  await dock.up(p); await p.click('#move-btn'); await p.waitForTimeout(150);
   await tap(old.col, old.row);
   const [mv] = await freeTiles(old.unit);
   await tap(...mv);
   s = await st(); check(s.army.some(q => q.id === old.id && q.col === mv[0] && q.row === mv[1]) && s.moved === old.id, `Move by tapping: ${old.col},${old.row} -> ${mv}, gold ${s.gold}`);
-  await p.click('#undo-move'); await p.waitForTimeout(200);
+  await dock.up(p); await p.click('#undo-move'); await p.waitForTimeout(200);
   s = await st(); check(s.army.some(q => q.id === old.id && q.col === old.col && q.row === old.row), 'undo move');
-  await p.click('#move-btn'); await p.waitForTimeout(150);
+  await dock.up(p); await p.click('#move-btn'); await p.waitForTimeout(150);
   const [mv2] = await freeTiles(old.unit);
   await dragT(old.col, old.row, ...mv2);
   s = await st(); check(s.army.some(q => q.id === old.id && q.col === mv2[0] && q.row === mv2[1]), `Move by dragging -> ${mv2}`);
@@ -103,7 +105,7 @@ const { chromium } = require('playwright-core');
   await p.evaluate(() => window.__pb().board3d.camera.setLevel(1));
   await p.waitForFunction(() => window.__pb().board3d.camera.handsOn(), null, { timeout: 15000 }); await p.waitForTimeout(300);
   const card2 = p.locator('#shop .ucard[aria-disabled="false"]:not([data-locked])').first();
-  const ui2 = +(await card2.getAttribute('data-i')); await card2.click(); await p.waitForTimeout(150);
+  await dock.up(p); const ui2 = +(await card2.getAttribute('data-i')); await card2.click(); await p.waitForTimeout(150);
   const [c] = await freeTiles(ui2);
   if (c) { await tap(...c); s = await st(); check(s.army.some(q => q.col === c[0] && q.row === c[1] && q.round === 2), `angled view: placed at ${c}`); }
   else check(false, 'angled view: no free tile on screen');
@@ -112,11 +114,17 @@ const { chromium } = require('playwright-core');
 
   // angled view: a press on a squad never slides the view, and a press on a model's body (above its tile) picks its squad
   const scr = (c, r, h) => p.evaluate(([c, r, h]) => window.__pb().board3d.screenAt(c, r, h), [c, r, h]);
-  const pull = async ([x1, y1], [x2, y2]) => { await p.mouse.move(x1, y1); await p.mouse.down(); await p.mouse.move((x1 + x2) / 2, (y1 + y2) / 2, { steps: 4 }); await p.mouse.move(x2, y2, { steps: 4 }); await p.mouse.up(); await p.waitForTimeout(600); };
+  const pull = async ([x1, y1], [x2, y2]) => { await dock.down(p); await p.mouse.move(x1, y1); await p.mouse.down(); await p.mouse.move((x1 + x2) / 2, (y1 + y2) / 2, { steps: 4 }); await p.mouse.move(x2, y2, { steps: 4 }); await p.mouse.up(); await p.waitForTimeout(600); };
+  // a point on a squad's model that picks it (another model in front may cover part of it); above: over another tile's ground
+  const bodyAt = (c, r, above) => p.evaluate(([c, r, above]) => {
+    const bd = window.__pb().board3d;
+    for (const h of [1.6, 1.3, 1.9, 1.0, 2.2]) { const [x, y] = bd.screenAt(c, r, h), g = bd.tileAt(x, y), t = bd.pickAt(x, y); if (t && t.col === c && t.row === r && !(above && g && g.col === c && g.row === r)) return [x, y]; }
+    return bd.screenAt(c, r, 1.6);
+  }, [c, r, above]);
   s = await st();
   const still = s.army.find(q => q.round < 2 && q.id !== s.moved), ref = await scr(5, 7, 0);
   if (still) {
-    const from = await scr(still.col, still.row, 1.6);
+    const from = await bodyAt(still.col, still.row, false);
     await pull(from, [from[0], from[1] - 80]);
     const now = await scr(5, 7, 0), s2 = await st();
     check(Math.hypot(now[0] - ref[0], now[1] - ref[1]) < 1 && s2.army.some(q => q.id === still.id && q.col === still.col && q.row === still.row), `dragging an older squad doesn't slide the view (moved ${Math.round(Math.hypot(now[0] - ref[0], now[1] - ref[1]))} px)`);
@@ -124,7 +132,7 @@ const { chromium } = require('playwright-core');
   const fresh = c && s.army.find(q => q.col === c[0] && q.row === c[1] && q.round === 2);
   if (fresh) {
     const [dest] = (await freeTiles(fresh.unit)).filter(t => t[0] !== c[0] || t[1] !== c[1]);
-    await pull(await scr(fresh.col, fresh.row, 1.6), await at(...dest));
+    await pull(await bodyAt(fresh.col, fresh.row, true), await at(...dest));
     s = await st(); check(s.army.some(q => q.id === fresh.id && q.col === dest[0] && q.row === dest[1]), `a press on the model's body drags its squad: -> ${dest}`);
   }
 

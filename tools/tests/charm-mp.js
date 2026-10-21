@@ -18,7 +18,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   await host.dblclick('[data-pack="0"]'); await guest.dblclick('[data-pack="0"]'); await sleep(600);
   // both players are Matteo (forced on both phones)
   for (const p of [host, guest]) await p.evaluate(() => { const { m } = window.__pb(); m.chars = ['matteo', 'matteo']; });
-  const redraw = async (p) => { const u = p.locator('[data-i]:not([data-locked])').first(); await u.click(); await sleep(80); await u.click(); await sleep(150); };
+  const redraw = async (p) => { const u = p.locator('[data-i]:not([data-locked])').first(); await u.click(); await sleep(80); await p.click('#task-x'); await sleep(150); };
   await redraw(host); await redraw(guest);
   const giveFirst = async (p) => {
     const sq = await p.evaluate(() => { const { m, me } = window.__pb(); return m.armies[me][0]; });

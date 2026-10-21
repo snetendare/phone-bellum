@@ -9,13 +9,14 @@
 // screen, the map thumbnails and coats of arms, the package pick, a selected unit, a placed squad, the first fight at
 // 6 moments, round 2, the round 3 tower pick (and its icons), and a fight with the picked tower. If the peer server
 // is up (node tools/peer-server.js), also the guest's board in a live match: the board turned around for side 1.
-// Only compare runs from the same machine: another browser version or font can change pixels. Game on port 8766.
+// Only compare runs from the same machine: another browser version or font can change pixels. Game on port 8766
+// (BASE=http://127.0.0.1:8767/ to run against another build, such as main's).
 const { chromium } = require('playwright-core');
 const ctx2d = require('./board2d'); // these checks are for the 2D board
 const fs = require('fs'), crypto = require('crypto'), path = require('path');
 const [out, against] = process.argv.slice(2);
 if (!out) { console.log('usage: node tools/tests/snapshots.js <dir> [dir to compare with]'); process.exit(1); }
-const BASE = 'http://127.0.0.1:8766/', CHROME = '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
+const BASE = process.env.BASE || 'http://127.0.0.1:8766/', CHROME = '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
 fs.mkdirSync(out, { recursive: true });
 const md5 = (s) => crypto.createHash('md5').update(s).digest('hex');
 // runs in the page before its own scripts
@@ -31,6 +32,14 @@ const freeze = ({ seed, frameClock }) => {
   window.__raf = (n) => { for (let i = 0; i < n; i++) { perf += 16; const run = q; q = []; run.forEach(e => e[1](perf)); } };
 };
 
+// the board at one fixed size, the one main's layout gives at 390 x 844, so runs of builds with other phone layouts
+// (this branch's board fills the screen) still compare only the drawing
+const pin = () => document.addEventListener('DOMContentLoaded', () => {
+  const st = document.createElement('style');
+  st.textContent = '#wrap { width: 303px !important; min-width: 0 !important; height: auto !important; aspect-ratio: 12 / 16 !important; }';
+  document.head.appendChild(st);
+});
+
 (async () => {
   const b = await chromium.launch({ executablePath: CHROME, args: ['--disable-features=WebRtcHideLocalIpsWithMdns'] });
   const hashes = [];
@@ -39,6 +48,7 @@ const freeze = ({ seed, frameClock }) => {
     const p = await (await ctx2d(b, { viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 })).newPage();
     p.on('pageerror', e => errors.push(e.message));
     await p.addInitScript(freeze, { seed, frameClock });
+    await p.addInitScript(pin);
     return p;
   };
   const snap = async (p, name) => {

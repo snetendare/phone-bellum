@@ -17,6 +17,12 @@
 //          the nearest level when they lift.
 //   Mouse: the wheel steps a level in or out; a touchpad pinch (ctrl + wheel) works like the fingers.
 //
+// The home view (level 0) is straight down by default; opts.home = 'tilted' (or setHome('tilted')) makes it a tilted
+// view of the whole board instead, from your side at TILT degrees, gentler than the angled view. It works like the
+// strategic view: taps and drags go to the page, and pinching goes in from it.
+// focus(k, x, z): the battle cam. While the home view is up, k from 0 to 1 moves it closer, lower and onto the
+// ground point (x, z), easing in and back out on its own.
+//
 // opts.onInput() on every pointer, wheel and key event and when the camera starts gliding to a level (setLevel too),
 // and busy() while it moves on its own, so a page that only draws when something changes knows when to draw.
 // dispose() when the page is done with it.
@@ -34,12 +40,17 @@ const Camera3D = (THREE, camera, el, opts) => {
   const TWIST_DEAD = 10 * Math.PI / 180; // and twist by 10 degrees before it rotates
   const PINCH_PER_LEVEL = Math.log(2.1); // spreading the fingers 2.1x apart goes in one level
   const PAN_SPEED = 2;                 // a drag moves the view this many times as far as the finger
+  const TILT = 52;                     // pitch of the tilted home view (degrees above the horizon)
+  const FOCUS = { pitch: 58, dist: 0.6 }; // the battle cam at full strength: at most this pitch, this much of the home distance
 
   let z = 0;                  // zoom: 0 strategic .. MAX, fractional while pinching or settling
   let target = new THREE.Vector3(); // the point a cinematic view looks at (on the ground)
   let yaw = 0;                // rotation of a cinematic view around the vertical axis (radians, 0 = from your side)
   let settle = null;          // { from, to, t } while z glides to a level
   let aspect = 1, viewH = 1;
+  let home = opts.home === 'tilted' ? 'tilted' : 'top';
+  let tilt = { pitch: TILT, dist: 100, tz: 0 }; // the tilted home view: distance and look point that fit the board (fitTilted)
+  const foc = { k: 0, x: 0, z: 0 }, focT = { k: 0, x: 0, z: 0 }; // the battle cam now, and where it's heading
   const woke = () => { if (opts.onInput) opts.onInput(); };
   const clampTarget = () => {
     target.x = Math.max(-W / 2 - 4, Math.min(W / 2 + 4, target.x));
@@ -50,16 +61,52 @@ const Camera3D = (THREE, camera, el, opts) => {
     const tan = Math.tan(FOV * Math.PI / 360);
     return Math.max(D / 2 / tan, W / 2 / (tan * aspect)) * 1.03;
   };
+  // the tilted home view: the distance, and the look point (z) that centres the board on the screen, so all four
+  // corners (and models standing on them) fit
+  const probe = new THREE.PerspectiveCamera(FOV, 1, 1, 1000), corner = new THREE.Vector3();
+  function fitTilted() {
+    const p = TILT * Math.PI / 180;
+    probe.aspect = aspect; probe.updateProjectionMatrix();
+    const ext = (d, tz) => {
+      probe.position.set(0, Math.sin(p) * d, tz + Math.cos(p) * d); probe.lookAt(0, 0, tz); probe.updateMatrixWorld();
+      let x = 0, y0 = Infinity, y1 = -Infinity;
+      for (const cx of [-W / 2, W / 2]) for (const cz of [-D / 2, D / 2]) for (const h of [0, 2.5]) {
+        corner.set(cx, h, cz).project(probe);
+        x = Math.max(x, Math.abs(corner.x)); y0 = Math.min(y0, corner.y); y1 = Math.max(y1, corner.y);
+      }
+      return { x, y0, y1 };
+    };
+    const centre = (d) => { // the board's middle on the screen rises as the look point comes toward you
+      let lo = -D, hi = D;
+      for (let i = 0; i < 30; i++) { const mid = (lo + hi) / 2, e = ext(d, mid); if (e.y0 + e.y1 > 0) hi = mid; else lo = mid; }
+      return (lo + hi) / 2;
+    };
+    let lo = 10, hi = 600;
+    for (let i = 0; i < 30; i++) {
+      const d = (lo + hi) / 2, e = ext(d, centre(d));
+      if (e.x <= 0.97 && (e.y1 - e.y0) / 2 <= 0.97) hi = d; else lo = d;
+    }
+    tilt = { pitch: TILT, dist: hi, tz: centre(hi) };
+  }
+  const homePose = () => home === 'tilted' ? { pitch: tilt.pitch, dist: tilt.dist } : { pitch: 90, dist: strategicDist() };
   // pitch and distance for any zoom value, gliding between levels (distance on a log scale, so it feels even)
   function pose(zz) {
-    const lv = (k) => k === 0 ? { pitch: 90, dist: strategicDist() } : LEVELS[k];
+    // on a screen taller than the 12:16 board, the cinematic views step back so they still see as far to the sides
+    const lv = (k) => k === 0 ? homePose() : { pitch: LEVELS[k].pitch, dist: LEVELS[k].dist * Math.max(1, 0.75 / aspect) };
     const k = Math.min(MAX - 1, Math.floor(zz)), f = zz - k, a = lv(k), b = lv(k + 1);
     return { pitch: a.pitch + (b.pitch - a.pitch) * f, dist: Math.exp(Math.log(a.dist) + (Math.log(b.dist) - Math.log(a.dist)) * f) };
   }
   function apply() {
-    const { pitch, dist } = pose(z);
-    // going in from the strategic view, the look point and the turn grow from the board centre / no turn
-    const w = Math.min(1, z), tx = target.x * w, tz = target.z * w, yw = yaw * w;
+    let { pitch, dist } = pose(z);
+    // going in from the home view, the look point and the turn grow from the board centre / no turn
+    const w = Math.min(1, z), z0 = home === 'tilted' ? tilt.tz : 0, yw = yaw * w;
+    let tx = target.x * w, tz = z0 + (target.z - z0) * w;
+    // the battle cam, on the home view only (it fades as the player goes in)
+    const fk = foc.k * (1 - w);
+    if (fk > 0) {
+      pitch += (Math.min(pitch, FOCUS.pitch) - pitch) * fk; dist *= Math.pow(FOCUS.dist, fk);
+      tx += (foc.x - tx) * fk; tz += (foc.z - tz) * fk;
+    }
     const p = pitch * Math.PI / 180, h = Math.cos(p) * dist;
     camera.position.set(tx + Math.sin(yw) * h, Math.sin(p) * dist, tz + Math.cos(yw) * h);
     camera.up.set(-Math.sin(yw), 0, -Math.cos(yw)); // "up" on the screen points away from the camera, so straight down works too
@@ -220,6 +267,11 @@ const Camera3D = (THREE, camera, el, opts) => {
       z = settle.from + (settle.to - settle.from) * e;
       if (settle.t >= 1) { z = settle.to; settle = null; if (z === 0) yaw = 0; }
     }
+    if (foc.k !== focT.k) {
+      foc.k += (focT.k - foc.k) * Math.min(1, dt * 3);
+      if (Math.abs(foc.k - focT.k) < 0.002) foc.k = focT.k;
+    }
+    if (focT.k > 0) { foc.x = focT.x; foc.z = focT.z; }
     if (!strategic()) { if (keys.has('q')) yaw += dt * 1.6; if (keys.has('e')) yaw -= dt * 1.6; }
     apply();
   }
@@ -228,9 +280,16 @@ const Camera3D = (THREE, camera, el, opts) => {
     if (k > 0 && z < 0.01) { target.set(0, 0, D / 4); yaw = 0; }
     settleTo(k);
   }
-  function resize(width, height) { aspect = width / height; viewH = height; camera.aspect = aspect; apply(); }
+  function resize(width, height) { aspect = width / height; viewH = height; camera.aspect = aspect; fitTilted(); apply(); }
+  function setHome(h) { home = h === 'tilted' ? 'tilted' : 'top'; fitTilted(); apply(); woke(); }
+  // the battle cam (see the top); x, z on the ground
+  function focus(k, x = 0, zz = 0) {
+    if (k > 0 && foc.k === 0) { foc.x = x; foc.z = zz; }
+    focT.k = Math.max(0, Math.min(1, k)); focT.x = x; focT.z = zz;
+  }
 
   // moving on its own (gliding to a level, a gesture under way, a rotate key held), so the page should keep drawing
-  const busy = () => !!settle || !!two || !!rotDrag || keys.has('q') || keys.has('e');
-  return { update, resize, groundAt, goStrategic, setLevel, strategic, handsOn, level, busy, dispose, zoom: () => z, LEVELS: MAX + 1 };
+  const busy = () => !!settle || !!two || !!rotDrag || keys.has('q') || keys.has('e') || foc.k !== focT.k;
+  return { update, resize, groundAt, goStrategic, setLevel, strategic, handsOn, level, busy, dispose, zoom: () => z, LEVELS: MAX + 1,
+    setHome, home: () => home, focus };
 };

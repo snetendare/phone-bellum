@@ -3,7 +3,8 @@
 // only through the same view():
 //   { m, me, phase, units, mode, bt, battlePre, fx, selected, moving, drag, hoverTile,
 //     editable, placingUnit, placingElf, placingTower, battleCam }
-// battleCam (the 2D board's zoom on the final seconds of a fight) isn't used: the 3D camera stays where the player put it.
+// battleCam ({ zoom, x, y, k }, the final seconds of a fight): from the home view the camera moves in, lower and onto
+// the action (Camera3D's focus); a player who went into a closer view keeps it.
 // Calls: size() after el changes size, draw() once per frame, tileAt(clientX, clientY) -> { col, row } or null,
 // screenAt(col, row, h) -> [clientX, clientY] of a tile's middle h metres up,
 // thumb(match) (from the 2D renderer). Also camera: the Camera3D driving the view.
@@ -12,12 +13,13 @@
 // opts.onDrop(tile | null, ended): ended is false when a second finger or a cancel stopped it. opts.onHover(tile | null):
 // the mouse over the strategic view. opts.placing() -> true: the angled view takes them too. All as in Camera3D, with
 // tiles for ground points.
+// opts.home: 'top' (straight down, the default) or 'tilted' for the home view, as in Camera3D; camera.setHome() changes it.
 // opts.onLevel(level): the camera is settling on a level (0 strategic, 1 angled, 2 ground).
 // For a page that draws only when something changes: opts.onInput() on every pointer, wheel and key event, and
 // still() -> false while the camera moves on its own. quality('high' | 'medium' | 'low') trades sharpness and shadows
 // for speed: high is the screen's pixels up to 2 per CSS pixel with shadows, medium 1.5 with shadows, low 1 without.
 // dispose() when the page is done with the board: frees the WebGL context (the page removes el). drawn(): what the
-// last frame drew, for checks.
+// last frame drew, and pickAt(clientX, clientY): the tile a touch there picks, for checks.
 //
 // The map floor (zones, flank tiles, mushrooms, buff tiles, the storm and the altar) is painted by the 2D renderer
 // onto a hidden canvas and laid on the ground. Everything else is drawn here, with the same rules for what this
@@ -186,7 +188,8 @@ const Render3D = (THREE, el, view, opts = {}) => {
   const sprites = new THREE.Mesh(sprGeo, sprMat);
   sprites.frustumCulled = false; sprites.renderOrder = 10;
   scene.add(sprites);
-  // what the camera level shows: strategic (health as rings), angled (health as bars), ground (no markers at all,
+  // what the camera level shows: strategic (health as rings), tilted (the tilted home view: health as bars, markers a
+  // little bigger than angled), angled (health as bars), ground (no markers at all,
   // only what belongs to the scene: corpses, stun stars, buff sparkles; wrap those in scene())
   let viewMode = 'strategic', uiOff = false;
   const scene_ = (fn) => { const k = uiOff; uiOff = false; fn(); uiOff = k; };
@@ -396,7 +399,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
       if (!Game.isGentleman(sq)) for (let k = 0; k < ch; k++) pips.push(color(CHARM_COL));
       // badges, read from above too (bigger in the strategic view, where the camera is farthest), placed as on the 2D
       // board: level and charisma pips at the squad's top left on the screen, ready to level up a gold plus at its top right
-      const bs = viewMode === 'strategic' ? 2.5 : 1.6, o = 1.4 + bs * 0.6;
+      const bs = viewMode === 'strategic' ? 2.5 : viewMode === 'tilted' ? 2 : 1.6, o = 1.4 + bs * 0.6;
       if (pips.length) { const n = (pips.length - 1) * 0.42 * bs * 1.1 / 2; iconRow(pips.map(() => 'dot'), wx - camRight.x * (o - n) - camDown.x * o, top + 0.2, wz - camRight.z * (o - n) - camDown.z * o, 0.42 * bs * 1.5, pips); }
       if (Game.isGentleman(sq)) icon('hat', wx, top + 1.1, wz, 1.1 * bs * 0.8);
       if (side === me && deploying && Game.isReady(m, sq)) icon('plus', wx + (camRight.x - camDown.x) * o, top + 0.2, wz + (camRight.z - camDown.z) * o, 0.9 * bs);
@@ -539,7 +542,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
       for (const [, g] of gs) finish(g, list.length);
     }
     // each squad's tag, just below it on the screen and clear of its models, so it can be read from above
-    const tagS = viewMode === 'strategic' ? 2.8 : 1.6;
+    const tagS = viewMode === 'strategic' ? 2.8 : viewMode === 'tilted' ? 2.2 : 1.6;
     for (const { u, pts } of labels.values()) {
       let cx = 0, cz = 0; for (const [x, z] of pts) { cx += x; cz += z; } cx /= pts.length; cz /= pts.length;
       let reach = 0; for (const [x, z, r] of pts) reach = Math.max(reach, (x - cx) * camDown.x + (z - cz) * camDown.z + r * 0.8);
@@ -577,7 +580,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
 
   // ---------- effects from view().fx ----------
   // shots and bolts are drawn wider the farther the camera is, so they show from above as on the 2D board
-  const fxWide = () => viewMode === 'strategic' ? 3 : viewMode === 'angled' ? 1.7 : 1;
+  const fxWide = () => viewMode === 'strategic' ? 3 : viewMode === 'tilted' ? 2.3 : viewMode === 'angled' ? 1.7 : 1;
   function drawFx(v) {
     const f = v.me === 1 ? -1 : 1, k = fxWide();
     let nf = 0;
@@ -655,6 +658,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
     onDrop: (p) => { if (opts.onDrop) opts.onDrop(tileOfGround(p, lastMe), !!p); },
     onHover: (p) => { if (opts.onHover) opts.onHover(tileOfGround(p, lastMe)); },
     placing: () => !!(opts.placing && opts.placing()),
+    home: opts.home,
     onLevel: (lv) => { if (opts.onLevel) opts.onLevel(lv); },
     onInput: () => { if (opts.onInput) opts.onInput(); },
   });
@@ -665,19 +669,21 @@ const Render3D = (THREE, el, view, opts = {}) => {
     renderer.setSize(r.width, r.height, false);
     cam.resize(r.width, r.height);
   }
-  let last = 0;
+  let last = 0, camOn = false; // camOn: the battle cam has the camera
   function draw() {
     const now = performance.now(), dt = last ? Math.min(0.1, (now - last) / 1000) : 0.016; last = now;
     clock += dt;
     const v = view();
     v0 = v; lastMe = v.me;
+    if (v.battleCam) { const f = v.me === 1 ? -1 : 1; cam.focus(v.battleCam.k, v.battleCam.x * f, -v.battleCam.y * f); camOn = true; }
+    else if (camOn) { cam.focus(0); camOn = false; }
     cam.update(dt);
     camRight.setFromMatrixColumn(camera.matrixWorld, 0); camRight.y = 0; camRight.normalize();
     // down the screen, along the ground (toward the camera in the angled view, toward your side from above)
     camDown.setFromMatrixColumn(camera.matrixWorld, 1).negate(); camDown.y = 0;
     if (camDown.lengthSq() < 1e-6) camDown.set(0, 0, 1); camDown.normalize();
     const z = cam.zoom();
-    viewMode = z < 0.5 ? 'strategic' : z < 1.5 ? 'angled' : 'ground'; uiOff = viewMode === 'ground';
+    viewMode = z < 0.5 ? (cam.home() === 'tilted' ? 'tilted' : 'strategic') : z < 1.5 ? 'angled' : 'ground'; uiOff = viewMode === 'ground';
     paintFloor(v, dt);
     used.clear(); ns = 0;
     placeBodies(v, dt);
@@ -693,6 +699,8 @@ const Render3D = (THREE, el, view, opts = {}) => {
     renderer.render(scene, camera);
   }
   const tileAt = (clientX, clientY) => tileOfGround(cam.groundAt(clientX, clientY), view().me);
+  // the tile a touch there picks (a squad's model in front of the ground wins, see pick()), for checks
+  const pickAt = (clientX, clientY) => pick(cam.groundAt(clientX, clientY), clientX, clientY);
   // where the middle of a tile (model column / row), h metres above the ground, is on the screen: [clientX, clientY]
   const scrV = new THREE.Vector3();
   function screenAt(col, row, h = 0) {
@@ -717,5 +725,5 @@ const Render3D = (THREE, el, view, opts = {}) => {
     renderer.forceContextLoss();
   }
   return { size: sizeTo, draw, tileAt, thumb: (match) => floor2d.thumb(match), camera: cam, info: () => renderer.info.render,
-    still: () => !cam.busy(), quality, pixelRatio: () => renderer.getPixelRatio(), dispose, drawn, screenAt };
+    still: () => !cam.busy(), quality, pixelRatio: () => renderer.getPixelRatio(), dispose, drawn, screenAt, pickAt };
 };

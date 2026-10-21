@@ -3975,6 +3975,12 @@ const Render2D = (cv, view) => {
 //          the nearest level when they lift.
 //   Mouse: the wheel steps a level in or out; a touchpad pinch (ctrl + wheel) works like the fingers.
 //
+// The home view (level 0) is straight down by default; opts.home = 'tilted' (or setHome('tilted')) makes it a tilted
+// view of the whole board instead, from your side at TILT degrees, gentler than the angled view. It works like the
+// strategic view: taps and drags go to the page, and pinching goes in from it.
+// focus(k, x, z): the battle cam. While the home view is up, k from 0 to 1 moves it closer, lower and onto the
+// ground point (x, z), easing in and back out on its own.
+//
 // opts.onInput() on every pointer, wheel and key event and when the camera starts gliding to a level (setLevel too),
 // and busy() while it moves on its own, so a page that only draws when something changes knows when to draw.
 // dispose() when the page is done with it.
@@ -3992,12 +3998,17 @@ const Camera3D = (THREE, camera, el, opts) => {
   const TWIST_DEAD = 10 * Math.PI / 180; // and twist by 10 degrees before it rotates
   const PINCH_PER_LEVEL = Math.log(2.1); // spreading the fingers 2.1x apart goes in one level
   const PAN_SPEED = 2;                 // a drag moves the view this many times as far as the finger
+  const TILT = 52;                     // pitch of the tilted home view (degrees above the horizon)
+  const FOCUS = { pitch: 58, dist: 0.6 }; // the battle cam at full strength: at most this pitch, this much of the home distance
 
   let z = 0;                  // zoom: 0 strategic .. MAX, fractional while pinching or settling
   let target = new THREE.Vector3(); // the point a cinematic view looks at (on the ground)
   let yaw = 0;                // rotation of a cinematic view around the vertical axis (radians, 0 = from your side)
   let settle = null;          // { from, to, t } while z glides to a level
   let aspect = 1, viewH = 1;
+  let home = opts.home === 'tilted' ? 'tilted' : 'top';
+  let tilt = { pitch: TILT, dist: 100, tz: 0 }; // the tilted home view: distance and look point that fit the board (fitTilted)
+  const foc = { k: 0, x: 0, z: 0 }, focT = { k: 0, x: 0, z: 0 }; // the battle cam now, and where it's heading
   const woke = () => { if (opts.onInput) opts.onInput(); };
   const clampTarget = () => {
     target.x = Math.max(-W / 2 - 4, Math.min(W / 2 + 4, target.x));
@@ -4008,16 +4019,52 @@ const Camera3D = (THREE, camera, el, opts) => {
     const tan = Math.tan(FOV * Math.PI / 360);
     return Math.max(D / 2 / tan, W / 2 / (tan * aspect)) * 1.03;
   };
+  // the tilted home view: the distance, and the look point (z) that centres the board on the screen, so all four
+  // corners (and models standing on them) fit
+  const probe = new THREE.PerspectiveCamera(FOV, 1, 1, 1000), corner = new THREE.Vector3();
+  function fitTilted() {
+    const p = TILT * Math.PI / 180;
+    probe.aspect = aspect; probe.updateProjectionMatrix();
+    const ext = (d, tz) => {
+      probe.position.set(0, Math.sin(p) * d, tz + Math.cos(p) * d); probe.lookAt(0, 0, tz); probe.updateMatrixWorld();
+      let x = 0, y0 = Infinity, y1 = -Infinity;
+      for (const cx of [-W / 2, W / 2]) for (const cz of [-D / 2, D / 2]) for (const h of [0, 2.5]) {
+        corner.set(cx, h, cz).project(probe);
+        x = Math.max(x, Math.abs(corner.x)); y0 = Math.min(y0, corner.y); y1 = Math.max(y1, corner.y);
+      }
+      return { x, y0, y1 };
+    };
+    const centre = (d) => { // the board's middle on the screen rises as the look point comes toward you
+      let lo = -D, hi = D;
+      for (let i = 0; i < 30; i++) { const mid = (lo + hi) / 2, e = ext(d, mid); if (e.y0 + e.y1 > 0) hi = mid; else lo = mid; }
+      return (lo + hi) / 2;
+    };
+    let lo = 10, hi = 600;
+    for (let i = 0; i < 30; i++) {
+      const d = (lo + hi) / 2, e = ext(d, centre(d));
+      if (e.x <= 0.97 && (e.y1 - e.y0) / 2 <= 0.97) hi = d; else lo = d;
+    }
+    tilt = { pitch: TILT, dist: hi, tz: centre(hi) };
+  }
+  const homePose = () => home === 'tilted' ? { pitch: tilt.pitch, dist: tilt.dist } : { pitch: 90, dist: strategicDist() };
   // pitch and distance for any zoom value, gliding between levels (distance on a log scale, so it feels even)
   function pose(zz) {
-    const lv = (k) => k === 0 ? { pitch: 90, dist: strategicDist() } : LEVELS[k];
+    // on a screen taller than the 12:16 board, the cinematic views step back so they still see as far to the sides
+    const lv = (k) => k === 0 ? homePose() : { pitch: LEVELS[k].pitch, dist: LEVELS[k].dist * Math.max(1, 0.75 / aspect) };
     const k = Math.min(MAX - 1, Math.floor(zz)), f = zz - k, a = lv(k), b = lv(k + 1);
     return { pitch: a.pitch + (b.pitch - a.pitch) * f, dist: Math.exp(Math.log(a.dist) + (Math.log(b.dist) - Math.log(a.dist)) * f) };
   }
   function apply() {
-    const { pitch, dist } = pose(z);
-    // going in from the strategic view, the look point and the turn grow from the board centre / no turn
-    const w = Math.min(1, z), tx = target.x * w, tz = target.z * w, yw = yaw * w;
+    let { pitch, dist } = pose(z);
+    // going in from the home view, the look point and the turn grow from the board centre / no turn
+    const w = Math.min(1, z), z0 = home === 'tilted' ? tilt.tz : 0, yw = yaw * w;
+    let tx = target.x * w, tz = z0 + (target.z - z0) * w;
+    // the battle cam, on the home view only (it fades as the player goes in)
+    const fk = foc.k * (1 - w);
+    if (fk > 0) {
+      pitch += (Math.min(pitch, FOCUS.pitch) - pitch) * fk; dist *= Math.pow(FOCUS.dist, fk);
+      tx += (foc.x - tx) * fk; tz += (foc.z - tz) * fk;
+    }
     const p = pitch * Math.PI / 180, h = Math.cos(p) * dist;
     camera.position.set(tx + Math.sin(yw) * h, Math.sin(p) * dist, tz + Math.cos(yw) * h);
     camera.up.set(-Math.sin(yw), 0, -Math.cos(yw)); // "up" on the screen points away from the camera, so straight down works too
@@ -4178,6 +4225,11 @@ const Camera3D = (THREE, camera, el, opts) => {
       z = settle.from + (settle.to - settle.from) * e;
       if (settle.t >= 1) { z = settle.to; settle = null; if (z === 0) yaw = 0; }
     }
+    if (foc.k !== focT.k) {
+      foc.k += (focT.k - foc.k) * Math.min(1, dt * 3);
+      if (Math.abs(foc.k - focT.k) < 0.002) foc.k = focT.k;
+    }
+    if (focT.k > 0) { foc.x = focT.x; foc.z = focT.z; }
     if (!strategic()) { if (keys.has('q')) yaw += dt * 1.6; if (keys.has('e')) yaw -= dt * 1.6; }
     apply();
   }
@@ -4186,11 +4238,18 @@ const Camera3D = (THREE, camera, el, opts) => {
     if (k > 0 && z < 0.01) { target.set(0, 0, D / 4); yaw = 0; }
     settleTo(k);
   }
-  function resize(width, height) { aspect = width / height; viewH = height; camera.aspect = aspect; apply(); }
+  function resize(width, height) { aspect = width / height; viewH = height; camera.aspect = aspect; fitTilted(); apply(); }
+  function setHome(h) { home = h === 'tilted' ? 'tilted' : 'top'; fitTilted(); apply(); woke(); }
+  // the battle cam (see the top); x, z on the ground
+  function focus(k, x = 0, zz = 0) {
+    if (k > 0 && foc.k === 0) { foc.x = x; foc.z = zz; }
+    focT.k = Math.max(0, Math.min(1, k)); focT.x = x; focT.z = zz;
+  }
 
   // moving on its own (gliding to a level, a gesture under way, a rotate key held), so the page should keep drawing
-  const busy = () => !!settle || !!two || !!rotDrag || keys.has('q') || keys.has('e');
-  return { update, resize, groundAt, goStrategic, setLevel, strategic, handsOn, level, busy, dispose, zoom: () => z, LEVELS: MAX + 1 };
+  const busy = () => !!settle || !!two || !!rotDrag || keys.has('q') || keys.has('e') || foc.k !== focT.k;
+  return { update, resize, groundAt, goStrategic, setLevel, strategic, handsOn, level, busy, dispose, zoom: () => z, LEVELS: MAX + 1,
+    setHome, home: () => home, focus };
 };
 
 const DATA = {"units":[{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Goblin Swarm","cost":1,"bodies":12,"hp":26,"hit":17,"aps":1.2,"range":2,"speed":8,"splash":0,"shape":"triangle","color":"#9BD35A","skills":["swift","shrink","spread"],"skillMods":[null,null,null],"skillsInnate":[false,false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Skeleton Archers","cost":1,"bodies":8,"hp":32,"hit":14,"aps":0.75,"range":19,"speed":2.1,"splash":0,"shape":"triangle","color":"#E9E3CF","skills":["range","rapid","boneShield"],"skillMods":[null,null,null],"skillsInnate":[false,false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Ember Imps","cost":1,"bodies":4,"hp":110,"hit":20,"aps":0.8,"range":10,"speed":4,"splash":3,"shape":"imp","color":"#FFA94D","skills":["swift","heavy","emberMortar"],"skillMods":[null,null,null],"skillsInnate":[false,false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":35,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Fire Mage","cost":1,"bodies":1,"hp":155,"hit":33,"aps":0.75,"range":20,"speed":3,"splash":4,"shape":"hexagon","color":"#fb0022","skills":["range","armorHp","dualFlame"],"skillMods":[null,null,null],"skillsInnate":[false,false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":1,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Sniper","cost":1,"bodies":1,"hp":140,"hit":210,"aps":0.25,"range":29,"speed":2,"splash":0,"shape":"cross","color":"#F7D154","skills":["rapid","spawn","range"],"skillMods":[{"params":{"range":0,"aps":15},"cost":150},{"params":{"waves":3,"every":8.5}},null],"skillsInnate":[false,false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"armor","defVal":3,"level":0,"unlock":50,"name":"Brute","cost":2,"bodies":1,"hp":1100,"hit":98,"aps":1.1,"range":2,"speed":5,"splash":0,"shape":"square","color":"#8D99AE","skills":["armorHp","swift"],"skillMods":[null,null],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":20,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":40,"level":0,"unlock":50,"name":"Wisps","cost":1,"bodies":2,"hp":80,"hit":75,"aps":0.8,"range":19,"speed":4,"splash":0,"shape":"ring","color":"#ff90ff","skills":["stealth","skmv5oxj501"],"skillMods":[null,{"params":{},"cost":200}],"skillsInnate":[false,false]},{"burst":6,"pellets":2,"spinUp":0,"pierce":0,"projSpeed":35,"minRange":0,"charge":1,"knockback":0,"windUp":0.2,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Leaf Wizard","cost":2,"bodies":1,"hp":240,"hit":21,"aps":0.45,"range":27,"speed":5,"splash":0,"shape":"hexagon","color":"#00d200","skills":["rapid","range"],"skillMods":[null,null],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":5,"projSpeed":35,"minRange":0,"charge":1,"knockback":0,"windUp":0.5,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Earth Wizard","cost":2,"bodies":1,"hp":650,"hit":440,"aps":0.2,"range":24,"speed":3,"splash":2,"shape":"circle","color":"#24590d","skills":["regen","range","heavy"],"skillMods":[null,null,{"params":{"hit":20,"slow":30},"cost":150}],"skillsInnate":[false,false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":30,"defense":"none","defVal":0,"level":0,"unlock":100,"name":"Flame Wizard","cost":3,"bodies":1,"hp":2000,"hit":12,"aps":4,"range":15,"speed":2,"splash":0,"shape":"flame","color":"#b95018","skills":["armorHp","range"],"skillMods":[null,null],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":100,"name":"Steel Wizard","cost":3,"bodies":1,"hp":1900,"hit":150,"aps":0.9,"range":15,"speed":2,"splash":2,"shape":"bar","color":"#57535a","skills":["range","heavy"],"skillMods":[null,{"params":{"slow":20,"hit":20}}],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":40,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":100,"name":"Slime Wizard","cost":3,"bodies":1,"hp":700,"hit":480,"aps":0.2,"range":22,"speed":2.5,"splash":6,"shape":"ring","color":"#81f038","skills":["skmv5oxpgk2","range"],"skillMods":[null,null],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"armor","defVal":6,"level":0,"unlock":150,"splash":3,"skillsInnate":[false,false],"skillMods":[null,null],"name":"Ether Golem","cost":5,"bodies":1,"hp":3450,"hit":69,"aps":0.6,"range":5,"speed":2.5,"shape":"square","color":"#51005c","skills":["regen","armorHp"]},{"burst":1,"pellets":1,"spinUp":50,"spinHit":50,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":150,"splash":0,"skillsInnate":[false,false],"skillMods":[null,null],"name":"Sun Priest","cost":5,"bodies":1,"hp":2800,"hit":38,"aps":2,"range":18,"speed":3,"shape":"sun","color":"#FFD23F","skills":["split","shrink"]},{"burst":3,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":22,"minRange":12,"charge":1,"knockback":0,"windUp":2,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":150,"splash":6,"skillsInnate":[false,false],"skillMods":[null,null],"name":"Meteor Caller","cost":5,"bodies":1,"hp":400,"hit":114,"aps":0.3,"range":50,"speed":2,"shape":"diamond","color":"#FF6B35","skills":["range","skmv5oxpgk2"]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":3,"knockback":4,"windUp":0,"flame":0,"defense":"armor","defVal":6,"level":0,"unlock":150,"splash":3,"skillsInnate":[false,false],"skillMods":[null,null],"name":"War Mammoth","cost":5,"bodies":1,"hp":2300,"hit":169,"aps":0.5,"range":3,"speed":8,"shape":"pentagon","color":"#A0785A","skills":["swift","armorHp"],"trample":50,"chargeStun":1.5},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":150,"splash":0,"skillsInnate":[true,false],"skillMods":[null,null],"name":"Necromancer","cost":5,"bodies":1,"hp":2300,"hit":56,"aps":1,"range":20,"speed":2.2,"shape":"hexagon","color":"#9D4EDD","skills":["raiseDead","healer"]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":180,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Ent","cost":1,"bodies":2,"hp":400,"hit":25,"aps":1.1,"range":4,"speed":2.2,"splash":0,"shape":"square","color":"#0d3000","skills":["armorHp","forward","explode"],"skillsInnate":[false,false,false],"skillMods":[{"params":{"armor":4,"hp":20}},null,null],"deathBlast":0},{"burst":1,"pellets":1,"spinUp":0.1,"pierce":0,"projSpeed":30,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"name":"Slimeshots","cost":2,"unlock":100,"bodies":10,"hp":95,"hit":7,"aps":0.8,"range":21,"speed":6,"splash":3,"shape":"diamond","color":"#20d300","skills":["range","heavy"],"skillsInnate":[false,false],"skillMods":[{"params":{"m":3},"cost":150},{"params":{"hit":25,"slow":0,"instant":0},"cost":150}]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Just a horse","cost":2,"bodies":1,"hp":500,"hit":200,"aps":1,"range":1,"speed":6,"splash":0,"shape":"horse","color":"#C8A27A","ram":1,"noFlank":1,"carrier":1,"noPack":1,"skills":["gallop","armorHp","deathBurst"],"skillMods":[null,{"params":{"armor":4,"hp":20},"cost":150},null],"skillsInnate":[false,false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":30,"minRange":0,"charge":4,"knockback":0,"windUp":0,"flame":0,"trample":0,"deathBlast":0,"defense":"none","defVal":0,"level":0,"unlock":100,"name":"Rogue","cost":3,"bodies":2,"hp":310,"hit":80,"aps":1.1,"range":4,"speed":6,"splash":0,"shape":"triangle","color":"#460000","skills":["stealth","skmv5oxj501","frenzy"],"skillsInnate":[true,false,false],"skillMods":[null,{"params":{"cap":200},"cost":150},null]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"trample":0,"deathBlast":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Spiders","cost":2,"bodies":5,"hp":185,"hit":20,"aps":0.8,"range":2,"speed":6,"splash":0,"shape":"spider","color":"#000000","skills":["spiderlings","poison","stealth"],"skillsInnate":[false,false,false],"skillMods":[null,null,{"params":{},"cost":200}]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":35,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"trample":0,"deathBlast":0,"pctHit":20,"defense":"none","defVal":0,"level":0,"unlock":150,"name":"Truespear","cost":5,"bodies":1,"hp":750,"hit":60,"aps":0.8,"range":25,"speed":3,"splash":0,"shape":"spear","color":"#C9D1D9","skills":["lifesteal","armorHp","dualSpear"],"skillMods":[null,null,null],"skillsInnate":[false,false,false]}],"matrix":[[0,-1,-0.899,-0.993,0.847,0.453,0.222,0.248,0.472,-1,-0.414,-0.296,-0.734,0.481,-0.809,-0.495,0.522,-0.815,-0.755,0.958,0.667,0.563,0.889],[1,0,0.268,-0.514,0.521,0.658,0.692,-0.189,0.383,-0.804,0.362,-0.542,0.158,-0.614,-0.959,0.625,-0.352,0.795,-0.524,0.946,0.842,0.819,0.825],[0.899,-0.268,0,-0.604,0.333,0.663,-0.225,0.415,0.125,-1,-0.528,-0.6,0.099,0.464,-0.992,-0.086,0.229,0.437,0.117,0.875,0.753,0.848,0.817],[0.993,0.514,0.604,0,-1,-0.25,0.454,-0.443,-0.882,-0.72,-0.216,-0.901,-0.331,-0.487,-1,-0.683,-0.331,0.743,0.097,0.733,-0.121,0.86,0.428],[-0.847,-0.521,-0.333,1,0,-0.095,0.598,0.397,-0.49,-0.363,-0.135,0.133,0.836,0.033,-1,-0.249,-0.578,0.994,-0.567,0.8,-0.415,0.8,0.858],[-0.453,-0.658,-0.663,0.25,0.095,0,-0.6,0.298,-0.799,-0.535,-0.527,-0.986,0.223,-0.542,0.04,-0.28,-0.197,-0.648,0.63,0.821,0.264,0.798,0.216],[-0.222,-0.692,0.225,-0.454,-0.598,0.6,0,-0.546,-0.413,-0.688,-0.22,-0.736,0.754,0.318,-0.906,-0.18,-0.49,0.926,-0.64,0.95,0.517,0.946,0.767],[-0.248,0.189,-0.415,0.443,-0.397,-0.298,0.546,0,-0.593,-0.434,-0.227,-0.566,-0.164,-0.36,-0.439,-0.702,-0.573,0.615,-0.518,0.778,-0.683,0.567,0.673],[-0.472,-0.383,-0.125,0.882,0.49,0.799,0.413,0.593,0,0.053,0.779,-0.311,0.915,0.577,-0.833,-0.082,-0.074,1,0.474,1,0.47,0.867,0.777],[1,0.804,1,0.72,0.363,0.535,0.688,0.434,-0.053,0,0.59,-0.722,-0.092,-0.225,-1,-0.508,0.753,1,0.847,0.98,0.688,1,0.116],[0.414,-0.362,0.528,0.216,0.135,0.527,0.22,0.227,-0.779,-0.59,0,-1,0.753,-0.533,-1,0.331,-0.286,0.575,0.378,0.905,0.444,0.771,0.015],[0.296,0.542,0.6,0.901,-0.133,0.986,0.736,0.566,0.311,0.722,1,0,1,0.874,-1,0.828,0.864,1,0.525,1,-0.05,0.971,0.686],[0.734,-0.158,-0.099,0.331,-0.836,-0.223,-0.754,0.164,-0.915,0.092,-0.753,-1,0,-0.918,-0.885,-0.607,-0.518,-0.094,0.885,0.859,0.301,0.882,-1],[-0.481,0.614,-0.464,0.487,-0.033,0.542,-0.318,0.36,-0.577,0.225,0.533,-0.874,0.918,0,-0.38,0.557,0.412,-0.182,-0.308,0.869,-0.164,0.706,-0.635],[0.809,0.959,0.992,1,1,-0.04,0.906,0.439,0.833,1,1,1,0.885,0.38,0,-0.483,0.796,1,0.489,1,-1,0.992,0.942],[0.495,-0.625,0.086,0.683,0.249,0.28,0.18,0.702,0.082,0.508,-0.331,-0.828,0.607,-0.557,0.483,0,-0.109,0.192,0.889,0.888,0.393,0.855,-0.251],[-0.522,0.352,-0.229,0.331,0.578,0.197,0.49,0.573,0.074,-0.753,0.286,-0.864,0.518,-0.412,-0.796,0.109,0,0.016,0.028,0.947,0.607,0.591,0.784],[0.815,-0.795,-0.437,-0.743,-0.994,0.648,-0.926,-0.615,-1,-1,-0.575,-1,0.094,0.182,-1,-0.192,-0.016,0,0.182,0.875,0.617,0.923,0.621],[0.755,0.524,-0.117,-0.097,0.567,-0.63,0.64,0.518,-0.474,-0.847,-0.378,-0.525,-0.885,0.308,-0.489,-0.889,-0.028,-0.182,0,0.9,0.682,0.684,0.861],[-0.958,-0.946,-0.875,-0.733,-0.8,-0.821,-0.95,-0.778,-1,-0.98,-0.905,-1,-0.859,-0.869,-1,-0.888,-0.947,-0.875,-0.9,0,-0.65,-0.8,-0.567],[-0.667,-0.842,-0.753,0.121,0.415,-0.264,-0.517,0.683,-0.47,-0.688,-0.444,0.05,-0.301,0.164,1,-0.393,-0.607,-0.617,-0.682,0.65,0,0.419,0.871],[-0.563,-0.819,-0.848,-0.86,-0.8,-0.798,-0.946,-0.567,-0.867,-1,-0.771,-0.971,-0.882,-0.706,-0.992,-0.855,-0.591,-0.923,-0.684,0.8,-0.419,0,0.392],[-0.889,-0.825,-0.817,-0.428,-0.858,-0.216,-0.767,-0.673,-0.777,-0.116,-0.015,-0.686,1,0.635,-0.942,0.251,-0.784,-0.621,-0.861,0.567,-0.871,-0.392,0]],"skills":[{"id":"regen","type":"regen","name":"Regeneration","cost":100,"params":{}},{"id":"poison","type":"poison","name":"Poison shot","cost":100,"params":{"pct":150}},{"id":"stealth","type":"stealth","name":"Stealth","cost":100,"params":{}},{"id":"armorHp","type":"armorHp","name":"Armor and health","cost":200,"params":{}},{"id":"spawn","type":"spawn","name":"Spawn goblins","cost":200,"params":{"every":7}},{"id":"rapid","type":"rapid","name":"Rapid fire","cost":100,"params":{}},{"id":"swift","type":"swift","name":"Swift strikes","cost":100,"params":{}},{"id":"heavy","type":"heavy","name":"Heavy shot","cost":100,"params":{}},{"id":"healer","type":"healer","name":"Healing touch","cost":200,"params":{}},{"id":"range","type":"range","name":"Long reach","cost":200,"params":{}},{"id":"shrink","type":"shrink","name":"Shortsight","cost":100,"params":{"m":6,"duration":4}},{"id":"skmv5oxj501","type":"ward","name":"Ward","cost":100,"params":{}},{"id":"skmv5oxpgk2","type":"slow","name":"Slow","cost":100,"params":{}},{"id":"raiseDead","type":"spawn","name":"Raise dead","cost":0,"params":{"unit":"Skeleton Archers","count":3,"every":2,"max":12}},{"id":"spiderlings","type":"deathSpawn","name":"Spiderlings","cost":200,"params":{"unit":"Spiders","count":2,"strength":50}},{"id":"split","type":"split","name":"Split beam","cost":100,"params":{}},{"id":"forward","type":"forward","name":"Forward planting","cost":100,"params":{}},{"id":"gallop","type":"swift","name":"Gallop","cost":200,"params":{"speed":25,"hit":0}},{"id":"deathBurst","type":"blast","name":"Death burst","cost":200,"params":{"radius":7,"pct":100}},{"id":"dualFlame","type":"turret","name":"Dual Flame","cost":200,"params":{"turrets":2}},{"id":"lifesteal","type":"lifesteal","name":"Lifesteal","cost":150,"params":{"pct":10}},{"id":"dualSpear","type":"turret","name":"Dual Spear","cost":300,"params":{"turrets":2}},{"id":"frenzy","type":"frenzy","name":"Frenzy","cost":250,"params":{"pct":10,"cap":2}},{"id":"spread","type":"spread","name":"Spread","cost":300,"params":{"min":1,"max":6}},{"id":"boneShield","type":"shield","name":"Bone shield","cost":200,"params":{"hits":1}},{"id":"emberMortar","type":"mortar","name":"Ember Mortar","cost":300,"params":{"range":15,"min":5,"aps":0.1}},{"id":"explode","type":"explode","name":"Explode on death","cost":400,"params":{"pct":30}}]};
@@ -4541,7 +4600,8 @@ const Models3D = (THREE) => {
 // only through the same view():
 //   { m, me, phase, units, mode, bt, battlePre, fx, selected, moving, drag, hoverTile,
 //     editable, placingUnit, placingElf, placingTower, battleCam }
-// battleCam (the 2D board's zoom on the final seconds of a fight) isn't used: the 3D camera stays where the player put it.
+// battleCam ({ zoom, x, y, k }, the final seconds of a fight): from the home view the camera moves in, lower and onto
+// the action (Camera3D's focus); a player who went into a closer view keeps it.
 // Calls: size() after el changes size, draw() once per frame, tileAt(clientX, clientY) -> { col, row } or null,
 // screenAt(col, row, h) -> [clientX, clientY] of a tile's middle h metres up,
 // thumb(match) (from the 2D renderer). Also camera: the Camera3D driving the view.
@@ -4550,12 +4610,13 @@ const Models3D = (THREE) => {
 // opts.onDrop(tile | null, ended): ended is false when a second finger or a cancel stopped it. opts.onHover(tile | null):
 // the mouse over the strategic view. opts.placing() -> true: the angled view takes them too. All as in Camera3D, with
 // tiles for ground points.
+// opts.home: 'top' (straight down, the default) or 'tilted' for the home view, as in Camera3D; camera.setHome() changes it.
 // opts.onLevel(level): the camera is settling on a level (0 strategic, 1 angled, 2 ground).
 // For a page that draws only when something changes: opts.onInput() on every pointer, wheel and key event, and
 // still() -> false while the camera moves on its own. quality('high' | 'medium' | 'low') trades sharpness and shadows
 // for speed: high is the screen's pixels up to 2 per CSS pixel with shadows, medium 1.5 with shadows, low 1 without.
 // dispose() when the page is done with the board: frees the WebGL context (the page removes el). drawn(): what the
-// last frame drew, for checks.
+// last frame drew, and pickAt(clientX, clientY): the tile a touch there picks, for checks.
 //
 // The map floor (zones, flank tiles, mushrooms, buff tiles, the storm and the altar) is painted by the 2D renderer
 // onto a hidden canvas and laid on the ground. Everything else is drawn here, with the same rules for what this
@@ -4724,7 +4785,8 @@ const Render3D = (THREE, el, view, opts = {}) => {
   const sprites = new THREE.Mesh(sprGeo, sprMat);
   sprites.frustumCulled = false; sprites.renderOrder = 10;
   scene.add(sprites);
-  // what the camera level shows: strategic (health as rings), angled (health as bars), ground (no markers at all,
+  // what the camera level shows: strategic (health as rings), tilted (the tilted home view: health as bars, markers a
+  // little bigger than angled), angled (health as bars), ground (no markers at all,
   // only what belongs to the scene: corpses, stun stars, buff sparkles; wrap those in scene())
   let viewMode = 'strategic', uiOff = false;
   const scene_ = (fn) => { const k = uiOff; uiOff = false; fn(); uiOff = k; };
@@ -4934,7 +4996,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
       if (!Game.isGentleman(sq)) for (let k = 0; k < ch; k++) pips.push(color(CHARM_COL));
       // badges, read from above too (bigger in the strategic view, where the camera is farthest), placed as on the 2D
       // board: level and charisma pips at the squad's top left on the screen, ready to level up a gold plus at its top right
-      const bs = viewMode === 'strategic' ? 2.5 : 1.6, o = 1.4 + bs * 0.6;
+      const bs = viewMode === 'strategic' ? 2.5 : viewMode === 'tilted' ? 2 : 1.6, o = 1.4 + bs * 0.6;
       if (pips.length) { const n = (pips.length - 1) * 0.42 * bs * 1.1 / 2; iconRow(pips.map(() => 'dot'), wx - camRight.x * (o - n) - camDown.x * o, top + 0.2, wz - camRight.z * (o - n) - camDown.z * o, 0.42 * bs * 1.5, pips); }
       if (Game.isGentleman(sq)) icon('hat', wx, top + 1.1, wz, 1.1 * bs * 0.8);
       if (side === me && deploying && Game.isReady(m, sq)) icon('plus', wx + (camRight.x - camDown.x) * o, top + 0.2, wz + (camRight.z - camDown.z) * o, 0.9 * bs);
@@ -5077,7 +5139,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
       for (const [, g] of gs) finish(g, list.length);
     }
     // each squad's tag, just below it on the screen and clear of its models, so it can be read from above
-    const tagS = viewMode === 'strategic' ? 2.8 : 1.6;
+    const tagS = viewMode === 'strategic' ? 2.8 : viewMode === 'tilted' ? 2.2 : 1.6;
     for (const { u, pts } of labels.values()) {
       let cx = 0, cz = 0; for (const [x, z] of pts) { cx += x; cz += z; } cx /= pts.length; cz /= pts.length;
       let reach = 0; for (const [x, z, r] of pts) reach = Math.max(reach, (x - cx) * camDown.x + (z - cz) * camDown.z + r * 0.8);
@@ -5115,7 +5177,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
 
   // ---------- effects from view().fx ----------
   // shots and bolts are drawn wider the farther the camera is, so they show from above as on the 2D board
-  const fxWide = () => viewMode === 'strategic' ? 3 : viewMode === 'angled' ? 1.7 : 1;
+  const fxWide = () => viewMode === 'strategic' ? 3 : viewMode === 'tilted' ? 2.3 : viewMode === 'angled' ? 1.7 : 1;
   function drawFx(v) {
     const f = v.me === 1 ? -1 : 1, k = fxWide();
     let nf = 0;
@@ -5193,6 +5255,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
     onDrop: (p) => { if (opts.onDrop) opts.onDrop(tileOfGround(p, lastMe), !!p); },
     onHover: (p) => { if (opts.onHover) opts.onHover(tileOfGround(p, lastMe)); },
     placing: () => !!(opts.placing && opts.placing()),
+    home: opts.home,
     onLevel: (lv) => { if (opts.onLevel) opts.onLevel(lv); },
     onInput: () => { if (opts.onInput) opts.onInput(); },
   });
@@ -5203,19 +5266,21 @@ const Render3D = (THREE, el, view, opts = {}) => {
     renderer.setSize(r.width, r.height, false);
     cam.resize(r.width, r.height);
   }
-  let last = 0;
+  let last = 0, camOn = false; // camOn: the battle cam has the camera
   function draw() {
     const now = performance.now(), dt = last ? Math.min(0.1, (now - last) / 1000) : 0.016; last = now;
     clock += dt;
     const v = view();
     v0 = v; lastMe = v.me;
+    if (v.battleCam) { const f = v.me === 1 ? -1 : 1; cam.focus(v.battleCam.k, v.battleCam.x * f, -v.battleCam.y * f); camOn = true; }
+    else if (camOn) { cam.focus(0); camOn = false; }
     cam.update(dt);
     camRight.setFromMatrixColumn(camera.matrixWorld, 0); camRight.y = 0; camRight.normalize();
     // down the screen, along the ground (toward the camera in the angled view, toward your side from above)
     camDown.setFromMatrixColumn(camera.matrixWorld, 1).negate(); camDown.y = 0;
     if (camDown.lengthSq() < 1e-6) camDown.set(0, 0, 1); camDown.normalize();
     const z = cam.zoom();
-    viewMode = z < 0.5 ? 'strategic' : z < 1.5 ? 'angled' : 'ground'; uiOff = viewMode === 'ground';
+    viewMode = z < 0.5 ? (cam.home() === 'tilted' ? 'tilted' : 'strategic') : z < 1.5 ? 'angled' : 'ground'; uiOff = viewMode === 'ground';
     paintFloor(v, dt);
     used.clear(); ns = 0;
     placeBodies(v, dt);
@@ -5231,6 +5296,8 @@ const Render3D = (THREE, el, view, opts = {}) => {
     renderer.render(scene, camera);
   }
   const tileAt = (clientX, clientY) => tileOfGround(cam.groundAt(clientX, clientY), view().me);
+  // the tile a touch there picks (a squad's model in front of the ground wins, see pick()), for checks
+  const pickAt = (clientX, clientY) => pick(cam.groundAt(clientX, clientY), clientX, clientY);
   // where the middle of a tile (model column / row), h metres above the ground, is on the screen: [clientX, clientY]
   const scrV = new THREE.Vector3();
   function screenAt(col, row, h = 0) {
@@ -5255,7 +5322,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
     renderer.forceContextLoss();
   }
   return { size: sizeTo, draw, tileAt, thumb: (match) => floor2d.thumb(match), camera: cam, info: () => renderer.info.render,
-    still: () => !cam.busy(), quality, pixelRatio: () => renderer.getPixelRatio(), dispose, drawn, screenAt };
+    still: () => !cam.busy(), quality, pixelRatio: () => renderer.getPixelRatio(), dispose, drawn, screenAt, pickAt };
 };
 
 // ===== 3D test page: real battles from the engine on the 3D board, to try the camera, the models and the renderer =====
