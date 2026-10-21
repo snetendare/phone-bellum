@@ -226,6 +226,20 @@ html.dock .panel.shut .dock-gold { display: inline; font-size: 15px; }
 .task { position: absolute; top: 30px; left: 10%; right: 10%; z-index: 3; display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 10px; border: 1px solid var(--you); border-radius: 6px; background: rgba(13, 19, 21, 0.9); font-size: 12px; line-height: 1.35; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45); }
 .task span { flex: 1; min-width: 0; }
 .task button { flex: none; width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel); font-size: 16px; line-height: 1; display: grid; place-items: center; }
+/* tutorial: the coach line over the board, a ring on what it talks about, and a glow on the next thing to tap */
+.coach { position: absolute; top: 8px; left: 8px; right: 8px; z-index: 3; display: grid; gap: 8px; padding: 10px 12px; border: 1px solid var(--gold); border-radius: 8px; background: rgba(13, 19, 21, 0.92); font-size: 14px; line-height: 1.4; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5); animation: coach-in 0.25s ease both; }
+.coach p { margin: 0; }
+.coach b { color: var(--gold); }
+.coach .btnrow { justify-content: flex-end; }
+.coach .btnrow:empty { display: none; }
+.coach-ring { position: absolute; z-index: 2; width: 56px; height: 56px; margin: -28px 0 0 -28px; border: 2px solid var(--gold); border-radius: 50%; pointer-events: none; animation: coach-ring 1.4s ease-out infinite; }
+.tut-glow { animation: tut-glow 1.4s ease-in-out infinite; }
+.ucard.tut-glow { animation-name: tut-glow-in; } /* the shop scrolls sideways and would clip a glow outside the card */
+@keyframes coach-in { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+@keyframes coach-ring { from { transform: scale(0.7); opacity: 1; } to { transform: scale(1.5); opacity: 0; } }
+@keyframes tut-glow { 50% { box-shadow: 0 0 0 3px rgba(230, 184, 74, 0.6), 0 0 16px rgba(230, 184, 74, 0.5); } }
+@keyframes tut-glow-in { 50% { box-shadow: inset 0 0 0 2px var(--gold); } }
+@media (prefers-reduced-motion: reduce) { .coach, .coach-ring, .tut-glow { animation: none; } .tut-glow { box-shadow: inset 0 0 0 2px var(--gold); } }
 </style>
 <script>
 // PC or phone: a fine pointer that can hover (a mouse) and room for the board and controls side by side
@@ -251,6 +265,8 @@ html.dock .panel.shut .dock-gold { display: inline; font-size: 15px; }
     <div class="pick" id="pick" role="dialog" aria-modal="false" aria-labelledby="pick-h" hidden></div>
     <button class="btn primary small pick-peek" id="pick-peek" hidden></button>
     <div class="task" id="task" role="status" hidden><span id="task-text"></span><button id="task-x" aria-label="Stop placing">✕</button></div>
+    <div class="coach" id="coach" role="status" aria-live="polite" hidden><p id="coach-text"></p><span class="btnrow" id="coach-btns"></span></div>
+    <div class="coach-ring" id="coach-ring" hidden></div>
   </div>
 
   <div class="panel" id="panel"></div>
@@ -417,9 +433,9 @@ html.dock .panel.shut .dock-gold { display: inline; font-size: 15px; }
   const now = () => Date.now();
 
   // ---------- state ----------
-  let mode = 'ai';          // ai | claude | host | guest
-  const solo = () => mode === 'ai' || mode === 'claude'; // playing against the computer on this screen
-  const foeName = () => mode === 'ai' ? 'Enemy' : mode === 'claude' ? 'Claude' : 'Opponent';
+  let mode = 'ai';          // ai | claude | tutorial | host | guest
+  const solo = () => mode === 'ai' || mode === 'claude' || mode === 'tutorial'; // playing against the computer on this screen
+  const foeName = () => mode === 'ai' || mode === 'tutorial' ? 'Enemy' : mode === 'claude' ? 'Claude' : 'Opponent';
   let me = 0;               // which side of the match this screen plays (the guest is side 1)
   const foe = () => 1 - me;
   let m = null;             // match state (on the guest: a copy kept in step by the host)
@@ -451,6 +467,7 @@ html.dock .panel.shut .dock-gold { display: inline; font-size: 15px; }
   }
   let drag = null, dragEndAt = 0; // dragging one of your squads to another tile
   let timerOn = true;       // vs AI: deploy countdown on or off
+  let tut = null;           // the tutorial's own state while it runs (see "tutorial")
 
   // ---------- music: the menu playlist on the start screen and in the lobby, the deployment phase playlist
   // while players deploy (round 1's starter pack choice included), the battle playlist during fights and their
@@ -766,7 +783,7 @@ html.dock .panel.shut .dock-gold { display: inline; font-size: 15px; }
     const shut = deploying && (!!dockTask || picking || !dockOpen);
     panel.classList.toggle('shut', shut);
     const tb = $('dock-toggle');
-    tb.hidden = !deploying || !!dockTask || picking;
+    tb.hidden = !deploying || !!dockTask || picking || mode === 'tutorial'; // the tutorial's drawer is a card or two: nothing to slide
     if (!tb.hidden && tb.dataset.shut !== String(shut)) { // up: arrows down; down: "Shop" and arrows up
       tb.dataset.shut = String(shut);
       tb.innerHTML = shut ? `Shop ${CHEVRONS(true)}` : CHEVRONS(false);
@@ -774,7 +791,7 @@ html.dock .panel.shut .dock-gold { display: inline; font-size: 15px; }
       tb.setAttribute('aria-label', shut ? 'Shop: slide up or tap to open' : 'Slide down or tap to close the shop');
     }
     tb.style.bottom = on ? panel.offsetHeight + 'px' : '';
-    $('task').hidden = !(deploying && dockTask);
+    $('task').hidden = !(deploying && dockTask) || mode === 'tutorial'; // the tutorial's coach line says it instead
     if (deploying && dockTask) { $('task-text').innerHTML = dockTask.text; $('task-x').hidden = !dockTask.x; }
     let h = boardH;
     if (on) {
@@ -785,6 +802,7 @@ html.dock .panel.shut .dock-gold { display: inline; font-size: 15px; }
       root.style.setProperty('--board-h', h + 'px');
     }
     if (on !== was || h !== boardH) { boardH = h; size(); if (on !== was || !board3d) render(); }
+    tutRing();
   }
   // the X on the task line: stop placing that unit (or the Move, the Charisma, the elf tower)
   function stopTask() {
@@ -838,6 +856,7 @@ html.dock .panel.shut .dock-gold { display: inline; font-size: 15px; }
     syncMusic();
     cv.style.touchAction = phase === 'deploy' ? 'none' : ''; // so a finger can drag squads without scrolling the page
     if (board3d) wake3d(); else board.draw();
+    tutRing();
   }
   const teamCol = (side) => Art.teamCol(side, me);
   const { SHROOM_COL, CHARM_COL, armsImg } = Art;
@@ -884,6 +903,7 @@ html.dock .panel.shut .dock-gold { display: inline; font-size: 15px; }
     $('phase').textContent = { start: 'Ready', lobby: 'Lobby', draft: 'Draft', deploy: 'Deploy', battle: 'Battle', result: 'Result', end: 'Match over' }[phase];
     $('foe-name').textContent = foeName();
     document.querySelector('.hud').hidden = phase === 'start' || phase === 'lobby' || phase === 'draft'; // no match yet: nothing to show
+    if (mode !== 'tutorial' || phase === 'battle') coach(null); // the fight speaks for itself
     syncPick(); syncMusic();
   }
 
@@ -1038,8 +1058,24 @@ html.dock .panel.shut .dock-gold { display: inline; font-size: 15px; }
   const loanOffer = () => !!m && Game.towerPicked(m, me) && !Game.needsTowerPick(m, me) && Game.towerType(m, me).id === 'bank';
   const mageOffer = () => !!m && Game.towerPicked(m, me) && !Game.needsTowerPick(m, me) && Game.towerType(m, me).id === 'mage';
   const tskillOffer = () => !!m && Game.towerPicked(m, me) && !Game.needsTowerPick(m, me) && !Game.towerSkillOf(m, me) && !!Game.towerType(m, me).skill;
+  // a unit's card in the shop (disabled: it can't be picked now)
+  function shopCard(i, disabled) {
+    const u = units[i], locked = !Game.isUnlocked(m, me, i), free = Game.freeLeft(m, me).filter(x => x === i).length, stars = Engine.SLOTS.filter(k => Game.hasSkill(m, me, i, k)).length;
+    return `
+        <div class="uwrap" style="--tier:${tierColor(tierOf(i))}">
+          <button class="ucard" data-i="${i}" aria-pressed="${selected === i}" aria-disabled="${disabled}" ${locked ? `data-locked="1" style="border-style:dashed" aria-label="${esc(u.name)}, locked, unlock for ${Game.unlockCost(m, i, me)} gold"` : ''}>
+            <span class="t"><span style="color:${u.color};display:inline-flex">${Shapes.svg(u.shape, 13)}</span> ${tag(u)} <span class="tier">T${tierOf(i)}</span></span><span class="n">${esc(u.name)}</span>
+            ${roleRow(i)}
+            ${locked ? `<span class="lock">${LOCK_SVG} Locked · ${Game.unlockCost(m, i, me)}g</span>` : ''}
+            ${free ? `<span class="c" style="color:var(--win, #6FD08C)">Free ×${free}</span>` : ''}
+            <span class="c">${Game.shopCost(m, me, i)} · ${u.bodies} ${u.bodies === 1 ? 'body' : 'bodies'}${stars ? ` · ${stars}★` : ''}</span>
+          </button>
+          <button class="info" data-info="${i}" aria-label="About ${esc(u.name)}">i</button>
+        </div>`;
+  }
   function panelDeploy() {
     if (phase !== 'deploy') return;
+    if (mode === 'tutorial') { panelTutorial(); return; }
     const g = m.gold[me];
     const fresh = m.armies[me].filter(s => s.round === m.round).length;
     const readyN = m.armies[me].filter(s => Game.isReady(m, s)).length;
@@ -1116,17 +1152,7 @@ html.dock .panel.shut .dock-gold { display: inline; font-size: 15px; }
           return `<button role="tab" data-tier="${t}" aria-selected="${t === shopTier}" aria-label="Tier ${t}, ${tierName(t)}, ${price(idx[0])} gold, ${open} of ${idx.length} unlocked${free ? ', has free squads' : ''}" style="--tier:${tierColor(t)}">T${t}<em>${tierName(t)}</em><small>${price(idx[0])}g · ${open}/${idx.length}</small></button>`;
         }).join('')}</div>`;
       })()}
-      ${(choosingPack() || choosingTower()) && can ? '' : `<div class="shop" id="shop">${units.map((u, i) => tierOf(i) !== shopTier || Game.isOff(m, i, me) ? '' : `
-        <div class="uwrap" style="--tier:${tierColor(tierOf(i))}">
-          <button class="ucard" data-i="${i}" aria-pressed="${selected === i}" aria-disabled="${!canBuy(i) && !(locked(i) && can)}" ${locked(i) ? `data-locked="1" style="border-style:dashed" aria-label="${esc(u.name)}, locked, unlock for ${Game.unlockCost(m, i, me)} gold"` : ''}>
-            <span class="t"><span style="color:${u.color};display:inline-flex">${Shapes.svg(u.shape, 13)}</span> ${tag(u)} <span class="tier">T${tierOf(i)}</span></span><span class="n">${esc(u.name)}</span>
-            ${roleRow(i)}
-            ${locked(i) ? `<span class="lock">${LOCK_SVG} Locked · ${Game.unlockCost(m, i, me)}g</span>` : ''}
-            ${freeN(i) ? `<span class="c" style="color:var(--win, #6FD08C)">Free ×${freeN(i)}</span>` : ''}
-            <span class="c">${price(i)} · ${u.bodies} ${u.bodies === 1 ? 'body' : 'bodies'}${Engine.SLOTS.filter(k => Game.hasSkill(m, me, i, k)).length ? ` · ${Engine.SLOTS.filter(k => Game.hasSkill(m, me, i, k)).length}★` : ''}</span>
-          </button>
-          <button class="info" data-info="${i}" aria-label="About ${esc(u.name)}">i</button>
-        </div>`).join('')}</div>`}
+      ${(choosingPack() || choosingTower()) && can ? '' : `<div class="shop" id="shop">${units.map((u, i) => tierOf(i) !== shopTier || Game.isOff(m, i, me) ? '' : shopCard(i, !canBuy(i) && !(locked(i) && can))).join('')}</div>`}
       <div class="bar"><span class="dock-gold gold num">${g}g</span><span class="hint">${status}</span>${action}</div>`;
     syncPick();
     $('panel').querySelectorAll('[data-tier]').forEach(b => b.addEventListener('click', () => { shopTier = +b.dataset.tier; shopScroll = 0; panelDeploy(); }));
@@ -1210,17 +1236,19 @@ html.dock .panel.shut .dock-gold { display: inline; font-size: 15px; }
     let resume = null;
     try { resume = JSON.parse(localStorage.getItem(HOST_STORE) || 'null'); } catch (e) {}
     if (resume && !(resume.m && now() - resume.ts < 6 * 3600e3)) resume = null;
+    const newcomer = !tutDone && !resume; // the tutorial leads the menu until it's been played to the end
     overlay(`<div class="card">
       <h2>No Mans Land</h2>
       <p class="big">Build an army. Watch it fight. Last one standing wins.</p>
-      <span class="btnrow"><button class="btn small" id="how">How to play</button><button class="btn small" id="music-open">Music</button>${HISTORY_URL ? `<button class="btn small" id="hist-open">Match history</button>` : ''}</span>
+      <span class="btnrow">${newcomer ? '' : '<button class="btn small" id="tutorial">Tutorial</button>'}<button class="btn small" id="how">How to play</button><button class="btn small" id="music-open">Music</button>${HISTORY_URL ? `<button class="btn small" id="hist-open">Match history</button>` : ''}</span>
     </div>`);
     $('music-open').addEventListener('click', openSoundSheet);
     if ($('hist-open')) $('hist-open').addEventListener('click', openHistorySheet);
     $('panel').innerHTML = `
       ${resume ? `<button class="btn primary" id="resume">Resume match ${esc(resume.code)}</button>` : ''}
+      ${newcomer ? '<button class="btn primary" id="tutorial">New here? Play the tutorial</button>' : ''}
       <div class="bar">
-        <button class="btn ${resume ? '' : 'primary'}" id="friend" style="flex:1">Challenge a friend</button>
+        <button class="btn ${resume || newcomer ? '' : 'primary'}" id="friend" style="flex:1">Challenge a friend</button>
         <button class="btn" id="go" style="flex:1">Play vs AI</button>
       </div>
       ${sampleFn ? `<button class="btn primary" id="vs-claude">Play vs Claude</button>` : ''}
@@ -1253,6 +1281,7 @@ html.dock .panel.shut .dock-gold { display: inline; font-size: 15px; }
           <span class="btnrow"><button class="btn small" id="load-units">Load units</button><a class="btn small" id="lab-link" href="lab.html" style="text-decoration:none;color:inherit;display:inline-block">Counter Lab</a></span>
         </div>`)}`;
     $('how').addEventListener('click', openHowTo);
+    $('tutorial').addEventListener('click', startTutorial);
     $('friend').addEventListener('click', hostLobby);
     $('go').addEventListener('click', () => { matchKind = 'standard'; startAiMatch(); });
     $('factions-ai').addEventListener('click', () => { matchKind = 'factions'; startAiMatch(); });
@@ -1318,6 +1347,7 @@ html.dock .panel.shut .dock-gold { display: inline; font-size: 15px; }
   }
 
   function showResult(sum) {
+    if (mode === 'tutorial') { tutResult(sum); return; }
     const iWon = sum.winner === me && !sum.timeout, iLost = sum.winner === foe() && !sum.timeout;
     const head = sum.timeout ? 'Time ran out' : iWon ? `Round ${sum.round} won` : iLost ? `Round ${sum.round} lost` : 'Draw';
     const cls = iWon ? 'you' : iLost ? 'foe' : '';
@@ -1387,7 +1417,7 @@ html.dock .panel.shut .dock-gold { display: inline; font-size: 15px; }
 
   // ---------- Main menu from the in-match settings: leaving a match that is still on forfeits it ----------
   function askForfeit() {
-    if (!m || phase === 'end') { quitToMenu(); return; }
+    if (!m || phase === 'end' || mode === 'tutorial') { quitToMenu(); return; }
     $('sheet').innerHTML = `
       <div class="bar" data-keep><h3 id="sheet-h">Main menu</h3></div>
       <p class="big" style="margin:0">You will forfeit the match. Are you sure?</p>
@@ -1841,6 +1871,113 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if ($('draft-go')) $('draft-go').addEventListener('click', () => { if (draftSel) draftPick(draftSel); });
   }
 
+  // ---------- tutorial: two scripted rounds against a fixed enemy, the screen built up one step at a time ----------
+  // Round 1: the board holds only your tower, then the deploy panel comes in with one card (Goblin Swarm). The enemy's
+  // Skeleton Archers stay hidden until the fight and beat the goblins wherever they stand, which shows how damage works.
+  // Round 2: the archers are in sight now. Of the two cards on offer, Fire Mage beats crowds and wins the fight from any
+  // tile; Sniper beats giants and is turned away with a hint (it would lose nearly always). A coach line over the board
+  // says what to do; the step comes from the match itself (tutStep), so taking a squad back steps back too. Always on
+  // the built-in units, on the Standard map, with no clock, packages, characters or AI level-ups.
+  const TUT_STORE = 'phonebellum.tutorial.v1';
+  const TUT = { start: 'Goblin Swarm', foe: 'Skeleton Archers', foeAt: [6, 4], counter: 'Fire Mage', wrong: 'Sniper' };
+  let tutDone = false;
+  try { tutDone = localStorage.getItem(TUT_STORE) === 'done'; } catch (e) {}
+  const unitIx = (name) => units.findIndex(u => u.name === name);
+  function startTutorial() {
+    leaveNet();
+    mode = 'tutorial'; me = 0; report = null; lastAiLevels = [];
+    if (customSet && !standardSet) standardSet = { set: rawSet, custom: customSet }; // restoreSet puts the player's units back
+    useSet(BUILTIN, false);
+    m = Game.createMatch(units, M, 1, 'standard');
+    m.packages = [[], []];
+    for (const n of [TUT.start, TUT.counter, TUT.wrong]) m.unlocks[0][unitIx(n)] = 1;
+    m.unlocks[1][unitIx(TUT.foe)] = 1;
+    Game.place(m, 1, unitIx(TUT.foe), TUT.foeAt[0], TUT.foeAt[1]);
+    m.gold = [Game.SQUAD_COST, 0]; // just the first squad
+    m.towers[1] = null;            // the enemy's tower comes with the enemy (the fight step)
+    tut = { intro: true, wrong: false };
+    nextReady = [false, false]; rematch = [false, false];
+    enterDeploy(0);
+  }
+  // tower (round 1's first look), pick, place, fight, counter (round 2's pick), result, or null (the fight is on)
+  function tutStep() {
+    if (mode !== 'tutorial' || !m) return null;
+    if (phase === 'result') return 'result';
+    if (phase !== 'deploy') return null;
+    if (m.round === 1 && tut.intro) return 'tower';
+    if (m.armies[me].some(s => s.round === m.round)) return 'fight';
+    return selected !== null ? 'place' : m.round === 1 ? 'pick' : 'counter';
+  }
+  // the coach line over the board: text and buttons ([label, onClick, primary]); null hides it, with the ring and the glows
+  function coach(text, btns = []) {
+    const el = $('coach');
+    document.querySelectorAll('.tut-glow').forEach(x => x.classList.remove('tut-glow'));
+    if (!text) { el.hidden = true; tutRing(); return; }
+    if (el.hidden || $('coach-text').innerHTML !== text) { el.hidden = true; void el.offsetWidth; } // each new line slides in
+    el.hidden = false;
+    $('coach-text').innerHTML = text;
+    $('coach-btns').innerHTML = btns.map(([label, , primary], k) => `<button class="btn small${primary ? ' primary' : ''}" data-cb="${k}">${label}</button>`).join('');
+    $('coach-btns').querySelectorAll('[data-cb]').forEach(b => b.addEventListener('click', btns[+b.dataset.cb][1]));
+    tutRing();
+  }
+  // a ring on your tower while the coach introduces it
+  function tutRing() {
+    const ring = $('coach-ring'), tw = tutStep() === 'tower' && m.towers[me];
+    ring.hidden = !tw;
+    if (!tw) return;
+    const w = $('wrap').getBoundingClientRect();
+    let x, y;
+    if (board3d) [x, y] = board3d.screenAt(tw.col, tw.row, 0);
+    else { const r = cv.getBoundingClientRect(); x = r.left + (tw.col + 0.5) * r.width / Game.COLS; y = r.top + (tw.row + 0.5) * r.height / Game.ROWS; }
+    ring.style.left = (x - w.left) + 'px'; ring.style.top = (y - w.top) + 'px';
+  }
+  const glow = (el) => { if (el) el.classList.add('tut-glow'); };
+  // the tutorial's deploy panel: only what the current step needs, built up as the steps go
+  function panelTutorial() {
+    const step = tutStep();
+    if (step === 'fight' && m.round === 1) Game.ensureTower(m, foe());
+    const cards = step === 'pick' ? [TUT.start] : step === 'counter' ? [TUT.counter, TUT.wrong] : [];
+    dockTask = step === 'place' ? { text: '', x: false } : null; // puts the drawer down, so the whole zone is in sight
+    $('panel').innerHTML = step === 'tower' ? '' : `
+      ${cards.length ? `<div class="shop" id="shop">${cards.map(n => shopCard(unitIx(n), false)).join('')}</div>` : ''}
+      <div class="bar"><span class="gold num">${m.gold[me]} gold</span>${step === 'fight' ? '<button class="btn primary" id="fight">Fight</button>' : ''}</div>`;
+    $('panel').querySelectorAll('.ucard').forEach(b => b.addEventListener('click', () => {
+      const i = +b.dataset.i;
+      if (units[i].name === TUT.wrong) { tut.wrong = true; panelDeploy(); return; }
+      selected = i; tut.wrong = false; panelDeploy(); render();
+    }));
+    $('panel').querySelectorAll('[data-info]').forEach(el => el.addEventListener('click', () => openSheet(+el.dataset.info)));
+    if ($('fight')) $('fight').addEventListener('click', runFight);
+    const card = (n) => $('panel').querySelector(`.ucard[data-i="${unitIx(n)}"]`);
+    if (step === 'tower') coach(`This is your <b>Tower</b>. Your army deploys around it, in your zone: the bottom six rows.`, [['Next', () => { tut.intro = false; panelDeploy(); render(); }, true]]);
+    else if (step === 'pick') { coach(`Tap <b>${esc(TUT.start)}</b> to recruit your first squad.`); glow(card(TUT.start)); }
+    else if (step === 'place') coach('Now tap a tile in your zone to place it.');
+    else if (step === 'counter') {
+      coach(tut.wrong ? `${esc(TUT.wrong)} beats giants, but ${esc(TUT.foe)} are a crowd. Try <b>${esc(TUT.counter)}</b>.`
+        : `Squads stay all match, so now you can see theirs: <b>${esc(TUT.foe)}</b>, a crowd. ${esc(TUT.counter)} beats crowds, ${esc(TUT.wrong)} beats giants. Recruit the right one.`);
+      if (tut.wrong) glow(card(TUT.counter));
+    } else if (step === 'fight') {
+      coach(m.round === 1 ? 'The enemy’s army stays hidden until the fight. Tap <b>Fight</b>, then watch: squads fight on their own.' : 'Your goblins are back too. Tap <b>Fight</b>.');
+      glow($('fight'));
+    }
+  }
+  function tutResult(sum) {
+    phase = 'result'; resultShownAt = 0; // no clock moving on by itself: the player reads at their own pace
+    overlay(null); $('panel').innerHTML = ''; hud(); netStatus();
+    const won = sum.winner === me && !sum.timeout, lost = sum.winner === foe() && !sum.timeout;
+    const line = lost ? `<b>Round lost.</b> You take ${sum.dmg[me]} damage: each enemy squad still standing hits your health, top left. At 0, you lose the match.`
+      : won ? `<b>Round won!</b> They take ${sum.dmg[foe()]} damage: each of your squads still standing hits their health. At 0, they lose the match.`
+      : '<b>A draw.</b> Nobody takes damage.';
+    if (sum.round === 1) coach(line, [['Next round', tapNext, true]]);
+    else {
+      tutDone = true;
+      try { localStorage.setItem(TUT_STORE, 'done'); } catch (e) {}
+      coach(`${line} ${won ? 'That’s the game: see their army, counter it, fight.' : 'Counters help, and where you place squads matters too.'}`,
+        [['Main menu', showStart], ['Play vs AI', () => { matchKind = 'standard'; startAiMatch(); }, true]]);
+    }
+    glow(document.querySelector(`.hud .side.${lost ? 'you' : 'foe'}`));
+  }
+
   // ---------- flow: vs AI ----------
   function startAiMatch() {
     leaveNet();
@@ -1854,6 +1991,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   }
 
   function beginAiRound() {
+    if (mode === 'tutorial') { enterDeploy(0); return; } // the enemy's army is set by the script; no clock
     if (mode === 'claude') { startClaudeTurn(); enterDeploy(timerOn ? deployMs() : 0); return; }
     Game.aiDeploy(m, 1);       // the AI commits first; its new squads stay hidden until the fight
     enterDeploy(timerOn ? deployMs() : 0);
@@ -2042,6 +2180,12 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (phase !== 'deploy' || !t) return;
     if (choosingPack() || choosingTower()) return; // the package (and in round 3 the tower) comes first
     if (performance.now() - dragEndAt < 400) return;
+    if (mode === 'tutorial') { // only placing and taking back, so no sheet pulls the player off the script
+      const own = Game.squadAt(m, me, t.col, t.row);
+      if (own) { if (editable() && own.round === m.round && Game.unplace(m, me, t.col, t.row)) changed(); }
+      else if (selected !== null && editable() && Game.place(m, me, selected, t.col, t.row)) { selected = null; changed(); }
+      return;
+    }
     if (placingTower()) { if (editable() && Game.placeTower(m, me, t.col, t.row)) changed(); return; }
     if (placingElf()) { if (editable() && Game.buyElfOwn(m, me, t.col, t.row)) { elfPlacing = false; changed(); } else if (!Game.elfOwnSpotOk(m, me, t.col, t.row)) { elfPlacing = false; render(); hud(); panelDeploy(); } return; }
     if (Game.elfOwnAt(m, me, t.col, t.row)) { openMapSheet(); return; }
