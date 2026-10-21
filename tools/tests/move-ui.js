@@ -1,8 +1,9 @@
 // Package squads pre-placed and draggable; Move a squad (50 gold) from round 2. Screenshots go to the current folder.
 const { chromium } = require('playwright-core');
+const ctx2d = require('./board2d'); // these checks are for the 2D board
 (async () => {
   const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome' });
-  const p = await (await b.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 })).newPage();
+  const p = await (await ctx2d(b, { viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 })).newPage();
   p.on('pageerror', e => console.log('PAGE ERROR', e.message));
   const at = async (c, r) => { const b2 = await p.locator('#board').boundingBox(); return [b2.x + (c + .5) * b2.width / 12, b2.y + (r + .5) * b2.height / 16]; };
   const tap = async (c, r) => { const [x, y] = await at(c, r); await p.mouse.click(x, y); await p.waitForTimeout(120); };

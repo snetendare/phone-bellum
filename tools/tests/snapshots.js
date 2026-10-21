@@ -11,6 +11,7 @@
 // is up (node tools/peer-server.js), also the guest's board in a live match: the board turned around for side 1.
 // Only compare runs from the same machine: another browser version or font can change pixels. Game on port 8766.
 const { chromium } = require('playwright-core');
+const ctx2d = require('./board2d'); // these checks are for the 2D board
 const fs = require('fs'), crypto = require('crypto'), path = require('path');
 const [out, against] = process.argv.slice(2);
 if (!out) { console.log('usage: node tools/tests/snapshots.js <dir> [dir to compare with]'); process.exit(1); }
@@ -35,7 +36,7 @@ const freeze = ({ seed, frameClock }) => {
   const hashes = [];
   const errors = [];
   const page = async (seed, frameClock) => {
-    const p = await (await b.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 })).newPage();
+    const p = await (await ctx2d(b, { viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 })).newPage();
     p.on('pageerror', e => errors.push(e.message));
     await p.addInitScript(freeze, { seed, frameClock });
     return p;

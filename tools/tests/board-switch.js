@@ -1,7 +1,8 @@
-// The Board setting (2D / 3D in the in-match Settings) and the 3D board's fall back to 2D. 2D by default; the switch
-// starts and stops the 3D board mid-match (stopping frees its WebGL context) and is saved on this device; the 3D
-// quality in Settings; a lost WebGL context, fights that are too slow (quality steps down first) and no WebGL at all
-// each go back to 2D with one line on the board; ?board=3d still forces 3D, with the speed meter.
+// The Board setting (2D / 3D in the in-match Settings) and the 3D board's fall back to 2D. 3D by default (no meter),
+// ?board=2d starts on 2D, a saved 2D stays 2D; the switch starts and stops the 3D board mid-match (stopping frees its
+// WebGL context) and is saved on this device; the 3D quality in Settings; a lost WebGL context, fights that are too
+// slow (quality steps down first) and no WebGL at all each go back to 2D with one line on the board (no WebGL on a
+// first visit saves 2D); ?board=3d still forces 3D, with the speed meter.
 // Headless Chromium needs software WebGL (the args below): about 5-10 fps at high and medium quality, 25 at low.
 const { chromium } = require('playwright-core');
 const URL = 'http://127.0.0.1:8766/?test';
@@ -26,10 +27,19 @@ const URL = 'http://127.0.0.1:8766/?test';
   // a whole fight: Fight, then wait for the round's result
   const fight = async (p) => { await p.click('#fight'); await p.waitForSelector('#next', { timeout: 120000 }); await p.waitForTimeout(300); };
 
-  // 2D by default, then 3D and back from Settings
+  // 3D by default, without the meter; ?board=2d starts on 2D and saves nothing
   let p = await open();
+  await p.goto(URL); await on3d(p);
+  check(await p.locator('#board').isHidden() && await p.locator('.board3d canvas').isVisible() && !(await p.locator('.meter3d').count()), '3D board by default, no meter');
+  check((await stored(p))[0] === null, 'nothing saved');
+  await p.goto(URL + '&board=2d'); await p.waitForFunction(() => window.__pb, null, { timeout: 15000 }); await p.waitForTimeout(800);
+  check(!(await is3d(p)) && await p.locator('#board').isVisible() && (await stored(p))[0] === null, '?board=2d: the 2D board, nothing saved');
+  await p.context().close();
+
+  // a saved 2D stays 2D; then 3D and back from Settings
+  p = await open(() => { try { if (!sessionStorage.getItem('seeded')) { localStorage.setItem('phone-bellum-board', '2d'); sessionStorage.setItem('seeded', '1'); } } catch (e) {} });
   await p.goto(URL); await p.waitForFunction(() => window.__pb, null, { timeout: 15000 }); await p.waitForTimeout(500);
-  check(!(await is3d(p)) && await p.locator('#board').isVisible() && !(await p.locator('.board3d').count()), '2D board by default');
+  check(!(await is3d(p)) && await p.locator('#board').isVisible() && !(await p.locator('.board3d').count()), 'saved 2D: the 2D board');
   await solo(p);
   await settings(p);
   check((await p.locator('#sheet-h').textContent()).trim() === 'Settings' && await p.locator('[data-board="2d"][aria-pressed="true"]').isVisible(), 'Settings: Board 2D pressed');
@@ -79,9 +89,8 @@ const URL = 'http://127.0.0.1:8766/?test';
   await p.screenshot({ path: 'board-switch-slow.png' });
   await p.context().close();
 
-  // no WebGL: the setting says 3D, the board can't start, so 2D with a line, and the setting goes back to 2D
+  // no WebGL on a first visit: 3D (the default) can't start, so 2D with a line, and the setting becomes 2D
   p = await open(() => {
-    try { localStorage.setItem('phone-bellum-board', '3d'); } catch (e) {}
     const get = HTMLCanvasElement.prototype.getContext;
     HTMLCanvasElement.prototype.getContext = function (k, ...a) { return /webgl/.test(k) ? null : get.call(this, k, ...a); };
   });

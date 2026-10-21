@@ -1,10 +1,11 @@
 // Matteo: the Give Charisma button on a squad sheet, the pips on the board, and charisma growing in a fight.
 const { chromium } = require('playwright-core');
+const ctx2d = require('./board2d'); // these checks are for the 2D board
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const OUT = process.env.OUT || '.';
 (async () => {
   const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome' });
-  const p = await (await b.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 })).newPage();
+  const p = await (await ctx2d(b, { viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 })).newPage();
   p.on('pageerror', e => console.log('PAGE ERROR', e.message));
   await p.goto('http://127.0.0.1:8766/?test'); await sleep(500);
   await p.click('#settings summary'); await p.click('[data-tm="0"]'); await p.click('#go'); await sleep(300);

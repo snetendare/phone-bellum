@@ -2,10 +2,11 @@
 // (starter pack choice included; Frozen Peak and Mushroom Cavern have their own, and Frozen Peak its own battle music) and the battle playlist during the fight; each resumes where it was paused. The cog (in a match) and Match settings
 // (on the menu) open the music sheet, its settings stick, and a picked menu song replaces the menu playlist.
 const { chromium } = require('playwright-core');
+const ctx2d = require('./board2d'); // these checks are for the 2D board
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 (async () => {
   const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--autoplay-policy=user-gesture-required'] });
-  const p = await (await b.newContext({ viewport: { width: 390, height: 844 } })).newPage();
+  const p = await (await ctx2d(b, { viewport: { width: 390, height: 844 } })).newPage();
   p.on('pageerror', e => console.log('PAGE ERROR', e.message));
   await p.addInitScript(() => { window.__els = new Set(); const o = HTMLMediaElement.prototype.play; HTMLMediaElement.prototype.play = function () { window.__els.add(this); return o.call(this); }; });
   // the tracks playing right now

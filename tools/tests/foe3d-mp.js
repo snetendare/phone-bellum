@@ -10,13 +10,15 @@
 // Needs the peer server (node tools/peer-server.js, port 9000) and the game on port 8766. Screenshots go to the
 // current folder. Headless Chromium needs software WebGL (the args below) and runs at about 5-10 fps.
 const { chromium } = require('playwright-core');
+const ctx2d = require('./board2d');
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const BASE = 'http://127.0.0.1:8766/?test&peerhost=127.0.0.1&peerport=9000';
 (async () => {
   const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--disable-features=WebRtcHideLocalIpsWithMdns', '--use-gl=angle', '--use-angle=swiftshader'] });
   let fails = 0;
   const check = (ok, what) => { console.log(ok ? 'ok  ' : 'FAIL', what); if (!ok) fails++; };
-  const mk = async (n) => { const p = await (await b.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1 })).newPage(); p.on('pageerror', e => { console.log(`[${n}] PAGE ERROR`, e.message); fails++; }); return p; };
+  // the 2D phone has 2D saved (board2d.js); the 3D one forces 3D with ?board=3d
+  const mk = async (n) => { const p = await (await ctx2d(b, { viewport: { width: 390, height: 844 }, deviceScaleFactor: 1 })).newPage(); p.on('pageerror', e => { console.log(`[${n}] PAGE ERROR`, e.message); fails++; }); return p; };
   const phase = (p) => p.evaluate(() => document.getElementById('phase').textContent);
   const inPhase = (p, name, timeout = 30000) => p.waitForFunction((n) => document.getElementById('phase').textContent === n, name, { timeout });
   const on3d = (p) => p.evaluate(() => !!window.__pb().board3d);

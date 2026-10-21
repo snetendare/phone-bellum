@@ -1,7 +1,8 @@
-// The artifact builds (node tools/build-artifact.js) and the 3D board. phone-bellum.html opens on the 2D board without
-// fetching three.js, and the Board setting then imports three.js 0.180.0 from jsDelivr; when that download fails, the
-// game stays on 2D with one line and the setting stays 3D. game3d-artifact.html starts on the 3D board with the speed
-// meter, three.js from ./vendor/.
+// The artifact builds (node tools/build-artifact.js) and the 3D board. phone-bellum.html opens on the 3D board (the
+// default), importing three.js 0.180.0 from jsDelivr, without the meter; with 2D saved it opens on 2D without fetching
+// three.js, and the Board setting then imports it; when that download fails, the game stays on 2D with one line and
+// nothing is saved (it tries again next time). game3d-artifact.html starts on the 3D board with the speed meter,
+// three.js from ./vendor/.
 // This container can't reach jsDelivr, so its three.js address is answered from vendor/ (the same 0.180.0 files).
 // Headless Chromium needs software WebGL (the args below).
 const { chromium } = require('playwright-core');
@@ -13,8 +14,9 @@ const CDN = 'https://cdn.jsdelivr.net/npm/three@0.180.0/build/';
   let fails = 0;
   const check = (ok, what) => { console.log(ok ? 'ok  ' : 'FAIL', what); if (!ok) fails++; };
   // a page whose three.js requests are logged; cdn: 'serve' answers jsDelivr from vendor/, 'fail' makes it fail
-  const open = async (cdn) => {
+  const open = async (cdn, saved) => {
     const ctx = await b.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 });
+    if (saved) await ctx.addInitScript((v) => { try { if (!sessionStorage.getItem('seeded')) { localStorage.setItem('phone-bellum-board', v); sessionStorage.setItem('seeded', '1'); } } catch (e) {} }, saved);
     const p = await ctx.newPage(), three = [];
     p.on('pageerror', e => { console.log('PAGE ERROR', e.message); fails++; });
     p.on('request', r => { if (/three\.(module|core)\.min\.js/.test(r.url())) three.push(r.url()); });
@@ -27,10 +29,18 @@ const CDN = 'https://cdn.jsdelivr.net/npm/three@0.180.0/build/';
   const solo = async (p) => { await p.click('#settings summary'); await p.click('[data-tm="0"]'); await p.click('#go'); await p.waitForTimeout(400); await p.dblclick('[data-pack="0"]'); await p.waitForTimeout(800); };
   const is3d = (p) => p.evaluate(() => !!window.__pb().board3d);
 
-  // phone-bellum.html: 2D, no three.js until the setting turns 3D on
+  // phone-bellum.html: 3D by default, three.js from jsDelivr, no meter
   let { p, three } = await open('serve');
+  await p.goto('http://127.0.0.1:8766/phone-bellum.html?test');
+  await p.waitForFunction(() => window.__pb && window.__pb().board3d, null, { timeout: 15000 }).catch(() => {});
+  check(await is3d(p) && await p.locator('.board3d canvas').isVisible() && !(await p.locator('.meter3d').count()), 'phone-bellum.html opens on 3D, no meter');
+  check(three.length > 0 && three.every(u => u.startsWith(CDN)), `three.js from jsDelivr 0.180.0 (${three.map(u => u.split('/').pop()).join(', ')})`);
+  await p.context().close();
+
+  // with 2D saved: 2D, no three.js until the setting turns 3D on
+  ({ p, three } = await open('serve', '2d'));
   await p.goto('http://127.0.0.1:8766/phone-bellum.html?test'); await p.waitForFunction(() => window.__pb, null, { timeout: 15000 }); await p.waitForTimeout(800);
-  check(!(await is3d(p)) && await p.locator('#board').isVisible() && !three.length, 'phone-bellum.html opens on 2D, three.js not fetched');
+  check(!(await is3d(p)) && await p.locator('#board').isVisible() && !three.length, 'saved 2D: phone-bellum.html opens on 2D, three.js not fetched');
   check(await p.evaluate(() => typeof Render3D === 'function'), 'the 3D code is inlined');
   await solo(p);
   await p.click('#cog'); await p.click('[data-board="3d"]');
@@ -41,15 +51,13 @@ const CDN = 'https://cdn.jsdelivr.net/npm/three@0.180.0/build/';
   await p.screenshot({ path: 'artifact3d-1-3d.png' });
   await p.context().close();
 
-  // the download fails: 2D with a line, the setting stays 3D for next time
+  // the download fails on a first visit: 2D with a line, nothing saved, so it tries 3D again next time
   ({ p, three } = await open('fail'));
   await p.goto('http://127.0.0.1:8766/phone-bellum.html?test'); await p.waitForFunction(() => window.__pb, null, { timeout: 15000 });
-  await solo(p);
-  await p.click('#cog'); await p.click('[data-board="3d"]'); await p.click('#close');
   await p.waitForSelector('#note3d', { timeout: 15000 }).catch(() => {});
   const note = (await p.locator('#note3d').count()) ? await p.locator('#note3d').textContent() : '';
-  check(!(await is3d(p)) && /couldn’t load/.test(note) && await p.locator('#board').isVisible(), `no download: stays 2D: "${note}"`);
-  check(await p.evaluate(() => localStorage.getItem('phone-bellum-board')) === '3d', 'the setting stays 3D');
+  check(!(await is3d(p)) && /couldn’t load/.test(note) && await p.locator('#board').isVisible(), `no download: 2D: "${note}"`);
+  check(await p.evaluate(() => localStorage.getItem('phone-bellum-board')) === null, 'nothing saved');
   await p.context().close();
 
   // game3d-artifact.html: forced onto 3D with the meter, three.js from ./vendor/
