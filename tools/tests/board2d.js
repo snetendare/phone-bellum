@@ -8,7 +8,8 @@
 // player sees it) on either board.
 module.exports = async (browser, opts) => {
   const ctx = await browser.newContext(opts);
-  await ctx.addInitScript((b) => { try { localStorage.setItem('phone-bellum-board', b); } catch (e) {} }, process.env.PB_BOARD === '3d' ? '3d' : '2d');
+  // the checks were written for every unit, leader and tower, so they play with All units, not the Standard pack
+  await ctx.addInitScript((b) => { try { localStorage.setItem('phone-bellum-board', b); if (!localStorage.getItem('pb-unit-pack')) localStorage.setItem('pb-unit-pack', 'all'); } catch (e) {} }, process.env.PB_BOARD === '3d' ? '3d' : '2d');
   return ctx;
 };
 module.exports.tap = async (p, c, r) => {

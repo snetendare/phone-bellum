@@ -311,7 +311,7 @@ const Render2D = (cv, view) => {
       }
     }
     ctx.globalAlpha = 1;
-    if (mp && mp.ice) { drawStorm(v); if (phase === 'deploy' && Game.altarRound(v)) drawAltar(); } // the altar only stands while deploying
+    if (Game.isIce(v)) { drawStorm(v); if (phase === 'deploy' && Game.altarRound(v)) drawAltar(); } // the altar only stands while deploying
     if (mp && mp.shrooms) for (const tl of v.map.tiles || []) {
       if (shroomShown(v, tl.col, tl.row)) drawShroomTile(tl);
       else if (!plain && myRemovalNow(tl.col, tl.row)) { // removed by you this round: a faint dashed outline until the fight

@@ -46,7 +46,7 @@ const Game = (() => {
       generals: true }, // no once-per-match skill: a mage general can be called every round instead (MAGE_GENERALS)
     { id: 'bank', name: 'Bank tower', text: 'Sturdy, with an attack between the keep and the sniper tower: medium range, medium fire rate.', unit: { ...TOWER, name: 'Bank Tower', kind: 'bank', hp: 700, hit: 45, aps: 0.6, range: 18, color: '#D9B95B' },
       loan: true, // a loan can be taken every round (LOAN)
-      skill2: { name: 'Major investment', cost: 500, noFree: true, text: 'Pay 500 gold now and get 1000 gold at the start of next round. Once per match.' } }, // see resolve
+      skill2: { name: 'Major investment', cost: 500, noFree: true, text: 'Pay 500 gold now and get 1000 gold at the start of next round. Once per match, and not in a round you take a loan.' } }, // see resolve
     { id: 'slime', name: 'Slime tower', text: 'Lobs splashing slime globs like one Slimeshots body, with 5 m more range.', unit: { ...TOWER, name: 'Slime Tower', kind: 'slime', hit: 7, aps: 0.8, range: 26, splash: 3, projSpeed: 30, spinUp: 0.1, color: '#7BD93F' },
       passive: { name: 'Slime lore', text: 'Every skill you buy for Slime Wizards or Slimeshots works on the slime tower too.' } }, // see slimeTowerUnit
   ];
@@ -61,8 +61,10 @@ const Game = (() => {
   // the types a player is offered: all of them while there are TOWER_OFFER or fewer, else a seeded draw
   function towerChoices(m, side) {
     if (m && m.factions) return factionTowers(m, side); // Factions mode: the towers of the player's own factions
-    if (TOWER_TYPES.length <= TOWER_OFFER) return TOWER_TYPES.slice();
-    const r = rng(m.seed + side * 4241 + 17), pool = TOWER_TYPES.slice(), out = [];
+    let types = TOWER_TYPES.filter(x => !(m && Array.isArray(m.offTowers) && m.offTowers.includes(x.id))); // m.offTowers: left out of this match (Standard pack)
+    if (!types.length) types = TOWER_TYPES;
+    if (types.length <= TOWER_OFFER) return types.slice();
+    const r = rng(m.seed + side * 4241 + 17), pool = types.slice(), out = [];
     while (out.length < TOWER_OFFER) out.push(pool.splice(Math.floor(r() * pool.length), 1)[0]);
     return out;
   }
@@ -109,7 +111,7 @@ const Game = (() => {
   const towerSkill2Of = (m, side) => !!(m && m.towerSkill2 && m.towerSkill2[side] > 0);
   const towerSkill2Visible = (m, side) => towerSkill2Of(m, side) && m.towerSkill2[side] < m.round;
   const towerSkill2Cost = (m, side) => { const sk = towerType(m, side).skill2; if (!sk) return 0; return !sk.noFree && (m.towerSkill2 && m.towerSkill2[side] === m.round ? isMapFree(m, side, { kind: 'tskill2' }) : mapFreeLeft(m, side)) ? blix(sk.cost) : sk.cost; };
-  const canBuyTowerSkill2 = (m, side) => { const sk = towerType(m, side).skill2; return towerPicked(m, side) && !!sk && !towerSkill2Of(m, side) && (!sk.needs || towerSkillOf(m, side)) && m.gold[side] >= towerSkill2Cost(m, side); };
+  const canBuyTowerSkill2 = (m, side) => { const sk = towerType(m, side).skill2; return towerPicked(m, side) && !!sk && !towerSkill2Of(m, side) && (!sk.needs || towerSkillOf(m, side)) && !bankBusy(m, side, 'invest') && m.gold[side] >= towerSkill2Cost(m, side); };
   function buyTowerSkill2(m, side) {
     if (!canBuyTowerSkill2(m, side)) return false;
     if (!m.towerSkill2) m.towerSkill2 = [0, 0];
@@ -219,7 +221,11 @@ const Game = (() => {
   // the rest) is LOAN.payback less, never below nothing. m.loan[side] = the round the last loan was taken in.
   const LOAN = { gold: 200, payback: 300 };
   const loanNow = (m, side) => !!(m && m.loan && m.loan[side] === m.round);
-  const canTakeLoan = (m, side) => towerPicked(m, side) && towerType(m, side).id === 'bank' && !loanNow(m, side);
+  // the bank does one thing a round: a loan or the Major investment, not both. bankBusy(m, side, want): the other one
+  // was used this round, so `want` ('loan' or 'invest') can't be
+  const investNow = (m, side) => !!(m && m.towerSkill2 && m.towerSkill2[side] === m.round && towerType(m, side).id === 'bank');
+  const bankBusy = (m, side, want) => towerType(m, side).id === 'bank' && (want === 'loan' ? investNow(m, side) : loanNow(m, side));
+  const canTakeLoan = (m, side) => towerPicked(m, side) && towerType(m, side).id === 'bank' && !loanNow(m, side) && !bankBusy(m, side, 'loan');
   function takeLoan(m, side) {
     if (!canTakeLoan(m, side)) return false;
     if (!m.loan) m.loan = [0, 0];
@@ -266,6 +272,16 @@ const Game = (() => {
     { id: 'enzo', name: 'Enzo', ability: 'You can’t buy unit skills, but each unit type comes with one random skill, for free, picked at the start of the match and the same for all your squads of it all match (see it under the unit’s i button). The skill only works while you have 2 or more squads of that unit.' },
     { id: 'matteo', name: 'Matteo - the Gentleman', ability: 'Give one of your squads a stack of Charisma. When a squad with Charisma kills an enemy, it gains a stack and gives one to a squad of yours without any. At 5 stacks a squad is a Gentleman: the first enemy it would kill each fight joins your side for that fight instead, at half health.' },
   ];
+  // ---------- the Standard pack ----------
+  // A smaller match for new players, picked on the menu: fewer units with clear jobs (one or two of each kind per tier),
+  // the leaders with simple abilities, and no mage or slime tower. Units by name, so a Counter Lab roster just keeps
+  // the ones it has (with none of them, the pack leaves nothing out).
+  const STANDARD_PACK = {
+    units: ['Goblin Swarm', 'Skeleton Archers', 'Fire Mage', 'Sniper', 'Brute', 'Leaf Wizard', 'Earth Wizard',
+      'Flame Wizard', 'Steel Wizard', 'Ether Golem', 'Sun Priest', 'War Mammoth'],
+    chars: ['cage', 'zoe', 'emile', 'wilhelm', 'phil', 'felix'],
+    offTowers: ['mage', 'slime'],
+  };
   const CHAR = { cageHp: 10, zoeTiles: 2, zoeDmg: [10, 20, 30, 40], zoeHp: [10, 20, 30, 40], zoeAps: [0, 5, 10, 15], wilhelmArmor: 4, wilhelmDelay: 0.5, noahLevel: 1, noahCut: 10, enzoMin: 2, philTier: 4, philOff: 100, yotUnit: 'Ember Imps', yotLv2: 3, yotLv3: 6, felixRound: 3, felixGold: 50 };
   // ---------- Matteo's charisma ----------
   // sq.charm = Charisma stacks on a squad, kept between rounds; they grow in fights (see Engine: opts.charm).
@@ -334,7 +350,10 @@ const Game = (() => {
     { id: 'standard', name: 'Standard', short: 'No special rules.', text: 'No special rules.', plain: true }, // only when picked, never random
     { id: 'forest', name: 'Forest Clearing', short: 'Bribe the elf tower to fight for you.', text: 'Ents and Earth Wizards have 15% more health. Healing and regeneration are 1.5× as strong. A neutral elf tower in no man’s land sides with whoever has bribed the elves the most times: it heals their units and shoots the other player’s. With bribes level, it shoots both. Bribe as often as you like: 50 gold, and 50 more for each extra bribe in the same round. Totals stay secret; the flag on the tower shows who is ahead. After round 5 the elves hit and heal twice as hard. From the round after 10 bribes have been paid in all, each player who has bribed can buy one elf tower of their own for 400 gold.', boostHp: 15, boostUnits: ['Ent', 'Earth Wizard'], healMul: 1.5, elfTower: true },
     { id: 'cavern', name: 'Mushroom Cavern', short: 'Shorter range. Mushroom tiles buff, speed up or poison.', text: 'All units have 25% less range (units with 5 m range or less keep theirs). Stealth units deal 20% more damage. Glowing mushroom tiles stay on the same tiles all match, mirrored on both halves. Purple: a squad that starts the fight there gets +10% damage, +10% health and +5% attack speed. Yellow: a unit that starts on it or walks over it moves 30% faster for the rest of the fight. Green: a unit that starts on it or walks over it is poisoned and slowed (slime units are healed and sped up instead). Yellow and green work once per unit, for both sides. Either player can remove a mushroom tile for 50 gold.', stealthDmg: 20, rangeCut: 25, rangeKeep: 5, shrooms: true, pointMirror: true },
-    { id: 'ice', name: 'Frozen Peak', short: 'Hail from round 2. An ice altar rises on even rounds.', text: 'Every fight from round 2: a hailstorm drops 10 hail tiles in the storm band (no man’s land at first); units standing in hail take 20 damage per second. Even rounds: the altar of ice rises in the middle of the board. Tap it to buy ice walls for your tower, push the storm band toward your opponent, or summon a Snowgre.', ice: true },
+    // Frozen Peak's hailstorm and altar are switched off for now (iceOff): the map is its snowy floor and music with no
+    // special rules. To bring them back, take iceOff out and use iceShort / iceText as short / text again.
+    { id: 'ice', name: 'Frozen Peak', short: 'A snowy mountain top. No special rules for now.', text: 'A snowy mountain top. No special rules for now.', iceOff: true,
+      iceShort: 'Hail from round 2. An ice altar rises on even rounds.', iceText: 'Every fight from round 2: a hailstorm drops 10 hail tiles in the storm band (no man’s land at first); units standing in hail take 20 damage per second. Even rounds: the altar of ice rises in the middle of the board. Tap it to buy ice walls for your tower, push the storm band toward your opponent, or summon a Snowgre.', ice: true },
   ];
   // ---------- Frozen Peak: hailstorm and the altar of ice ----------
   // The storm band is 4 rows deep: no man's land to start with. Each push moves it ICE.push rows toward the other
@@ -348,7 +367,7 @@ const Game = (() => {
   ];
   // the Ether Golem a Snowgre is modelled on (taken from the roster when it has one)
   const GOLEM = { name: 'Ether Golem', cost: 5, bodies: 1, hp: 3450, hit: 69, aps: 0.6, range: 5, speed: 2.5, splash: 3, defense: 'armor', defVal: 6 };
-  const isIce = (m) => !!(mapOf(m) && mapOf(m).ice);
+  const isIce = (m) => !!(mapOf(m) && mapOf(m).ice && !mapOf(m).iceOff);
   const hailRound = (m) => isIce(m) && m.round >= 2;
   const altarRound = (m) => isIce(m) && m.round % 2 === 0;
   const altarBuys = (m) => (m && m.altar) || [];
@@ -726,6 +745,7 @@ const Game = (() => {
 
   // offChars (optional): character ids left out of the pool (at least one always stays in)
   // opts (optional): { offUnits: unit indexes left out of the match (at least two stay in), rules: roster rules for the fights (see Engine.RULES),
+  //   offTowers: tower type ids left out of the round 3 offer,
   //   factions: [[ids of player 0's factions], [player 1's]] for a Factions match (units: factionSet's, each with its `faction`) }
   function createMatch(units, matrix, seed, mapId, lastMapId, offChars, opts) {
     const r = rng((seed >>> 0) + 777);
@@ -761,6 +781,7 @@ const Game = (() => {
       mageGen: [null, null], // the mage generals each player called this round: { round, id, tp } (Mage tower)
       mapFree: [{}, {}], // Blixten's discounted map purchase per round (see mapFreeOf)
       factions, // Factions mode: each player's drafted faction ids (null = a normal match)
+      offTowers: !factions && opts && Array.isArray(opts.offTowers) ? opts.offTowers.filter(id => TOWER_TYPES.some(x => x.id === id)) : [], // tower types left out (Standard pack)
     };
     m.towers = [towerSpot(m, 0), towerSpot(m, 1)];
     return m;
@@ -1553,9 +1574,9 @@ const Game = (() => {
     unlockCost, tierOf, startLevel, shopCost, mapFreeOf, mapFreeLeft, isUnlocked, unlockVisible, unlock, undoUnlock,
     skillDef, skillCost, SKILL_STEP, skillsBought, isInnate, hasSkill, skillVisible, unitFor, canBuySkill, buySkill, undoSkill, sellValue, sell,
     isRider, hiddenFromFoe, isCarrier, riderOf, carrierOf, squadAt, boardable, unplaceSquad,
-    TOWER, TOWER_TYPES, OUTPOST, TOWER_PICK_ROUND, towerType, towerChoices, needsTowerPick, setTowerType, settleTowerPicks, TOWER_SKILL, towerSkillOf, towerSkillVisible, towerPicked, canBuyTowerSkill, buyTowerSkill, undoTowerSkill, towerSkillCost, towerSkill2Of, towerSkill2Visible, towerSkill2Cost, canBuyTowerSkill2, buyTowerSkill2, undoTowerSkill2, towerSkill2On, AIRSHIP, MOAT, INVEST, MAGE_GENERALS, mageGenPrice, MAGE, mageGenInfo, mageGenOf, mageTpOf, isExtraGen, mageGenCost, canBuyMageGen, buyMageGen, undoMageGen, mageTowerUnit, generalUnit, LOAN, loanNow, canTakeLoan, takeLoan, undoLoan, SLIME_UNITS, slimeTowerUnit, slimeSkillDefs, TOWER_MID, towerColOk, towerAt, needsTower, placeTower, ensureTower,
+    TOWER, TOWER_TYPES, OUTPOST, TOWER_PICK_ROUND, towerType, towerChoices, needsTowerPick, setTowerType, settleTowerPicks, TOWER_SKILL, towerSkillOf, towerSkillVisible, towerPicked, canBuyTowerSkill, buyTowerSkill, undoTowerSkill, towerSkillCost, towerSkill2Of, towerSkill2Visible, towerSkill2Cost, canBuyTowerSkill2, buyTowerSkill2, undoTowerSkill2, towerSkill2On, AIRSHIP, MOAT, INVEST, MAGE_GENERALS, mageGenPrice, MAGE, mageGenInfo, mageGenOf, mageTpOf, isExtraGen, mageGenCost, canBuyMageGen, buyMageGen, undoMageGen, mageTowerUnit, generalUnit, LOAN, loanNow, investNow, bankBusy, canTakeLoan, takeLoan, undoLoan, SLIME_UNITS, slimeTowerUnit, slimeSkillDefs, TOWER_MID, towerColOk, towerAt, needsTower, placeTower, ensureTower,
     FLANK, flankRows, flankOpen, isFlank, reserved, canPlaceAt, isOff, enemyHolds, inNoMans, hasSkillType,
-    ICE, ALTAR, GOLEM, isIce, hailRound, altarRound, stormShift, stormRows, hailTiles, altarCost, altarRefund, altarCount, pushRoom, altarBought, addAltar, buyAltar, undoAltar, snowgres, snowgreUnit,
+    STANDARD_PACK, ICE, ALTAR, GOLEM, isIce, hailRound, altarRound, stormShift, stormRows, hailTiles, altarCost, altarRefund, altarCount, pushRoom, altarBought, addAltar, buyAltar, undoAltar, snowgres, snowgreUnit,
     MAPS, ELF_TOWER, SHROOM, SHROOM_SPLIT, shroomAt, shroomTileAt, shroomRemoval, SHROOM_REMOVE, shroomCost, removeShroom, undoRemoveShroom, mapOf, elfSpot, rollMap, BRIBE_COST, bribeList, bribeGold, bribeCount, bribeNow, bribeCost, bribeRefund, ELF_POWER, elfPowered, elfUnit, ELF_OWN, elfOwnCost, elfOwnOf, elfOwnAt, elfOwnUnlocked, elfOwnOffered, canBuyElfOwn, elfOwnSpotOk, buyElfOwn, undoElfOwn, bribeLeader, canBribe, bribe, undoBribe,
     CHARACTERS, CHAR, charOf, charInfo, enzoSkill, enzoActive, charmOf, isGentleman, canGiveCharm, giveCharm, undoCharm, ensureCharm, felixGold, isTier1, rollBuffTiles, onBuffTile, zoeBuff, yotImps, yotLevel, TOWER_SPOT, towerSpot,
     FACTION_MODE, FACTIONS: () => FACTIONS, setFactions, factionInfo, factionsOf, factionTowers, towerTypeById, ownsUnit, withFactionTrait, factionSet,
