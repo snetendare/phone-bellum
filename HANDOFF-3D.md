@@ -2,7 +2,13 @@
 
 Repo `snetendare/phone-bellum`, branch `refactor/render-split`. `main` is merged in, up to `10e1155` (art direction doc, battle cam, PC layout, compact shop). The branch isn't merged into `main`, and there's no PR yet.
 
-**All nine steps are done; 3D is the default on this branch.** The branch isn't merged into `main` and there's no PR yet: merging it is what puts 3D on the live site. Still open: the owner's two calls in step 8, and whether the Meteor Caller's movement should change (see "Readability from above").
+**All nine steps are done; 3D is the default on this branch, and `main` is merged in up to `10e1155`.** The branch isn't merged into `main` and there's no PR yet: merging it is what puts 3D on the live site. Waiting on the owner:
+1. Board size on phones: keep `main`'s layout (whole deploy screen fits, board 240 px wide on a 390 px phone) or make the board bigger again (see "Board size on phones").
+2. Open a PR to merge this branch into `main`?
+3. Publish `phone-bellum.html` (3D by default) to the "Phone Bellum" artifact, https://claude.ai/artifact/GzaUNu492zn78RqrQYX8pQ?
+4. Meteor Caller movement: keep, hold position, or back off inside its minimum range (a game rule for both boards; see "Readability from above").
+5. Step 8's two calls (recommended: leave the start screen and map picker as they are, no view buttons).
+6. Not yet tried on phones: the touch picking and bigger level badges (commit `aa77348`).
 
 ## Where things stand
 
