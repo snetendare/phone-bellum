@@ -1608,6 +1608,7 @@ const Game = (() => {
   const towerTypeById = (id) => [OUTPOST, ...TOWER_TYPES].find(x => x.id === id) || factionTowerById(id);
   // the types a player is offered: all of them while there are TOWER_OFFER or fewer, else a seeded draw
   function towerChoices(m, side) {
+    if (m && Array.isArray(m.towerOffer)) return m.towerOffer.map(towerTypeById).filter(Boolean); // a fixed offer (the tutorial's)
     if (m && m.factions) return factionTowers(m, side); // Factions mode: the towers of the player's own factions
     if (TOWER_TYPES.length <= TOWER_OFFER) return TOWER_TYPES.slice();
     const r = rng(m.seed + side * 4241 + 17), pool = TOWER_TYPES.slice(), out = [];
