@@ -99,7 +99,8 @@ const Engine = (() => {
     deathSpawn: { label: 'Spawn on death', params: [['unit', 'Spawns (unit name)', 'Goblin Swarm', null], ['count', 'Bodies per death', 2, 1], ['strength', 'Strength of each spawn (% health and damage; 50 = half)', 100, 10]] },
     shield:  { label: 'Shield', params: [['hits', 'Hits blocked per body', 3, 1]] },
     blast:   { label: 'Death burst', params: [['radius', 'Radius (m)', 7, 0.5], ['pct', 'Damage (% of hit)', 100, 10]] },
-    explode: { label: 'Explode on death', params: [['pct', 'Damage (% of its max health)', 30, 5]] },
+    explode: { label: 'Explode on death', params: [['pct', 'Damage (% of its max health)', 30, 5], ['radius', 'Radius (m)', BLAST_RADIUS, 0.5]] },
+    dodge:   { label: 'Dodge', params: [['pct', 'Chance to dodge a hit (%)', 33, 1]] },
     lifesteal: { label: 'Lifesteal', params: [['pct', 'Heals itself for (% of damage dealt)', 10, 1]] },
     turret:  { label: 'Extra turret', params: [['turrets', 'Attacks at once (each with its own target and reload)', 2, 1]] },
     frenzy:  { label: 'Frenzy', params: [['pct', 'Attack speed per hit (+% of base)', 10, 1], ['cap', 'Most attacks per second', 2, 0.1]] },
@@ -122,7 +123,7 @@ const Engine = (() => {
       case 'regen': return `+${n('hp')}% health, and regains ${n('pct')}% of its max health every second.`;
       case 'poison': return `Hits poison the target for ${n('pct')}% of the hit over ${n('duration')} s, ignoring armor and ward. ${n('slow')}% more time between attacks.`;
       case 'stealth': return `Can’t be targeted until it attacks, and hides again after ${STEALTH_BACK} s without attacking. Splash and piercing shots can still hit it.`;
-      case 'armorHp': return `+${n('armor')} armor and +${n('hp')}% health.`;
+      case 'armorHp': return +P('hp') ? `+${n('armor')} armor and +${n('hp')}% health.` : `+${n('armor')} armor.`;
       case 'spawn': return `Every ${n('every')} s, spawns ${n('count')} ${String(P('unit'))} ${+P('count') === 1 ? 'body' : 'bodies'}, up to ${n('max')} alive at once${+P('waves') > 0 ? `, at most ${n('waves')} ${+P('waves') === 1 ? 'wave' : 'waves'} per fight` : ''}.`;
       case 'rapid': return `+${n('aps')}% attack speed, −${n('range')}% range.`;
       case 'swift': return +P('hit') ? `+${n('speed')}% move speed and +${n('hit')}% hit size.` : `+${n('speed')}% move speed.`;
@@ -136,7 +137,8 @@ const Engine = (() => {
       case 'split': return `Attacks ${n('beams')} different enemies at once${+P('hit') > 0 ? `, −${n('hit')}% hit each` : ''}. −${n('range')}% range.`;
       case 'deathSpawn': return `When a body dies, ${n('count')} ${String(P('unit'))} ${+P('count') === 1 ? 'body takes' : 'bodies take'} its place${+P('strength') !== 100 ? `, at ${n('strength')}% health and damage` : ''}. A spawn of the unit itself starts from the dead body's own stats. Spawns don’t spawn again.`;
       case 'blast': return `When a body dies it explodes, dealing ${+P('pct') === 100 ? 'the damage of its hit' : `${n('pct')}% of its hit`} (for a ram, what it deals to the tower) to every enemy within ${n('radius')} m.`;
-      case 'explode': return `When a body dies it explodes for ${n('pct')}% of its max health, hurting every enemy within ${BLAST_RADIUS} m.`;
+      case 'explode': return `When a body dies it explodes for ${n('pct')}% of its max health, hurting every enemy within ${n('radius')} m.`;
+      case 'dodge': return `Each hit has a ${n('pct')}% chance to miss it completely. Poison already on it still ticks.`;
       case 'lifesteal': return `Each body heals itself for ${n('pct')}% of the damage it deals.`;
       case 'turret': return `Each body attacks ${n('turrets')} different enemies at once, each attack with its own target and its own reload, as if it carried ${n('turrets')} copies of its weapon. They never aim at the same enemy, so with only one enemy in reach just one fires.`;
       case 'frenzy': return `Each hit it lands gives that body +${n('pct')}% attack speed for the rest of the fight, up to ${n('cap')} attacks per second.`;
@@ -201,7 +203,8 @@ const Engine = (() => {
         case 'spread': u.spread = [Math.max(0, P('min')), Math.max(0, P('min'), P('max'))]; break;
         case 'mortar': u.range = u.range + P('range'); u.minRange = Math.max(u.minRange || 0, P('min')); u.aps = u.aps + Math.max(0, P('aps')); break;
         case 'frenzy': u.frenzyPct = (u.frenzyPct || 0) + Math.max(0, P('pct')); u.frenzyCap = Math.max(u.frenzyCap || 0, Math.max(0.05, P('cap'))); break;
-        case 'explode': u.deathBlast = Math.max(u.deathBlast || 0, Math.max(0, P('pct'))); break;
+        case 'explode': u.deathBlast = Math.max(u.deathBlast || 0, Math.max(0, P('pct'))); u.blastAt = Math.max(u.blastAt || 0, Math.max(0, P('radius'))); break;
+        case 'dodge': u.dodge = Math.min(90, Math.max(u.dodge || 0, P('pct'))); break;
         case 'blast': u.blastR = Math.max(u.blastR || 0, Math.max(0, P('radius'))); u.blastPct = (u.blastPct || 0) + Math.max(0, P('pct')); break;
         case 'split':
           u.beams = Math.max(u.beams || 1, Math.round(P('beams')));
@@ -367,9 +370,9 @@ const Engine = (() => {
       }
       if (v.u.structure) cripple[v.side] = towerDown.secs;
       if (v.u.deathBlast > 0) {
-        const dmg = v.u.hp * v.u.deathBlast / 100;
-        if (opts.record) shots.push([v.x, v.y, v.x, v.y, v.side, BLAST_RADIUS, 1, 0, 0]);
-        for (const f of sides[1 - v.side]) if (f.alive && hyp(f.x - v.x, f.y - v.y) <= BLAST_RADIUS) hurt(v, f, dmg, v.x, v.y);
+        const dmg = v.u.hp * v.u.deathBlast / 100, rad = v.u.blastAt > 0 ? v.u.blastAt : BLAST_RADIUS;
+        if (opts.record) shots.push([v.x, v.y, v.x, v.y, v.side, rad, 1, 0, 0]);
+        for (const f of sides[1 - v.side]) if (f.alive && hyp(f.x - v.x, f.y - v.y) <= rad) hurt(v, f, dmg, v.x, v.y);
       }
       // Death burst: its hit to every enemy within blastR (a ram's target already took the ram itself)
       if (v.u.blastR > 0) {
@@ -500,6 +503,8 @@ const Engine = (() => {
       if (v.turning) return; // being won over: nothing hurts it until it has switched sides
       if (v.u.aloft) return; // an airship can't be shot down
       const st = stats[owner.side];
+      // Dodge: the whole hit misses (the same random numbers on every device)
+      if (v.u.dodge > 0 && rnd() * 100 < v.u.dodge) { st.missed += hit; return; }
       let pct = owner.u.pctHit > 0 && !v.u.structure ? v.u.hp * owner.u.pctHit / 100 : 0;
       if (cripple[owner.side] > 0) { hit = hit * (1 - towerDown.attack / 100); pct = pct * (1 - towerDown.attack / 100); }
       // Shield: the whole hit is blocked, however big, and it brings no poison
@@ -891,7 +896,20 @@ const Engine = (() => {
             const fa = a.u.structure || a.delay > 0, fc = c.u.structure || c.delay > 0;
             if (fa && fc) continue;
             const ka = fa ? 0 : fc ? 2 : 1, kc = fc ? 0 : fa ? 2 : 1;
-            if (d > 0 && d < minSep) {
+            if (d < minSep && (a.u.structure || c.u.structure)) {
+              // a body walking into its own tower slides around it instead of being pushed straight back (it got
+              // stuck behind it): out to minSep, then sideways by as much as it had walked in, toward where it heads
+              // (with no lean either way, toward the middle of the board)
+              const s = a.u.structure ? a : c, w = s === a ? c : a;
+              let rx = w.x - s.x, ry = w.y - s.y, rl = d;
+              if (rl < 1e-9) { rx = s.x > 0 ? -1 : 1; ry = 0; rl = 1; }
+              rx /= rl; ry /= rl;
+              let tx = -ry, ty = rx;
+              const lean = tx * (w.hx || 0) + ty * (w.hy || 0);
+              if (lean < 0 || (lean < 1e-6 && tx * (s.x > 0 ? -1 : 1) < 0)) { tx = -tx; ty = -ty; }
+              const slide = minSep - (d < 1e-9 ? 0 : d);
+              w.x = s.x + rx * minSep + tx * slide; w.y = s.y + ry * minSep + ty * slide;
+            } else if (d > 0 && d < minSep) {
               const push = (minSep - d) / 2;
               a.x -= dx / d * push * ka; a.y -= dy / d * push * ka;
               c.x += dx / d * push * kc; c.y += dy / d * push * kc;

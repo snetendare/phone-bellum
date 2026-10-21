@@ -378,9 +378,10 @@ html.pc .sheet { max-width: 640px; }
   let phase = 'start';      // start | lobby | draft | deploy | battle | result | end
   try { if (/[?&]test\b/.test(location.search)) window.__pb = () => ({ m, me }); } catch (e) {} // read-only peek for UI tests
   let selected = null;      // unit index chosen in the shop
+  let rangeOf = null;       // { side, id }: the squad last tapped on the board; its range shows as a dotted ring
   let bt = null;            // battle being played back
   let battlePre = null;     // match as it stood when the running battle began (for the HUD)
-  let speed = 2, lastTs = 0, acc = 0, raf = 0;
+  let speed = 1, lastTs = 0, acc = 0, raf = 0;
   let fx = [];
   // battle cam: the last CAM.secs of a high-stakes fight play a little slower, zoomed in on the action.
   // High stakes: both sides still have units fighting then, and the fight ends the match, or a player went into it under
@@ -1314,6 +1315,15 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
       }
     }
     for (const side of [me, foe()]) if (towerVisible(side)) drawTowerTile(side);
+    // the squad tapped last: its range as a dotted ring round its tile (theirs as you can know it)
+    const rs = rangeOf && phase === 'deploy' && m.armies[rangeOf.side].find(s => s.id === rangeOf.id);
+    if (rs) {
+      const p = rangeOf.side !== me ? Game.seenAt(m, rs) : drag && drag.moved && drag.id === rs.id ? drag.over : rs;
+      const w = Game.tileToWorld(p.col, p.row);
+      ctx.strokeStyle = teamCol(rangeOf.side); ctx.globalAlpha = 0.9; ctx.lineWidth = 1.5; ctx.setLineDash([4, 5]);
+      ctx.beginPath(); ctx.arc(PX(w.x), PY(w.y), Game.squadRange(m, rangeOf.side, rs, rangeOf.side !== me) * S, 0, Math.PI * 2); ctx.stroke();
+      ctx.setLineDash([]); ctx.globalAlpha = 1;
+    }
     drawElfTower(m, true);
     if (Game.isIce(m)) for (const side of [me, foe()]) {
       // Snowgres on their tiles in no man's land (an opponent's new one shows up at the fight)
@@ -1532,7 +1542,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
         if (el) { el.textContent = fmtClock(left); el.classList.toggle('low', left <= 5000); }
         $('clock').textContent = left > 0 ? `${fmtClock(left)} to deploy` : 'Time’s up';
         if (mode !== 'guest' && left <= (mode === 'host' ? -500 : 0)) runFight();
-        else if (mode === 'guest' && left <= 0 && !timeUp) { timeUp = true; selected = null; closeSheet(); sendSide(); panelDeploy(); render(); }
+        else if (mode === 'guest' && left <= 0 && !timeUp) { commitPick(); timeUp = true; selected = null; closeSheet(); sendSide(); panelDeploy(); render(); }
       } else if (el) { el.textContent = heldMs || (mode === 'guest' && net.connected && m && m.round === Game.TOWER_PICK_ROUND) ? 'picking towers' : solo() ? '' : 'paused'; el.classList.remove('low'); }
     }
     if ((phase === 'result' || phase === 'end') && resultShownAt) {
@@ -1585,6 +1595,12 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
       changed();
     } else if (Game.setTowerType(m, me, key)) { changed(); releaseClock(); }
   }
+  // a card tapped once (shown, not chosen yet) counts as chosen once the player is ready or time runs out,
+  // instead of falling back to the first card
+  function commitPick() {
+    const o = pickOptions();
+    if (o && pickSel != null && o.items.some(x => x.key === pickSel)) choosePick(o, pickSel);
+  }
   function syncPick() {
     const o = phase === 'deploy' ? pickOptions() : null, el = $('pick'), peek = $('pick-peek');
     const id = o ? `${o.kind}:${m.round}:${o.items.map(x => x.key).join(',')}` : '';
@@ -1624,7 +1640,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
     $('sheet-back').hidden = false;
     $('close').addEventListener('click', closeSheet);
   }
-  const loanText = () => `Take ${Game.LOAN.gold} gold right away; next round you get ${Game.LOAN.payback} gold less (never less than nothing). Once a round.`;
+  const loanText = () => `Take ${Game.LOAN.gold} gold right away; next round you get ${Game.LOAN.payback} gold less (never less than nothing). Once a round, and not in the round you make the Major investment.`;
   const loanOffer = () => !!m && Game.towerPicked(m, me) && !Game.needsTowerPick(m, me) && Game.towerType(m, me).id === 'bank';
   const mageOffer = () => !!m && Game.towerPicked(m, me) && !Game.needsTowerPick(m, me) && Game.towerType(m, me).id === 'mage';
   const tskillOffer = () => !!m && Game.towerPicked(m, me) && !Game.needsTowerPick(m, me) && !Game.towerSkillOf(m, me) && !!Game.towerType(m, me).skill;
@@ -1644,14 +1660,14 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
     else {
       hint = selected !== null
         ? (canBuy(selected) ? `Tap a tile in your zone${Game.flankOpen(m) ? ' or a flank tile in theirs' : ''} to place ${esc(units[selected].name)}.` : left <= 0 ? 'No deployments left this round.' : `Not enough gold for ${esc(units[selected].name)}.`)
-        : (fresh ? 'Drag a squad you placed this round to move it, or tap it to take it back.' : 'Pick a unit, then tap a tile in the bottom six rows.');
+        : (fresh ? 'Tap a squad to see its range. Drag one you placed this round to move it, or tap it again to take it back.' : 'Pick a unit, then tap a tile in the bottom six rows.');
       if (left <= 0 && selected === null) hint = Game.canBuyDeploy(m, me) || m.extraDeploys[me] < Game.CONFIG.maxExtraDeploys ? `No deployments left. Buy one more for ${Game.CONFIG.extraDeployCost} gold (once per round), or spend gold on upgrades.` : 'No deployments left this round. Spend gold on upgrades.';
       if (readyN && selected === null) hint = `${readyN} squad${readyN === 1 ? ' is' : 's are'} ready to level up. Tap ${readyN === 1 ? 'it' : 'one'} to upgrade.`;
       if (Game.charOf(m, me) === 'zoe' && selected === null && (m.buff && m.buff[me] || []).length) hint += ` Starred tiles are your buff tiles this round: ${(zb => `+${zb.dmg}% damage, +${zb.hp}% health${zb.aps ? ` and +${zb.aps}% attack speed` : ''}`)(Game.zoeBuff(m, me))} for a squad that starts the fight there. The bonus grows every round you use them.`;
       if (Game.hailRound(m) && selected === null && !fresh) hint = `Hail this round: ${Game.ICE.hailDps} damage a second on hail tiles. ${MORE('map-more')}`;
       if (Game.altarRound(m) && selected === null && !fresh) hint = `${Game.hailRound(m) ? 'Hail this round, and the' : 'The'} altar of ice has risen: tap it for ice walls, a push of the hail or a Snowgre. ${MORE('map-more')}`;
       if (m.round === Game.FLANK.round && selected === null && !fresh) hint = `Flanks are open: you can deploy on the blue edge columns in their half. ${MORE('flank-more')}`;
-      if (m.round === 1 && selected === null && m.armies[me].some(s => s.free)) hint = 'Your package squads are already on the board. Drag them where you want them, or tap one to take it back.';
+      if (m.round === 1 && selected === null && m.armies[me].some(s => s.free)) hint = 'Your package squads are already on the board. Drag them where you want them, or tap one twice to take it back.';
       if (charmMode && Game.canGiveCharm(m, me)) hint = 'Tap one of your squads to give it a stack of Charisma.';
       if (moveMode) hint = moving == null ? `Tap one of your squads from an earlier round to move it (${Game.CONFIG.moveCost} gold, once per round).` : `Tap a free tile to move ${esc(units[m.armies[me].find(s => s.id === moving).unit].name)} there, or drag it.`;
       if (selected !== null && !moveMode && m.armies[me].some(q => Game.boardable(m, me, q.col, q.row, selected))) hint += ` Or tap your ${esc(units[m.armies[me].find(q => Game.boardable(m, me, q.col, q.row, selected)).unit].name)} (gold outline) to hide this squad inside it.`;
@@ -1666,7 +1682,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
     }
     const extraBtns = `<span style="display:flex;gap:6px;flex-wrap:wrap">
         <button class="btn small" id="buy-deploy" ${can && Game.canBuyDeploy(m, me) ? '' : 'disabled'}>+1 deployment · ${Game.CONFIG.extraDeployCost}</button>
-        ${loanOffer() ? (Game.loanNow(m, me) ? `<button class="btn small" id="loan-undo" ${can && m.gold[me] >= Game.LOAN.gold ? '' : 'disabled'}>Pay back loan · −${Game.LOAN.gold}</button>` : `<button class="btn small" id="loan" ${can ? '' : 'disabled'}>Loan · +${Game.LOAN.gold}</button>`) : ''}
+        ${loanOffer() ? (Game.loanNow(m, me) ? `<button class="btn small" id="loan-undo" ${can && m.gold[me] >= Game.LOAN.gold ? '' : 'disabled'}>Pay back loan · −${Game.LOAN.gold}</button>` : `<button class="btn small" id="loan" ${can && Game.canTakeLoan(m, me) ? '' : 'disabled'}>Loan · +${Game.LOAN.gold}</button>`) : ''}
         ${mageOffer() ? `<button class="btn small" id="mage-gen" ${can ? '' : 'disabled'}>${Game.mageGenOf(m, me) || Game.mageTpOf(m, me) ? [Game.mageGenOf(m, me), Game.mageTpOf(m, me) && 'teleport'].filter(Boolean).map(id => esc(Game.mageGenInfo(id).name)).join(' + ') : 'Mage general'}…</button>` : ''}
         ${tskillOffer() ? `<button class="btn small" id="buy-tskill" ${can && Game.canBuyTowerSkill(m, me) ? '' : 'disabled'}>${esc(Game.towerType(m, me).skill.name)} · ${Game.towerSkillCost(m, me)}</button>` : ''}
         ${can && m.extraDeploys[me] > 0 && left > 0 ? `<button class="btn small" id="refund-deploy">Refund unused</button>` : ''}
@@ -1748,6 +1764,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
 
   function toggleReady() {
     if (phase !== 'deploy' || timeUp) return;
+    if (!ready[me]) commitPick();
     ready[me] = !ready[me];
     if (ready[me]) { selected = null; closeSheet(); }
     if (mode === 'guest') sendSide();
@@ -1759,7 +1776,7 @@ const tierColor = (t) => TIER_COLORS[Math.min(TIER_COLORS.length - 1, t - 1)];
     $('panel').innerHTML = `
       <div class="bar">
         <div class="seg" role="group" aria-label="Playback speed">
-          ${[1, 2, 4].map(s => `<button data-s="${s}" aria-pressed="${speed === s}">${s}×</button>`).join('')}
+          ${[1, 1.5, 2].map(s => `<button data-s="${s}" aria-pressed="${speed === s}">${s}×</button>`).join('')}
         </div>
         <button class="btn small" id="skip">Skip to result</button>
       </div>`;
@@ -2441,7 +2458,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   }
 
   function enterDeploy(ms) {
-    phase = 'deploy'; bt = null; battlePre = null; fx = []; selected = null; timeUp = false; resultShownAt = 0; elfPlacing = false;
+    phase = 'deploy'; bt = null; battlePre = null; fx = []; selected = null; rangeOf = null; timeUp = false; resultShownAt = 0; elfPlacing = false;
     ready = [false, false];
     heldMs = ms > 0 && mode !== 'guest' && picksPending() ? ms : 0;
     deadline = ms > 0 && !heldMs ? now() + ms : 0;
@@ -2483,6 +2500,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   function runFight() {
     if (phase !== 'deploy' || !m) return;
     if (mode === 'guest') return;
+    commitPick();
     if (mode === 'claude' && claude.busy) { if (!claude.fightWaiting) { claude.fightWaiting = true; selected = null; closeSheet(); panelDeploy(); } return; }
     closeSheet(); selected = null;
     if (mode === 'ai' || (mode === 'claude' && claude.bot)) lastAiLevels = Game.aiLevel(m, 1); // the AI spends its level-ups now
@@ -2614,7 +2632,15 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     hoverTile = tileAt(ev); render();
   });
   cv.addEventListener('pointerleave', () => { hoverTile = null; if (phase === 'deploy') render(); });
+  // a tap on the board clears the range ring; tapping a squad shows its range (a squad of yours from this round
+  // is taken back with a second tap)
   cv.addEventListener('click', (ev) => {
+    const had = rangeOf;
+    rangeOf = null;
+    boardTap(ev, had);
+    if (rangeOf !== had && phase === 'deploy') render();
+  });
+  function boardTap(ev, had) {
     if (phase !== 'deploy') return;
     const t = tileAt(ev); if (!t) return;
     if (choosingPack() || choosingTower()) return; // the package (and in round 3 the tower) comes first
@@ -2654,20 +2680,21 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       return;
     }
     if (own) {
+      rangeOf = { side: me, id: own.id };
       if (Game.riderOf(m, me, own)) openPairSheet(own, Game.riderOf(m, me, own));
-      else if (own.round === m.round) { if (editable() && Game.unplace(m, me, t.col, t.row)) changed(); }
+      else if (own.round === m.round) { if (had && had.side === me && had.id === own.id && editable() && Game.unplace(m, me, t.col, t.row)) { rangeOf = null; changed(); } }
       else openSheet(own.unit, own, me);
       return;
     }
     const enemy = m.armies[foe()].find(s => { const p = Game.seenAt(m, s); return !Game.hiddenFromFoe(m, s) && p.col === t.col && p.row === t.row && s.round < m.round; });
-    if (enemy) { openSheet(enemy.unit, enemy, foe()); return; }
+    if (enemy) { rangeOf = { side: foe(), id: enemy.id }; openSheet(enemy.unit, enemy, foe()); return; }
     if (selected !== null && editable() && Game.canPlaceAt(m, me, t.col, t.row, selected)) {
       if (Game.place(m, me, selected, t.col, t.row)) {
         if (!Game.freeLeft(m, me).includes(selected) && (m.gold[me] < Game.shopCost(m, me, selected) || Game.deploysLeft(m, me) <= 0)) selected = null;
         changed();
       }
     }
-  });
+  }
 
   // ---------- unit sheet ----------
   function unlockBlock(i, side) {
@@ -2752,7 +2779,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     let act;
     if (side !== me) act = took && phase !== 'deploy' ? chip('Took one', 'var(--foe)') : '';
     else if (took) act = chip('Taken', 'var(--gold)') + (phase === 'deploy' && editable() ? ` <button class="btn small" id="tloan-undo" ${m.gold[me] >= L.gold ? '' : 'disabled'}>Pay back · −${L.gold}</button>` : '');
-    else if (phase === 'deploy') act = `<button class="btn small${editable() ? ' primary' : ''}" id="tloan" ${editable() ? '' : 'disabled'}>Take · +${L.gold} gold</button>`;
+    else if (phase === 'deploy') { const ok = editable() && Game.canTakeLoan(m, me); act = `<button class="btn small${ok ? ' primary' : ''}" id="tloan" ${ok ? '' : 'disabled'}>${Game.bankBusy(m, me, 'loan') ? 'Not with an investment this round' : `Take · +${L.gold} gold`}</button>`; }
     else act = '';
     return abilityRow('Loan', act, esc(loanText()) + (side === me && took ? ` Next round: −${L.payback}.` : ''));
   }
@@ -2812,7 +2839,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     let act;
     if (side !== me) act = Game.towerSkill2Visible(m, side) || (owned && phase !== 'deploy') ? chip(`${esc(foeName())} has it`, 'var(--foe)') : '<span class="hint">Not bought</span>';
     else if (owned) act = chip('Owned', 'var(--gold)') + (phase === 'deploy' && editable() && m.towerSkill2[me] === m.round ? ' <button class="btn small" id="tskill2-undo">Undo</button>' : '');
-    else if (phase === 'deploy') act = editable() && Game.canBuyTowerSkill2(m, me) ? `<button class="btn small primary" id="tskill2">Buy · ${cost} gold</button>` : `<button class="btn small" disabled>${blocked ? `Needs ${esc(tt.skill.name)}` : m.gold[me] < cost ? `Need ${cost} gold` : `Buy · ${cost} gold`}</button>`;
+    else if (phase === 'deploy') act = editable() && Game.canBuyTowerSkill2(m, me) ? `<button class="btn small primary" id="tskill2">Buy · ${cost} gold</button>` : `<button class="btn small" disabled>${blocked ? `Needs ${esc(tt.skill.name)}` : Game.bankBusy(m, me, 'invest') ? 'Not with a loan this round' : m.gold[me] < cost ? `Need ${cost} gold` : `Buy · ${cost} gold`}</button>`;
     else act = `<span class="hint">${cost} gold</span>`;
     return abilityRow(sk.name, act, esc(sk.text) + (side === me && !owned ? ' Once per match; your opponent sees it after the next fight.' : ''));
   }
@@ -2988,7 +3015,8 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (u.trample > 0) tr.push(`Tramples (${u.trample}% hit)`);
     if (u.chargeStun > 0) tr.push(`Stunned ${u.chargeStun} s after a charge`);
     if (u.pctHit > 0) tr.push(`Hits +${u.pctHit}% of target’s health, past armor`);
-    if (u.deathBlast > 0) tr.push(`Death blast ${u.deathBlast}% health`);
+    if (u.deathBlast > 0) tr.push(`Death blast ${u.deathBlast}% health, ${u.blastAt > 0 ? u.blastAt : Engine.BLAST_RADIUS} m`);
+    if (u.dodge > 0) tr.push(`Dodges ${u.dodge}% of hits`);
     if (u.windUp > 0) tr.push(`Wind-up ${u.windUp} s`);
     if (u.defense === 'armor') tr.push(`Armor ${u.defVal}`);
     if (u.defense === 'ward') tr.push(`Ward ${u.defVal}`);
@@ -3442,7 +3470,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     // the guest's bank loan: an earlier one stays (it is paid back after this round's fight), one sent for this round is taken
     if (!m.loan) m.loan = [0, 0];
     if (!(m.loan[1] > 0 && m.loan[1] < m.round)) m.loan[1] = 0;
-    if ((d.loan | 0) === m.round && Game.towerPicked(m, 1) && Game.towerType(m, 1).id === 'bank') m.loan[1] = m.round;
+    if ((d.loan | 0) === m.round && Game.towerPicked(m, 1) && Game.towerType(m, 1).id === 'bank' && m.towerSkill2[1] !== m.round) m.loan[1] = m.round; // one bank ability a round
     // the guest's elf bribes: earlier ones stay, the ones sent for this round are taken (gold was checked on their side)
     if (!m.bribe) m.bribe = [[], []];
     const newBribes = Game.elfSpot(m) ? (Array.isArray(d.bribe) ? d.bribe : [d.bribe]).filter(r => (r | 0) === m.round).slice(0, 200) : [];

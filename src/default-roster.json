@@ -239,9 +239,29 @@
       "id": "explode",
       "type": "explode",
       "name": "Explode on death",
-      "cost": 400,
+      "cost": 200,
       "params": {
-        "pct": 30
+        "pct": 30,
+        "radius": 5
+      }
+    },
+    {
+      "id": "dodge",
+      "type": "dodge",
+      "name": "Dodge",
+      "cost": 200,
+      "params": {
+        "pct": 33
+      }
+    },
+    {
+      "id": "steelPlating",
+      "type": "armorHp",
+      "name": "Steel plating",
+      "cost": 300,
+      "params": {
+        "armor": 16,
+        "hp": 0
       }
     }
   ],
@@ -265,7 +285,7 @@
       "cost": 100,
       "bodies": 12,
       "hp": 26,
-      "hit": 17,
+      "hit": 19,
       "aps": 1.2,
       "range": 2,
       "speed": 8,
@@ -284,7 +304,10 @@
       ],
       "skillMods": [
         null,
-        null,
+        {
+          "params": {},
+          "cost": 50
+        },
         null
       ],
       "skillsInnate": [
@@ -609,17 +632,21 @@
       "color": "#00d200",
       "skills": [
         "rapid",
-        "range"
+        "range",
+        "dodge"
       ],
       "skillsOn": [
+        false,
         false,
         false
       ],
       "skillMods": [
         null,
+        null,
         null
       ],
       "skillsInnate": [
+        false,
         false,
         false
       ]
@@ -748,9 +775,11 @@
       "color": "#57535a",
       "skills": [
         "range",
-        "heavy"
+        "heavy",
+        "steelPlating"
       ],
       "skillsOn": [
+        false,
         false,
         false
       ],
@@ -761,9 +790,11 @@
             "slow": 20,
             "hit": 20
           }
-        }
+        },
+        null
       ],
       "skillsInnate": [
+        false,
         false,
         false
       ]
@@ -972,7 +1003,7 @@
       "name": "War Mammoth",
       "cost": 500,
       "bodies": 1,
-      "hp": 2300,
+      "hp": 2450,
       "hit": 169,
       "aps": 0.5,
       "range": 3,

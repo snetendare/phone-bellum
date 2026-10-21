@@ -38,7 +38,7 @@ const Game = (() => {
       skill2: { name: 'Brute guards', cost: 500, needs: true, text: 'Your guards are Brutes instead of Wisps: 4 of them, with every skill you have bought for Brutes. Needs Guards.' } },
     { id: 'sniper', name: 'Sniper tower', text: 'Shoots across most of the board, slowly, for double damage.', unit: { ...TOWER, name: 'Sniper Tower', kind: 'sniper', hp: 500, hit: 60, aps: 0.4, range: 32, color: '#B9C7D6' },
       skill: { name: 'Eagle eye', text: 'The sniper tower and all your Sniper squads get +3 m range and +10% attack speed.' },
-      skill2: { name: 'Deploy airship', cost: 500, text: 'Every fight, an airship takes off from the tower. It can’t be shot down. It flies toward the enemy, shoots like the sniper tower (Eagle eye included) and drops a paratrooper (a guard, like the keep’s) every 5 s, up to 6 at once. Passive: your sniper tower, the airship and all your Sniper squads deal +30 damage per hit.' } },
+      skill2: { name: 'Deploy airship', cost: 500, text: 'Every fight, an airship joins the fight. It can’t be shot down. It takes off in your half of no man’s land, flies toward the enemy, shoots like the sniper tower (Eagle eye included) and drops a paratrooper (a guard, like the keep’s) every 5 s, up to 6 at once. Passive: your sniper tower, the airship and all your Sniper squads deal +30 damage per hit.' } },
     { id: 'bastion', name: 'Bastion', text: 'Much tougher, with a shorter, slower attack that splashes the units around its target.', unit: { ...TOWER, name: 'Bastion', kind: 'bastion', hp: 1000, aps: 0.8, range: 5, splash: 2, color: '#B79C8A' },
       skill: { name: 'Home ground', text: 'In fights, your units get +2 armor and +10% health while they stand in your own zone. They lose it in no man’s land and get it back if they return.' },
       skill2: { name: 'Moats', cost: 250, text: 'A ring of fire around the bastion: 12 damage 4 times a second to every enemy within 5 m, like a Flame Wizard’s flames.' } },
@@ -46,7 +46,7 @@ const Game = (() => {
       generals: true }, // no once-per-match skill: a mage general can be called every round instead (MAGE_GENERALS)
     { id: 'bank', name: 'Bank tower', text: 'Sturdy, with an attack between the keep and the sniper tower: medium range, medium fire rate.', unit: { ...TOWER, name: 'Bank Tower', kind: 'bank', hp: 700, hit: 45, aps: 0.6, range: 18, color: '#D9B95B' },
       loan: true, // a loan can be taken every round (LOAN)
-      skill2: { name: 'Major investment', cost: 500, noFree: true, text: 'Pay 500 gold now and get 1000 gold at the start of next round. Once per match.' } }, // see resolve
+      skill2: { name: 'Major investment', cost: 500, noFree: true, text: 'Pay 500 gold now and get 1000 gold at the start of next round. Once per match, and not in a round you take a loan.' } }, // see resolve
     { id: 'slime', name: 'Slime tower', text: 'Lobs splashing slime globs like one Slimeshots body, with 5 m more range.', unit: { ...TOWER, name: 'Slime Tower', kind: 'slime', hit: 7, aps: 0.8, range: 26, splash: 3, projSpeed: 30, spinUp: 0.1, color: '#7BD93F' },
       passive: { name: 'Slime lore', text: 'Every skill you buy for Slime Wizards or Slimeshots works on the slime tower too.' } }, // see slimeTowerUnit
   ];
@@ -109,7 +109,7 @@ const Game = (() => {
   const towerSkill2Of = (m, side) => !!(m && m.towerSkill2 && m.towerSkill2[side] > 0);
   const towerSkill2Visible = (m, side) => towerSkill2Of(m, side) && m.towerSkill2[side] < m.round;
   const towerSkill2Cost = (m, side) => { const sk = towerType(m, side).skill2; if (!sk) return 0; return !sk.noFree && (m.towerSkill2 && m.towerSkill2[side] === m.round ? isMapFree(m, side, { kind: 'tskill2' }) : mapFreeLeft(m, side)) ? blix(sk.cost) : sk.cost; };
-  const canBuyTowerSkill2 = (m, side) => { const sk = towerType(m, side).skill2; return towerPicked(m, side) && !!sk && !towerSkill2Of(m, side) && (!sk.needs || towerSkillOf(m, side)) && m.gold[side] >= towerSkill2Cost(m, side); };
+  const canBuyTowerSkill2 = (m, side) => { const sk = towerType(m, side).skill2; return towerPicked(m, side) && !!sk && !towerSkill2Of(m, side) && (!sk.needs || towerSkillOf(m, side)) && !bankBusy(m, side, 'invest') && m.gold[side] >= towerSkill2Cost(m, side); };
   function buyTowerSkill2(m, side) {
     if (!canBuyTowerSkill2(m, side)) return false;
     if (!m.towerSkill2) m.towerSkill2 = [0, 0];
@@ -139,11 +139,11 @@ const Game = (() => {
   // it was bought. Hidden from the opponent until the fight.
   const MAGE_GENERALS = [
     { id: 'meteor', name: 'Meteor mage general', cost: 100, text: 'The tower calls down meteors like a Meteor Caller, with its range and minimum range, but at 25% of its damage and half its fire rate.' },
-    { id: 'lightning', name: 'Lightning mage general', cost: 50, text: 'Lightning at the tower’s normal range: 100 damage to the first enemy, then it jumps up to 5 times to the nearest enemy not hit yet within 6 m, for 60 each.' },
+    { id: 'lightning', name: 'Lightning mage general', cost: 50, text: 'Lightning at 3 m more than the tower’s normal range: 100 damage to the first enemy, then it jumps up to 5 times to the nearest enemy not hit yet within 6 m, for 60 each.' },
     { id: 'water', name: 'Water mage general', cost: 50, text: 'The tower stops attacking and heals instead: 100 health to your most wounded unit within 40 m, 0.8 times a second.' },
     { id: 'teleport', name: 'Teleport mage general', cost: 100, extra: true, text: 'Can be called on top of another general. The tower keeps its attack. When it falls, your army isn’t crippled: instead the tower teleports to a random tile anywhere on the board with 1 health.' },
   ];
-  const MAGE = { meteorHit: 25, meteorAps: 50, boltHit: 100, boltAps: 0.8, jumps: 5, jumpHit: 60, jumpReach: 6, waterHeal: 100, waterAps: 0.8, waterRange: 40 };
+  const MAGE = { meteorHit: 25, meteorAps: 50, boltHit: 100, boltAps: 0.8, boltRange: 3, jumps: 5, jumpHit: 60, jumpReach: 6, waterHeal: 100, waterAps: 0.8, waterRange: 40 };
   const METEOR = { hit: 114, aps: 0.3, range: 50, minRange: 12, burst: 3, splash: 6, windUp: 2, projSpeed: 22 }; // used when the roster has no Meteor Caller
   const mageGenInfo = (id) => MAGE_GENERALS.find(x => x.id === id) || null;
   const isExtraGen = (id) => !!(mageGenInfo(id) || {}).extra;
@@ -201,7 +201,7 @@ const Game = (() => {
       const mc = (m.units || []).find(x => x && x.name === 'Meteor Caller') || METEOR;
       return { ...plain, hit: mc.hit * MAGE.meteorHit / 100, aps: mc.aps * MAGE.meteorAps / 100, range: mc.range, minRange: mc.minRange || 0, burst: mc.burst || 1, splash: mc.splash || 0, windUp: mc.windUp || 0, projSpeed: mc.projSpeed || 0, general: id };
     }
-    if (id === 'lightning') return { ...plain, hit: MAGE.boltHit, aps: MAGE.boltAps, chain: { jumps: MAGE.jumps, hit: MAGE.jumpHit, reach: MAGE.jumpReach }, general: id };
+    if (id === 'lightning') return { ...plain, hit: MAGE.boltHit, aps: MAGE.boltAps, range: plain.range + MAGE.boltRange, chain: { jumps: MAGE.jumps, hit: MAGE.jumpHit, reach: MAGE.jumpReach }, general: id };
     if (id === 'water') return { ...plain, hit: 0, mend: MAGE.waterHeal, aps: MAGE.waterAps, range: MAGE.waterRange, general: id };
     return base;
   }
@@ -219,7 +219,12 @@ const Game = (() => {
   // the rest) is LOAN.payback less, never below nothing. m.loan[side] = the round the last loan was taken in.
   const LOAN = { gold: 200, payback: 300 };
   const loanNow = (m, side) => !!(m && m.loan && m.loan[side] === m.round);
-  const canTakeLoan = (m, side) => towerPicked(m, side) && towerType(m, side).id === 'bank' && !loanNow(m, side);
+  const canTakeLoan = (m, side) => towerPicked(m, side) && towerType(m, side).id === 'bank' && !loanNow(m, side) && !bankBusy(m, side, 'loan');
+  // the bank's abilities are one per round: a loan or the Major investment, not both. bankBusy(m, side, want) = the other one was used this round
+  function bankBusy(m, side, want) {
+    if (!m || towerType(m, side).id !== 'bank') return false;
+    return want === 'loan' ? !!(m.towerSkill2 && m.towerSkill2[side] === m.round) : loanNow(m, side);
+  }
   function takeLoan(m, side) {
     if (!canTakeLoan(m, side)) return false;
     if (!m.loan) m.loan = [0, 0];
@@ -259,14 +264,14 @@ const Game = (() => {
     { id: 'wilhelm', name: 'Wilhelm', ability: 'Your squads on flank tiles and in no man’s land get +4 armor, and flank squads start twice as fast.' },
     { id: 'blixten', name: 'Blixten', ability: 'Your first map or tower purchase each round is 100 gold cheaper: a bribe, an offering at the altar of ice, your own elf tower, removing a mushroom tile, a tower skill or a mage general (not the bank’s Major investment).' },
     { id: 'noah', name: 'Noah - The Bog', ability: 'Squads you buy in the shop start at level 2. Each costs its price plus one upgrade. All your units have 10% less health and damage.' },
-    { id: 'phil', name: 'Phil', ability: 'Tier 4 units are 100 gold cheaper to unlock.' },
+    { id: 'phil', name: 'Phil', ability: 'Tier 4 units are 100 gold cheaper to unlock and 50 gold cheaper to buy.' },
     { id: 'yotyot', name: 'Yot-Yot', ability: 'Every fight, Ember Imps pop up on random free tiles on your side of the board (your zone, no man’s land and, once open, your flank tiles): 1 in round 1, 2 in round 2, and so on. From round 3 they are level 2, from round 6 level 3. They get the skills you bought for Ember Imps.' },
     { id: 'mubarak', name: 'Mubarak - Slime Lord', ability: 'Your slime units (Slime Wizards and Slimeshots) get every skill you buy for any slime unit, not just their own.' },
-    { id: 'felix', name: 'Felix', ability: 'From round 3 on, you get 50 more gold every round.' },
+    { id: 'felix', name: 'Felix', ability: 'From round 3 on, you get 50 more gold every round, and 100 more from round 7 on.' },
     { id: 'enzo', name: 'Enzo', ability: 'You can’t buy unit skills, but each unit type comes with one random skill, for free, picked at the start of the match and the same for all your squads of it all match (see it under the unit’s i button). The skill only works while you have 2 or more squads of that unit.' },
     { id: 'matteo', name: 'Matteo - the Gentleman', ability: 'Give one of your squads a stack of Charisma. When a squad with Charisma kills an enemy, it gains a stack and gives one to a squad of yours without any. At 5 stacks a squad is a Gentleman: the first enemy it would kill each fight joins your side for that fight instead, at half health.' },
   ];
-  const CHAR = { cageHp: 10, zoeTiles: 2, zoeDmg: [10, 20, 30, 40], zoeHp: [10, 20, 30, 40], zoeAps: [0, 5, 10, 15], wilhelmArmor: 4, wilhelmDelay: 0.5, noahLevel: 1, noahCut: 10, enzoMin: 2, philTier: 4, philOff: 100, yotUnit: 'Ember Imps', yotLv2: 3, yotLv3: 6, felixRound: 3, felixGold: 50 };
+  const CHAR = { cageHp: 10, zoeTiles: 2, zoeDmg: [10, 20, 30, 40], zoeHp: [10, 20, 30, 40], zoeAps: [0, 5, 10, 15], wilhelmArmor: 4, wilhelmDelay: 0.5, noahLevel: 1, noahCut: 10, enzoMin: 2, philTier: 4, philOff: 100, philBuy: 50, yotUnit: 'Ember Imps', yotLv2: 3, yotLv3: 6, felixRound: 3, felixGold: 50, felixRound2: 7, felixGold2: 100 };
   // ---------- Matteo's charisma ----------
   // sq.charm = Charisma stacks on a squad, kept between rounds; they grow in fights (see Engine: opts.charm).
   // Matteo gives the first stack to a squad of his choice (again whenever none of his squads has any, e.g. after
@@ -383,11 +388,12 @@ const Game = (() => {
   // whether one more push would still move the band: it stops at the edge of the opponent's zone
   const pushRoom = (m, side) => { const off = stormShift(m, m.round + 1); return side === 0 ? off < ZONE : off > -ZONE; };
   const altarBought = (m, side, type) => altarBuys(m).some(b => b.side === side && b.type === type && b.round === m.round);
-  // a Snowgre's spot: a random tile in its owner's half of no man's land, picked when it is summoned
+  // a Snowgre's spot: a random tile in its owner's half of no man's land (never the flank columns), picked when it is summoned
   function snowSpot(m, side, k) {
     const r = rng(m.seed + side * 7717 + k * 313 + 3);
     const rows = Array.from({ length: ROWS / 2 - ZONE }, (_, i) => side === 0 ? ROWS / 2 + i : ROWS / 2 - 1 - i);
-    return { col: Math.floor(r() * COLS), row: rows[Math.floor(r() * rows.length)] };
+    const cols = Array.from({ length: COLS }, (_, c) => c).filter(c => !FLANK.cols.includes(c));
+    return { col: cols[Math.floor(r() * cols.length)], row: rows[Math.floor(r() * rows.length)] };
   }
   // add a purchase without paying (paying is buyAltar's job; the host also uses this for the guest's purchases)
   function addAltar(m, side, type) {
@@ -430,7 +436,7 @@ const Game = (() => {
   const SHROOM_SPLIT = { purple: 2, yellow: 1, green: 2 };
   const SHROOM = { purpleDmg: 10, purpleHp: 10, purpleAps: 5, speed: 30, poisonPct: 3, poisonDur: 4, slowMove: 40, slowAtk: 20, slowDur: 3 }; // poisonPct: % of max health per second
   // healHit/healAps/healSplash: the small splash heal it throws on the units of the player ahead in the bribe-off
-  const ELF_TOWER = { name: 'Elf Tower', cost: 0, bodies: 1, hp: 1, hit: 20, aps: 0.5, range: 12, speed: 0, splash: 0, structure: true, healHit: 15, healAps: 0.4, healSplash: 2.5 };
+  const ELF_TOWER = { name: 'Elf Tower', cost: 0, bodies: 1, hp: 1, hit: 20, aps: 0.5, range: 18, speed: 0, splash: 0, structure: true, healHit: 15, healAps: 0.4, healSplash: 2.5 };
   // The bribe-off: either player can bribe the elves any number of times. The first bribe in a round costs BRIBE_COST
   // gold and each further one that round BRIBE_COST more (50, 100, 150, ...). In every fight the
   // elf tower sides with whoever has bribed it the most times over the whole match (not the most gold): it never shoots their units and heals them,
@@ -955,9 +961,11 @@ const Game = (() => {
     m.towers[side] = towerSpot(m, side);
   }
 
-  // what a squad costs a player in the shop, and the level it starts at: Noah's start CHAR.noahLevel levels up, paying for them
+  // what a squad costs a player in the shop, and the level it starts at: Noah's start CHAR.noahLevel levels up, paying for them;
+  // Phil's tier 4 squads are CHAR.philBuy gold cheaper
   const startLevel = (m, side) => charOf(m, side) === 'noah' ? CHAR.noahLevel : 0;
-  const shopCost = (m, side, ui) => unitCostOf(m.units[ui]) + startLevel(m, side) * levelCost(m.units[ui]);
+  const shopCost = (m, side, ui) => unitCostOf(m.units[ui]) + startLevel(m, side) * levelCost(m.units[ui])
+    - (charOf(m, side) === 'phil' && tierOf(m.units, ui) === CHAR.philTier ? CHAR.philBuy : 0);
   function place(m, side, unitIdx, col, row) {
     if (!canPlaceAt(m, side, col, row, unitIdx)) return null;
     if (needsTower(m, side)) return null; // the tower goes down first
@@ -1063,7 +1071,8 @@ const Game = (() => {
         const para = E.withTraits({ ...plain, name: 'Paratrooper', level: 0, bodies: 1, shape: 'diamond', color: '#E2D3A6' });
         const au = E.withTraits({ ...tu, name: 'Airship', kind: 'airship', structure: false, aloft: true, hp: 1, speed: AIRSHIP.speed, hover: AIRSHIP.hover,
           spawn: { unit: para, count: 1, every: AIRSHIP.every, max: AIRSHIP.max, waves: 0 } });
-        const ab = E.buildSquad(au, side, w.x, w.y, -4, TILE, idx);
+        const aw = tileToWorld(t.col, side === 0 ? ROWS - ZONE - 1 : ZONE); // it takes off from the front row of its side's half of no man's land
+        const ab = E.buildSquad(au, side, aw.x, aw.y, -4, TILE, idx);
         idx += ab.length; out.push(...ab);
       }
     }
@@ -1083,6 +1092,19 @@ const Game = (() => {
       }
     }
     return out;
+  }
+
+  // the range a squad fights at (its skills, Eagle eye, the map's range cut), as bodiesFor works it out.
+  // pub: as the opponent can know it (skills and a tower skill bought this round left out)
+  function squadRange(m, side, sq, pub) {
+    const ui = sq.unit, base = m.units[ui];
+    let u = unitFor(m, side, ui, sq);
+    if (pub) { const defs = E.SLOTS.filter(k => skillVisible(m, side, ui, k)).map(k => skillDef(m, ui, k)); u = withFactionTrait(defs.length ? E.applySkills(base, defs, m.units) : E.withTraits(base), base.faction); }
+    let r = u.range;
+    if (u.name === 'Sniper' && towerSkillOn(m, side, 'sniper') && (!pub || towerSkillVisible(m, side))) r += TOWER_SKILL.eagleRange;
+    const mp = mapOf(m);
+    if (mp && mp.rangeCut && r > mp.rangeKeep) r = Math.max(mp.rangeKeep, r * (1 - mp.rangeCut / 100));
+    return r;
   }
 
   // ---------- Yot-Yot's imps ----------
@@ -1145,7 +1167,9 @@ const Game = (() => {
     return E.createBattle(bodiesFor(m, 0), bodiesFor(m, 1), g, { record: true, tiles, neutrals, charm: [charmMap(m, 0), charmMap(m, 1)] });
   }
 
-  // Damage a side deals = points of its squads, scaled by how much of each squad is still alive
+  // Damage a side deals = points of its squads, scaled by how much of each squad is still alive.
+  // TIER_DMG: a share for the squads of a tier (tier 3 squads deal 25% less than their price would)
+  const TIER_DMG = { 3: 0.75 };
   function survivorDamage(m, res, side) {
     let sum = 0;
     for (const k in res.squads) {
@@ -1154,7 +1178,7 @@ const Game = (() => {
       if (s.squad <= -10 && s.squad > YOT_SQUAD) { const sg = snowgres(m, side)[-10 - s.squad]; if (sg) sum += SQUAD_POINTS * GOLEM.cost * sg.strength * s.alive / s.total; continue; } // a Snowgre
       if (s.squad < 0) continue; // spawned bodies don't count
       const sq = m.armies[side].find(q => q.id === s.squad);
-      const value = sq ? (m.units[sq.unit].cost || 1) : 1; // pricier squads hit harder, like their price
+      const value = sq ? (m.units[sq.unit].cost || 1) * (TIER_DMG[tierOf(m.units, sq.unit)] || 1) : 1; // pricier squads hit harder, like their price
       sum += SQUAD_POINTS * value * s.alive / s.total;
     }
     return sum > 0 ? Math.min(MAX_ROUND_DMG, Math.max(1, Math.round(sum))) : 0; // at most MAX_ROUND_DMG per round
@@ -1253,8 +1277,8 @@ const Game = (() => {
     return summary;
   }
 
-  // Felix: extra gold every round from CHAR.felixRound on (on top of the income)
-  const felixGold = (m, side, round = m.round) => charOf(m, side) === 'felix' && round >= CHAR.felixRound ? CHAR.felixGold : 0;
+  // Felix: extra gold every round from CHAR.felixRound on, more from CHAR.felixRound2 on (on top of the income)
+  const felixGold = (m, side, round = m.round) => charOf(m, side) !== 'felix' ? 0 : round >= CHAR.felixRound2 ? CHAR.felixGold2 : round >= CHAR.felixRound ? CHAR.felixGold : 0;
 
   // ---------- leveling (manual, costs gold) ----------
   const isReady = (m, sq) => sq.level < E.MAX_LEVEL && sq.xp >= xpNeeded(m.units[sq.unit], sq.level);
@@ -1530,7 +1554,7 @@ const Game = (() => {
   }
 
   return {
-    MAX_ROUND_DMG, seenAt, movedId, canMove, moveSquad, undoMove,
+    MAX_ROUND_DMG, TIER_DMG, bankBusy, seenAt, movedId, canMove, moveSquad, undoMove,
     COLS, ROWS, TILE, ZONE, START_HP, START_GOLD, INCOME, incomeFor, LOSER_BONUS, SQUAD_COST, SQUAD_POINTS, SETTINGS, XP_STEPS, xpNeeded, unitCostOf,
     levelCost, isReady, levelUp, undoLevel, seenLevel, aiLevel, AI, CONFIG,
     deploysAllowed, deploysLeft, deployedThisRound, canBuyDeploy, buyDeploy, refundDeploy,
@@ -1545,7 +1569,7 @@ const Game = (() => {
     CHARACTERS, CHAR, charOf, charInfo, enzoSkill, enzoActive, charmOf, isGentleman, canGiveCharm, giveCharm, undoCharm, ensureCharm, felixGold, isTier1, rollBuffTiles, onBuffTile, zoeBuff, yotImps, yotLevel, TOWER_SPOT, towerSpot,
     FACTION_MODE, FACTIONS: () => FACTIONS, setFactions, factionInfo, factionsOf, factionTowers, towerTypeById, ownsUnit, withFactionTrait, factionSet,
     createDraft, draftTurn, draftOpen, draftAct, draftDone, draftPossible, aiDraftChoice,
-    zoneRows, inZone, tileToWorld, createMatch, place, unplace, bodiesFor, startBattle, resolve, aiDeploy, occupied,
+    zoneRows, inZone, tileToWorld, squadRange, createMatch, place, unplace, bodiesFor, startBattle, resolve, aiDeploy, occupied,
   };
 })();
 if (typeof module !== 'undefined') module.exports = Game;
