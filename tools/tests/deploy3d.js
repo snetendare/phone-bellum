@@ -36,7 +36,7 @@ const { chromium } = require('playwright-core');
   await tap(...c);
   s = await st(); console.log('taken back:', !s.army.some(q => q.id === placed.id), 'gold', s.gold);
   // the angled view: placing, dragging and taking back work there too; the Strategic chip goes back
-  await p.click('#levels .chip:nth-child(2)'); await p.waitForFunction(() => window.__lab3d.board.camera.handsOn()); await p.waitForTimeout(300);
+  await p.click('#levels .chip:nth-child(3)'); await p.waitForFunction(() => window.__lab3d.board.camera.handsOn()); await p.waitForTimeout(300);
   const lv = () => p.evaluate(() => window.__lab3d.board.camera.level());
   console.log('angled: level', await lv(), '| help:', await p.locator('#help').textContent());
   await p.evaluate(() => { window.__lab3d.selected = null; });

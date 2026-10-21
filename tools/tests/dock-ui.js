@@ -1,8 +1,8 @@
 // The phone layout and the new 3D camera bits. On a phone (390 x 664) in a match, on both boards: the board fills the
 // screen width, the deploy panel is a drawer docked at the bottom, up at the start of the round; a pick from the shop
-// puts it down and shows the task line over the board, whose X stops placing (the drawer comes back up); Hide / Shop
+// puts it down and shows the task line over the board, whose X stops placing (the drawer comes back up); the blue pull tab slides it (held and dragged) or toggles it (a tap) and
 // move it; a fight docks the speed bar. On a PC window, none of that (the panel sits beside the board, on 3D too).
-// On the 3D board: the Tilted view from Settings (the whole board fits, a tap still places a squad there), and the
+// On the 3D board: the Tilted view, one step in from Strategic (the whole board fits, a tap still places a squad there), and the
 // battle cam's focus (closer in on its point, then back out). Screenshots go to the current folder.
 const { chromium } = require('playwright-core');
 const dock = require('./dock');
@@ -41,10 +41,21 @@ const dock = require('./dock');
     await p.click('#task-x'); await p.waitForTimeout(300);
     l = await lay(p);
     check(!l.shut && !l.task && await p.evaluate(() => !document.querySelector('#shop .ucard[aria-pressed="true"]')), `${board}: X stops placing, the drawer comes back`);
+    const tab = () => p.evaluate(() => { const t = document.getElementById('dock-toggle'), r = t.getBoundingClientRect(), q = document.getElementById('panel').getBoundingClientRect();
+      return { text: t.textContent.trim(), up: !!t.querySelector('path[d^="M1 7.5"]'), down: !!t.querySelector('path[d^="M1 1.5"]'), x: r.left + r.width / 2, y: r.top + r.height / 2, onEdge: Math.abs(r.bottom - q.top) < 2, centred: Math.abs(r.left + r.width / 2 - innerWidth / 2) < 2 }; });
+    let tb = await tab();
+    check(tb.text === '' && tb.down && tb.onEdge && tb.centred, `${board}: drawer up: the tab sits centred on its top edge, arrows down`);
+    const drag = async (dy) => { const t = await tab(); await p.mouse.move(t.x, t.y); await p.mouse.down(); for (let k = 1; k <= 6; k++) await p.mouse.move(t.x, t.y + dy * k / 6); await p.mouse.up(); await p.waitForTimeout(400); };
+    await drag(260); l = await lay(p); tb = await tab();
+    check(l.shut && tb.text === 'Shop' && tb.up && tb.onEdge, `${board}: sliding the tab down puts the drawer down; the tab says Shop, arrows up`);
+    await drag(-260); l = await lay(p);
+    check(!l.shut && (await tab()).down, `${board}: sliding it up brings the drawer up`);
+    await drag(40); l = await lay(p);
+    check(!l.shut, `${board}: a short slide springs back`);
     await dock.down(p); l = await lay(p);
-    check(l.shut && await p.locator('#dock-toggle').textContent() === 'Shop ▴', `${board}: Hide puts it down`);
+    check(l.shut, `${board}: a tap on the tab puts it down`);
     await dock.up(p); l = await lay(p);
-    check(!l.shut && await p.locator('#dock-toggle').textContent() === 'Hide ▾', `${board}: Shop brings it up`);
+    check(!l.shut, `${board}: a tap brings it up`);
     await p.click('#fight'); await p.waitForTimeout(800);
     l = await lay(p);
     check(l.dock && await p.locator('#panel [data-s]').count() === 3, `${board}: the fight's speed bar is docked`);
@@ -61,8 +72,11 @@ const dock = require('./dock');
 
   // 3D: the Tilted view, and the battle cam
   const p = await open('3d', 390, 664, true);
-  await p.click('#cog'); await p.click('[data-v3d="tilted"]'); await p.click('#close'); await p.waitForTimeout(800);
-  check(await p.evaluate(() => window.__pb().board3d.camera.home() === 'tilted' && localStorage.getItem('phone-bellum-3d-view') === 'tilted'), 'Tilted view on, saved');
+  // the wheel steps a level in: Strategic -> Tilted
+  const cv = await p.evaluate(() => { const r = document.querySelector('.board3d canvas').getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; });
+  await p.mouse.move(...cv); await p.mouse.wheel(0, -100);
+  await p.waitForFunction(() => window.__pb().board3d.camera.handsOn() && window.__pb().board3d.camera.level() === 1, null, { timeout: 15000 }).catch(() => {}); await p.waitForTimeout(300);
+  check(await p.evaluate(() => window.__pb().board3d.camera.level() === 1), 'one step in from Strategic is the Tilted view');
   const corners = await p.evaluate(() => { const bd = window.__pb().board3d, r = document.querySelector('.board3d canvas').getBoundingClientRect();
     return [[0, 0], [11, 0], [0, 15], [11, 15]].map(([c, w]) => bd.screenAt(c, w, 0)).every(([x, y]) => x >= r.left && x <= r.right && y >= r.top && y <= r.bottom); });
   check(corners, 'the tilted view shows the whole board');
@@ -91,8 +105,10 @@ const dock = require('./dock');
   await p.evaluate(() => window.__pb().board3d.camera.focus(0));
   await settle();
   check(Math.abs(await span() - s0) < 2, 'battle cam: back to the home view after');
-  await p.click('#cog'); await p.click('[data-v3d="top"]'); await p.click('#close'); await p.waitForTimeout(600);
-  check(await p.evaluate(() => window.__pb().board3d.camera.home() === 'top'), 'From above again');
+  await p.evaluate(() => window.__pb().board3d.camera.setLevel(2)); await settle();
+  check(await p.evaluate(() => window.__pb().board3d.camera.level() === 2), 'the next step in is Angled');
+  await p.keyboard.press('Escape'); await settle();
+  check(await p.evaluate(() => window.__pb().board3d.camera.strategic()), 'Esc goes back to Strategic');
 
   await b.close();
   console.log(fails ? `${fails} failed` : 'all ok');

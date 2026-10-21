@@ -131,7 +131,7 @@ const board = Render3D(THREE, $('view'), () => ({ m, me: ME, phase, units, mode:
   onPress: press, onDrag: dragTo, onDrop: drop,
   onHover: (t) => { hoverTile = t; },
   placing: () => player && phase === 'deploy', // you can place in the angled view too
-  onLevel: (lv) => { if (lv > 1 || !(player && phase === 'deploy')) hoverTile = null; help(lv); },
+  onLevel: (lv) => { if (lv > 2 || !(player && phase === 'deploy')) hoverTile = null; help(lv); },
 });
 // the level chips switch views (in the angled view a tap places, so it no longer goes back)
 [...$('levels').children].forEach((c, k) => c.addEventListener('click', () => board.camera.setLevel(k)));
@@ -139,8 +139,8 @@ function showLevel() { [...$('levels').children].forEach((c, k) => c.classList.t
 // the help line for a view: none in the strategic view while deploying (the shop says what to do)
 function help(lv = board.camera.level()) {
   const deploying = player && phase === 'deploy';
-  $('help').hidden = deploying && lv === 0;
-  $('help').textContent = deploying && lv === 1
+  $('help').hidden = deploying && lv <= 1;
+  $('help').textContent = deploying && lv === 2
     ? (touch ? 'Tap a tile to place · drag a new squad to move it · drag elsewhere to look around · pinch or tap Strategic to go back'
       : 'Click a tile to place · drag a new squad to move it · drag elsewhere to look around · scroll, Esc or Strategic to go back')
     : touch ? 'Spread two fingers to go in · drag to look around · twist two fingers to rotate · tap to go back'

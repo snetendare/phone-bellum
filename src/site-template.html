@@ -199,16 +199,20 @@ html.pc #wrap { width: min(calc(100vw - 32px - 460px), calc((100svh - 110px) * 0
 html.pc .shop { display: grid; grid-template-columns: repeat(auto-fill, minmax(124px, 1fr)); overflow-x: visible; }
 html.pc .sheet { max-width: 640px; }
 /* Phone in a match (html.dock, see dock()): the board fills the screen above a panel docked at the bottom. While
-   deploying the panel is a drawer: Shop opens it over the bottom of the board, Hide (or picking a unit) closes it to
-   its last row. A task on the board (placing a unit, Move, Charisma, a tower) shows in a line over the board, with an X. */
+   deploying the panel is a drawer with a blue pull tab on its top edge: hold the tab and slide the drawer up over the
+   bottom of the board or down to its last row (a tap on the tab works too; picking a unit also puts it down). A task on the board (placing a unit, Move, Charisma, a tower) shows in a line over the board, with an X. */
 html.dock body { padding-inline: 6px; padding-bottom: calc(var(--dock-h, 64px) + 6px); }
 html.dock #wrap { width: min(100%, calc(var(--board-h, 480px) * 0.75)); min-width: 0; }
 html.dock #wrap:has(> .board3d) { width: 100%; aspect-ratio: auto; height: var(--board-h, 480px); } /* the 3D camera fits the board to any shape */
 html.dock .panel { position: fixed; left: 0; right: 0; bottom: 0; z-index: 4; max-width: 560px; margin: 0 auto; max-height: 62svh; overflow-y: auto; border-bottom: 0; border-radius: 10px 10px 0 0; box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.45); }
 html.dock .panel.shut > :not(:last-child) { display: none; }
 html.dock .panel.shut > .bar:last-child { margin-top: 0; padding-top: 0; }
-.dock-toggle, .dock-gold { display: none; }
-html.dock .dock-toggle { display: inline-flex; align-items: center; }
+.dock-gold, .dock-tab { display: none; }
+html.dock .dock-tab { position: fixed; left: 50%; bottom: var(--dock-h, 64px); transform: translateX(-50%); z-index: 4; display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  height: 28px; min-width: 76px; padding: 0 16px; border: 0; border-radius: 14px 14px 0 0; background: var(--you); color: var(--bg); font: 600 13px var(--font-display);
+  letter-spacing: 0.04em; touch-action: none; user-select: none; -webkit-user-select: none; box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.35); cursor: grab; }
+html.dock .dock-tab:active { cursor: grabbing; }
+.dock-tab svg { display: block; }
 html.dock .panel.shut .dock-gold { display: inline; font-size: 15px; }
 .task { position: absolute; top: 30px; left: 10%; right: 10%; z-index: 3; display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 10px; border: 1px solid var(--you); border-radius: 6px; background: rgba(13, 19, 21, 0.9); font-size: 12px; line-height: 1.35; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45); }
 .task span { flex: 1; min-width: 0; }
@@ -241,6 +245,7 @@ html.dock .panel.shut .dock-gold { display: inline; font-size: 15px; }
   </div>
 
   <div class="panel" id="panel"></div>
+  <button class="dock-tab" id="dock-toggle" aria-controls="panel" hidden></button>
 </div>
 
 <div class="dd" id="stats-dd" hidden role="dialog" aria-label="Damage last round"></div>
@@ -570,12 +575,6 @@ html.dock .panel.shut .dock-gold { display: inline; font-size: 15px; }
           <button data-board="2d" aria-pressed="${!want3d}">2D</button><button data-board="3d" aria-pressed="${want3d}">3D</button>
         </div>
       </div>
-      <div class="bar q3d-bar"${want3d ? '' : ' hidden'}>
-        <span class="hint">3D view</span>
-        <div class="seg" role="group" aria-label="3D view">
-          <button data-v3d="top" aria-pressed="${view3d === 'top'}">From above</button><button data-v3d="tilted" aria-pressed="${view3d === 'tilted'}">Tilted</button>
-        </div>
-      </div>
       <div class="bar q3d-bar" id="q3d-bar"${want3d ? '' : ' hidden'}>
         <span class="hint">3D quality</span>
         <div class="seg" role="group" aria-label="3D quality">
@@ -613,10 +612,6 @@ html.dock .panel.shut .dock-gold { display: inline; font-size: 15px; }
       set3d(b.dataset.board === '3d');
       $('sheet').querySelectorAll('[data-board]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
       $('sheet').querySelectorAll('.q3d-bar').forEach(x => { x.hidden = !want3d; });
-    }));
-    $('sheet').querySelectorAll('[data-v3d]').forEach(b => b.addEventListener('click', () => {
-      setView3d(b.dataset.v3d);
-      $('sheet').querySelectorAll('[data-v3d]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
     }));
     $('sheet').querySelectorAll('[data-q3d]').forEach(b => b.addEventListener('click', () => {
       setQuality(b.dataset.q3d);
@@ -725,11 +720,15 @@ html.dock .panel.shut .dock-gold { display: inline; font-size: 15px; }
   const size = () => (board3d || board).size();
   // ---------- phone layout: the board fills the screen, the panel docks at the bottom (CSS: html.dock) ----------
   // In a match on a phone the panel is fixed to the bottom of the screen and the board takes the height above it.
-  // While deploying the panel is a drawer: open at the start of each round, shut by its button, by a pick from the shop,
-  // or a task that needs the board (dockTask, set by panelDeploy); a task shows as a line over the board, and its X
-  // stops it (stopTask). Runs whenever the panel changes, the window resizes or the connection line comes or goes.
-  let dockOpen = true, dockRound = 0, dockTask = null, dockH = 64, boardH = 0;
+  // While deploying the panel is a drawer: open at the start of each round. Its blue pull tab (#dock-toggle, sitting on
+  // the drawer's top edge) slides it: hold it and drag the drawer up or down, or tap it. A pick from the shop or a task
+  // that needs the board (dockTask, set by panelDeploy) also puts it down; a task shows as a line over the board, and
+  // its X stops it (stopTask). Runs whenever the panel changes, the window resizes or the connection line comes or goes.
+  let dockOpen = true, dockRound = 0, dockTask = null, dockH = 64, boardH = 0, dockDrag = null;
+  const TAB_H = 28; // the pull tab's height, kept clear above the drawer's last row
+  const CHEVRONS = (up) => `<svg width="20" height="9" viewBox="0 0 20 9" aria-hidden="true"><path d="${up ? 'M1 7.5 5 2.5 9 7.5M11 7.5 15 2.5 19 7.5' : 'M1 1.5 5 6.5 9 1.5M11 1.5 15 6.5 19 1.5'}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
   function dock() {
+    if (dockDrag) return; // the tab is being slid: dock() runs again when it lets go
     const root = document.documentElement, panel = $('panel');
     const on = !root.classList.contains('pc') && ['deploy', 'battle', 'result', 'end'].includes(phase) && !!m;
     const was = root.classList.contains('dock');
@@ -739,7 +738,14 @@ html.dock .panel.shut .dock-gold { display: inline; font-size: 15px; }
     const shut = deploying && (!!dockTask || picking || !dockOpen);
     panel.classList.toggle('shut', shut);
     const tb = $('dock-toggle');
-    if (tb) { tb.textContent = shut ? 'Shop ▴' : 'Hide ▾'; tb.setAttribute('aria-expanded', String(!shut)); tb.hidden = !!dockTask || picking; }
+    tb.hidden = !deploying || !!dockTask || picking;
+    if (!tb.hidden && tb.dataset.shut !== String(shut)) { // up: arrows down; down: "Shop" and arrows up
+      tb.dataset.shut = String(shut);
+      tb.innerHTML = shut ? `Shop ${CHEVRONS(true)}` : CHEVRONS(false);
+      tb.setAttribute('aria-expanded', String(!shut));
+      tb.setAttribute('aria-label', shut ? 'Shop: slide up or tap to open' : 'Slide down or tap to close the shop');
+    }
+    tb.style.bottom = on ? panel.offsetHeight + 'px' : '';
     $('task').hidden = !(deploying && dockTask);
     if (deploying && dockTask) { $('task-text').innerHTML = dockTask.text; $('task-x').hidden = !dockTask.x; }
     let h = boardH;
@@ -747,7 +753,7 @@ html.dock .panel.shut .dock-gold { display: inline; font-size: 15px; }
       if (shut || phase !== 'deploy') dockH = panel.offsetHeight || dockH; // the drawer's height when down
       root.style.setProperty('--dock-h', dockH + 'px');
       const top = $('wrap').getBoundingClientRect().top + scrollY;
-      h = Math.max(240, Math.floor(innerHeight - top - dockH - 8));
+      h = Math.max(240, Math.floor(innerHeight - top - dockH - (deploying ? TAB_H : 0) - 8));
       root.style.setProperty('--board-h', h + 'px');
     }
     if (on !== was || h !== boardH) { boardH = h; size(); if (on !== was || !board3d) render(); }
@@ -759,6 +765,45 @@ html.dock .panel.shut .dock-gold { display: inline; font-size: 15px; }
     render();
   }
   $('task-x').addEventListener('click', stopTask);
+  // the pull tab: hold and slide the drawer, or tap it. While sliding, the drawer shows all of it, moved down by t px
+  // (0 = up, range = down to its last row), and follows the finger; on letting go it settles on the nearer end.
+  {
+    const tab = $('dock-toggle');
+    let tapAt = 0;
+    const slide = (t) => { const d = dockDrag; d.t = Math.max(0, Math.min(d.range, t)); $('panel').style.transform = `translateY(${d.t}px)`; tab.style.bottom = (d.openH - d.t) + 'px'; };
+    tab.addEventListener('pointerdown', (e) => {
+      if (tab.hidden || dockDrag) return;
+      const panel = $('panel'), wasShut = panel.classList.contains('shut');
+      panel.classList.remove('shut');
+      const openH = panel.offsetHeight, range = Math.max(0, openH - dockH);
+      dockDrag = { y: e.clientY, t0: wasShut ? range : 0, t: 0, range, openH, wasShut, moved: false, id: e.pointerId };
+      slide(dockDrag.t0);
+      try { tab.setPointerCapture(e.pointerId); } catch (err) {}
+      e.preventDefault();
+    });
+    tab.addEventListener('pointermove', (e) => {
+      const d = dockDrag; if (!d || d.id !== e.pointerId || d.settling) return;
+      if (Math.abs(e.clientY - d.y) > 6) d.moved = true;
+      if (d.moved) slide(d.t0 + e.clientY - d.y);
+    });
+    const letGo = (e) => {
+      const d = dockDrag; if (!d || d.id !== e.pointerId || d.settling) return;
+      tapAt = performance.now();
+      const open = d.moved ? d.t < d.range / 2 : d.wasShut; // a tap toggles
+      d.settling = true;
+      const panel = $('panel');
+      panel.style.transition = tab.style.transition = 'transform 0.18s ease-out, bottom 0.18s ease-out';
+      slide(open ? 0 : d.range);
+      setTimeout(() => {
+        panel.style.transition = tab.style.transition = ''; panel.style.transform = '';
+        dockOpen = open; dockDrag = null; dock();
+      }, 190);
+    };
+    tab.addEventListener('pointerup', letGo);
+    tab.addEventListener('pointercancel', letGo);
+    // keyboard (Enter, Space): a click with no pointer before it
+    tab.addEventListener('click', () => { if (performance.now() - tapAt < 500 || dockDrag || tab.hidden) return; dockOpen = $('panel').classList.contains('shut'); dock(); });
+  }
   new MutationObserver(dock).observe($('panel'), { childList: true });
   addEventListener('resize', dock);
   function render() {
@@ -946,8 +991,8 @@ html.dock .panel.shut .dock-gold { display: inline; font-size: 15px; }
         <li>Pick a unit card, then tap a highlighted tile in your zone, the bottom six rows. Each squad costs its gold and one deployment.</li>
         <li>Drag a squad you placed this round to move it, or tap it to take it back. Your round 1 package squads are free.</li>
         <li>A squad with a gold badge can level up: tap it. Tap an older squad, a tower or an enemy squad to see what it does.</li>
-        ${document.documentElement.classList.contains('dock') ? '<li>Shop brings the deploy panel up, Hide puts it down. Picking a unit puts it down so you can see every tile; the ✕ on the board stops placing.</li>' : ''}
-        ${board3d ? '<li>3D board: spread two fingers (or scroll) for the angled view, pinch (or press Esc) to go back. Settings → 3D view: From above or Tilted (the whole board from your side).</li>' : ''}
+        ${document.documentElement.classList.contains('dock') ? '<li>Hold the blue tab on the deploy panel and slide it up or down (or tap it). Picking a unit puts it down so you can see every tile; the ✕ on the board stops placing.</li>' : ''}
+        ${board3d ? '<li>3D board: spread two fingers (or scroll) to go in a view: Strategic, Tilted (the whole board from your side, still for placing), Angled, Cinematic. Pinch (or press Esc) to go back.</li>' : ''}
       </ul>
       <div class="bar"><span></span><button class="btn small" id="help-how">How to play</button></div>`;
     $('sheet-back').hidden = false;
@@ -1054,9 +1099,8 @@ html.dock .panel.shut .dock-gold { display: inline; font-size: 15px; }
           </button>
           <button class="info" data-info="${i}" aria-label="About ${esc(u.name)}">i</button>
         </div>`).join('')}</div>`}
-      <div class="bar"><span class="dock-gold gold num">${g}g</span><span class="hint">${status}</span><span class="btnrow"><button class="btn dock-toggle" id="dock-toggle" aria-controls="panel">Shop</button>${action}</span></div>`;
+      <div class="bar"><span class="dock-gold gold num">${g}g</span><span class="hint">${status}</span>${action}</div>`;
     syncPick();
-    $('dock-toggle').addEventListener('click', () => { dockOpen = $('panel').classList.contains('shut'); dock(); });
     $('panel').querySelectorAll('[data-tier]').forEach(b => b.addEventListener('click', () => { shopTier = +b.dataset.tier; shopScroll = 0; panelDeploy(); }));
     const shop = $('shop') || document.createElement('div');
     shop.scrollLeft = shopScroll;
@@ -2036,15 +2080,6 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   let want3d = !force2d;
   try { want3d = force3d || (!force2d && localStorage.getItem(B3D_STORE) !== '2d'); } catch (e) {}
   const save3d = (on) => { try { localStorage.setItem(B3D_STORE, on ? '3d' : '2d'); } catch (e) {} };
-  // the 3D view setting: the home view straight down ('top') or tilted, showing the whole board from your side
-  const V3D_STORE = 'phone-bellum-3d-view';
-  let view3d = 'top';
-  try { if (localStorage.getItem(V3D_STORE) === 'tilted') view3d = 'tilted'; } catch (e) {}
-  function setView3d(v) {
-    view3d = v === 'tilted' ? 'tilted' : 'top';
-    try { localStorage.setItem(V3D_STORE, view3d); } catch (e) {}
-    if (board3d) { board3d.camera.setHome(view3d); wake3d(); }
-  }
   let starting3d = null;
   function start3d() {
     if (board3d || starting3d) return starting3d;
@@ -2059,7 +2094,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
         if (!want3d) return; // switched back to 2D while loading
         el.className = 'board3d';
         cv.after(el);
-        b = Render3D(THREE, el, boardView, { onTap: boardTap, onPress: boardPress, onDrag: boardDrag, onDrop: boardDrop, onHover: boardHover, placing: () => phase === 'deploy', onInput: wake3d, home: view3d });
+        b = Render3D(THREE, el, boardView, { onTap: boardTap, onPress: boardPress, onDrag: boardDrag, onDrop: boardDrop, onHover: boardHover, placing: () => phase === 'deploy', onInput: wake3d });
         const can = el.querySelector('canvas');
         can.setAttribute('aria-label', cv.getAttribute('aria-label'));
         can.addEventListener('webglcontextlost', () => { if (board3d === b) fallback2d('lost'); });

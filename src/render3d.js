@@ -3,7 +3,7 @@
 // only through the same view():
 //   { m, me, phase, units, mode, bt, battlePre, fx, selected, moving, drag, hoverTile,
 //     editable, placingUnit, placingElf, placingTower, battleCam }
-// battleCam ({ zoom, x, y, k }, the final seconds of a fight): from the home view the camera moves in, lower and onto
+// battleCam ({ zoom, x, y, k }, the final seconds of a fight): from the strategic or tilted view the camera moves in, lower and onto
 // the action (Camera3D's focus); a player who went into a closer view keeps it.
 // Calls: size() after el changes size, draw() once per frame, tileAt(clientX, clientY) -> { col, row } or null,
 // screenAt(col, row, h) -> [clientX, clientY] of a tile's middle h metres up,
@@ -13,8 +13,7 @@
 // opts.onDrop(tile | null, ended): ended is false when a second finger or a cancel stopped it. opts.onHover(tile | null):
 // the mouse over the strategic view. opts.placing() -> true: the angled view takes them too. All as in Camera3D, with
 // tiles for ground points.
-// opts.home: 'top' (straight down, the default) or 'tilted' for the home view, as in Camera3D; camera.setHome() changes it.
-// opts.onLevel(level): the camera is settling on a level (0 strategic, 1 angled, 2 ground).
+// opts.onLevel(level): the camera is settling on a level (0 strategic, 1 tilted, 2 angled, 3 ground).
 // For a page that draws only when something changes: opts.onInput() on every pointer, wheel and key event, and
 // still() -> false while the camera moves on its own. quality('high' | 'medium' | 'low') trades sharpness and shadows
 // for speed: high is the screen's pixels up to 2 per CSS pixel with shadows, medium 1.5 with shadows, low 1 without.
@@ -188,7 +187,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
   const sprites = new THREE.Mesh(sprGeo, sprMat);
   sprites.frustumCulled = false; sprites.renderOrder = 10;
   scene.add(sprites);
-  // what the camera level shows: strategic (health as rings), tilted (the tilted home view: health as bars, markers a
+  // what the camera level shows: strategic (health as rings), tilted (health as bars, markers a
   // little bigger than angled), angled (health as bars), ground (no markers at all,
   // only what belongs to the scene: corpses, stun stars, buff sparkles; wrap those in scene())
   let viewMode = 'strategic', uiOff = false;
@@ -658,7 +657,6 @@ const Render3D = (THREE, el, view, opts = {}) => {
     onDrop: (p) => { if (opts.onDrop) opts.onDrop(tileOfGround(p, lastMe), !!p); },
     onHover: (p) => { if (opts.onHover) opts.onHover(tileOfGround(p, lastMe)); },
     placing: () => !!(opts.placing && opts.placing()),
-    home: opts.home,
     onLevel: (lv) => { if (opts.onLevel) opts.onLevel(lv); },
     onInput: () => { if (opts.onInput) opts.onInput(); },
   });
@@ -683,7 +681,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
     camDown.setFromMatrixColumn(camera.matrixWorld, 1).negate(); camDown.y = 0;
     if (camDown.lengthSq() < 1e-6) camDown.set(0, 0, 1); camDown.normalize();
     const z = cam.zoom();
-    viewMode = z < 0.5 ? (cam.home() === 'tilted' ? 'tilted' : 'strategic') : z < 1.5 ? 'angled' : 'ground'; uiOff = viewMode === 'ground';
+    viewMode = z < 0.5 ? 'strategic' : z < 1.5 ? 'tilted' : z < 2.5 ? 'angled' : 'ground'; uiOff = viewMode === 'ground';
     paintFloor(v, dt);
     used.clear(); ns = 0;
     placeBodies(v, dt);
@@ -694,7 +692,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
     sprGeo.instanceCount = ns;
     for (const a of Object.values(sprAttr)) { a.clearUpdateRanges(); a.addUpdateRange(0, ns * a.itemSize); a.needsUpdate = true; }
     showNote(uiOff ? {} : v);
-    const near = Math.min(1, cam.zoom() / 2); // fog only at the ground view: the strategic and angled views see the whole board
+    const near = Math.max(0, Math.min(1, (cam.zoom() - 1) / 2)); // fog only at the ground view: the strategic, tilted and angled views see the whole board
     scene.fog.near = 400 - 310 * near; scene.fog.far = 600 - 380 * near;
     renderer.render(scene, camera);
   }

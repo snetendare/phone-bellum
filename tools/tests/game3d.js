@@ -102,7 +102,7 @@ const dock = require('./dock'); // the phone layout's deploy drawer
   else console.log('skip: no visible enemy squad on screen');
 
   // the angled view takes taps while deploying: place from the shop there
-  await p.evaluate(() => window.__pb().board3d.camera.setLevel(1));
+  await p.evaluate(() => window.__pb().board3d.camera.setLevel(2));
   await p.waitForFunction(() => window.__pb().board3d.camera.handsOn(), null, { timeout: 15000 }); await p.waitForTimeout(300);
   const card2 = p.locator('#shop .ucard[aria-disabled="false"]:not([data-locked])').first();
   await dock.up(p); const ui2 = +(await card2.getAttribute('data-i')); await card2.click(); await p.waitForTimeout(150);
@@ -110,7 +110,7 @@ const dock = require('./dock'); // the phone layout's deploy drawer
   if (c) { await tap(...c); s = await st(); check(s.army.some(q => q.col === c[0] && q.row === c[1] && q.round === 2), `angled view: placed at ${c}`); }
   else check(false, 'angled view: no free tile on screen');
   await p.screenshot({ path: 'game3d-3-angled.png' });
-  check(await p.evaluate(() => window.__pb().board3d.camera.level()) === 1, 'still in the angled view');
+  check(await p.evaluate(() => window.__pb().board3d.camera.level()) === 2, 'still in the angled view');
 
   // angled view: a press on a squad never slides the view, and a press on a model's body (above its tile) picks its squad
   const scr = (c, r, h) => p.evaluate(([c, r, h]) => window.__pb().board3d.screenAt(c, r, h), [c, r, h]);
