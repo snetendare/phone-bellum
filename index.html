@@ -325,13 +325,16 @@ html.dock .dock-tab { position: fixed; left: 50%; bottom: var(--dock-h, 64px); t
 html.dock .dock-tab:active { cursor: grabbing; }
 .dock-tab svg { display: block; }
 html.dock .panel.shut .dock-gold { display: inline; font-size: 15px; }
-.task { position: absolute; top: 30px; left: 10%; right: 10%; z-index: 3; display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 10px; border: 1px solid var(--you); border-radius: 6px; background: rgba(13, 19, 21, 0.9); font-size: 12px; line-height: 1.35; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45); }
-.task span { flex: 1; min-width: 0; }
+.task { position: absolute; top: 30px; left: 10%; right: 10%; z-index: 3; display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 10px; border: 1px solid var(--you); border-radius: 6px; background: rgba(13, 19, 21, 0.9); color: var(--ink); font: inherit; font-size: 12px; line-height: 1.35; text-align: left; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45); cursor: pointer; }
+.task:active:not(:disabled) { background: color-mix(in srgb, var(--you) 18%, var(--bg)); }
+.task:disabled { cursor: default; } /* nothing to cancel (placing the tower): a plain line */
+.task .task-t { flex: 1; min-width: 0; display: grid; gap: 1px; }
+.task small { font-size: 11px; color: var(--you); }
 /* in the lowered drawer: in its last row, between the gold and Fight / Ready, in place of the status line */
 html.dock .bar > .task { position: static; flex: 1 1 0; min-width: 0; margin: 0; padding: 4px 4px 4px 8px; box-shadow: none; }
-html.dock .bar > .task button { width: 30px; height: 30px; }
+html.dock .bar > .task .task-x { width: 28px; height: 28px; }
 html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
-.task button { flex: none; width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel); font-size: 16px; line-height: 1; display: grid; place-items: center; }
+.task .task-x { flex: none; width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel); font-size: 16px; line-height: 1; display: grid; place-items: center; }
 /* tutorial: the coach line over the board, a ring on what it talks about, and a glow on the next thing to tap */
 .coach { position: absolute; top: 8px; left: 8px; right: 8px; z-index: 3; display: grid; gap: 8px; padding: 10px 12px; border: 1px solid var(--gold); border-radius: 8px; background: rgba(13, 19, 21, 0.92); font-size: 14px; line-height: 1.4; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5); animation: coach-in 0.25s ease both; }
 .coach p { margin: 0; padding-right: 26px; }
@@ -376,7 +379,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
     <div class="overlay" id="overlay"></div>
     <div class="pick" id="pick" role="dialog" aria-modal="false" aria-labelledby="pick-h" hidden></div>
     <button class="btn primary small pick-peek" id="pick-peek" hidden></button>
-    <div class="task" id="task" role="status" hidden><span id="task-text"></span><button id="task-x" aria-label="Stop placing">✕</button></div>
+    <button class="task" id="task" hidden><span class="task-t"><span id="task-text"></span><small id="task-cancel">Tap here to cancel</small></span><span class="task-x" id="task-x" aria-hidden="true">✕</span></button>
     <div class="coach" id="coach" role="status" aria-live="polite" hidden><button class="coach-x" id="coach-x" aria-label="Leave the tutorial">✕</button><p id="coach-text"></p><span class="btnrow" id="coach-btns"></span></div>
     <div class="coach-ring" id="coach-ring" hidden></div>
     <svg class="marks" id="marks" aria-hidden="true"></svg>
@@ -4704,7 +4707,11 @@ const Render2D = (cv, view) => {
     if (row) { if (taskEl.parentNode !== row) row.insertBefore(taskEl, row.children[1] || null); }
     else if (taskEl.parentNode !== $('wrap')) $('wrap').appendChild(taskEl);
     taskEl.hidden = !showTask;
-    if (showTask) { taskEl.querySelector('#task-text').innerHTML = dockTask.text; taskEl.querySelector('#task-x').hidden = !dockTask.x; }
+    if (showTask) { // the whole line is the X: a tap anywhere on it stops placing (when there's something to stop)
+      taskEl.querySelector('#task-text').innerHTML = dockTask.text;
+      taskEl.disabled = !dockTask.x; taskEl.querySelector('#task-x').hidden = taskEl.querySelector('#task-cancel').hidden = !dockTask.x;
+      taskEl.setAttribute('aria-label', dockTask.x ? `${taskEl.querySelector('#task-text').textContent} Tap to cancel.` : taskEl.querySelector('#task-text').textContent);
+    }
     let h = boardH;
     if (on) {
       if (shut || phase !== 'deploy') dockH = panel.offsetHeight || dockH; // the drawer's height when down
@@ -4723,7 +4730,7 @@ const Render2D = (cv, view) => {
     render();
   }
   const taskEl = $('task'); // kept by reference: in the drawer it is taken out with the panel's old rows, then put back (dock)
-  $('task-x').addEventListener('click', stopTask);
+  taskEl.addEventListener('click', () => { if (!taskEl.disabled) stopTask(); });
   $('coach-x').addEventListener('click', () => { if (mode === 'tutorial') showStart(); }); // leave the tutorial
   // the pull tab: hold and slide the drawer, or tap it. While sliding, the drawer shows all of it, moved down by t px
   // (0 = up, range = down to its last row), and follows the finger; on letting go it settles on the nearer end.
