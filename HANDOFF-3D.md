@@ -1,6 +1,8 @@
 # Handoff: getting the 3D board into the live game
 
-Repo `snetendare/phone-bellum`, branch `refactor/render-split`. `main` is merged in, up to `10e1155` (art direction doc, battle cam, PC layout, compact shop). A PR to merge the branch into `main` is open (see the end of this file); merging it is what puts 3D on the live site.
+Repo `snetendare/phone-bellum`. **Merged into `main`** (PR #1, merge commit `74bdde0`, 2026-10-21) and live on GitHub Pages: https://snetendare.github.io/phone-bellum/ opens on the 3D board, with live matches (PeerJS), match history (the Google Sheet), music and everything else the 2D game had. **The 3D board is now the working version; the 2D board is for trying out mechanics quickly** (Settings → Board, or `?board=2d`). Work continues on `main`; `refactor/render-split` is done.
+
+Checked on the merged `main`, on both boards: `music-ui.js` (the same songs in the same places on 2D and 3D), `history-mp.js`, `timer-mp.js`, `timer-r1.js`, `forfeit-ui.js`, `map-pick.js`, plus `game3d-mp.js` and `foe3d-mp.js` for live matches on 3D. The checks written for 2D run on 3D with `PB_BOARD=3d` in the environment (`board2d.js`); `board2d.js`'s `tap(p, c, r)` clicks a tile on either board (needs `?test` in the page address). Those that still click `#board` by hand only run on 2D. `chars-ui.js` fails on 2D as well (a button it clicks stays disabled), from before.
 
 **All nine steps are done; 3D is the default on this branch.** The owner's answers to the last open questions:
 1. Board size on phones: a new phone layout. The board fills the screen, and the deploy panel is a drawer (see "Phone layout"). Done.

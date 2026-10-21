@@ -11,13 +11,13 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   await p.addInitScript(() => { window.__els = new Set(); const o = HTMLMediaElement.prototype.play; HTMLMediaElement.prototype.play = function () { window.__els.add(this); return o.call(this); }; });
   // the tracks playing right now
   const playing = () => p.evaluate(() => [...window.__els].filter(a => !a.paused).map(a => a.src.split('/').pop()).join(', ') || 'nothing');
-  await p.goto('http://127.0.0.1:8766/'); await sleep(800);
+  await p.goto('http://127.0.0.1:8766/?test'); await sleep(800);
   await p.mouse.click(5, 5); await sleep(800);
   console.log('menu (Long first):', await playing());
   await p.click('#settings summary'); await p.click('[data-map="forest"]'); // Bulgaria map: not Frozen Peak
   await p.click('#go'); await sleep(1500);
   console.log('starter pack choice:', await playing());
-  const tap = async (c, r) => { const bb = await p.locator('#board').boundingBox(); await p.mouse.click(bb.x + (c + .5) * bb.width / 12, bb.y + (r + .5) * bb.height / 16); };
+  const tap = (c, r) => ctx2d.tap(p, c, r);
   await p.dblclick('[data-pack="0"]'); await sleep(200); await tap(1, 15); await sleep(200);
   await p.click('.ucard:not([data-locked])'); await tap(5, 13); await sleep(2000); await p.click('#fight'); await sleep(2000);
   console.log('fight:', await playing());
@@ -49,7 +49,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   console.log('Frozen Peak deploy:', await playing());
   await p.dblclick('[data-pack="0"]'); await sleep(200); await p.click('#fight'); await sleep(2000);
   console.log('Frozen Peak fight:', await playing());
-  await p.goto('http://127.0.0.1:8766/'); await sleep(500); await p.mouse.click(5, 5);
+  await p.goto('http://127.0.0.1:8766/?test'); await sleep(500); await p.mouse.click(5, 5);
   await p.click('#settings summary'); await p.click('[data-map="cavern"]'); await p.click('#go'); await sleep(1500);
   console.log('Mushroom Cavern deploy:', await playing());
   await b.close();

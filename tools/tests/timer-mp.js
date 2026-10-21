@@ -4,13 +4,13 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 (async () => {
   const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--disable-features=WebRtcHideLocalIpsWithMdns'] });
   const mk = async (n) => { const p = await (await ctx2d(b, { viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 })).newPage(); p.on('pageerror', e => console.log(`[${n}] PAGE ERROR`, e.message)); return p; };
-  const tap = async (p, c, r) => { const b2 = await p.locator('#board').boundingBox(); await p.mouse.click(b2.x + (c + .5) * b2.width / 12, b2.y + (r + .5) * b2.height / 16); };
+  const tap = ctx2d.tap;
   // multiplayer: guest unlocks Ember Imps and places them
   const host = await mk('host'), guest = await mk('guest');
   const BASE = 'http://127.0.0.1:8766/?peerhost=127.0.0.1&peerport=9000';
-  await host.goto(BASE); await host.click('#friend');
+  await host.goto(BASE + (BASE.includes('?') ? '&' : '?') + 'test'); await host.click('#friend');
   await host.waitForFunction(() => /Waiting/.test(document.getElementById('lobby-status').textContent));
-  await guest.goto(await host.locator('#link').textContent());
+  await guest.goto((await host.locator('#link').textContent()) + '&test');
   await host.waitForFunction(() => !document.getElementById('start').disabled, null, { timeout: 20000 });
   await host.click('#start');
   await guest.waitForFunction(() => document.getElementById('phase').textContent === 'Deploy');
