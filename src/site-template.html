@@ -110,6 +110,7 @@ a { color: var(--you); }
 html.pc .panel > .bar:last-child { margin: -6px -12px -12px; padding: 6px 12px 12px; }
 .roleline { margin: 0; display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--muted); }
 .roleline .roles .rng { margin-left: 0; }
+.unlock-btn { width: 100%; padding: 12px 16px; font-size: 16px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
 .confirm { display: grid; gap: 8px; border: 1px solid var(--gold); border-radius: 6px; padding: 10px; }
 /* main menu: short rules, with a tap-to-read-more section per bigger concept */
 .learn { width: 100%; display: grid; gap: 6px; text-align: left; }
@@ -225,6 +226,10 @@ html.dock .dock-tab:active { cursor: grabbing; }
 html.dock .panel.shut .dock-gold { display: inline; font-size: 15px; }
 .task { position: absolute; top: 30px; left: 10%; right: 10%; z-index: 3; display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 10px; border: 1px solid var(--you); border-radius: 6px; background: rgba(13, 19, 21, 0.9); font-size: 12px; line-height: 1.35; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45); }
 .task span { flex: 1; min-width: 0; }
+/* in the lowered drawer: in its last row, between the gold and Fight / Ready, in place of the status line */
+html.dock .bar > .task { position: static; flex: 1 1 0; min-width: 0; margin: 0; padding: 4px 4px 4px 8px; box-shadow: none; }
+html.dock .bar > .task button { width: 30px; height: 30px; }
+html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
 .task button { flex: none; width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel); font-size: 16px; line-height: 1; display: grid; place-items: center; }
 /* tutorial: the coach line over the board, a ring on what it talks about, and a glow on the next thing to tap */
 .coach { position: absolute; top: 8px; left: 8px; right: 8px; z-index: 3; display: grid; gap: 8px; padding: 10px 12px; border: 1px solid var(--gold); border-radius: 8px; background: rgba(13, 19, 21, 0.92); font-size: 14px; line-height: 1.4; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5); animation: coach-in 0.25s ease both; }
@@ -798,8 +803,13 @@ html.dock .panel.shut .dock-gold { display: inline; font-size: 15px; }
       tb.setAttribute('aria-label', shut ? 'Shop: slide up or tap to open' : 'Slide down or tap to close the shop');
     }
     tb.style.bottom = on ? panel.offsetHeight + 'px' : '';
-    $('task').hidden = !(deploying && dockTask && dockTask.text); // the tutorial's coach line can say it instead (no text)
-    if (deploying && dockTask) { $('task-text').innerHTML = dockTask.text; $('task-x').hidden = !dockTask.x; }
+    // the task line: in the lowered drawer's last row, between the gold and Fight / Ready (it moves there each time the
+    // panel is redrawn); over the board on a PC or with the panel below the board. No text: hidden (the tutorial's coach line says it)
+    const showTask = deploying && !!dockTask && !!dockTask.text, row = on && showTask && panel.lastElementChild;
+    if (row) { if (taskEl.parentNode !== row) row.insertBefore(taskEl, row.children[1] || null); }
+    else if (taskEl.parentNode !== $('wrap')) $('wrap').appendChild(taskEl);
+    taskEl.hidden = !showTask;
+    if (showTask) { taskEl.querySelector('#task-text').innerHTML = dockTask.text; taskEl.querySelector('#task-x').hidden = !dockTask.x; }
     let h = boardH;
     if (on) {
       if (shut || phase !== 'deploy') dockH = panel.offsetHeight || dockH; // the drawer's height when down
@@ -817,6 +827,7 @@ html.dock .panel.shut .dock-gold { display: inline; font-size: 15px; }
     if (phase === 'deploy') panelDeploy();
     render();
   }
+  const taskEl = $('task'); // kept by reference: in the drawer it is taken out with the panel's old rows, then put back (dock)
   $('task-x').addEventListener('click', stopTask);
   $('coach-x').addEventListener('click', () => { if (mode === 'tutorial') showStart(); }); // leave the tutorial
   // the pull tab: hold and slide the drawer, or tap it. While sliding, the drawer shows all of it, moved down by t px
@@ -984,7 +995,7 @@ html.dock .panel.shut .dock-gold { display: inline; font-size: 15px; }
         key: x.id,
         art: `<canvas data-ticon="${x.id}" width="96" height="96" style="width:48px;height:48px" aria-hidden="true"></canvas>`,
         name: esc(x.name), who: '', sub: `${x.unit.hp} hp · ${x.unit.range} m`,
-        det: `<b>${esc(x.name)}</b> · ${x.unit.hp} hp · hit ${x.unit.hit} × ${x.unit.aps}/s · ${x.unit.range} m${x.unit.splash ? ` · ${x.unit.splash} m splash` : ''}<br>${esc(x.text)}${x.skill ? `<br><span style="color:var(--gold)">Skill, bought separately for ${Game.TOWER_SKILL.cost} gold: ${esc(x.skill.name)}.</span> ${esc(x.skill.text)}` : ''}${x.skill2 ? `<br><span style="color:var(--gold)">Skill, bought separately for ${x.skill2.cost} gold: ${esc(x.skill2.name)}.</span> ${esc(x.skill2.text)}` : ''}${x.loan ? `<br><span style="color:var(--gold)">Loan, every round:</span> ${esc(loanText())}` : ''}${x.passive ? `<br><span style="color:var(--gold)">${esc(x.passive.name)} (always on):</span> ${esc(x.passive.text)}` : ''}${x.generals ? `<br><span style="color:var(--gold)">Mage generals, one per round, for that round's fight:</span> ${Game.MAGE_GENERALS.map(g => `<b>${esc(g.name)}</b> (${g.cost} gold): ${esc(g.text)}`).join(' ')}` : ''}`,
+        det: mode === 'tutorial' && TUT.towers[x.id] ? `<b>${esc(x.name)}</b> · ${esc(TUT.towers[x.id])}` : `<b>${esc(x.name)}</b> · ${x.unit.hp} hp · hit ${x.unit.hit} × ${x.unit.aps}/s · ${x.unit.range} m${x.unit.splash ? ` · ${x.unit.splash} m splash` : ''}<br>${esc(x.text)}${x.skill ? `<br><span style="color:var(--gold)">Skill, bought separately for ${Game.TOWER_SKILL.cost} gold: ${esc(x.skill.name)}.</span> ${esc(x.skill.text)}` : ''}${x.skill2 ? `<br><span style="color:var(--gold)">Skill, bought separately for ${x.skill2.cost} gold: ${esc(x.skill2.name)}.</span> ${esc(x.skill2.text)}` : ''}${x.loan ? `<br><span style="color:var(--gold)">Loan, every round:</span> ${esc(loanText())}` : ''}${x.passive ? `<br><span style="color:var(--gold)">${esc(x.passive.name)} (always on):</span> ${esc(x.passive.text)}` : ''}${x.generals ? `<br><span style="color:var(--gold)">Mage generals, one per round, for that round's fight:</span> ${Game.MAGE_GENERALS.map(g => `<b>${esc(g.name)}</b> (${g.cost} gold): ${esc(g.text)}`).join(' ')}` : ''}`,
       })),
     };
     return null;
@@ -1005,7 +1016,7 @@ html.dock .panel.shut .dock-gold { display: inline; font-size: 15px; }
     el.hidden = pickPeek; peek.hidden = !pickPeek;
     peek.textContent = o.kind === 'pack' ? 'Choose your start' : 'Choose your tower';
     const html = `<div class="ph"><span class="eyebrow">${o.eyebrow}</span><h2 id="pick-h">${o.title}</h2><span class="hint">${o.sub}</span></div>
-      <div class="opts">${o.items.map(x => `<button class="opt" data-opt="${x.key}"${o.kind === 'pack' ? ` data-pack="${x.key}"` : ` data-ttype="${x.key}"`} aria-pressed="false">
+      <div class="opts" style="grid-template-columns:repeat(${Math.max(2, o.items.length)},1fr)">${o.items.map(x => `<button class="opt" data-opt="${x.key}"${o.kind === 'pack' ? ` data-pack="${x.key}"` : ` data-ttype="${x.key}"`} aria-pressed="false">
         <span class="art">${x.art}</span><span class="nm">${x.name}</span>${x.who ? `<span class="who">${x.who}</span>` : ''}${x.sub ? `<span class="sub">${x.sub}</span>` : ''}
       </button>`).join('')}</div>
       <div class="det" id="pick-det" aria-live="polite"></div>
@@ -1897,7 +1908,8 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   const TUT = { start: 'Goblin Swarm', foe: 'Skeleton Archers', foeAt: [6, 4], counter: 'Fire Mage', wrong: 'Sniper',
     shop: ['Goblin Swarm', 'Skeleton Archers', 'Ember Imps', 'Fire Mage', 'Sniper'], // the shop from round 3
     adds: { 3: [['Brute', 5, 4]], 4: [['Wisps', 3, 2]] }, // the enemy's new squads by round: [unit, column, row]
-    last: 4 }; // the round after which the enemy plays for real
+    last: 4, // the round after which the enemy plays for real
+    towers: { bastion: 'A defensive tower: it takes more hits before it goes down.', keep: 'An all-round tower that can summon more units to aid you in battle.' } }; // round 3's offer
   let tutDone = false, tutHint = '', tutSpeed = 2; // tutHint: the coach line on the first screen after the handover; tutSpeed: the fight speed to go back to
   try { tutDone = localStorage.getItem(TUT_STORE) === 'done'; } catch (e) {}
   const unitIx = (name) => units.findIndex(u => u.name === name);
@@ -1913,6 +1925,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     tutEnemy([[TUT.foe, ...TUT.foeAt]]);
     m.gold = [Game.SQUAD_COST, 0]; // just the first squad
     m.towers[1] = null;            // the enemy's tower comes with the enemy (the fight step)
+    m.towerOffer = Object.keys(TUT.towers); // round 3: Bastion or Keep only
     tut = { intro: 0, wrong: false, tskillSeen: false, sheetSeen: false }; // intro: 0 the tower, 1 the zone, 2 on to the shop
     nextReady = [false, false]; rematch = [false, false];
     enterDeploy(0);
@@ -2027,7 +2040,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
         : `Squads stay all match, so now you see theirs: <b>${esc(TUT.foe)}</b>, a crowd. ${esc(TUT.counter)} beats crowds; ${esc(TUT.wrong)} beats giants.`);
       if (tut.wrong) glow(card(TUT.counter));
     } else if (step === 'fight') {
-      coach(r === 1 ? 'Their army stays hidden until the fight. Tap <b>Fight</b>: squads fight on their own.' : 'Your goblins are back too. Tap <b>Fight</b>.');
+      coach(r === 1 ? 'This is the <b>opponent’s board</b>. They deploy units just like you. Newly deployed units stay hidden until the battle phase. Tap <b>Fight</b>.' : 'Your goblins are back too. Tap <b>Fight</b>.');
       glow($('fight'));
     } else if (step === 'towerpick') coach(null); // the pick says it (with the tutorial's line, see pickOptions)
     else if (step === 'tskill') {
@@ -2036,8 +2049,8 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
         : tt.loan ? `Your <b>${esc(tt.name)}</b> can lend you gold, once a round: the glowing button.` : `Your <b>${esc(tt.name)}</b> can call a general every round: the glowing button.`, later);
       glow($('t-skill') || $('t-loan') || $('t-sheet'));
     } else if (step === 'level') coach(`Your <b>${esc(units[tutTarget().unit].name)}</b> earned enough experience to level up: tap them.`);
-    else if (step === 'sheet') coach(`Their sheet also has <b>Move</b> (${Game.CONFIG.moveCost} gold, once a round), <b>Sell</b> (half their worth) and <b>Skills</b>: one buy upgrades every squad of that unit.`, [['Next', () => { tut.sheetSeen = true; closeSheet(); panelDeploy(); render(); }, true]]);
-    else if (step === 'flank') coach(`The blinking edges on their half are yours now: <b>flanks</b>. Squads there wait ${Game.FLANK.delay} s, then hit from the side. Between the zones is <b>no man’s land</b>: nobody deploys there.`);
+    else if (step === 'sheet') coach(`You can also <b>Move</b> them (${Game.CONFIG.moveCost} gold, once a round), <b>Sell</b> them (for half their worth) or buy <b>Skills</b>: one buy upgrades every squad of that unit.`, [['Next', () => { tut.sheetSeen = true; closeSheet(); panelDeploy(); render(); }, true]]);
+    else if (step === 'flank') coach(`From round ${Game.FLANK.round} on you can deploy on these tiles, called <b>flanks</b>. Squads there wait ${Game.FLANK.delay} s, then hit from the side. Between the zones is <b>no man’s land</b>: nobody deploys there.`);
     else if (step === 'free') {
       const tab = document.documentElement.classList.contains('dock');
       coach(r === 3 ? `<b>${Game.CONFIG.deploysPerRound} new squads</b> a round. Need more? <b>+1 deployment</b> costs ${Game.CONFIG.extraDeployCost}. Then <b>Fight</b>.${tab ? ' Slide the blue tab to see the board.' : ''}` : 'Spend the rest as you like, then <b>Fight</b>.');
@@ -2054,7 +2067,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (sum.round === 1) line += ` <b>+${(sum.income || 0) + (sum.bonusTo === me ? Game.LOSER_BONUS : 0)} gold</b> for next round: you get more every round${sum.bonusTo === me ? `, and ${Game.LOSER_BONUS} extra for losing` : ''}.`;
     if (sum.round > 2) line = lost ? `<b>Round lost.</b> You take ${sum.dmg[me]} damage.` : won ? `<b>Round won!</b> They take ${sum.dmg[foe()]} damage.` : '<b>A draw.</b>';
     const added = (TUT.adds[sum.round] || []).map(a => a[0]);
-    if (added.length) line += ` They added ${added.map(esc).join(' and ')}: new squads stay hidden until the fight.`;
+    if (added.length) line += ` Your opponent added ${added.map(esc).join(' and ')}: new squads stay hidden until the battle phase.`;
     if (m.over) coach(`${line} The match is over.`, [['Main menu', showStart], ['Play vs AI', () => { matchKind = 'standard'; startAiMatch(); }, true]]);
     else if (sum.round < TUT.last) coach(line, [['Next round', tapNext, true]]);
     else {
@@ -2576,16 +2589,16 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (side !== undefined && side !== me) return ''; // an enemy squad on the board is unlocked by definition
     if (Game.isUnlocked(m, me, i)) {
       const undo = phase === 'deploy' && editable() && m.unlocks[me][i] === m.round && !m.armies[me].some(q => q.unit === i);
-      return `<div class="bar" style="border-top:1px solid var(--line);padding-top:8px"><span class="hint">Unlocked${m.unlocks[me][i] === m.round ? ' this round' : ''}</span>${undo ? '<button class="btn small" id="unlock-undo">Undo unlock</button>' : ''}</div>`;
+      return `<div class="bar"><span class="hint">Unlocked${m.unlocks[me][i] === m.round ? ' this round' : ''}</span>${undo ? '<button class="btn small" id="unlock-undo">Undo unlock</button>' : ''}</div>`;
     }
     const why = phase !== 'deploy' ? '' : !editable() ? '' : m.gold[me] < cost ? `Need ${cost} gold` : '';
     if (unlockAsk === i && phase === 'deploy' && editable() && !why) return `<div class="confirm" role="alertdialog" aria-label="Confirm unlock">
       <b style="font-family:var(--font-display)">Unlock ${esc(units[i].name)} for ${cost} gold?</b>
       <span class="hint">You'll have ${m.gold[me] - cost} gold left. This lasts the whole match.</span>
-      <div class="btnrow" style="justify-content:flex-start"><button class="btn small primary" id="unlock-yes">Yes, unlock</button><button class="btn small" id="unlock-no">No</button></div></div>`;
-    return `<div style="display:grid;gap:4px;border-top:1px solid var(--line);padding-top:8px">
-      <div class="bar"><b style="font-family:var(--font-display);display:inline-flex;gap:6px;align-items:center">${LOCK_SVG} Locked</b>${phase === 'deploy' ? (why || !editable() ? `<button class="btn small" disabled>${why || `Unlock · ${cost} gold`}</button>` : `<button class="btn small" id="unlock">Unlock · ${cost} gold</button>`) : `<span class="hint">${cost} gold to unlock</span>`}</div>
-      <span class="hint">Pay once to be able to field this unit for the rest of the match. The opponent sees it after the next fight.</span></div>`;
+      <div class="btnrow" style="justify-content:stretch"><button class="btn primary unlock-btn" id="unlock-yes" style="flex:2">Yes, unlock</button><button class="btn" id="unlock-no" style="flex:1">No</button></div></div>`;
+    return `<div style="display:grid;gap:6px">
+      ${phase === 'deploy' ? `<button class="btn primary unlock-btn" ${why || !editable() ? 'disabled' : 'id="unlock"'}>${LOCK_SVG} ${why || `Unlock · ${cost} gold`}</button>` : `<b style="font-family:var(--font-display);display:inline-flex;gap:6px;align-items:center;color:var(--gold)">${LOCK_SVG} Locked · ${cost} gold to unlock</b>`}
+      <span class="hint">Pay once to field this unit for the rest of the match. The opponent sees it after the next fight.</span></div>`;
   }
   // sq (optional): the squad whose sheet this is, to show the skill it came with (Enzo)
   function skillBlock(i, side, sq) {
@@ -2895,10 +2908,10 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (u.splash > 0) tr.push(`Splash ${u.splash} m`);
     const html = `
       ${(() => { const r = roleOf(i, owner === me ? me : null); return `<p class="roleline"><span class="roles">${roleIcons(r)}${rangeSvg(r.range)}</span><span>${r.text}</span></p>`; })()}
+      ${unlockBlock(i, side)}
       <p class="role" style="margin:0">${ROLES[u.name] && !customSet ? ROLES[u.name] : customSet ? `From a Counter Lab roster · ${Game.unitCostOf(base)} gold` : ''}</p>
       ${lvl}
       ${sq && m && !compact ? (() => { const q = side === me ? sq : Game.seenAt(m, sq); return shroomBlock(q.col, q.row); })() : ''}
-      ${unlockBlock(i, side)}
       ${tr.length ? `<div class="traits">${tr.map(x => `<span>${x}</span>`).join('')}</div>` : ''}
       ${skillBlock(i, side, sq)}
       <div class="stats num">
