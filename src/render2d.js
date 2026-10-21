@@ -2,8 +2,9 @@
 // It sees the game only through view(), which it calls at the start of every draw and which returns what this
 // screen shows right now:
 //   { m, me, phase, units, mode, bt, battlePre, fx, selected, moving, drag, hoverTile,
-//     editable, placingUnit, placingElf, placingTower }
+//     editable, placingUnit, placingElf, placingTower, battleCam }
 // fx: short-lived battle effects as plain data (shots, flames, bolts, heals, deaths), in board metres.
+// battleCam: { zoom, x, y } while the battle cam zooms in on the final seconds of a fight (board metres), else null.
 // Calls: size() after the canvas changes size, draw(), tileAt(clientX, clientY) -> { col, row } or null,
 // thumb(match) -> a data URL of a small picture of that match's board (null: a plain board with a question mark),
 // floor(plain): only the board itself (map, zones, tiles), no squads or towers: the 3D renderer lays it on the ground;
@@ -11,9 +12,9 @@
 // A 3D renderer can take its place by offering the same calls.
 const Render2D = (cv, view) => {
   let ctx = cv.getContext('2d'); // swapped for a moment while drawing map thumbnails (thumb)
-  let m = null, me = 0, phase = 'start', units = [], mode = 'ai', bt = null, battlePre = null, fx = [];
+  let m = null, me = 0, phase = 'start', units = [], mode = 'ai', bt = null, battlePre = null, fx = [], battleCam = null;
   let selected = null, moving = null, drag = null, hoverTile = null, editable = false, placingUnit = null, placingElf = false, placingTower = false;
-  const pull = () => { ({ m, me, phase, units, mode, bt, battlePre, fx, selected, moving, drag, hoverTile, editable, placingUnit, placingElf, placingTower } = view()); };
+  const pull = () => { ({ m, me, phase, units, mode, bt, battlePre, fx, selected, moving, drag, hoverTile, editable, placingUnit, placingElf, placingTower, battleCam } = view()); };
   const foe = () => 1 - me;
   const css = Art.css, tag = Shapes.tag;
   const { ELF_COL, SHROOM_COL, CHARM_COL } = Art;
@@ -505,7 +506,7 @@ const Render2D = (cv, view) => {
     // a squad they moved this round still shows on its old tile
     for (const sq of m.armies[foe()]) if ((sq.round < m.round || phase !== 'deploy') && !Game.hiddenFromFoe(m, sq)) {
       const p = phase === 'deploy' ? Game.seenAt(m, sq) : sq;
-      drawSquad(p === sq ? sq : { ...sq, col: p.col, row: p.row }, foe(), false);
+      drawSquad(phase === 'deploy' ? { ...sq, col: p.col, row: p.row, level: Game.seenLevel(m, sq) } : sq, foe(), false); // a level-up bought this round stays hidden
     }
     for (const sq of m.armies[me]) {
       if (phase === 'deploy' && sq.from && sq.movedRound === m.round) { // where your moved squad came from
@@ -692,7 +693,12 @@ const Render2D = (cv, view) => {
   function draw() {
     pull();
     if (!m) { drawBoard(); return; }
-    if (bt && (phase === 'battle' || phase === 'result' || phase === 'end')) drawBattle();
+    if (bt && phase === 'battle' && battleCam) { // the battle cam, zoomed in around its focus
+      const fx0 = PX(battleCam.x), fy0 = PY(battleCam.y);
+      ctx.save(); ctx.translate(fx0, fy0); ctx.scale(battleCam.zoom, battleCam.zoom); ctx.translate(-fx0, -fy0);
+      drawBattle();
+      ctx.restore();
+    } else if (bt && (phase === 'battle' || phase === 'result' || phase === 'end')) drawBattle();
     else drawDeploy();
   }
 

@@ -3,7 +3,7 @@
 // WebGL context) and is saved on this device; the 3D quality in Settings; a lost WebGL context, fights that are too
 // slow (quality steps down first) and no WebGL at all each go back to 2D with one line on the board (no WebGL on a
 // first visit saves 2D); ?board=3d still forces 3D, with the speed meter.
-// Headless Chromium needs software WebGL (the args below): about 5-10 fps at high and medium quality, 25 at low.
+// Headless Chromium needs software WebGL (the args below).
 const { chromium } = require('playwright-core');
 const URL = 'http://127.0.0.1:8766/?test';
 (async () => {
@@ -76,13 +76,14 @@ const URL = 'http://127.0.0.1:8766/?test';
   await p.reload(); await on3d(p);
   check(await is3d(p), 'saved 3D: the 3D board starts at load');
 
-  // too slow: a fight under 20 fps steps the quality down (medium -> low), the next one at low goes back to 2D
+  // too slow: a fight under 20 fps steps the quality down (medium -> low), the next one at low goes back to 2D.
+  // Headless speed depends on the board's size, so a slow phone is played: each frame takes 60 ms more.
+  const slowPhone = () => p.evaluate(() => { if (window.__slow) return; window.__slow = true; const raf = window.requestAnimationFrame; window.requestAnimationFrame = (cb) => raf((t) => { const e = performance.now() + 60; while (performance.now() < e); cb(t); }); });
   await solo(p);
+  await slowPhone();
   await fight(p);
   check(await is3d(p) && (await stored(p))[1] === 'low' && await p.evaluate(() => window.__pb().board3d.pixelRatio()) === 1, `slow fight at medium: still 3D, quality now ${(await stored(p))[1]}`);
   await p.click('#next'); await p.waitForTimeout(800);
-  // at low quality headless runs about 25 fps, so a slow phone is played: each frame takes 60 ms more
-  await p.evaluate(() => { const raf = window.requestAnimationFrame; window.requestAnimationFrame = (cb) => raf((t) => { const e = performance.now() + 60; while (performance.now() < e); cb(t); }); });
   await fight(p); await on2d(p).catch(() => {});
   check(!(await is3d(p)) && /too slow/.test(await note(p)), `slow fight at low -> 2D: "${await note(p)}"`);
   check((await stored(p))[0] === '2d', 'the setting goes back to 2D');

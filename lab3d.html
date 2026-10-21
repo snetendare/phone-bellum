@@ -435,6 +435,7 @@ const Engine = (() => {
     deathSpawn: { label: 'Spawn on death', params: [['unit', 'Spawns (unit name)', 'Goblin Swarm', null], ['count', 'Bodies per death', 2, 1], ['strength', 'Strength of each spawn (% health and damage; 50 = half)', 100, 10]] },
     shield:  { label: 'Shield', params: [['hits', 'Hits blocked per body', 3, 1]] },
     blast:   { label: 'Death burst', params: [['radius', 'Radius (m)', 7, 0.5], ['pct', 'Damage (% of hit)', 100, 10]] },
+    explode: { label: 'Explode on death', params: [['pct', 'Damage (% of its max health)', 30, 5]] },
     lifesteal: { label: 'Lifesteal', params: [['pct', 'Heals itself for (% of damage dealt)', 10, 1]] },
     turret:  { label: 'Extra turret', params: [['turrets', 'Attacks at once (each with its own target and reload)', 2, 1]] },
     frenzy:  { label: 'Frenzy', params: [['pct', 'Attack speed per hit (+% of base)', 10, 1], ['cap', 'Most attacks per second', 2, 0.1]] },
@@ -471,6 +472,7 @@ const Engine = (() => {
       case 'split': return `Attacks ${n('beams')} different enemies at once${+P('hit') > 0 ? `, −${n('hit')}% hit each` : ''}. −${n('range')}% range.`;
       case 'deathSpawn': return `When a body dies, ${n('count')} ${String(P('unit'))} ${+P('count') === 1 ? 'body takes' : 'bodies take'} its place${+P('strength') !== 100 ? `, at ${n('strength')}% health and damage` : ''}. A spawn of the unit itself starts from the dead body's own stats. Spawns don’t spawn again.`;
       case 'blast': return `When a body dies it explodes, dealing ${+P('pct') === 100 ? 'the damage of its hit' : `${n('pct')}% of its hit`} (for a ram, what it deals to the tower) to every enemy within ${n('radius')} m.`;
+      case 'explode': return `When a body dies it explodes for ${n('pct')}% of its max health, hurting every enemy within ${BLAST_RADIUS} m.`;
       case 'lifesteal': return `Each body heals itself for ${n('pct')}% of the damage it deals.`;
       case 'turret': return `Each body attacks ${n('turrets')} different enemies at once, each attack with its own target and its own reload, as if it carried ${n('turrets')} copies of its weapon. They never aim at the same enemy, so with only one enemy in reach just one fires.`;
       case 'frenzy': return `Each hit it lands gives that body +${n('pct')}% attack speed for the rest of the fight, up to ${n('cap')} attacks per second.`;
@@ -535,6 +537,7 @@ const Engine = (() => {
         case 'spread': u.spread = [Math.max(0, P('min')), Math.max(0, P('min'), P('max'))]; break;
         case 'mortar': u.range = u.range + P('range'); u.minRange = Math.max(u.minRange || 0, P('min')); u.aps = u.aps + Math.max(0, P('aps')); break;
         case 'frenzy': u.frenzyPct = (u.frenzyPct || 0) + Math.max(0, P('pct')); u.frenzyCap = Math.max(u.frenzyCap || 0, Math.max(0.05, P('cap'))); break;
+        case 'explode': u.deathBlast = Math.max(u.deathBlast || 0, Math.max(0, P('pct'))); break;
         case 'blast': u.blastR = Math.max(u.blastR || 0, Math.max(0, P('radius'))); u.blastPct = (u.blastPct || 0) + Math.max(0, P('pct')); break;
         case 'split':
           u.beams = Math.max(u.beams || 1, Math.round(P('beams')));
@@ -635,6 +638,7 @@ const Engine = (() => {
       frenzy: 0, // hits landed so far (Frenzy skill)
       stunT: 0, lastAtk: 0, // seconds of stun left (chargeStun); fight time of its last attack (stealth returns)
       spreadTo: u.spread ? spreadSpot(x, y, i, u.spread) : null, // Spread skill: where it runs to before anything else
+      spreadT: null, // ...and the seconds it may spend getting there (set on its first step)
     };
   }
   // Spread: a spot min..max metres from (x, y) in one of 12 directions, picked from the body's index (the same on every device)
@@ -819,6 +823,8 @@ const Engine = (() => {
       if (tl.type === 'speed') { b.u = { ...b.u, speed: b.u.speed * (1 + tl.speed / 100) }; b.fast = true; }
       if (tl.type === 'toxic') {
         (b.poison || (b.poison = [])).push({ src: null, dps: b.u.hp * tl.poisonPct / 100, t: tl.poisonDur });
+        // slime units get it the other way round: the poison heals them (see the ongoing effects) and the slow speeds them up
+        if (b.u.slime) { if (!(b.slowT > 0)) { b.slowMove = -tl.slowMove; b.slowAtk = -tl.slowAtk; b.slowT = tl.slowDur; } return; }
         if (!(b.slowT > 0)) { b.slowMove = 0; b.slowAtk = 0; }
         b.slowMove = Math.max(b.slowMove, tl.slowMove); b.slowAtk = Math.max(b.slowAtk, tl.slowAtk); b.slowT = Math.max(b.slowT, tl.slowDur);
       }
@@ -1146,7 +1152,11 @@ const Engine = (() => {
           const sx = b.spreadTo.x - b.x, sy = b.spreadTo.y - b.y, sd = hyp(sx, sy);
           const mv = Math.min(sd, b.u.speed * (b.slowT > 0 ? 1 - b.slowMove / 100 : 1) * dt);
           if (sd > 1e-6) { b.hx = sx / sd; b.hy = sy / sd; b.x += b.hx * mv; b.y += b.hy * mv; b.moved += mv; }
-          if (sd - mv <= 0.05) b.spreadTo = null;
+          // allies pushing it away (separation) can keep it from ever reaching a spot near the middle of the squad:
+          // it gives up after the time the run should take plus a second, and charges from where it is
+          if (b.spreadT == null) b.spreadT = 1 + sd / Math.max(0.5, b.u.speed);
+          b.spreadT -= dt;
+          if (sd - mv <= 0.05 || b.spreadT <= 0) { b.spreadTo = null; b.spreadT = null; }
           continue;
         }
         let near = null, nd = Infinity;
@@ -1473,7 +1483,7 @@ const Engine = (() => {
       return {
         t, shots: final ? [] : shots,
         p: final ? [] : projectiles.map(p => [p.x, p.y, p.owner.side]),
-        b: all.map(x => [x.x, x.y, x.alive ? x.hp / x.u.hp : 0, x.side, x.windTarget && x.u.windUp > 0 ? 1 - x.windT / x.u.windUp : 0, x.hidden ? 1 : 0, x.poison && x.poison.length ? 1 : 0, x.slowT > 0 ? 1 : 0, x.stunT > 0 ? 1 : 0]),
+        b: all.map(x => [x.x, x.y, x.alive ? x.hp / x.u.hp : 0, x.side, x.windTarget && x.u.windUp > 0 ? 1 - x.windT / x.u.windUp : 0, x.hidden ? 1 : 0, x.poison && x.poison.length ? 1 : 0, x.slowT > 0 && x.slowMove > 0 ? 1 : 0, x.stunT > 0 ? 1 : 0]),
       };
     }
 
@@ -1580,9 +1590,9 @@ const Game = (() => {
     { id: 'bastion', name: 'Bastion', text: 'Much tougher, with a shorter, slower attack that splashes the units around its target.', unit: { ...TOWER, name: 'Bastion', kind: 'bastion', hp: 1000, aps: 0.8, range: 5, splash: 2, color: '#B79C8A' },
       skill: { name: 'Home ground', text: 'In fights, your units get +2 armor and +10% health while they stand in your own zone. They lose it in no man’s land and get it back if they return.' },
       skill2: { name: 'Moats', cost: 250, text: 'A ring of fire around the bastion: 12 damage 4 times a second to every enemy within 5 m, like a Flame Wizard’s flames.' } },
-    { id: 'mage', name: 'Mage tower', text: 'A small sun-priest beam: it locks onto one enemy and hits harder and faster the longer it stays on it. Slow against swarms, but melts big units after a few seconds.', unit: { ...TOWER, name: 'Mage Tower', kind: 'mage', hit: 14, aps: 1.5, range: 12, spinUp: 50, spinHit: 50, color: '#A493DE' },
+    { id: 'mage', name: 'Mage tower', text: 'A small sun-priest beam: it locks onto one enemy and hits harder and faster the longer it stays on it. Slow against swarms, but melts big units after a few seconds.', unit: { ...TOWER, name: 'Mage Tower', kind: 'mage', hp: 600, hit: 14, aps: 1.5, range: 12, spinUp: 50, spinHit: 50, color: '#A493DE' },
       generals: true }, // no once-per-match skill: a mage general can be called every round instead (MAGE_GENERALS)
-    { id: 'bank', name: 'Bank tower', text: 'Sturdy, with an attack between the keep and the sniper tower: medium range, medium fire rate.', unit: { ...TOWER, name: 'Bank Tower', kind: 'bank', hp: 700, hit: 45, aps: 0.8, range: 18, color: '#D9B95B' },
+    { id: 'bank', name: 'Bank tower', text: 'Sturdy, with an attack between the keep and the sniper tower: medium range, medium fire rate.', unit: { ...TOWER, name: 'Bank Tower', kind: 'bank', hp: 700, hit: 45, aps: 0.6, range: 18, color: '#D9B95B' },
       loan: true, // a loan can be taken every round (LOAN)
       skill2: { name: 'Major investment', cost: 500, noFree: true, text: 'Pay 500 gold now and get 1000 gold at the start of next round. Once per match.' } }, // see resolve
     { id: 'slime', name: 'Slime tower', text: 'Lobs splashing slime globs like one Slimeshots body, with 5 m more range.', unit: { ...TOWER, name: 'Slime Tower', kind: 'slime', hit: 7, aps: 0.8, range: 26, splash: 3, projSpeed: 30, spinUp: 0.1, color: '#7BD93F' },
@@ -1642,11 +1652,11 @@ const Game = (() => {
   }
   // Some tower types have a second skill (skill2), bought once per match for its own price, like the first.
   // m.towerSkill2[side] = round it was bought (0 = not). skill2.needs: the first skill must be bought first.
-  // Blixten: the first tower or map purchase each round is free (skill2.noFree: never free)
-  const towerSkillCost = (m, side) => (m.towerSkill && m.towerSkill[side] === m.round ? isMapFree(m, side, { kind: 'tskill' }) : mapFreeLeft(m, side)) ? 0 : TOWER_SKILL.cost;
+  // Blixten: the first tower or map purchase each round is BLIX_OFF gold cheaper (skill2.noFree: never cheaper)
+  const towerSkillCost = (m, side) => (m.towerSkill && m.towerSkill[side] === m.round ? isMapFree(m, side, { kind: 'tskill' }) : mapFreeLeft(m, side)) ? blix(TOWER_SKILL.cost) : TOWER_SKILL.cost;
   const towerSkill2Of = (m, side) => !!(m && m.towerSkill2 && m.towerSkill2[side] > 0);
   const towerSkill2Visible = (m, side) => towerSkill2Of(m, side) && m.towerSkill2[side] < m.round;
-  const towerSkill2Cost = (m, side) => { const sk = towerType(m, side).skill2; if (!sk) return 0; return !sk.noFree && (m.towerSkill2 && m.towerSkill2[side] === m.round ? isMapFree(m, side, { kind: 'tskill2' }) : mapFreeLeft(m, side)) ? 0 : sk.cost; };
+  const towerSkill2Cost = (m, side) => { const sk = towerType(m, side).skill2; if (!sk) return 0; return !sk.noFree && (m.towerSkill2 && m.towerSkill2[side] === m.round ? isMapFree(m, side, { kind: 'tskill2' }) : mapFreeLeft(m, side)) ? blix(sk.cost) : sk.cost; };
   const canBuyTowerSkill2 = (m, side) => { const sk = towerType(m, side).skill2; return towerPicked(m, side) && !!sk && !towerSkill2Of(m, side) && (!sk.needs || towerSkillOf(m, side)) && m.gold[side] >= towerSkill2Cost(m, side); };
   function buyTowerSkill2(m, side) {
     if (!canBuyTowerSkill2(m, side)) return false;
@@ -1695,29 +1705,30 @@ const Game = (() => {
   const mageTpOf = (m, side) => !!(mageCalled(m, side) || {}).tp;       // the teleport general called this round
   const mageGenCost = (id) => (mageGenInfo(id) || {}).cost || 0;
   const setMageGen = (m, side, id, tp) => { if (!m.mageGen) m.mageGen = [null, null]; m.mageGen[side] = id || tp ? { round: m.round, id: id || null, tp: !!tp } : null; };
-  // Blixten: a general can take the round's free purchase ({ kind: 'mgen' }, or { kind: 'mtp' } for teleport); swapping generals keeps it
+  // Blixten: a general can take the round's discounted purchase ({ kind: 'mgen' }, or { kind: 'mtp' } for teleport); swapping generals keeps it
   const mageGenFree = (m, side) => !!mageGenOf(m, side) && isMapFree(m, side, { kind: 'mgen' });
   const mageTpFree = (m, side) => mageTpOf(m, side) && isMapFree(m, side, { kind: 'mtp' });
-  // what calling id costs a player now (a free general swapped for another stays free)
-  const mageGenPrice = (m, side, id) => isExtraGen(id) ? (mageTpFree(m, side) || (!mageTpOf(m, side) && mapFreeLeft(m, side)) ? 0 : mageGenCost(id))
-    : mageGenFree(m, side) || (!mageGenOf(m, side) && mapFreeLeft(m, side)) ? 0 : mageGenCost(id);
+  // what calling id costs a player now (a discounted general swapped for another stays discounted)
+  const mageGenPrice = (m, side, id) => isExtraGen(id) ? (mageTpFree(m, side) || (!mageTpOf(m, side) && mapFreeLeft(m, side)) ? blix(mageGenCost(id)) : mageGenCost(id))
+    : mageGenFree(m, side) || (!mageGenOf(m, side) && mapFreeLeft(m, side)) ? blix(mageGenCost(id)) : mageGenCost(id);
+  const mageGenPaid = (m, side) => { const c = mageGenCost(mageGenOf(m, side)); return mageGenFree(m, side) ? blix(c) : c; }; // what the current general cost
   // a general already called this round is swapped out and paid back
   const canBuyMageGen = (m, side, id) => !!mageGenInfo(id) && towerPicked(m, side) && towerType(m, side).id === 'mage' && (isExtraGen(id)
     ? !mageTpOf(m, side) && m.gold[side] >= mageGenPrice(m, side, id)
-    : mageGenOf(m, side) !== id && m.gold[side] + (mageGenFree(m, side) ? 0 : mageGenCost(mageGenOf(m, side))) >= mageGenPrice(m, side, id));
+    : mageGenOf(m, side) !== id && m.gold[side] + mageGenPaid(m, side) >= mageGenPrice(m, side, id));
   function buyMageGen(m, side, id) {
     if (!canBuyMageGen(m, side, id)) return false;
     if (isExtraGen(id)) {
       const free = mapFreeLeft(m, side);
       if (free) useMapFree(m, side, { kind: 'mtp' });
-      m.gold[side] -= free ? 0 : mageGenCost(id);
+      m.gold[side] -= free ? blix(mageGenCost(id)) : mageGenCost(id);
       setMageGen(m, side, mageGenOf(m, side), true);
       return true;
     }
     const cur = mageGenOf(m, side), free = mageGenFree(m, side) || (!cur && mapFreeLeft(m, side));
-    if (cur && !mageGenFree(m, side)) m.gold[side] += mageGenCost(cur);
+    if (cur) m.gold[side] += mageGenPaid(m, side);
     if (free && !mageGenFree(m, side)) useMapFree(m, side, { kind: 'mgen' });
-    m.gold[side] -= free ? 0 : mageGenCost(id);
+    m.gold[side] -= free ? blix(mageGenCost(id)) : mageGenCost(id);
     setMageGen(m, side, id, mageTpOf(m, side));
     return true;
   }
@@ -1726,7 +1737,7 @@ const Game = (() => {
     const tp = isExtraGen(id), cur = tp ? (mageTpOf(m, side) ? id : null) : mageGenOf(m, side);
     if (!cur) return false;
     const wasFree = tp ? mageTpFree(m, side) : mageGenFree(m, side);
-    m.gold[side] += wasFree ? 0 : mageGenCost(cur);
+    m.gold[side] += wasFree ? blix(mageGenCost(cur)) : mageGenCost(cur);
     setMageGen(m, side, tp ? mageGenOf(m, side) : null, tp ? false : mageTpOf(m, side));
     if (wasFree) passMapFree(m, side);
     return true;
@@ -1791,19 +1802,19 @@ const Game = (() => {
   // Each starting package comes with a character, who gives that player a passive ability for the whole match.
   const CHARACTERS = [
     { id: 'cage', name: 'Frickolas Cage', ability: 'All your units have 10% more health.' },
-    { id: 'zoe', name: 'Zoe', ability: 'Every round, 2 random tiles in your zone become buff tiles. A squad that starts the fight on one gets +20% damage, +20% health and +10% attack speed for the whole fight.' },
+    { id: 'zoe', name: 'Zoe', ability: 'Every round, 2 random tiles in your zone become buff tiles. A squad that starts the fight on one gets a bonus for the whole fight, and the bonus grows every round you use them: +10% damage and health at first, then +20% / +20% / +5% attack speed, +30% / +30% / +10%, up to +40% / +40% / +15%.' },
     { id: 'emile', name: 'Emile', ability: 'Tier 1 units are free to unlock.' },
     { id: 'wilhelm', name: 'Wilhelm', ability: 'Your squads on flank tiles and in no man’s land get +4 armor, and flank squads start twice as fast.' },
-    { id: 'blixten', name: 'Blixten', ability: 'Your first map or tower purchase each round is free: a bribe, an offering at the altar of ice, your own elf tower, removing a mushroom tile, a tower skill or a mage general (not the bank’s Major investment).' },
+    { id: 'blixten', name: 'Blixten', ability: 'Your first map or tower purchase each round is 100 gold cheaper: a bribe, an offering at the altar of ice, your own elf tower, removing a mushroom tile, a tower skill or a mage general (not the bank’s Major investment).' },
     { id: 'noah', name: 'Noah - The Bog', ability: 'Squads you buy in the shop start at level 2. Each costs its price plus one upgrade. All your units have 10% less health and damage.' },
     { id: 'phil', name: 'Phil', ability: 'Tier 4 units are 100 gold cheaper to unlock.' },
     { id: 'yotyot', name: 'Yot-Yot', ability: 'Every fight, Ember Imps pop up on random free tiles on your side of the board (your zone, no man’s land and, once open, your flank tiles): 1 in round 1, 2 in round 2, and so on. From round 3 they are level 2, from round 6 level 3. They get the skills you bought for Ember Imps.' },
     { id: 'mubarak', name: 'Mubarak - Slime Lord', ability: 'Your slime units (Slime Wizards and Slimeshots) get every skill you buy for any slime unit, not just their own.' },
     { id: 'felix', name: 'Felix', ability: 'From round 3 on, you get 50 more gold every round.' },
-    { id: 'enzo', name: 'Enzo', ability: 'You can’t buy unit skills, but each unit type comes with one random skill, for free, picked at the start of the match and the same for all your squads of it all match (see it under the unit’s i button). All your units have 10% less health and damage.' },
+    { id: 'enzo', name: 'Enzo', ability: 'You can’t buy unit skills, but each unit type comes with one random skill, for free, picked at the start of the match and the same for all your squads of it all match (see it under the unit’s i button). The skill only works while you have 2 or more squads of that unit.' },
     { id: 'matteo', name: 'Matteo - the Gentleman', ability: 'Give one of your squads a stack of Charisma. When a squad with Charisma kills an enemy, it gains a stack and gives one to a squad of yours without any. At 5 stacks a squad is a Gentleman: the first enemy it would kill each fight joins your side for that fight instead, at half health.' },
   ];
-  const CHAR = { cageHp: 10, zoeTiles: 2, zoeDmg: 20, zoeHp: 20, zoeAps: 10, wilhelmArmor: 4, wilhelmDelay: 0.5, noahLevel: 1, noahCut: 10, enzoCut: 10, philTier: 4, philOff: 100, yotUnit: 'Ember Imps', yotLv2: 3, yotLv3: 6, felixRound: 3, felixGold: 50 };
+  const CHAR = { cageHp: 10, zoeTiles: 2, zoeDmg: [10, 20, 30, 40], zoeHp: [10, 20, 30, 40], zoeAps: [0, 5, 10, 15], wilhelmArmor: 4, wilhelmDelay: 0.5, noahLevel: 1, noahCut: 10, enzoMin: 2, philTier: 4, philOff: 100, yotUnit: 'Ember Imps', yotLv2: 3, yotLv3: 6, felixRound: 3, felixGold: 50 };
   // ---------- Matteo's charisma ----------
   // sq.charm = Charisma stacks on a squad, kept between rounds; they grow in fights (see Engine: opts.charm).
   // Matteo gives the first stack to a squad of his choice (again whenever none of his squads has any, e.g. after
@@ -1833,9 +1844,11 @@ const Game = (() => {
   const charmMap = (m, side) => charOf(m, side) === 'matteo' ? Object.fromEntries(m.armies[side].map(q => [q.id, charmOf(q)])) : null;
   const charOf = (m, side) => (m && m.chars && m.chars[side]) || null;
   const charInfo = (id) => CHARACTERS.find(c => c.id === id) || null;
-  // Blixten: the first map or tower purchase each round is free. m.mapFree[side][round] = the purchase that got it:
+  // Blixten: the first map or tower purchase each round is BLIX_OFF gold cheaper. m.mapFree[side][round] = the purchase that got it:
   // { kind: 'bribe' } (the round's first bribe), { kind: 'altar', type }, { kind: 'shroom', col, row }, { kind: 'elf' },
   // { kind: 'tskill' }, { kind: 'tskill2' } (not Major investment), { kind: 'mgen' } (a mage general) or { kind: 'mtp' } (the teleport general)
+  const BLIX_OFF = 100;
+  const blix = (c) => Math.max(0, c - BLIX_OFF); // a price with Blixten's discount
   const mapFreeOf = (m, side) => (m && m.mapFree && m.mapFree[side] && m.mapFree[side][m.round]) || null;
   const mapFreeLeft = (m, side) => side != null && charOf(m, side) === 'blixten' && !mapFreeOf(m, side);
   const isMapFree = (m, side, rec) => { const f = mapFreeOf(m, side); return !!f && f.kind === rec.kind && f.type === rec.type && f.col === rec.col && f.row === rec.row; };
@@ -1843,7 +1856,7 @@ const Game = (() => {
     if (!m.mapFree) m.mapFree = [{}, {}];
     m.mapFree[side][m.round] = rec;
   }
-  // the free purchase was taken back: the free slot passes to another map purchase of this round, if there is one, refunding it
+  // the discounted purchase was taken back: the discount passes to another map purchase of this round, if there is one, refunding the difference
   function passMapFree(m, side) {
     delete m.mapFree[side][m.round];
     const alt = altarBuys(m).find(b => b.side === side && b.round === m.round);
@@ -1858,7 +1871,7 @@ const Game = (() => {
     else if (m.towerSkill2 && m.towerSkill2[side] === m.round && !(towerType(m, side).skill2 || {}).noFree) { rec = { kind: 'tskill2' }; back = towerType(m, side).skill2.cost; }
     else if (mageGenOf(m, side)) { rec = { kind: 'mgen' }; back = mageGenCost(mageGenOf(m, side)); }
     else if (mageTpOf(m, side)) { rec = { kind: 'mtp' }; back = mageGenCost('teleport'); }
-    if (rec) { useMapFree(m, side, rec); m.gold[side] += back; }
+    if (rec) { useMapFree(m, side, rec); m.gold[side] += back - blix(back); }
   }
   // ---------- maps ----------
   // Each match is fought on one map, picked by the host when the match is created (or at random). A map can change the
@@ -1868,7 +1881,7 @@ const Game = (() => {
   const MAPS = [
     { id: 'standard', name: 'Standard', short: 'No special rules.', text: 'No special rules.', plain: true }, // only when picked, never random
     { id: 'forest', name: 'Forest Clearing', short: 'Bribe the elf tower to fight for you.', text: 'Ents and Earth Wizards have 15% more health. Healing and regeneration are 1.5× as strong. A neutral elf tower in no man’s land sides with whoever has bribed the elves the most times: it heals their units and shoots the other player’s. With bribes level, it shoots both. Bribe as often as you like: 50 gold, and 50 more for each extra bribe in the same round. Totals stay secret; the flag on the tower shows who is ahead. After round 5 the elves hit and heal twice as hard. From the round after 10 bribes have been paid in all, each player who has bribed can buy one elf tower of their own for 400 gold.', boostHp: 15, boostUnits: ['Ent', 'Earth Wizard'], healMul: 1.5, elfTower: true },
-    { id: 'cavern', name: 'Mushroom Cavern', short: 'Shorter range. Mushroom tiles buff, speed up or poison.', text: 'All units have 25% less range (units with 5 m range or less keep theirs). Stealth units deal 20% more damage. Glowing mushroom tiles stay on the same tiles all match, mirrored on both halves. Purple: a squad that starts the fight there gets +10% damage, +10% health and +5% attack speed. Yellow: a unit that starts on it or walks over it moves 30% faster for the rest of the fight. Green: a unit that starts on it or walks over it is poisoned and slowed. Yellow and green work once per unit, for both sides. Either player can remove a mushroom tile for 50 gold.', stealthDmg: 20, rangeCut: 25, rangeKeep: 5, shrooms: true, pointMirror: true },
+    { id: 'cavern', name: 'Mushroom Cavern', short: 'Shorter range. Mushroom tiles buff, speed up or poison.', text: 'All units have 25% less range (units with 5 m range or less keep theirs). Stealth units deal 20% more damage. Glowing mushroom tiles stay on the same tiles all match, mirrored on both halves. Purple: a squad that starts the fight there gets +10% damage, +10% health and +5% attack speed. Yellow: a unit that starts on it or walks over it moves 30% faster for the rest of the fight. Green: a unit that starts on it or walks over it is poisoned and slowed (slime units are healed and sped up instead). Yellow and green work once per unit, for both sides. Either player can remove a mushroom tile for 50 gold.', stealthDmg: 20, rangeCut: 25, rangeKeep: 5, shrooms: true, pointMirror: true },
     { id: 'ice', name: 'Frozen Peak', short: 'Hail from round 2. An ice altar rises on even rounds.', text: 'Every fight from round 2: a hailstorm drops 10 hail tiles in the storm band (no man’s land at first); units standing in hail take 20 damage per second. Even rounds: the altar of ice rises in the middle of the board. Tap it to buy ice walls for your tower, push the storm band toward your opponent, or summon a Snowgre.', ice: true },
   ];
   // ---------- Frozen Peak: hailstorm and the altar of ice ----------
@@ -1911,10 +1924,10 @@ const Game = (() => {
   const altarCost = (m, side, type) => {
     const c = altarBase(m, side, type);
     if (c == null) return c;
-    return (altarBought(m, side, type) && !altarRepeat(type) ? isMapFree(m, side, { kind: 'altar', type }) : mapFreeLeft(m, side)) ? 0 : c;
+    return (altarBought(m, side, type) && !altarRepeat(type) ? isMapFree(m, side, { kind: 'altar', type }) : mapFreeLeft(m, side)) ? blix(c) : c;
   };
-  // what taking back this round's last one of an offering gives back (Blixten's free one gives nothing)
-  const altarRefund = (m, side, type) => { const n = altarCount(m, side, type); return !n || (n === 1 && isMapFree(m, side, { kind: 'altar', type })) ? 0 : altarBase(m, side, type); };
+  // what taking back this round's last one of an offering gives back (Blixten's discounted one: what was paid)
+  const altarRefund = (m, side, type) => { const n = altarCount(m, side, type); return !n ? 0 : n === 1 && isMapFree(m, side, { kind: 'altar', type }) ? blix(altarBase(m, side, type)) : altarBase(m, side, type); };
   // whether one more push would still move the band: it stops at the edge of the opponent's zone
   const pushRoom = (m, side) => { const off = stormShift(m, m.round + 1); return side === 0 ? off < ZONE : off > -ZONE; };
   const altarBought = (m, side, type) => altarBuys(m).some(b => b.side === side && b.type === type && b.round === m.round);
@@ -1979,23 +1992,23 @@ const Game = (() => {
   const bribeGold = (m, side, pub) => {
     const per = {}; // bribes per round: n of them cost BRIBE_COST * (1 + 2 + ... + n)
     for (const r of bribeList(m, side)) if (!pub || r < m.round) per[r] = (per[r] || 0) + 1;
-    const free = Object.keys(per).filter(r => ((m.mapFree && m.mapFree[side]) || {})[r]?.kind === 'bribe').length; // Blixten's free first bribes
-    return Object.values(per).reduce((a, n) => a + BRIBE_COST * n * (n + 1) / 2, 0) - BRIBE_COST * free;
+    const free = Object.keys(per).filter(r => ((m.mapFree && m.mapFree[side]) || {})[r]?.kind === 'bribe').length; // Blixten's discounted first bribes
+    return Object.values(per).reduce((a, n) => a + BRIBE_COST * n * (n + 1) / 2, 0) - (BRIBE_COST - blix(BRIBE_COST)) * free;
   };
   // how many times a player has bribed; pub = only bribes from earlier rounds
   const bribeCount = (m, side, pub) => bribeList(m, side).filter(r => !pub || r < m.round).length;
   const bribeNow = (m, side) => bribeList(m, side).filter(r => r === m.round).length; // bribes paid this round
-  const bribeCost = (m, side) => bribeNow(m, side) === 0 && mapFreeLeft(m, side) ? 0 : BRIBE_COST * (bribeNow(m, side) + 1); // what the next bribe this round costs
-  // what taking back this round's last bribe gives back: the last one bought was the dearest (Blixten's free one gives nothing)
-  const bribeRefund = (m, side) => bribeNow(m, side) === 1 && isMapFree(m, side, { kind: 'bribe' }) ? 0 : BRIBE_COST * bribeNow(m, side);
+  const bribeCost = (m, side) => bribeNow(m, side) === 0 && mapFreeLeft(m, side) ? blix(BRIBE_COST) : BRIBE_COST * (bribeNow(m, side) + 1); // what the next bribe this round costs
+  // what taking back this round's last bribe gives back: the last one bought was the dearest (Blixten's discounted one: what was paid)
+  const bribeRefund = (m, side) => bribeNow(m, side) === 1 && isMapFree(m, side, { kind: 'bribe' }) ? blix(BRIBE_COST) : BRIBE_COST * bribeNow(m, side);
   // who is ahead in the bribe-off: 0, 1, or -1 when level. pub: counting earlier rounds only (as the flag shows it while deploying)
   const bribeLeader = (m, pub) => { const a = bribeCount(m, 0, pub), b = bribeCount(m, 1, pub); return a > b ? 0 : b > a ? 1 : -1; };
   const canBribe = (m, side) => !!elfSpot(m) && m.gold[side] >= bribeCost(m, side);
   function bribe(m, side) {
     if (!canBribe(m, side)) return false;
     if (!m.bribe) m.bribe = [[], []];
+    m.gold[side] -= bribeCost(m, side);
     if (bribeNow(m, side) === 0 && mapFreeLeft(m, side)) useMapFree(m, side, { kind: 'bribe' });
-    else m.gold[side] -= bribeCost(m, side);
     m.bribe[side] = bribeList(m, side).concat(m.round);
     return true;
   }
@@ -2023,7 +2036,7 @@ const Game = (() => {
   // offered to a player only if they have bribed the elves themselves (in an earlier round too)
   const elfOwnOffered = (m, side) => elfOwnUnlocked(m) && bribeCount(m, side, true) > 0;
   // what it costs a player: what they paid if they bought it this round, else what it costs them now
-  const elfOwnCost = (m, side) => { const e = elfOwnOf(m, side); return (e && e.round === m.round ? isMapFree(m, side, { kind: 'elf' }) : mapFreeLeft(m, side)) ? 0 : ELF_OWN.cost; };
+  const elfOwnCost = (m, side) => { const e = elfOwnOf(m, side); return (e && e.round === m.round ? isMapFree(m, side, { kind: 'elf' }) : mapFreeLeft(m, side)) ? blix(ELF_OWN.cost) : ELF_OWN.cost; };
   const canBuyElfOwn = (m, side) => elfOwnOffered(m, side) && !elfOwnOf(m, side) && m.gold[side] >= elfOwnCost(m, side);
   const elfOwnSpotOk = (m, side, col, row) => col >= 0 && col < COLS && inZone(side, row) && !reserved(side, col, row) && !occupied(m, side, col, row);
   function buyElfOwn(m, side, col, row) {
@@ -2079,7 +2092,7 @@ const Game = (() => {
   // what removing a tile costs a player; with col, row of a tile they removed this round: what they paid for it
   const shroomCost = (m, side, col, row) => {
     const mine = col != null && (m.map && m.map.removed || []).some(x => x.col === col && x.row === row && x.side === side && x.round === m.round);
-    return (mine ? isMapFree(m, side, { kind: 'shroom', col, row }) : mapFreeLeft(m, side)) ? 0 : SHROOM_REMOVE;
+    return (mine ? isMapFree(m, side, { kind: 'shroom', col, row }) : mapFreeLeft(m, side)) ? blix(SHROOM_REMOVE) : SHROOM_REMOVE;
   };
   // (both players may pick the same tile in the same round, since neither can see the other's choice; both pay)
   function removeShroom(m, side, col, row) {
@@ -2281,6 +2294,7 @@ const Game = (() => {
       towers: null, // { col, row } of each player's tower (fixed; set below, as it depends on the map)
       chars: [null, null], // each player's character id (comes with the package)
       buff: [[], []], // Zoe's buff tiles for this round: [{ col, row }, ...]
+      zoeUses: [0, 0], // fights each player has used Zoe's buff tiles in (the buff grows with them: zoeBuff)
       unlocks: [{}, {}], // units unlocked per player: unlocks[side][unitIdx] = round it was unlocked
       off, // units left out of this match: they can't be unlocked, placed or dealt in a package
       rules, // roster rules for the fights (null = all on)
@@ -2293,7 +2307,7 @@ const Game = (() => {
       towerSkill2: [0, 0], // ...and its second skill (keep, bastion, bank)
       loan: [0, 0], // the round each player last took a bank loan in (Bank tower)
       mageGen: [null, null], // the mage generals each player called this round: { round, id, tp } (Mage tower)
-      mapFree: [{}, {}], // Blixten's free map purchase per round (see mapFreeOf)
+      mapFree: [{}, {}], // Blixten's discounted map purchase per round (see mapFreeOf)
       factions, // Factions mode: each player's drafted faction ids (null = a normal match)
     };
     m.towers = [towerSpot(m, 0), towerSpot(m, 1)];
@@ -2307,7 +2321,18 @@ const Game = (() => {
   // ---------- skills (bought per unit type, for all squads of that type) ----------
   // m.units[i].skillDefs = [def or null, ...], one per skill slot (Engine.SKILL_SLOTS)
   const skillDef = (m, ui, k) => (m.units[ui].skillDefs || [])[k] || null;
-  const skillCost = (m, ui, k) => { const d = skillDef(m, ui, k); return d ? Math.max(0, Math.round(+d.cost || 0)) : 0; };
+  // Every skill a player buys for a unit makes that unit's other skills SKILL_STEP gold dearer (other units' skills
+  // stay as they are). side (optional): that player's price, for a skill they don't have yet the price to buy it, for
+  // one they bought the refund for undoing it (so buying and undoing in any order always adds up)
+  const SKILL_STEP = 50;
+  const skillsBought = (m, side, ui) => ((m.tech && m.tech[side] && m.tech[side][ui]) || []).filter((r, k) => r > 0 && !isInnate(m, ui, k)).length;
+  const skillCost = (m, ui, k, side) => {
+    const d = skillDef(m, ui, k); if (!d) return 0;
+    const base = Math.max(0, Math.round(+d.cost || 0));
+    if (side == null || isInnate(m, ui, k)) return base;
+    const n = skillsBought(m, side, ui) - (hasSkill(m, side, ui, k) ? 1 : 0);
+    return base + SKILL_STEP * Math.max(0, n);
+  };
   // a built-in skill (skillsInnate on the unit) is always on, free and visible
   const isInnate = (m, ui, k) => !!(skillDef(m, ui, k) && Array.isArray(m.units[ui].skillsInnate) && m.units[ui].skillsInnate[k]);
   const hasSkill = (m, side, ui, k) => isInnate(m, ui, k) || !!(m.tech && m.tech[side] && m.tech[side][ui] && m.tech[side][ui][k] > 0);
@@ -2315,22 +2340,24 @@ const Game = (() => {
   const skillVisible = (m, side, ui, k) => isInnate(m, ui, k) || (hasSkill(m, side, ui, k) && m.tech[side][ui][k] < m.round);
   // Enzo: each of his unit types has one random non-built-in skill (slot index, or null if the unit has none), the same
   // for all his squads of it. Drawn from the match seed and the unit, so both phones get the same one without sending it.
+  // It only works while he has CHAR.enzoMin or more squads of that unit on the board (enzoActive).
   function enzoSkill(m, side, sq) {
     if (!sq || charOf(m, side) !== 'enzo' || !m.units[sq.unit]) return null;
     const ks = E.SLOTS.filter(k => skillDef(m, sq.unit, k) && !isInnate(m, sq.unit, k));
     return ks.length ? ks[Math.floor(rng(m.seed + side * 6151 + sq.unit * 7919 + 313)() * ks.length)] : null;
   }
+  const enzoActive = (m, side, ui) => charOf(m, side) === 'enzo' && m.armies[side].filter(s => s.unit === ui).length >= CHAR.enzoMin;
   // sq (optional): the squad, for a skill of its own (Enzo's)
   function unitFor(m, side, ui, sq) {
-    const base = m.units[ui], ek = enzoSkill(m, side, sq);
+    const base = m.units[ui], ek = enzoActive(m, side, ui) ? enzoSkill(m, side, sq) : null;
     const defs = E.SLOTS.filter(k => hasSkill(m, side, ui, k) || k === ek).map(k => skillDef(m, ui, k));
     // Mubarak: a slime unit also gets the skills bought for the other slime units
     if (charOf(m, side) === 'mubarak' && base && SLIME_UNITS.includes(base.name)) defs.push(...slimeSkillDefs(m, side, ui));
     let u = defs.length ? E.applySkills(base, defs, m.units) : base;
     u = withFactionTrait(u, base && base.faction);
     if (base && SLIME_UNITS.includes(base.name)) u = { ...u, slime: true }; // poison heals slime units
-    if (charOf(m, side) === 'noah' || charOf(m, side) === 'enzo') { // Noah and Enzo: 10% less health and damage, spawned ones too
-      const k = 1 - (charOf(m, side) === 'noah' ? CHAR.noahCut : CHAR.enzoCut) / 100;
+    if (charOf(m, side) === 'noah') { // Noah: 10% less health and damage, spawned ones too
+      const k = 1 - CHAR.noahCut / 100;
       u = { ...u, hp: u.hp * k, hit: u.hit * k };
       if (u.spawn) u.spawn = { ...u.spawn, unit: { ...u.spawn.unit, hp: u.spawn.unit.hp * k, hit: u.spawn.unit.hit * k } };
     }
@@ -2380,11 +2407,11 @@ const Game = (() => {
     if (!d || hasSkill(m, side, ui, k)) return false;
     if (charOf(m, side) === 'enzo') return false; // Enzo's squads come with their skill instead
     if (!m.armies[side].some(s => s.unit === ui)) return false; // needs a squad of that type on the board
-    return m.gold[side] >= skillCost(m, ui, k);
+    return m.gold[side] >= skillCost(m, ui, k, side);
   }
   function buySkill(m, side, ui, k) {
     if (!canBuySkill(m, side, ui, k)) return false;
-    m.gold[side] -= skillCost(m, ui, k);
+    m.gold[side] -= skillCost(m, ui, k, side);
     if (!m.tech) m.tech = [{}, {}];
     const t = m.tech[side][ui] || (m.tech[side][ui] = E.SLOTS.map(() => 0));
     t[k] = m.round;
@@ -2396,8 +2423,8 @@ const Game = (() => {
     // Forward planting can't be taken back while a squad of that unit stands in no man's land
     const d = skillDef(m, ui, k);
     if (d && d.type === 'forward' && m.armies[side].some(s => s.unit === ui && inNoMans(s.row))) return false;
+    m.gold[side] += skillCost(m, ui, k, side); // the refund, worked out while it's still owned
     t[k] = 0;
-    m.gold[side] += skillCost(m, ui, k);
     return true;
   }
 
@@ -2552,7 +2579,7 @@ const Game = (() => {
       if (ch === 'wilhelm' && forward) u = { ...u, bonusArmor: (u.bonusArmor || 0) + CHAR.wilhelmArmor };
       // Zoe: a squad that starts the fight on a buff tile keeps the bonus for the whole fight
       const zoe = onBuffTile(m, side, sq.col, sq.row);
-      if (zoe) u = { ...u, hit: u.hit * (1 + CHAR.zoeDmg / 100), hp: u.hp * (1 + CHAR.zoeHp / 100), aps: u.aps * (1 + CHAR.zoeAps / 100) };
+      if (zoe) { const zb = zoeBuff(m, side); u = { ...u, hit: u.hit * (1 + zb.dmg / 100), hp: u.hp * (1 + zb.hp / 100), aps: u.aps * (1 + zb.aps / 100) }; }
       if (eagle && u.name === 'Sniper') u = { ...u, range: u.range + TOWER_SKILL.eagleRange, aps: u.aps * (1 + TOWER_SKILL.eagleAps / 100) };
       if (mp && mp.rangeCut && u.range > mp.rangeKeep) u = { ...u, range: Math.max(mp.rangeKeep, u.range * (1 - mp.rangeCut / 100)) }; // the map shortens reach (never below rangeKeep)
       const b = E.buildSquad(u, side, w.x, w.y, sq.id, TILE, idx, sq.level);
@@ -2653,6 +2680,12 @@ const Game = (() => {
     for (let k = 0; k < CHAR.zoeTiles && spots.length; k++) m.buff[side].push(spots.splice(Math.floor(r() * spots.length), 1)[0]);
   }
   const onBuffTile = (m, side, col, row) => charOf(m, side) === 'zoe' && !!(m.buff && m.buff[side] || []).some(t => t.col === col && t.row === row);
+  // The buff grows with use: m.zoeUses[side] = fights in which a squad started on one of her tiles (see resolve).
+  // Returns the bonus in percent for this round's fight: { dmg, hp, aps }
+  const zoeBuff = (m, side) => {
+    const lv = Math.min(CHAR.zoeDmg.length - 1, (m && m.zoeUses && m.zoeUses[side]) || 0);
+    return { dmg: CHAR.zoeDmg[lv], hp: CHAR.zoeHp[lv], aps: CHAR.zoeAps[lv] };
+  };
 
   function startBattle(m) {
     ensureTower(m, 0); ensureTower(m, 1);
@@ -2693,6 +2726,9 @@ const Game = (() => {
   // Apply a finished battle to the match. Returns a summary for the results screen.
   function resolve(m, res) {
     const dmg = [0, 0]; // damage taken by each side
+    // Zoe: a fight with a squad on one of her buff tiles makes the buff stronger from the next round on
+    if (!m.zoeUses) m.zoeUses = [0, 0];
+    for (const sd of [0, 1]) if (m.armies[sd].some(sq => onBuffTile(m, sd, sq.col, sq.row))) m.zoeUses[sd]++;
     let roundWinner = res.winner;
     if (res.timeout) {
       dmg[0] = survivorDamage(m, res, 1);
@@ -2796,6 +2832,9 @@ const Game = (() => {
     (sq.boughtLevels = sq.boughtLevels || {})[m.round] = ((sq.boughtLevels || {})[m.round] || 0) + 1;
     return true;
   }
+
+  // the level the opponent sees: levels bought this round stay hidden until the fight
+  const seenLevel = (m, sq) => Math.max(0, (sq.level || 0) - ((sq.boughtLevels && sq.boughtLevels[m.round]) || 0));
 
   // Undo a level bought this round (full refund)
   function undoLevel(m, side, sqId) {
@@ -2985,7 +3024,7 @@ const Game = (() => {
       const types = Object.keys(own).map(Number).filter(ui => own[ui] >= 2).sort((a, b) => own[b] - own[a]);
       for (const ui of types) for (const k of E.SLOTS) {
         if (!skillDef(m, ui, k) || hasSkill(m, side, ui, k)) continue;
-        if (m.gold[side] - reserve - skillCost(m, ui, k) < minCost) continue;
+        if (m.gold[side] - reserve - skillCost(m, ui, k, side) < minCost) continue;
         if (r() < 0.5) buySkill(m, side, ui, k);
       }
     }
@@ -3056,17 +3095,17 @@ const Game = (() => {
   return {
     MAX_ROUND_DMG, seenAt, charShown, towerTypeShown, altarShown, elfOwnShown, shroomShown, removingShroom, movedId, canMove, moveSquad, undoMove,
     COLS, ROWS, TILE, ZONE, START_HP, START_GOLD, INCOME, incomeFor, LOSER_BONUS, SQUAD_COST, SQUAD_POINTS, SETTINGS, XP_STEPS, xpNeeded, unitCostOf,
-    levelCost, isReady, levelUp, undoLevel, aiLevel, AI, CONFIG,
+    levelCost, isReady, levelUp, undoLevel, seenLevel, aiLevel, AI, CONFIG,
     deploysAllowed, deploysLeft, deployedThisRound, canBuyDeploy, buyDeploy, refundDeploy,
     PACKAGE, allPackages, packOf, needsPack, freeLeft, choosePack, ensurePack,
     unlockCost, tierOf, startLevel, shopCost, mapFreeOf, mapFreeLeft, isUnlocked, unlockVisible, unlock, undoUnlock,
-    skillDef, skillCost, isInnate, hasSkill, skillVisible, unitFor, canBuySkill, buySkill, undoSkill, sellValue, sell,
+    skillDef, skillCost, SKILL_STEP, skillsBought, isInnate, hasSkill, skillVisible, unitFor, canBuySkill, buySkill, undoSkill, sellValue, sell,
     isRider, hiddenFromFoe, isCarrier, riderOf, carrierOf, squadAt, boardable, unplaceSquad,
     TOWER, TOWER_TYPES, OUTPOST, TOWER_PICK_ROUND, towerType, towerChoices, needsTowerPick, setTowerType, settleTowerPicks, TOWER_SKILL, towerSkillOf, towerSkillVisible, towerPicked, canBuyTowerSkill, buyTowerSkill, undoTowerSkill, towerSkillCost, towerSkill2Of, towerSkill2Visible, towerSkill2Cost, canBuyTowerSkill2, buyTowerSkill2, undoTowerSkill2, towerSkill2On, AIRSHIP, MOAT, INVEST, MAGE_GENERALS, mageGenPrice, MAGE, mageGenInfo, mageGenOf, mageTpOf, isExtraGen, mageGenCost, canBuyMageGen, buyMageGen, undoMageGen, mageTowerUnit, generalUnit, LOAN, loanNow, canTakeLoan, takeLoan, undoLoan, SLIME_UNITS, slimeTowerUnit, slimeSkillDefs, TOWER_MID, towerColOk, towerAt, needsTower, placeTower, ensureTower,
     FLANK, flankRows, flankOpen, isFlank, reserved, canPlaceAt, isOff, enemyHolds, inNoMans, hasSkillType,
     ICE, ALTAR, GOLEM, isIce, hailRound, altarRound, stormShift, stormRows, hailTiles, altarCost, altarRefund, altarCount, pushRoom, altarBought, addAltar, buyAltar, undoAltar, snowgres, snowgreUnit,
     MAPS, ELF_TOWER, SHROOM, SHROOM_SPLIT, shroomAt, shroomTileAt, shroomRemoval, SHROOM_REMOVE, shroomCost, removeShroom, undoRemoveShroom, mapOf, elfSpot, rollMap, BRIBE_COST, bribeList, bribeGold, bribeCount, bribeNow, bribeCost, bribeRefund, ELF_POWER, elfPowered, elfUnit, ELF_OWN, elfOwnCost, elfOwnOf, elfOwnAt, elfOwnUnlocked, elfOwnOffered, canBuyElfOwn, elfOwnSpotOk, buyElfOwn, undoElfOwn, bribeLeader, canBribe, bribe, undoBribe,
-    CHARACTERS, CHAR, charOf, charInfo, enzoSkill, charmOf, isGentleman, canGiveCharm, giveCharm, undoCharm, ensureCharm, felixGold, isTier1, rollBuffTiles, onBuffTile, yotImps, yotLevel, TOWER_SPOT, towerSpot,
+    CHARACTERS, CHAR, charOf, charInfo, enzoSkill, enzoActive, charmOf, isGentleman, canGiveCharm, giveCharm, undoCharm, ensureCharm, felixGold, isTier1, rollBuffTiles, onBuffTile, zoeBuff, yotImps, yotLevel, TOWER_SPOT, towerSpot,
     FACTION_MODE, FACTIONS: () => FACTIONS, setFactions, factionInfo, factionsOf, factionTowers, towerTypeById, ownsUnit, withFactionTrait, factionSet,
     createDraft, draftTurn, draftOpen, draftAct, draftDone, draftPossible, aiDraftChoice,
     zoneRows, inZone, tileToWorld, createMatch, place, unplace, bodiesFor, startBattle, resolve, aiDeploy, occupied,
@@ -3202,8 +3241,9 @@ const Art = (() => {
 // It sees the game only through view(), which it calls at the start of every draw and which returns what this
 // screen shows right now:
 //   { m, me, phase, units, mode, bt, battlePre, fx, selected, moving, drag, hoverTile,
-//     editable, placingUnit, placingElf, placingTower }
+//     editable, placingUnit, placingElf, placingTower, battleCam }
 // fx: short-lived battle effects as plain data (shots, flames, bolts, heals, deaths), in board metres.
+// battleCam: { zoom, x, y } while the battle cam zooms in on the final seconds of a fight (board metres), else null.
 // Calls: size() after the canvas changes size, draw(), tileAt(clientX, clientY) -> { col, row } or null,
 // thumb(match) -> a data URL of a small picture of that match's board (null: a plain board with a question mark),
 // floor(plain): only the board itself (map, zones, tiles), no squads or towers: the 3D renderer lays it on the ground;
@@ -3211,9 +3251,9 @@ const Art = (() => {
 // A 3D renderer can take its place by offering the same calls.
 const Render2D = (cv, view) => {
   let ctx = cv.getContext('2d'); // swapped for a moment while drawing map thumbnails (thumb)
-  let m = null, me = 0, phase = 'start', units = [], mode = 'ai', bt = null, battlePre = null, fx = [];
+  let m = null, me = 0, phase = 'start', units = [], mode = 'ai', bt = null, battlePre = null, fx = [], battleCam = null;
   let selected = null, moving = null, drag = null, hoverTile = null, editable = false, placingUnit = null, placingElf = false, placingTower = false;
-  const pull = () => { ({ m, me, phase, units, mode, bt, battlePre, fx, selected, moving, drag, hoverTile, editable, placingUnit, placingElf, placingTower } = view()); };
+  const pull = () => { ({ m, me, phase, units, mode, bt, battlePre, fx, selected, moving, drag, hoverTile, editable, placingUnit, placingElf, placingTower, battleCam } = view()); };
   const foe = () => 1 - me;
   const css = Art.css, tag = Shapes.tag;
   const { ELF_COL, SHROOM_COL, CHARM_COL } = Art;
@@ -3705,7 +3745,7 @@ const Render2D = (cv, view) => {
     // a squad they moved this round still shows on its old tile
     for (const sq of m.armies[foe()]) if ((sq.round < m.round || phase !== 'deploy') && !Game.hiddenFromFoe(m, sq)) {
       const p = phase === 'deploy' ? Game.seenAt(m, sq) : sq;
-      drawSquad(p === sq ? sq : { ...sq, col: p.col, row: p.row }, foe(), false);
+      drawSquad(phase === 'deploy' ? { ...sq, col: p.col, row: p.row, level: Game.seenLevel(m, sq) } : sq, foe(), false); // a level-up bought this round stays hidden
     }
     for (const sq of m.armies[me]) {
       if (phase === 'deploy' && sq.from && sq.movedRound === m.round) { // where your moved squad came from
@@ -3892,7 +3932,12 @@ const Render2D = (cv, view) => {
   function draw() {
     pull();
     if (!m) { drawBoard(); return; }
-    if (bt && (phase === 'battle' || phase === 'result' || phase === 'end')) drawBattle();
+    if (bt && phase === 'battle' && battleCam) { // the battle cam, zoomed in around its focus
+      const fx0 = PX(battleCam.x), fy0 = PY(battleCam.y);
+      ctx.save(); ctx.translate(fx0, fy0); ctx.scale(battleCam.zoom, battleCam.zoom); ctx.translate(-fx0, -fy0);
+      drawBattle();
+      ctx.restore();
+    } else if (bt && (phase === 'battle' || phase === 'result' || phase === 'end')) drawBattle();
     else drawDeploy();
   }
 
@@ -3919,6 +3964,8 @@ const Render2D = (cv, view) => {
 // point, so the game can place squads). There the page can also take a one-finger drag for itself (to move a squad):
 // opts.onPress(point) on the press returns true to take it, then opts.onDrag(point) as it moves and opts.onDrop(point)
 // when it lifts (null when a second finger or a cancel ends it); a short press still counts as a tap after the drop.
+// onTap and onPress also get the screen point (clientX, clientY), and groundAt(clientX, clientY, h) finds where it
+// meets a level h metres above the ground (to pick what stands there).
 // A mouse moving over the strategic view with no button down goes to opts.onHover(point), null when it leaves.
 // While opts.placing() is true (the player is deploying), the angled view takes taps, drags and hover the same way;
 // a drag that the page doesn't take still looks around, and setLevel(k) (or a pinch, the wheel, Esc) changes view. Levels 1 and 2 are cinematic: angled, then close to the ground. In a
@@ -3993,12 +4040,18 @@ const Camera3D = (THREE, camera, el, opts) => {
 
   // the point on the ground under a screen point (null if it's above the horizon)
   const ray = new THREE.Raycaster(), ndc = new THREE.Vector2(), ground = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-  function groundAt(cx, cy) {
+  // the point under a screen point on the ground, or (h metres) on a level that high above it
+  const level_ = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  function groundAt(cx, cy, h = 0) {
     const r = el.getBoundingClientRect();
     ndc.set((cx - r.left) / r.width * 2 - 1, -((cy - r.top) / r.height) * 2 + 1);
     ray.setFromCamera(ndc, camera);
     const hit = new THREE.Vector3();
-    return ray.ray.intersectPlane(ground, hit);
+    if (!h) return ray.ray.intersectPlane(ground, hit);
+    level_.constant = -h;
+    const p = ray.ray.intersectPlane(level_, hit);
+    if (p) p.y = 0;
+    return p;
   }
   // enter a cinematic view looking at the ground under a screen point
   function aimAt(cx, cy) {
@@ -4044,7 +4097,7 @@ const Camera3D = (THREE, camera, el, opts) => {
     try { el.setPointerCapture(e.pointerId); } catch (err) {}
     if (pts.size === 1) {
       tap = { x: e.clientX, y: e.clientY, t: performance.now(), id: e.pointerId };
-      if (handsOn() && opts.onPress && opts.onPress(groundAt(e.clientX, e.clientY))) grab = e.pointerId;
+      if (handsOn() && opts.onPress && opts.onPress(groundAt(e.clientX, e.clientY), e.clientX, e.clientY)) grab = e.pointerId;
     }
     else if (pts.size === 2) startTwo();
   });
@@ -4075,7 +4128,7 @@ const Camera3D = (THREE, camera, el, opts) => {
     pts.delete(e.pointerId);
     if (grab === e.pointerId) dropGrab(e.type === 'pointerup' ? groundAt(e.clientX, e.clientY) : null);
     if (tap && tap.id === e.pointerId && e.type === 'pointerup' && performance.now() - tap.t < TAP_MS) {
-      if (handsOn()) { if (opts.onTap) opts.onTap(groundAt(e.clientX, e.clientY)); }
+      if (handsOn()) { if (opts.onTap) opts.onTap(groundAt(e.clientX, e.clientY), e.clientX, e.clientY); }
       else goStrategic();
     }
     tap = null;
@@ -4140,7 +4193,7 @@ const Camera3D = (THREE, camera, el, opts) => {
   return { update, resize, groundAt, goStrategic, setLevel, strategic, handsOn, level, busy, dispose, zoom: () => z, LEVELS: MAX + 1 };
 };
 
-const DATA = {"units":[{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Goblin Swarm","cost":1,"bodies":12,"hp":26,"hit":17,"aps":1.2,"range":2,"speed":8,"splash":0,"shape":"triangle","color":"#9BD35A","skills":["swift","shrink","spread"],"skillMods":[null,null,null],"skillsInnate":[false,false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Skeleton Archers","cost":1,"bodies":8,"hp":32,"hit":14,"aps":0.75,"range":19,"speed":2.1,"splash":0,"shape":"triangle","color":"#E9E3CF","skills":["range","rapid","boneShield"],"skillMods":[null,null,null],"skillsInnate":[false,false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Ember Imps","cost":1,"bodies":4,"hp":110,"hit":20,"aps":0.8,"range":10,"speed":4,"splash":3,"shape":"imp","color":"#FFA94D","skills":["swift","heavy","emberMortar"],"skillMods":[null,null,null],"skillsInnate":[false,false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":35,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Fire Mage","cost":1,"bodies":1,"hp":155,"hit":33,"aps":0.75,"range":20,"speed":3,"splash":4,"shape":"hexagon","color":"#fb0022","skills":["range","armorHp","dualFlame"],"skillMods":[null,null,null],"skillsInnate":[false,false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":1,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Sniper","cost":1,"bodies":1,"hp":140,"hit":210,"aps":0.25,"range":29,"speed":2,"splash":0,"shape":"cross","color":"#F7D154","skills":["rapid","spawn","range"],"skillMods":[{"params":{"range":0,"aps":15},"cost":150},{"params":{"waves":3}},null],"skillsInnate":[false,false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"armor","defVal":3,"level":0,"unlock":50,"name":"Brute","cost":2,"bodies":1,"hp":1100,"hit":98,"aps":1.1,"range":2,"speed":5,"splash":0,"shape":"square","color":"#8D99AE","skills":["armorHp","swift"],"skillMods":[null,null],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":20,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":40,"level":0,"unlock":50,"name":"Wisps","cost":1,"bodies":2,"hp":80,"hit":75,"aps":0.8,"range":19,"speed":4,"splash":0,"shape":"ring","color":"#ff90ff","skills":["stealth","skmv5oxj501"],"skillMods":[null,{"params":{},"cost":200}],"skillsInnate":[false,false]},{"burst":6,"pellets":2,"spinUp":0,"pierce":0,"projSpeed":35,"minRange":0,"charge":1,"knockback":0,"windUp":0.2,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Leaf Wizard","cost":2,"bodies":1,"hp":240,"hit":21,"aps":0.45,"range":27,"speed":5,"splash":0,"shape":"hexagon","color":"#00d200","skills":["rapid","range"],"skillMods":[null,null],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":5,"projSpeed":35,"minRange":0,"charge":1,"knockback":0,"windUp":0.5,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Earth Wizard","cost":2,"bodies":1,"hp":650,"hit":440,"aps":0.2,"range":24,"speed":3,"splash":2,"shape":"circle","color":"#24590d","skills":["regen","range","heavy"],"skillMods":[null,null,{"params":{"hit":20,"slow":30},"cost":150}],"skillsInnate":[false,false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":30,"defense":"none","defVal":0,"level":0,"unlock":100,"name":"Flame Wizard","cost":3,"bodies":1,"hp":2000,"hit":12,"aps":4,"range":15,"speed":2,"splash":0,"shape":"flame","color":"#b95018","skills":["armorHp","range"],"skillMods":[null,null],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":100,"name":"Steel Wizard","cost":3,"bodies":1,"hp":1900,"hit":150,"aps":0.9,"range":15,"speed":2,"splash":2,"shape":"bar","color":"#57535a","skills":["range","heavy"],"skillMods":[null,{"params":{"slow":20,"hit":20}}],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":40,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":100,"name":"Slime Wizard","cost":3,"bodies":1,"hp":700,"hit":480,"aps":0.2,"range":22,"speed":2,"splash":6,"shape":"ring","color":"#81f038","skills":["skmv5oxpgk2","range"],"skillMods":[null,null],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"armor","defVal":6,"level":0,"unlock":150,"splash":3,"skillsInnate":[false,false],"skillMods":[null,null],"name":"Ether Golem","cost":5,"bodies":1,"hp":3450,"hit":69,"aps":0.6,"range":5,"speed":2.5,"shape":"square","color":"#51005c","skills":["regen","armorHp"]},{"burst":1,"pellets":1,"spinUp":50,"spinHit":50,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":150,"splash":0,"skillsInnate":[false,false],"skillMods":[null,null],"name":"Sun Priest","cost":5,"bodies":1,"hp":2800,"hit":38,"aps":2,"range":18,"speed":3,"shape":"sun","color":"#FFD23F","skills":["split","shrink"]},{"burst":3,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":22,"minRange":12,"charge":1,"knockback":0,"windUp":2,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":150,"splash":6,"skillsInnate":[false,false],"skillMods":[null,null],"name":"Meteor Caller","cost":5,"bodies":1,"hp":400,"hit":114,"aps":0.3,"range":50,"speed":2,"shape":"diamond","color":"#FF6B35","skills":["range","skmv5oxpgk2"]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":3,"knockback":4,"windUp":0,"flame":0,"defense":"armor","defVal":6,"level":0,"unlock":150,"splash":3,"skillsInnate":[false,false],"skillMods":[null,null],"name":"War Mammoth","cost":5,"bodies":1,"hp":2300,"hit":169,"aps":0.5,"range":3,"speed":8,"shape":"pentagon","color":"#A0785A","skills":["swift","armorHp"],"trample":50,"chargeStun":1.5},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":150,"splash":0,"skillsInnate":[true,false],"skillMods":[null,null],"name":"Necromancer","cost":5,"bodies":1,"hp":2300,"hit":56,"aps":1,"range":20,"speed":2.2,"shape":"hexagon","color":"#9D4EDD","skills":["raiseDead","healer"]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":90,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Ent","cost":1,"bodies":2,"hp":400,"hit":25,"aps":1.1,"range":4,"speed":2,"splash":0,"shape":"square","color":"#0d3000","skills":["armorHp","forward"],"skillsInnate":[false,false],"skillMods":[{"params":{"armor":4,"hp":20}},null],"deathBlast":30},{"burst":1,"pellets":1,"spinUp":0.1,"pierce":0,"projSpeed":30,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"name":"Slimeshots","cost":2,"unlock":100,"bodies":10,"hp":95,"hit":7,"aps":0.8,"range":21,"speed":6,"splash":3,"shape":"diamond","color":"#20d300","skills":["range","heavy"],"skillsInnate":[false,false],"skillMods":[{"params":{"m":3},"cost":150},{"params":{"hit":25,"slow":0,"instant":0},"cost":150}]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Just a horse","cost":2,"bodies":1,"hp":500,"hit":200,"aps":1,"range":1,"speed":6,"splash":0,"shape":"horse","color":"#C8A27A","ram":1,"noFlank":1,"carrier":1,"noPack":1,"skills":["gallop","armorHp","deathBurst"],"skillMods":[null,{"params":{"armor":4,"hp":20},"cost":150},null],"skillsInnate":[false,false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":30,"minRange":0,"charge":4,"knockback":0,"windUp":0,"flame":0,"trample":0,"deathBlast":0,"defense":"none","defVal":0,"level":0,"unlock":100,"name":"Rogue","cost":3,"bodies":2,"hp":310,"hit":80,"aps":1.1,"range":4,"speed":6,"splash":0,"shape":"triangle","color":"#460000","skills":["stealth","skmv5oxj501","frenzy"],"skillsInnate":[true,false,false],"skillMods":[null,{"params":{"cap":200},"cost":150},null]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"trample":0,"deathBlast":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Spiders","cost":2,"bodies":5,"hp":185,"hit":20,"aps":0.8,"range":2,"speed":6,"splash":0,"shape":"spider","color":"#000000","skills":["spiderlings","poison","stealth"],"skillsInnate":[false,false,false],"skillMods":[null,null,{"params":{},"cost":200}]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":35,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"trample":0,"deathBlast":0,"pctHit":20,"defense":"none","defVal":0,"level":0,"unlock":150,"name":"Truespear","cost":5,"bodies":1,"hp":750,"hit":60,"aps":0.8,"range":25,"speed":3,"splash":0,"shape":"spear","color":"#C9D1D9","skills":["lifesteal","armorHp","dualSpear"],"skillMods":[null,null,null],"skillsInnate":[false,false,false]}],"matrix":[[0,-1,-0.899,-0.993,0.847,0.453,0.222,0.248,0.472,-1,-0.414,-0.236,-0.734,0.481,-0.809,-0.495,0.522,-0.812,-0.755,0.958,0.667,0.563,0.889],[1,0,0.268,-0.514,0.521,0.658,0.692,-0.189,0.383,-0.804,0.362,-0.704,0.158,-0.614,-0.959,0.625,-0.352,0.803,-0.524,0.946,0.842,0.819,0.825],[0.899,-0.268,0,-0.604,0.333,0.663,-0.225,0.415,0.125,-1,-0.528,-0.68,0.099,0.464,-0.992,-0.086,0.229,0.242,0.117,0.875,0.753,0.848,0.817],[0.993,0.514,0.604,0,-1,-0.25,0.454,-0.443,-0.882,-0.72,-0.216,-0.915,-0.331,-0.487,-1,-0.683,-0.331,0.394,0.097,0.733,-0.121,0.86,0.428],[-0.847,-0.521,-0.333,1,0,-0.095,0.598,0.397,-0.49,-0.363,-0.135,0.333,0.836,0.033,-1,-0.249,-0.578,1,-0.567,0.8,-0.415,0.8,0.858],[-0.453,-0.658,-0.663,0.25,0.095,0,-0.6,0.298,-0.799,-0.535,-0.527,-1,0.223,-0.542,0.04,-0.28,-0.197,-0.702,0.63,0.821,0.264,0.798,0.216],[-0.222,-0.692,0.225,-0.454,-0.598,0.6,0,-0.546,-0.413,-0.688,-0.22,-0.55,0.754,0.318,-0.906,-0.18,-0.49,0.968,-0.64,0.95,0.517,0.946,0.767],[-0.248,0.189,-0.415,0.443,-0.397,-0.298,0.546,0,-0.593,-0.434,-0.227,-0.547,-0.164,-0.36,-0.439,-0.702,-0.573,0.699,-0.518,0.778,-0.683,0.567,0.673],[-0.472,-0.383,-0.125,0.882,0.49,0.799,0.413,0.593,0,0.053,0.779,-0.311,0.915,0.577,-0.833,-0.082,-0.074,1,0.474,1,0.47,0.867,0.777],[1,0.804,1,0.72,0.363,0.535,0.688,0.434,-0.053,0,0.59,-0.722,-0.092,-0.225,-1,-0.508,0.753,1,0.847,0.98,0.688,1,0.116],[0.414,-0.362,0.528,0.216,0.135,0.527,0.22,0.227,-0.779,-0.59,0,-1,0.753,-0.533,-1,0.331,-0.286,0.301,0.378,0.905,0.444,0.771,0.015],[0.236,0.704,0.68,0.915,-0.333,1,0.55,0.547,0.311,0.722,1,0,1,0.771,-1,0.828,0.844,1,0.591,1,-0.05,0.974,0.671],[0.734,-0.158,-0.099,0.331,-0.836,-0.223,-0.754,0.164,-0.915,0.092,-0.753,-1,0,-0.918,-0.885,-0.607,-0.518,-0.368,0.885,0.859,0.301,0.882,-1],[-0.481,0.614,-0.464,0.487,-0.033,0.542,-0.318,0.36,-0.577,0.225,0.533,-0.771,0.918,0,-0.38,0.557,0.412,-0.3,-0.308,0.869,-0.164,0.706,-0.635],[0.809,0.959,0.992,1,1,-0.04,0.906,0.439,0.833,1,1,1,0.885,0.38,0,-0.483,0.796,1,0.489,1,-1,0.992,0.942],[0.495,-0.625,0.086,0.683,0.249,0.28,0.18,0.702,0.082,0.508,-0.331,-0.828,0.607,-0.557,0.483,0,-0.109,-0.283,0.889,0.888,0.393,0.855,-0.251],[-0.522,0.352,-0.229,0.331,0.578,0.197,0.49,0.573,0.074,-0.753,0.286,-0.844,0.518,-0.412,-0.796,0.109,0,-0.03,0.028,0.947,0.607,0.591,0.784],[0.812,-0.803,-0.242,-0.394,-1,0.702,-0.968,-0.699,-1,-1,-0.301,-1,0.368,0.3,-1,0.283,0.03,0,0.18,0.875,0.73,0.892,0.611],[0.755,0.524,-0.117,-0.097,0.567,-0.63,0.64,0.518,-0.474,-0.847,-0.378,-0.591,-0.885,0.308,-0.489,-0.889,-0.028,-0.18,0,0.9,0.682,0.684,0.861],[-0.958,-0.946,-0.875,-0.733,-0.8,-0.821,-0.95,-0.778,-1,-0.98,-0.905,-1,-0.859,-0.869,-1,-0.888,-0.947,-0.875,-0.9,0,-0.65,-0.8,-0.567],[-0.667,-0.842,-0.753,0.121,0.415,-0.264,-0.517,0.683,-0.47,-0.688,-0.444,0.05,-0.301,0.164,1,-0.393,-0.607,-0.73,-0.682,0.65,0,0.419,0.871],[-0.563,-0.819,-0.848,-0.86,-0.8,-0.798,-0.946,-0.567,-0.867,-1,-0.771,-0.974,-0.882,-0.706,-0.992,-0.855,-0.591,-0.892,-0.684,0.8,-0.419,0,0.392],[-0.889,-0.825,-0.817,-0.428,-0.858,-0.216,-0.767,-0.673,-0.777,-0.116,-0.015,-0.671,1,0.635,-0.942,0.251,-0.784,-0.611,-0.861,0.567,-0.871,-0.392,0]],"skills":[{"id":"regen","type":"regen","name":"Regeneration","cost":100,"params":{}},{"id":"poison","type":"poison","name":"Poison shot","cost":100,"params":{"pct":150}},{"id":"stealth","type":"stealth","name":"Stealth","cost":100,"params":{}},{"id":"armorHp","type":"armorHp","name":"Armor and health","cost":200,"params":{}},{"id":"spawn","type":"spawn","name":"Spawn goblins","cost":200,"params":{"every":7}},{"id":"rapid","type":"rapid","name":"Rapid fire","cost":100,"params":{}},{"id":"swift","type":"swift","name":"Swift strikes","cost":100,"params":{}},{"id":"heavy","type":"heavy","name":"Heavy shot","cost":100,"params":{}},{"id":"healer","type":"healer","name":"Healing touch","cost":200,"params":{}},{"id":"range","type":"range","name":"Long reach","cost":200,"params":{}},{"id":"shrink","type":"shrink","name":"Shortsight","cost":100,"params":{}},{"id":"skmv5oxj501","type":"ward","name":"Ward","cost":100,"params":{}},{"id":"skmv5oxpgk2","type":"slow","name":"Slow","cost":100,"params":{}},{"id":"raiseDead","type":"spawn","name":"Raise dead","cost":0,"params":{"unit":"Skeleton Archers","count":3,"every":2,"max":12}},{"id":"spiderlings","type":"deathSpawn","name":"Spiderlings","cost":200,"params":{"unit":"Spiders","count":2,"strength":50}},{"id":"split","type":"split","name":"Split beam","cost":100,"params":{}},{"id":"forward","type":"forward","name":"Forward planting","cost":100,"params":{}},{"id":"gallop","type":"swift","name":"Gallop","cost":200,"params":{"speed":25,"hit":0}},{"id":"deathBurst","type":"blast","name":"Death burst","cost":200,"params":{"radius":7,"pct":100}},{"id":"dualFlame","type":"turret","name":"Dual Flame","cost":200,"params":{"turrets":2}},{"id":"lifesteal","type":"lifesteal","name":"Lifesteal","cost":150,"params":{"pct":10}},{"id":"dualSpear","type":"turret","name":"Dual Spear","cost":300,"params":{"turrets":2}},{"id":"frenzy","type":"frenzy","name":"Frenzy","cost":250,"params":{"pct":10,"cap":2}},{"id":"spread","type":"spread","name":"Spread","cost":300,"params":{"min":1,"max":6}},{"id":"boneShield","type":"shield","name":"Bone shield","cost":200,"params":{"hits":1}},{"id":"emberMortar","type":"mortar","name":"Ember Mortar","cost":300,"params":{"range":15,"min":5,"aps":0.1}}]};
+const DATA = {"units":[{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Goblin Swarm","cost":1,"bodies":12,"hp":26,"hit":17,"aps":1.2,"range":2,"speed":8,"splash":0,"shape":"triangle","color":"#9BD35A","skills":["swift","shrink","spread"],"skillMods":[null,null,null],"skillsInnate":[false,false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Skeleton Archers","cost":1,"bodies":8,"hp":32,"hit":14,"aps":0.75,"range":19,"speed":2.1,"splash":0,"shape":"triangle","color":"#E9E3CF","skills":["range","rapid","boneShield"],"skillMods":[null,null,null],"skillsInnate":[false,false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Ember Imps","cost":1,"bodies":4,"hp":110,"hit":20,"aps":0.8,"range":10,"speed":4,"splash":3,"shape":"imp","color":"#FFA94D","skills":["swift","heavy","emberMortar"],"skillMods":[null,null,null],"skillsInnate":[false,false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":35,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Fire Mage","cost":1,"bodies":1,"hp":155,"hit":33,"aps":0.75,"range":20,"speed":3,"splash":4,"shape":"hexagon","color":"#fb0022","skills":["range","armorHp","dualFlame"],"skillMods":[null,null,null],"skillsInnate":[false,false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":1,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Sniper","cost":1,"bodies":1,"hp":140,"hit":210,"aps":0.25,"range":29,"speed":2,"splash":0,"shape":"cross","color":"#F7D154","skills":["rapid","spawn","range"],"skillMods":[{"params":{"range":0,"aps":15},"cost":150},{"params":{"waves":3,"every":8.5}},null],"skillsInnate":[false,false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"armor","defVal":3,"level":0,"unlock":50,"name":"Brute","cost":2,"bodies":1,"hp":1100,"hit":98,"aps":1.1,"range":2,"speed":5,"splash":0,"shape":"square","color":"#8D99AE","skills":["armorHp","swift"],"skillMods":[null,null],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":20,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":40,"level":0,"unlock":50,"name":"Wisps","cost":1,"bodies":2,"hp":80,"hit":75,"aps":0.8,"range":19,"speed":4,"splash":0,"shape":"ring","color":"#ff90ff","skills":["stealth","skmv5oxj501"],"skillMods":[null,{"params":{},"cost":200}],"skillsInnate":[false,false]},{"burst":6,"pellets":2,"spinUp":0,"pierce":0,"projSpeed":35,"minRange":0,"charge":1,"knockback":0,"windUp":0.2,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Leaf Wizard","cost":2,"bodies":1,"hp":240,"hit":21,"aps":0.45,"range":27,"speed":5,"splash":0,"shape":"hexagon","color":"#00d200","skills":["rapid","range"],"skillMods":[null,null],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":5,"projSpeed":35,"minRange":0,"charge":1,"knockback":0,"windUp":0.5,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Earth Wizard","cost":2,"bodies":1,"hp":650,"hit":440,"aps":0.2,"range":24,"speed":3,"splash":2,"shape":"circle","color":"#24590d","skills":["regen","range","heavy"],"skillMods":[null,null,{"params":{"hit":20,"slow":30},"cost":150}],"skillsInnate":[false,false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":30,"defense":"none","defVal":0,"level":0,"unlock":100,"name":"Flame Wizard","cost":3,"bodies":1,"hp":2000,"hit":12,"aps":4,"range":15,"speed":2,"splash":0,"shape":"flame","color":"#b95018","skills":["armorHp","range"],"skillMods":[null,null],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":100,"name":"Steel Wizard","cost":3,"bodies":1,"hp":1900,"hit":150,"aps":0.9,"range":15,"speed":2,"splash":2,"shape":"bar","color":"#57535a","skills":["range","heavy"],"skillMods":[null,{"params":{"slow":20,"hit":20}}],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":40,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":100,"name":"Slime Wizard","cost":3,"bodies":1,"hp":700,"hit":480,"aps":0.2,"range":22,"speed":2.5,"splash":6,"shape":"ring","color":"#81f038","skills":["skmv5oxpgk2","range"],"skillMods":[null,null],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"armor","defVal":6,"level":0,"unlock":150,"splash":3,"skillsInnate":[false,false],"skillMods":[null,null],"name":"Ether Golem","cost":5,"bodies":1,"hp":3450,"hit":69,"aps":0.6,"range":5,"speed":2.5,"shape":"square","color":"#51005c","skills":["regen","armorHp"]},{"burst":1,"pellets":1,"spinUp":50,"spinHit":50,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":150,"splash":0,"skillsInnate":[false,false],"skillMods":[null,null],"name":"Sun Priest","cost":5,"bodies":1,"hp":2800,"hit":38,"aps":2,"range":18,"speed":3,"shape":"sun","color":"#FFD23F","skills":["split","shrink"]},{"burst":3,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":22,"minRange":12,"charge":1,"knockback":0,"windUp":2,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":150,"splash":6,"skillsInnate":[false,false],"skillMods":[null,null],"name":"Meteor Caller","cost":5,"bodies":1,"hp":400,"hit":114,"aps":0.3,"range":50,"speed":2,"shape":"diamond","color":"#FF6B35","skills":["range","skmv5oxpgk2"]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":3,"knockback":4,"windUp":0,"flame":0,"defense":"armor","defVal":6,"level":0,"unlock":150,"splash":3,"skillsInnate":[false,false],"skillMods":[null,null],"name":"War Mammoth","cost":5,"bodies":1,"hp":2300,"hit":169,"aps":0.5,"range":3,"speed":8,"shape":"pentagon","color":"#A0785A","skills":["swift","armorHp"],"trample":50,"chargeStun":1.5},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":150,"splash":0,"skillsInnate":[true,false],"skillMods":[null,null],"name":"Necromancer","cost":5,"bodies":1,"hp":2300,"hit":56,"aps":1,"range":20,"speed":2.2,"shape":"hexagon","color":"#9D4EDD","skills":["raiseDead","healer"]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":180,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Ent","cost":1,"bodies":2,"hp":400,"hit":25,"aps":1.1,"range":4,"speed":2.2,"splash":0,"shape":"square","color":"#0d3000","skills":["armorHp","forward","explode"],"skillsInnate":[false,false,false],"skillMods":[{"params":{"armor":4,"hp":20}},null,null],"deathBlast":0},{"burst":1,"pellets":1,"spinUp":0.1,"pierce":0,"projSpeed":30,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"name":"Slimeshots","cost":2,"unlock":100,"bodies":10,"hp":95,"hit":7,"aps":0.8,"range":21,"speed":6,"splash":3,"shape":"diamond","color":"#20d300","skills":["range","heavy"],"skillsInnate":[false,false],"skillMods":[{"params":{"m":3},"cost":150},{"params":{"hit":25,"slow":0,"instant":0},"cost":150}]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Just a horse","cost":2,"bodies":1,"hp":500,"hit":200,"aps":1,"range":1,"speed":6,"splash":0,"shape":"horse","color":"#C8A27A","ram":1,"noFlank":1,"carrier":1,"noPack":1,"skills":["gallop","armorHp","deathBurst"],"skillMods":[null,{"params":{"armor":4,"hp":20},"cost":150},null],"skillsInnate":[false,false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":30,"minRange":0,"charge":4,"knockback":0,"windUp":0,"flame":0,"trample":0,"deathBlast":0,"defense":"none","defVal":0,"level":0,"unlock":100,"name":"Rogue","cost":3,"bodies":2,"hp":310,"hit":80,"aps":1.1,"range":4,"speed":6,"splash":0,"shape":"triangle","color":"#460000","skills":["stealth","skmv5oxj501","frenzy"],"skillsInnate":[true,false,false],"skillMods":[null,{"params":{"cap":200},"cost":150},null]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"trample":0,"deathBlast":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Spiders","cost":2,"bodies":5,"hp":185,"hit":20,"aps":0.8,"range":2,"speed":6,"splash":0,"shape":"spider","color":"#000000","skills":["spiderlings","poison","stealth"],"skillsInnate":[false,false,false],"skillMods":[null,null,{"params":{},"cost":200}]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":35,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"trample":0,"deathBlast":0,"pctHit":20,"defense":"none","defVal":0,"level":0,"unlock":150,"name":"Truespear","cost":5,"bodies":1,"hp":750,"hit":60,"aps":0.8,"range":25,"speed":3,"splash":0,"shape":"spear","color":"#C9D1D9","skills":["lifesteal","armorHp","dualSpear"],"skillMods":[null,null,null],"skillsInnate":[false,false,false]}],"matrix":[[0,-1,-0.899,-0.993,0.847,0.453,0.222,0.248,0.472,-1,-0.414,-0.296,-0.734,0.481,-0.809,-0.495,0.522,-0.815,-0.755,0.958,0.667,0.563,0.889],[1,0,0.268,-0.514,0.521,0.658,0.692,-0.189,0.383,-0.804,0.362,-0.542,0.158,-0.614,-0.959,0.625,-0.352,0.795,-0.524,0.946,0.842,0.819,0.825],[0.899,-0.268,0,-0.604,0.333,0.663,-0.225,0.415,0.125,-1,-0.528,-0.6,0.099,0.464,-0.992,-0.086,0.229,0.437,0.117,0.875,0.753,0.848,0.817],[0.993,0.514,0.604,0,-1,-0.25,0.454,-0.443,-0.882,-0.72,-0.216,-0.901,-0.331,-0.487,-1,-0.683,-0.331,0.743,0.097,0.733,-0.121,0.86,0.428],[-0.847,-0.521,-0.333,1,0,-0.095,0.598,0.397,-0.49,-0.363,-0.135,0.133,0.836,0.033,-1,-0.249,-0.578,0.994,-0.567,0.8,-0.415,0.8,0.858],[-0.453,-0.658,-0.663,0.25,0.095,0,-0.6,0.298,-0.799,-0.535,-0.527,-0.986,0.223,-0.542,0.04,-0.28,-0.197,-0.648,0.63,0.821,0.264,0.798,0.216],[-0.222,-0.692,0.225,-0.454,-0.598,0.6,0,-0.546,-0.413,-0.688,-0.22,-0.736,0.754,0.318,-0.906,-0.18,-0.49,0.926,-0.64,0.95,0.517,0.946,0.767],[-0.248,0.189,-0.415,0.443,-0.397,-0.298,0.546,0,-0.593,-0.434,-0.227,-0.566,-0.164,-0.36,-0.439,-0.702,-0.573,0.615,-0.518,0.778,-0.683,0.567,0.673],[-0.472,-0.383,-0.125,0.882,0.49,0.799,0.413,0.593,0,0.053,0.779,-0.311,0.915,0.577,-0.833,-0.082,-0.074,1,0.474,1,0.47,0.867,0.777],[1,0.804,1,0.72,0.363,0.535,0.688,0.434,-0.053,0,0.59,-0.722,-0.092,-0.225,-1,-0.508,0.753,1,0.847,0.98,0.688,1,0.116],[0.414,-0.362,0.528,0.216,0.135,0.527,0.22,0.227,-0.779,-0.59,0,-1,0.753,-0.533,-1,0.331,-0.286,0.575,0.378,0.905,0.444,0.771,0.015],[0.296,0.542,0.6,0.901,-0.133,0.986,0.736,0.566,0.311,0.722,1,0,1,0.874,-1,0.828,0.864,1,0.525,1,-0.05,0.971,0.686],[0.734,-0.158,-0.099,0.331,-0.836,-0.223,-0.754,0.164,-0.915,0.092,-0.753,-1,0,-0.918,-0.885,-0.607,-0.518,-0.094,0.885,0.859,0.301,0.882,-1],[-0.481,0.614,-0.464,0.487,-0.033,0.542,-0.318,0.36,-0.577,0.225,0.533,-0.874,0.918,0,-0.38,0.557,0.412,-0.182,-0.308,0.869,-0.164,0.706,-0.635],[0.809,0.959,0.992,1,1,-0.04,0.906,0.439,0.833,1,1,1,0.885,0.38,0,-0.483,0.796,1,0.489,1,-1,0.992,0.942],[0.495,-0.625,0.086,0.683,0.249,0.28,0.18,0.702,0.082,0.508,-0.331,-0.828,0.607,-0.557,0.483,0,-0.109,0.192,0.889,0.888,0.393,0.855,-0.251],[-0.522,0.352,-0.229,0.331,0.578,0.197,0.49,0.573,0.074,-0.753,0.286,-0.864,0.518,-0.412,-0.796,0.109,0,0.016,0.028,0.947,0.607,0.591,0.784],[0.815,-0.795,-0.437,-0.743,-0.994,0.648,-0.926,-0.615,-1,-1,-0.575,-1,0.094,0.182,-1,-0.192,-0.016,0,0.182,0.875,0.617,0.923,0.621],[0.755,0.524,-0.117,-0.097,0.567,-0.63,0.64,0.518,-0.474,-0.847,-0.378,-0.525,-0.885,0.308,-0.489,-0.889,-0.028,-0.182,0,0.9,0.682,0.684,0.861],[-0.958,-0.946,-0.875,-0.733,-0.8,-0.821,-0.95,-0.778,-1,-0.98,-0.905,-1,-0.859,-0.869,-1,-0.888,-0.947,-0.875,-0.9,0,-0.65,-0.8,-0.567],[-0.667,-0.842,-0.753,0.121,0.415,-0.264,-0.517,0.683,-0.47,-0.688,-0.444,0.05,-0.301,0.164,1,-0.393,-0.607,-0.617,-0.682,0.65,0,0.419,0.871],[-0.563,-0.819,-0.848,-0.86,-0.8,-0.798,-0.946,-0.567,-0.867,-1,-0.771,-0.971,-0.882,-0.706,-0.992,-0.855,-0.591,-0.923,-0.684,0.8,-0.419,0,0.392],[-0.889,-0.825,-0.817,-0.428,-0.858,-0.216,-0.767,-0.673,-0.777,-0.116,-0.015,-0.686,1,0.635,-0.942,0.251,-0.784,-0.621,-0.861,0.567,-0.871,-0.392,0]],"skills":[{"id":"regen","type":"regen","name":"Regeneration","cost":100,"params":{}},{"id":"poison","type":"poison","name":"Poison shot","cost":100,"params":{"pct":150}},{"id":"stealth","type":"stealth","name":"Stealth","cost":100,"params":{}},{"id":"armorHp","type":"armorHp","name":"Armor and health","cost":200,"params":{}},{"id":"spawn","type":"spawn","name":"Spawn goblins","cost":200,"params":{"every":7}},{"id":"rapid","type":"rapid","name":"Rapid fire","cost":100,"params":{}},{"id":"swift","type":"swift","name":"Swift strikes","cost":100,"params":{}},{"id":"heavy","type":"heavy","name":"Heavy shot","cost":100,"params":{}},{"id":"healer","type":"healer","name":"Healing touch","cost":200,"params":{}},{"id":"range","type":"range","name":"Long reach","cost":200,"params":{}},{"id":"shrink","type":"shrink","name":"Shortsight","cost":100,"params":{"m":6,"duration":4}},{"id":"skmv5oxj501","type":"ward","name":"Ward","cost":100,"params":{}},{"id":"skmv5oxpgk2","type":"slow","name":"Slow","cost":100,"params":{}},{"id":"raiseDead","type":"spawn","name":"Raise dead","cost":0,"params":{"unit":"Skeleton Archers","count":3,"every":2,"max":12}},{"id":"spiderlings","type":"deathSpawn","name":"Spiderlings","cost":200,"params":{"unit":"Spiders","count":2,"strength":50}},{"id":"split","type":"split","name":"Split beam","cost":100,"params":{}},{"id":"forward","type":"forward","name":"Forward planting","cost":100,"params":{}},{"id":"gallop","type":"swift","name":"Gallop","cost":200,"params":{"speed":25,"hit":0}},{"id":"deathBurst","type":"blast","name":"Death burst","cost":200,"params":{"radius":7,"pct":100}},{"id":"dualFlame","type":"turret","name":"Dual Flame","cost":200,"params":{"turrets":2}},{"id":"lifesteal","type":"lifesteal","name":"Lifesteal","cost":150,"params":{"pct":10}},{"id":"dualSpear","type":"turret","name":"Dual Spear","cost":300,"params":{"turrets":2}},{"id":"frenzy","type":"frenzy","name":"Frenzy","cost":250,"params":{"pct":10,"cap":2}},{"id":"spread","type":"spread","name":"Spread","cost":300,"params":{"min":1,"max":6}},{"id":"boneShield","type":"shield","name":"Bone shield","cost":200,"params":{"hits":1}},{"id":"emberMortar","type":"mortar","name":"Ember Mortar","cost":300,"params":{"range":15,"min":5,"aps":0.1}},{"id":"explode","type":"explode","name":"Explode on death","cost":400,"params":{"pct":30}}]};
 </script>
 <script type="module">
 import * as THREE from './vendor/three.module.min.js';
@@ -4487,8 +4540,10 @@ const Models3D = (THREE) => {
 // Render3D(THREE, el, view, opts) puts a WebGL canvas in el and offers the same calls as Render2D, reading the game
 // only through the same view():
 //   { m, me, phase, units, mode, bt, battlePre, fx, selected, moving, drag, hoverTile,
-//     editable, placingUnit, placingElf, placingTower }
+//     editable, placingUnit, placingElf, placingTower, battleCam }
+// battleCam (the 2D board's zoom on the final seconds of a fight) isn't used: the 3D camera stays where the player put it.
 // Calls: size() after el changes size, draw() once per frame, tileAt(clientX, clientY) -> { col, row } or null,
+// screenAt(col, row, h) -> [clientX, clientY] of a tile's middle h metres up,
 // thumb(match) (from the 2D renderer). Also camera: the Camera3D driving the view.
 // opts.onTap(tile | null): a tap in the strategic view, as a tile in model columns / rows (like tileAt).
 // opts.onPress(tile) -> true to take a one-finger drag in the strategic view, then opts.onDrag(tile) and
@@ -4521,6 +4576,9 @@ const Render3D = (THREE, el, view, opts = {}) => {
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   el.appendChild(renderer.domElement);
+  // fingers on the board never scroll the page (some phones look at the canvas itself, not only at el)
+  renderer.domElement.style.touchAction = 'none';
+  el.addEventListener('touchmove', (e) => { if (e.cancelable) e.preventDefault(); }, { passive: false });
   const bg = css('--bg') || '#0D1315';
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(bg);
@@ -4837,7 +4895,10 @@ const Render3D = (THREE, el, view, opts = {}) => {
       spire(w.x, w.y, sd, Art.teamCol(sd, v.me), arms(sd), 0.85);
     }
   }
+  let squadTiles = new Set(); // 'col,row' of the squads drawn while deploying (model columns / rows), for pick()
+  let models_ = []; // the squad models drawn while deploying, for pick(): [x, z, radius, height, col, row] (world metres)
   function collectBattle(v, dt, f) {
+    squadTiles = new Set();
     const { bt, me } = v, src = v.battlePre || v.m;
     const muted = color(css('--muted') || '#8DA1A1');
     for (const b of bt.bodies) {
@@ -4854,13 +4915,15 @@ const Render3D = (THREE, el, view, opts = {}) => {
   }
   function collectDeploy(v, f) {
     shown = new WeakMap();
+    squadTiles = new Set();
     const { m, me, phase, units, drag, moving, selected, hoverTile, placingUnit, editable } = v, foe = 1 - me;
     const deploying = phase === 'deploy';
     const you = color(css('--you') || '#5CC6DF'), gold = color(css('--gold') || '#E6B84A');
     const squad = (sq, side, fresh) => {
       const u = units[sq.unit], w = Game.tileToWorld(sq.col, sq.row), st = tileCenter(v, sq.col, sq.row);
       const list = Engine.buildSquad(u, side, w.x, w.y, sq.id, T);
-      for (const b of list) bodies.push({ u, side, x: b.x, y: b.y, look: 'solid', tag: side + '|' + sq.id });
+      squadTiles.add(sq.col + ',' + sq.row);
+      for (const b of list) bodies.push({ u, side, x: b.x, y: b.y, look: 'solid', tag: side + '|' + sq.id, tile: sq });
       if (fresh) tileSq(st.c, st.r, teamColor(side, me), 0.8, 0.05, 14);
       // badges over the squad: level pips, charisma pips (or the Gentleman's hat), ready to level up (its tag goes
       // under it, see labels)
@@ -4869,15 +4932,18 @@ const Render3D = (THREE, el, view, opts = {}) => {
       for (let k = 0; k < (sq.level || 0); k++) pips.push(gold);
       const ch = Game.charmOf(sq);
       if (!Game.isGentleman(sq)) for (let k = 0; k < ch; k++) pips.push(color(CHARM_COL));
-      if (pips.length) iconRow(pips.map(() => 'dot'), wx, top + 0.85, wz, 0.42, pips);
-      if (Game.isGentleman(sq)) icon('hat', wx, top + 1.1, wz, 1.1);
-      if (side === me && deploying && Game.isReady(m, sq)) icon('plus', wx + camRight.x * 1.6, top + 0.2, wz + camRight.z * 1.6, 0.9);
+      // badges, read from above too (bigger in the strategic view, where the camera is farthest), placed as on the 2D
+      // board: level and charisma pips at the squad's top left on the screen, ready to level up a gold plus at its top right
+      const bs = viewMode === 'strategic' ? 2.5 : 1.6, o = 1.4 + bs * 0.6;
+      if (pips.length) { const n = (pips.length - 1) * 0.42 * bs * 1.1 / 2; iconRow(pips.map(() => 'dot'), wx - camRight.x * (o - n) - camDown.x * o, top + 0.2, wz - camRight.z * (o - n) - camDown.z * o, 0.42 * bs * 1.5, pips); }
+      if (Game.isGentleman(sq)) icon('hat', wx, top + 1.1, wz, 1.1 * bs * 0.8);
+      if (side === me && deploying && Game.isReady(m, sq)) icon('plus', wx + (camRight.x - camDown.x) * o, top + 0.2, wz + (camRight.z - camDown.z) * o, 0.9 * bs);
       return [wx, wz];
     };
     // the opponent's squads from this round stay hidden until the fight; a squad they moved shows on its old tile
     for (const sq of m.armies[foe]) if ((sq.round < m.round || !deploying) && !Game.hiddenFromFoe(m, sq)) {
       const p = deploying ? Game.seenAt(m, sq) : sq;
-      squad(p === sq ? sq : { ...sq, col: p.col, row: p.row }, foe, false);
+      squad(deploying ? { ...sq, col: p.col, row: p.row, level: Game.seenLevel(m, sq) } : sq, foe, false); // a level-up bought this round stays hidden
     }
     for (const sq of m.armies[me]) {
       if (deploying && sq.from && sq.movedRound === m.round) { const s = tileCenter(v, sq.from.col, sq.from.row); tileSq(s.c, s.r, color(css('--muted') || '#8DA1A1'), 0.6, 0.04, 10, 0.1); }
@@ -4936,7 +5002,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
     if (u.structure) return;
     if (b.windTarget && u.windUp > 0) arc(wx, wz, r * 1.58, team, 0.95, 1 - b.windT / u.windUp, 0.1);
     if (b.delay > 0) arc(wx, wz, r * 1.58, color(css('--gold') || '#E6B84A'), 1, b.delay / Game.FLANK.delay, 0.1);
-    if (b.level > 0) for (let k = 0; k < b.level; k++) arc(wx, wz, r * (1.74 + k * 0.13), color(css('--gold') || '#E6B84A'), 0.85, 1, 0.06);
+    if (b.level > 0) for (let k = 0; k < b.level; k++) arc(wx, wz, r * (1.8 + k * 0.24), color(css('--gold') || '#E6B84A'), 0.9, 1, 0.12);
     if (b.convert) arc(wx, wz, r * 1.66, color(CHARM_COL), 0.9, 1, 0.07, 16);
     // small dots over the head: poisoned (green), slowed (blue), charisma stacks (pink)
     const dots = [];
@@ -4978,6 +5044,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
     const byKey = {};
     for (const s of bodies) { const k = models.kindOf(s.u) + '#' + s.look; (byKey[k] || (byKey[k] = [])).push(s); }
     const rings = [], labels = new Map();
+    models_ = [];
     for (const [key, list] of Object.entries(byKey)) {
       const [kind, look] = key.split('#'), parts = models.parts(kind), top = models.height(kind);
       const gs = [['tint', tintMat], ['team', teamMat], ['fixed', fixedMat]].filter(([p]) => parts[p])
@@ -5005,6 +5072,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
         if (s.crest) icon(`arms|${s.crest}|${s.edge}`, wx, h + 1.2, wz, 1.5);
         if (s.b && !ghost) { bodyMarkers(s, f, me, wx, wz, r, h, clock); s.marked = true; }
         if (s.tag) { const l = labels.get(s.tag) || { u: s.u, pts: [] }; l.pts.push([wx, wz, r]); labels.set(s.tag, l); }
+        if (s.tile) models_.push([wx, wz, r, h, s.tile.col, s.tile.row]);
       });
       for (const [, g] of gs) finish(g, list.length);
     }
@@ -5099,12 +5167,28 @@ const Render3D = (THREE, el, view, opts = {}) => {
     return screenTile(me, c, r);
   }
 
+  // ---------- what a finger points at ----------
+  // In the angled view a model stands above its tile, so a touch on its body meets the ground behind it. Follow the
+  // touch down from the height of the tallest model: the first squad model it passes through gives the tile; else
+  // the tile on the ground.
+  function pick(p, cx, cy) {
+    const t = tileOfGround(p, lastMe);
+    if (cx == null || viewMode === 'strategic' || !models_.length) return t;
+    const top = Math.max(...models_.map(b => b[3]));
+    for (let h = top; h > 0.1; h -= 0.25) {
+      const q = cam.groundAt(cx, cy, h); if (!q) continue;
+      for (const [x, z, r, mh, col, row] of models_) if (h <= mh && Math.hypot(q.x - x, q.z - z) < r * 0.75) return { col, row };
+    }
+    return t;
+  }
+
   // ---------- camera ----------
   let lastMe = 0;
   const cam = Camera3D(THREE, camera, renderer.domElement, {
     width: BW, depth: BD,
-    onTap: (p) => { if (opts.onTap) opts.onTap(tileOfGround(p, lastMe)); },
-    onPress: (p) => !!(opts.onPress && opts.onPress(tileOfGround(p, lastMe))),
+    onTap: (p, cx, cy) => { if (opts.onTap) opts.onTap(pick(p, cx, cy)); },
+    // a press on a squad never moves the camera: one the page doesn't drag is held still, as on the 2D board
+    onPress: (p, cx, cy) => { const t = pick(p, cx, cy); return !!(opts.onPress && opts.onPress(t)) || !!(t && squadTiles.has(t.col + ',' + t.row)); },
     onDrag: (p) => { if (opts.onDrag) opts.onDrag(tileOfGround(p, lastMe)); },
     onDrop: (p) => { if (opts.onDrop) opts.onDrop(tileOfGround(p, lastMe), !!p); },
     onHover: (p) => { if (opts.onHover) opts.onHover(tileOfGround(p, lastMe)); },
@@ -5147,6 +5231,13 @@ const Render3D = (THREE, el, view, opts = {}) => {
     renderer.render(scene, camera);
   }
   const tileAt = (clientX, clientY) => tileOfGround(cam.groundAt(clientX, clientY), view().me);
+  // where the middle of a tile (model column / row), h metres above the ground, is on the screen: [clientX, clientY]
+  const scrV = new THREE.Vector3();
+  function screenAt(col, row, h = 0) {
+    const f = view().me === 1 ? -1 : 1, w = Game.tileToWorld(col, row), r = renderer.domElement.getBoundingClientRect();
+    scrV.set(w.x * f, h, -w.y * f).project(camera);
+    return [r.left + (scrV.x + 1) / 2 * r.width, r.top + (1 - scrV.y) / 2 * r.height];
+  }
   const QUALITY = { high: [2, true], medium: [1.5, true], low: [1, false] };
   function quality(q) {
     const [ratio, shadows] = QUALITY[q] || QUALITY.high;
@@ -5164,7 +5255,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
     renderer.forceContextLoss();
   }
   return { size: sizeTo, draw, tileAt, thumb: (match) => floor2d.thumb(match), camera: cam, info: () => renderer.info.render,
-    still: () => !cam.busy(), quality, pixelRatio: () => renderer.getPixelRatio(), dispose, drawn };
+    still: () => !cam.busy(), quality, pixelRatio: () => renderer.getPixelRatio(), dispose, drawn, screenAt };
 };
 
 // ===== 3D test page: real battles from the engine on the 3D board, to try the camera, the models and the renderer =====

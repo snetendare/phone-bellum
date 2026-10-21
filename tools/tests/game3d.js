@@ -1,6 +1,7 @@
 // The game on the 3D board (?board=3d): the game's own board input through render3d.js. Package squads dragged,
 // a unit placed from the shop and taken back, the tower and unit sheets, the paid Move ability in round 2 (tap and
-// drag), an enemy squad's sheet, and placing in the angled view. Also that the board idles in the shop, the meter
+// drag), an enemy squad's sheet, and placing in the angled view; there a drag on an older squad doesn't slide the
+// view, and a press on a model's body (above its tile) drags its squad. Also that the board idles in the shop, the meter
 // (frame rate, quality steps, the last fight's summary). Screenshots go to the current folder.
 // Headless Chromium needs software WebGL (the args below) and runs at about 10-15 fps.
 const { chromium } = require('playwright-core');
@@ -108,6 +109,24 @@ const { chromium } = require('playwright-core');
   else check(false, 'angled view: no free tile on screen');
   await p.screenshot({ path: 'game3d-3-angled.png' });
   check(await p.evaluate(() => window.__pb().board3d.camera.level()) === 1, 'still in the angled view');
+
+  // angled view: a press on a squad never slides the view, and a press on a model's body (above its tile) picks its squad
+  const scr = (c, r, h) => p.evaluate(([c, r, h]) => window.__pb().board3d.screenAt(c, r, h), [c, r, h]);
+  const pull = async ([x1, y1], [x2, y2]) => { await p.mouse.move(x1, y1); await p.mouse.down(); await p.mouse.move((x1 + x2) / 2, (y1 + y2) / 2, { steps: 4 }); await p.mouse.move(x2, y2, { steps: 4 }); await p.mouse.up(); await p.waitForTimeout(600); };
+  s = await st();
+  const still = s.army.find(q => q.round < 2 && q.id !== s.moved), ref = await scr(5, 7, 0);
+  if (still) {
+    const from = await scr(still.col, still.row, 1.6);
+    await pull(from, [from[0], from[1] - 80]);
+    const now = await scr(5, 7, 0), s2 = await st();
+    check(Math.hypot(now[0] - ref[0], now[1] - ref[1]) < 1 && s2.army.some(q => q.id === still.id && q.col === still.col && q.row === still.row), `dragging an older squad doesn't slide the view (moved ${Math.round(Math.hypot(now[0] - ref[0], now[1] - ref[1]))} px)`);
+  } else console.log('skip: no older squad to press');
+  const fresh = c && s.army.find(q => q.col === c[0] && q.row === c[1] && q.round === 2);
+  if (fresh) {
+    const [dest] = (await freeTiles(fresh.unit)).filter(t => t[0] !== c[0] || t[1] !== c[1]);
+    await pull(await scr(fresh.col, fresh.row, 1.6), await at(...dest));
+    s = await st(); check(s.army.some(q => q.id === fresh.id && q.col === dest[0] && q.row === dest[1]), `a press on the model's body drags its squad: -> ${dest}`);
+  }
 
   await b.close();
   console.log(fails ? `${fails} failed` : 'all ok');

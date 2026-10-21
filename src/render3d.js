@@ -2,8 +2,10 @@
 // Render3D(THREE, el, view, opts) puts a WebGL canvas in el and offers the same calls as Render2D, reading the game
 // only through the same view():
 //   { m, me, phase, units, mode, bt, battlePre, fx, selected, moving, drag, hoverTile,
-//     editable, placingUnit, placingElf, placingTower }
+//     editable, placingUnit, placingElf, placingTower, battleCam }
+// battleCam (the 2D board's zoom on the final seconds of a fight) isn't used: the 3D camera stays where the player put it.
 // Calls: size() after el changes size, draw() once per frame, tileAt(clientX, clientY) -> { col, row } or null,
+// screenAt(col, row, h) -> [clientX, clientY] of a tile's middle h metres up,
 // thumb(match) (from the 2D renderer). Also camera: the Camera3D driving the view.
 // opts.onTap(tile | null): a tap in the strategic view, as a tile in model columns / rows (like tileAt).
 // opts.onPress(tile) -> true to take a one-finger drag in the strategic view, then opts.onDrag(tile) and
@@ -36,6 +38,9 @@ const Render3D = (THREE, el, view, opts = {}) => {
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   el.appendChild(renderer.domElement);
+  // fingers on the board never scroll the page (some phones look at the canvas itself, not only at el)
+  renderer.domElement.style.touchAction = 'none';
+  el.addEventListener('touchmove', (e) => { if (e.cancelable) e.preventDefault(); }, { passive: false });
   const bg = css('--bg') || '#0D1315';
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(bg);
@@ -352,7 +357,10 @@ const Render3D = (THREE, el, view, opts = {}) => {
       spire(w.x, w.y, sd, Art.teamCol(sd, v.me), arms(sd), 0.85);
     }
   }
+  let squadTiles = new Set(); // 'col,row' of the squads drawn while deploying (model columns / rows), for pick()
+  let models_ = []; // the squad models drawn while deploying, for pick(): [x, z, radius, height, col, row] (world metres)
   function collectBattle(v, dt, f) {
+    squadTiles = new Set();
     const { bt, me } = v, src = v.battlePre || v.m;
     const muted = color(css('--muted') || '#8DA1A1');
     for (const b of bt.bodies) {
@@ -369,13 +377,15 @@ const Render3D = (THREE, el, view, opts = {}) => {
   }
   function collectDeploy(v, f) {
     shown = new WeakMap();
+    squadTiles = new Set();
     const { m, me, phase, units, drag, moving, selected, hoverTile, placingUnit, editable } = v, foe = 1 - me;
     const deploying = phase === 'deploy';
     const you = color(css('--you') || '#5CC6DF'), gold = color(css('--gold') || '#E6B84A');
     const squad = (sq, side, fresh) => {
       const u = units[sq.unit], w = Game.tileToWorld(sq.col, sq.row), st = tileCenter(v, sq.col, sq.row);
       const list = Engine.buildSquad(u, side, w.x, w.y, sq.id, T);
-      for (const b of list) bodies.push({ u, side, x: b.x, y: b.y, look: 'solid', tag: side + '|' + sq.id });
+      squadTiles.add(sq.col + ',' + sq.row);
+      for (const b of list) bodies.push({ u, side, x: b.x, y: b.y, look: 'solid', tag: side + '|' + sq.id, tile: sq });
       if (fresh) tileSq(st.c, st.r, teamColor(side, me), 0.8, 0.05, 14);
       // badges over the squad: level pips, charisma pips (or the Gentleman's hat), ready to level up (its tag goes
       // under it, see labels)
@@ -384,15 +394,18 @@ const Render3D = (THREE, el, view, opts = {}) => {
       for (let k = 0; k < (sq.level || 0); k++) pips.push(gold);
       const ch = Game.charmOf(sq);
       if (!Game.isGentleman(sq)) for (let k = 0; k < ch; k++) pips.push(color(CHARM_COL));
-      if (pips.length) iconRow(pips.map(() => 'dot'), wx, top + 0.85, wz, 0.42, pips);
-      if (Game.isGentleman(sq)) icon('hat', wx, top + 1.1, wz, 1.1);
-      if (side === me && deploying && Game.isReady(m, sq)) icon('plus', wx + camRight.x * 1.6, top + 0.2, wz + camRight.z * 1.6, 0.9);
+      // badges, read from above too (bigger in the strategic view, where the camera is farthest), placed as on the 2D
+      // board: level and charisma pips at the squad's top left on the screen, ready to level up a gold plus at its top right
+      const bs = viewMode === 'strategic' ? 2.5 : 1.6, o = 1.4 + bs * 0.6;
+      if (pips.length) { const n = (pips.length - 1) * 0.42 * bs * 1.1 / 2; iconRow(pips.map(() => 'dot'), wx - camRight.x * (o - n) - camDown.x * o, top + 0.2, wz - camRight.z * (o - n) - camDown.z * o, 0.42 * bs * 1.5, pips); }
+      if (Game.isGentleman(sq)) icon('hat', wx, top + 1.1, wz, 1.1 * bs * 0.8);
+      if (side === me && deploying && Game.isReady(m, sq)) icon('plus', wx + (camRight.x - camDown.x) * o, top + 0.2, wz + (camRight.z - camDown.z) * o, 0.9 * bs);
       return [wx, wz];
     };
     // the opponent's squads from this round stay hidden until the fight; a squad they moved shows on its old tile
     for (const sq of m.armies[foe]) if ((sq.round < m.round || !deploying) && !Game.hiddenFromFoe(m, sq)) {
       const p = deploying ? Game.seenAt(m, sq) : sq;
-      squad(p === sq ? sq : { ...sq, col: p.col, row: p.row }, foe, false);
+      squad(deploying ? { ...sq, col: p.col, row: p.row, level: Game.seenLevel(m, sq) } : sq, foe, false); // a level-up bought this round stays hidden
     }
     for (const sq of m.armies[me]) {
       if (deploying && sq.from && sq.movedRound === m.round) { const s = tileCenter(v, sq.from.col, sq.from.row); tileSq(s.c, s.r, color(css('--muted') || '#8DA1A1'), 0.6, 0.04, 10, 0.1); }
@@ -451,7 +464,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
     if (u.structure) return;
     if (b.windTarget && u.windUp > 0) arc(wx, wz, r * 1.58, team, 0.95, 1 - b.windT / u.windUp, 0.1);
     if (b.delay > 0) arc(wx, wz, r * 1.58, color(css('--gold') || '#E6B84A'), 1, b.delay / Game.FLANK.delay, 0.1);
-    if (b.level > 0) for (let k = 0; k < b.level; k++) arc(wx, wz, r * (1.74 + k * 0.13), color(css('--gold') || '#E6B84A'), 0.85, 1, 0.06);
+    if (b.level > 0) for (let k = 0; k < b.level; k++) arc(wx, wz, r * (1.8 + k * 0.24), color(css('--gold') || '#E6B84A'), 0.9, 1, 0.12);
     if (b.convert) arc(wx, wz, r * 1.66, color(CHARM_COL), 0.9, 1, 0.07, 16);
     // small dots over the head: poisoned (green), slowed (blue), charisma stacks (pink)
     const dots = [];
@@ -493,6 +506,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
     const byKey = {};
     for (const s of bodies) { const k = models.kindOf(s.u) + '#' + s.look; (byKey[k] || (byKey[k] = [])).push(s); }
     const rings = [], labels = new Map();
+    models_ = [];
     for (const [key, list] of Object.entries(byKey)) {
       const [kind, look] = key.split('#'), parts = models.parts(kind), top = models.height(kind);
       const gs = [['tint', tintMat], ['team', teamMat], ['fixed', fixedMat]].filter(([p]) => parts[p])
@@ -520,6 +534,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
         if (s.crest) icon(`arms|${s.crest}|${s.edge}`, wx, h + 1.2, wz, 1.5);
         if (s.b && !ghost) { bodyMarkers(s, f, me, wx, wz, r, h, clock); s.marked = true; }
         if (s.tag) { const l = labels.get(s.tag) || { u: s.u, pts: [] }; l.pts.push([wx, wz, r]); labels.set(s.tag, l); }
+        if (s.tile) models_.push([wx, wz, r, h, s.tile.col, s.tile.row]);
       });
       for (const [, g] of gs) finish(g, list.length);
     }
@@ -614,12 +629,28 @@ const Render3D = (THREE, el, view, opts = {}) => {
     return screenTile(me, c, r);
   }
 
+  // ---------- what a finger points at ----------
+  // In the angled view a model stands above its tile, so a touch on its body meets the ground behind it. Follow the
+  // touch down from the height of the tallest model: the first squad model it passes through gives the tile; else
+  // the tile on the ground.
+  function pick(p, cx, cy) {
+    const t = tileOfGround(p, lastMe);
+    if (cx == null || viewMode === 'strategic' || !models_.length) return t;
+    const top = Math.max(...models_.map(b => b[3]));
+    for (let h = top; h > 0.1; h -= 0.25) {
+      const q = cam.groundAt(cx, cy, h); if (!q) continue;
+      for (const [x, z, r, mh, col, row] of models_) if (h <= mh && Math.hypot(q.x - x, q.z - z) < r * 0.75) return { col, row };
+    }
+    return t;
+  }
+
   // ---------- camera ----------
   let lastMe = 0;
   const cam = Camera3D(THREE, camera, renderer.domElement, {
     width: BW, depth: BD,
-    onTap: (p) => { if (opts.onTap) opts.onTap(tileOfGround(p, lastMe)); },
-    onPress: (p) => !!(opts.onPress && opts.onPress(tileOfGround(p, lastMe))),
+    onTap: (p, cx, cy) => { if (opts.onTap) opts.onTap(pick(p, cx, cy)); },
+    // a press on a squad never moves the camera: one the page doesn't drag is held still, as on the 2D board
+    onPress: (p, cx, cy) => { const t = pick(p, cx, cy); return !!(opts.onPress && opts.onPress(t)) || !!(t && squadTiles.has(t.col + ',' + t.row)); },
     onDrag: (p) => { if (opts.onDrag) opts.onDrag(tileOfGround(p, lastMe)); },
     onDrop: (p) => { if (opts.onDrop) opts.onDrop(tileOfGround(p, lastMe), !!p); },
     onHover: (p) => { if (opts.onHover) opts.onHover(tileOfGround(p, lastMe)); },
@@ -662,6 +693,13 @@ const Render3D = (THREE, el, view, opts = {}) => {
     renderer.render(scene, camera);
   }
   const tileAt = (clientX, clientY) => tileOfGround(cam.groundAt(clientX, clientY), view().me);
+  // where the middle of a tile (model column / row), h metres above the ground, is on the screen: [clientX, clientY]
+  const scrV = new THREE.Vector3();
+  function screenAt(col, row, h = 0) {
+    const f = view().me === 1 ? -1 : 1, w = Game.tileToWorld(col, row), r = renderer.domElement.getBoundingClientRect();
+    scrV.set(w.x * f, h, -w.y * f).project(camera);
+    return [r.left + (scrV.x + 1) / 2 * r.width, r.top + (1 - scrV.y) / 2 * r.height];
+  }
   const QUALITY = { high: [2, true], medium: [1.5, true], low: [1, false] };
   function quality(q) {
     const [ratio, shadows] = QUALITY[q] || QUALITY.high;
@@ -679,5 +717,5 @@ const Render3D = (THREE, el, view, opts = {}) => {
     renderer.forceContextLoss();
   }
   return { size: sizeTo, draw, tileAt, thumb: (match) => floor2d.thumb(match), camera: cam, info: () => renderer.info.render,
-    still: () => !cam.busy(), quality, pixelRatio: () => renderer.getPixelRatio(), dispose, drawn };
+    still: () => !cam.busy(), quality, pixelRatio: () => renderer.getPixelRatio(), dispose, drawn, screenAt };
 };

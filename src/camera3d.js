@@ -6,6 +6,8 @@
 // point, so the game can place squads). There the page can also take a one-finger drag for itself (to move a squad):
 // opts.onPress(point) on the press returns true to take it, then opts.onDrag(point) as it moves and opts.onDrop(point)
 // when it lifts (null when a second finger or a cancel ends it); a short press still counts as a tap after the drop.
+// onTap and onPress also get the screen point (clientX, clientY), and groundAt(clientX, clientY, h) finds where it
+// meets a level h metres above the ground (to pick what stands there).
 // A mouse moving over the strategic view with no button down goes to opts.onHover(point), null when it leaves.
 // While opts.placing() is true (the player is deploying), the angled view takes taps, drags and hover the same way;
 // a drag that the page doesn't take still looks around, and setLevel(k) (or a pinch, the wheel, Esc) changes view. Levels 1 and 2 are cinematic: angled, then close to the ground. In a
@@ -80,12 +82,18 @@ const Camera3D = (THREE, camera, el, opts) => {
 
   // the point on the ground under a screen point (null if it's above the horizon)
   const ray = new THREE.Raycaster(), ndc = new THREE.Vector2(), ground = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-  function groundAt(cx, cy) {
+  // the point under a screen point on the ground, or (h metres) on a level that high above it
+  const level_ = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  function groundAt(cx, cy, h = 0) {
     const r = el.getBoundingClientRect();
     ndc.set((cx - r.left) / r.width * 2 - 1, -((cy - r.top) / r.height) * 2 + 1);
     ray.setFromCamera(ndc, camera);
     const hit = new THREE.Vector3();
-    return ray.ray.intersectPlane(ground, hit);
+    if (!h) return ray.ray.intersectPlane(ground, hit);
+    level_.constant = -h;
+    const p = ray.ray.intersectPlane(level_, hit);
+    if (p) p.y = 0;
+    return p;
   }
   // enter a cinematic view looking at the ground under a screen point
   function aimAt(cx, cy) {
@@ -131,7 +139,7 @@ const Camera3D = (THREE, camera, el, opts) => {
     try { el.setPointerCapture(e.pointerId); } catch (err) {}
     if (pts.size === 1) {
       tap = { x: e.clientX, y: e.clientY, t: performance.now(), id: e.pointerId };
-      if (handsOn() && opts.onPress && opts.onPress(groundAt(e.clientX, e.clientY))) grab = e.pointerId;
+      if (handsOn() && opts.onPress && opts.onPress(groundAt(e.clientX, e.clientY), e.clientX, e.clientY)) grab = e.pointerId;
     }
     else if (pts.size === 2) startTwo();
   });
@@ -162,7 +170,7 @@ const Camera3D = (THREE, camera, el, opts) => {
     pts.delete(e.pointerId);
     if (grab === e.pointerId) dropGrab(e.type === 'pointerup' ? groundAt(e.clientX, e.clientY) : null);
     if (tap && tap.id === e.pointerId && e.type === 'pointerup' && performance.now() - tap.t < TAP_MS) {
-      if (handsOn()) { if (opts.onTap) opts.onTap(groundAt(e.clientX, e.clientY)); }
+      if (handsOn()) { if (opts.onTap) opts.onTap(groundAt(e.clientX, e.clientY), e.clientX, e.clientY); }
       else goStrategic();
     }
     tap = null;
