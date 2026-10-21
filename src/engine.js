@@ -44,6 +44,8 @@ const Engine = (() => {
   // comes from how fast it gets going, not from its attack speed.
   const ROLL_START = 1;
   const ROLL_PAST = 6;         // a tile
+  // unfold (the Rollers' Unfold skill): once a roller has rolled through its first enemy and stopped past it, it folds
+  // out for the rest of the fight (u.roll 0, u.unfolded): a walking unit that hits one enemy at a time, same stats.
   // build = { time, range, count, unit }: the unit walks at the enemy until one is within range − 1 m, stands still
   // for `time` seconds building `count` copies of `unit` (BUILD_GAP metres apart, side by side across the enemy's
   // direction), then fights on. Once per fight. Builders building within BUILD_COOP metres of each other speed each
@@ -194,7 +196,7 @@ const Engine = (() => {
       case 'shield': return `Each body fully blocks the first ${n('hits')} ${+P('hits') === 1 ? 'hit' : 'hits'} it takes in a fight, however big. Poison already on it still ticks.`;
       case 'building': return `Pick a free tile in your zone for a ${String(P('building'))}. Your nearest builder builds it during fights; once built it stays all match, and each round you can buy one of its own skills.`;
       case 'momentum': return `Gets up to full rolling speed ${n('accel')}% faster, so it rolls over its targets more often.`;
-      case 'unfold': return 'Folds out into a walking unit: it walks up to its target and hits it in melee, one enemy at a time, instead of rolling over everything in its path. Same health and stats.';
+      case 'unfold': return 'Rolls in as usual, but once it has rolled through its first enemy it folds out into a walking unit: from then on it walks up to its target and hits it in melee, one enemy at a time. Same health and stats.';
       case 'link': return `+${n('hp')}% health, and the bodies of a squad share one health pool: damage to any of them is shared by all, and they fall together.`;
       case 'healbot': return `Each squad brings a healbot (${n('hp')} health) that follows it, never attacks, and heals every body of the squad within ${n('range')} m for ${n('pct')}% of its max health every second.`;
       case 'builder': {
@@ -271,7 +273,7 @@ const Engine = (() => {
           u.hit = u.hit * (1 - Math.min(90, P('hit')) / 100);
           break;
         case 'momentum': if (u.roll > 0) u.roll = u.roll / (1 + Math.max(0, P('accel')) / 100); break;
-        case 'unfold': if (u.roll > 0) { u.roll = 0; u.unfolded = true; } break;
+        case 'unfold': if (u.roll > 0) u.unfold = true; break;
         case 'link': u.link = true; u.hp = u.hp * (1 + P('hp') / 100); break;
         case 'healbot':
           u.escort = { pct: Math.max(0, P('pct')), unit: withTraits({ name: 'Healbot', cost: 0, bodies: 1, hp: Math.max(1, P('hp')), hit: 0, aps: 1, range: Math.max(1, P('range')),
@@ -938,6 +940,7 @@ const Engine = (() => {
         if (opts.record) shots.push([b.x, b.y, f.x, f.y, b.side, 1, 1, 0, 0]);
         hurt(b, f, b.u.hit, b.x, b.y);
       }
+      if (stop && b.u.unfold && b.rolled && b.rolled.length) { b.u = { ...b.u, roll: 0, unfolded: true }; b.engaged = true; } // through its first enemy: it folds out
       if (stop) { b.rollPast = 0; b.rollV = start; b.rolled = null; }
     }
 

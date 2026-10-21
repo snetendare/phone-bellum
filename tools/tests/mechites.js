@@ -13,17 +13,27 @@ const squad = (u, side, x, y, id, level) => E.buildSquad(u, side, x, y, id, Game
 const run = (bt, secs) => { for (let k = 0; k < secs / g.dt - 1e-9 && bt.step(); k++); };
 
 // ---------- Rollers ----------
-// Unfold: the same stats, but it walks up and hits one enemy at a time, like an Ent without its sweep
+// Unfold: it rolls until it has rolled through its first enemy, then folds out and walks, hitting one enemy at a
+// time with the same stats (like an Ent without its sweep)
 {
   const base = unit('Rollers'), u = unit('Rollers', 'rollerUnfold');
-  assert.ok(!u.roll && u.unfolded && !u.flame && u.hp === base.hp && u.hit === base.hit && u.aps === base.aps && u.range === base.range && u.speed === base.speed, 'unfolded, nothing else changed');
-  const [r] = squad({ ...u, bodies: 1 }, 0, 0, -10, 1);
-  const d = squad({ ...DUMMY, bodies: 2 }, 1, 0, 10, 2);
+  assert.ok(u.roll === base.roll && u.unfold && !u.unfolded && u.hp === base.hp && u.hit === base.hit && u.aps === base.aps && u.range === base.range && u.speed === base.speed, 'rolls at first, nothing else changed');
+  const [r] = squad({ ...u, bodies: 1 }, 0, 0, -30, 1);
+  const d = squad({ ...DUMMY, bodies: 2 }, 1, 0, 30, 2);
   const bt = E.createBattle([r], d, g);
+  let hitRolling = 0;
+  for (let k = 0; k < 600 && bt.step() && !r.u.unfolded; k++) hitRolling = d.filter(x => x.hp < x.u.hp).length;
+  assert.ok(r.u.unfolded && r.u.roll === 0 && hitRolling > 0, 'it rolled through an enemy, then folded out');
+  assert.ok(r.y > 30, 'past its target when it folds out');
+  const dealt = r.dealt;
   run(bt, 8);
-  near(r.y, d[0].y - r.u.range, 2.5, 'it stops in front of its target');
-  assert.ok(r.dealt > 0 && r.dealt % base.hit < 1e-6, 'and hits it');
-  assert.ok(d.filter(x => x.hp < x.u.hp).length === 1, 'one enemy at a time');
+  assert.ok(r.dealt > dealt, 'then it walks back and hits in melee');
+  near(Math.min(...d.map(x => Math.hypot(x.x - r.x, x.y - r.y))), r.u.range, 1.5, 'standing next to its target');
+  // without the skill it keeps rolling
+  const [r2] = squad({ ...base, bodies: 1 }, 0, 0, -30, 3);
+  const bt2 = E.createBattle([r2], squad(DUMMY, 1, 0, 30, 4), g);
+  run(bt2, 15);
+  assert.ok(!r2.u.unfolded && r2.u.roll > 0, 'no Unfold, no folding out');
 }
 {
   // speed climbs from 1 to 7 m/s over 2 s
