@@ -1071,7 +1071,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
         <li>Drag a squad you placed this round to move it, or tap it to take it back. Your round 1 package squads are free.</li>
         <li>A squad with a gold badge can level up: tap it. Tap an older squad, a tower or an enemy squad to see what it does.</li>
         ${document.documentElement.classList.contains('dock') ? '<li>Hold the blue tab on the deploy panel and slide it up or down (or tap it). Picking a unit puts it down so you can see every tile; the ✕ on the board stops placing.</li>' : ''}
-        ${board3d ? '<li>3D board: spread two fingers (or scroll) to go in a view: Strategic, Tilted (the whole board from your side, still for placing), Angled, Cinematic. Pinch (or press Esc) to go back.</li>' : ''}
+        ${board3d ? '<li>3D board: spread two fingers (or scroll) to go in a view: Strategic, Angled, Cinematic. Pinch (or press Esc) to go back. Pinch on from Strategic (or scroll back) for Tilted: the whole board from your side, still for placing.</li>' : ''}
       </ul>
       <div class="bar"><span></span><button class="btn small" id="help-how">How to play</button></div>`;
     $('sheet-back').hidden = false;
