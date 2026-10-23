@@ -1227,7 +1227,7 @@ const Game = (() => {
     for (const h of hailTiles(m)) { const w = tileToWorld(h.col, h.row); tiles.push({ type: 'hail', dps: ICE.hailDps, x0: w.x - T2, x1: w.x + T2, y0: w.y - T2, y1: w.y + T2 }); }
     const fx = isDev(m) ? castEffects(m) : { tiles: [], strikes: [] }; // devtest spells
     tiles.push(...fx.tiles);
-    if (isDev(m) && DEV.awareness) g = { ...g, aware2: true };
+    if (isDev(m) && DEV.awareness) g = { ...g, aware2: true, ...(DEV.awareLane != null ? { awareLane: DEV.awareLane } : {}) };
     const neutrals = elf ? [{ u: elfUnit(m), x: elf.x, y: elf.y, friends: [bribeLeader(m) === 0, bribeLeader(m) === 1] }] : [];
     for (const side of [0, 1]) { const e = elfOwnOf(m, side); if (e) { const w = tileToWorld(e.col, e.row); neutrals.push({ u: elfUnit(m), x: w.x, y: w.y, friends: [side === 0, side === 1], side }); } }
     return E.createBattle(bodiesFor(m, 0), bodiesFor(m, 1), g, { record: true, tiles, strikes: fx.strikes, neutrals, charm: [charmMap(m, 0), charmMap(m, 1)] });

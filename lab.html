@@ -635,6 +635,10 @@ const Engine = (() => {
   const SIGHT = 15;            // metres beyond its own range at which a unit notices an enemy and turns toward it
   const MIN_SIGHT = 18;        // ...but never less than this many metres from the unit (3 tiles), however short its range
   const DRIFT = 15;            // metres beyond that at which a marching unit starts to lean toward the nearest enemy
+  // awareness prototype (g.aware2, the Factions devtest only; docs/AWARENESS.md): once engaged, a body picks whom to walk
+  // to by distance plus crowding (melee slots per target) and stays on it unless something clearly better turns up;
+  // it only looks within its sight, and new attack targets skip enemies its side is already about to kill
+  const AWARE = { step: 2, full: 12, stick: 3, leash: 1.5, melee: 5, lane: 0.5 }; // metres added per melee body on the target already, when its slots are full; kept-target bonus; how far past sight it chases its target; melee reach; extra cost per metre sideways (a squad keeps to its own lane)
 
   const LEVEL_BONUS = 1;       // each upgrade adds +100% of starting health and hit (2x, then 3x)
   const MAX_LEVEL = 2;         // two upgrades on top of the base unit
@@ -1201,8 +1205,32 @@ const Engine = (() => {
     // the enemy a body attacks: once it has picked one it stays on it until it dies, hides or leaves its reach,
     // even if another enemy comes closer; then it picks the nearest
     function locked(b, valid) {
-      if (!(b.lock && b.lock.alive && valid.includes(b.lock))) b.lock = valid[0];
+      if (!(b.lock && b.lock.alive && valid.includes(b.lock))) {
+        // aware2: the nearest enemy that isn't about to die from what its side is already shooting at it
+        b.lock = g.aware2 ? (valid.find(f => (f.claimDmg || 0) < f.hp) || valid[0]) : valid[0];
+        if (g.aware2 && b.lock) b.lock.claimDmg = (b.lock.claimDmg || 0) + b.u.hit;
+      }
       return b.lock;
+    }
+    // aware2: how many melee bodies a target makes room for
+    const slotsOf = (f) => f.u.structure ? 6 : f.u.hp >= 1000 ? 5 : f.u.bodies >= 5 ? 2 : 3;
+    // aware2: whom an engaged body walks to: within its sight (its current one a bit further), by distance plus crowding,
+    // keeping its current one unless another is clearly better. null: nobody in sight (it goes for the nearest, as before)
+    function goalOf(b, rg) {
+      const aware = Math.max(rg + sight, minSight), melee = rg <= AWARE.melee;
+      let best = null, bc = Infinity;
+      for (const f of sides[1 - b.side]) {
+        if (!f.alive || f.hidden) continue;
+        const d = dist(f, b), mine = f === b.goal;
+        if (d > aware * (mine ? AWARE.leash : 1)) continue;
+        const lane = g.awareLane == null ? AWARE.lane : g.awareLane;
+        let c = d - (mine ? AWARE.stick : 0) + lane * Math.abs(f.x - b.x);
+        if (melee) { const n = (f.claimsM || 0) - (mine ? 1 : 0); c += n >= slotsOf(f) ? AWARE.full : n * AWARE.step; }
+        else c += ((f.claimsR || 0) - (mine ? 1 : 0)) * 0.5;
+        if (c < bc) { bc = c; best = f; }
+      }
+      b.goal = best;
+      return best;
     }
 
     // one shot, or a spread of shotgun pellets each at a different body in the cone
@@ -1382,6 +1410,15 @@ const Engine = (() => {
         b.u = { ...b.u, hp: inside ? b.u.hp * k : b.u.hp / k, bonusArmor: (b.u.bonusArmor || 0) + sign * b.band.armor };
         b.hp = inside ? b.hp * k : b.hp / k;
       }
+      // aware2: who is walking to and shooting at whom, from the last tick's choices
+      if (g.aware2) {
+        for (const f of all) { f.claimsM = 0; f.claimsR = 0; f.claimDmg = 0; }
+        for (const b of all) {
+          if (!b.alive) continue;
+          if (b.goal && b.goal.alive) { if (R(b) <= AWARE.melee) b.goal.claimsM++; else b.goal.claimsR++; }
+          if (b.lock && b.lock.alive) b.lock.claimDmg += b.u.hit;
+        }
+      }
       // movement + targeting
       for (const b of all) {
         if (!b.alive || b.delay > 0) continue;
@@ -1441,6 +1478,7 @@ const Engine = (() => {
           if (b.u.windUp > 0 && mv > 0) { b.setUp = false; if (b.windTarget) { b.windTarget = null; stats[b.side].windLost++; } }
           continue;
         }
+        if (g.aware2 && b.engaged && near) { const gl = goalOf(b, rg); if (gl) { near = gl; nd = dist(gl, b); } }
         if (near && nd > (g.stopPct > 0 && g.stopPct < 1 && b.engaged ? stopAt(rg) : rg)) {
           const step = b.u.speed * (b.slowT > 0 ? 1 - b.slowMove / 100 : 1) * (cripple[b.side] > 0 ? 1 - towerDown.move / 100 : 1) * dt;
           let mv;
@@ -1761,7 +1799,7 @@ const Engine = (() => {
         v.convert = { side: v.side, squad: v.squad, xp: v.xp, dealt: v.dealt || 0 }; // what it earned for its old squad
         v.side = 1 - v.side; v.squad = CONVERT_SQUAD; v.xp = 0; v.dealt = 0; v.turning = false;
         v.windTarget = null; v.windT = 0; v.setUp = false; v.firing = -1; v.burstLeft = 0; v.trampleLeft = 0; v.trampled = null;
-        v.spinTarget = null; v.aims = null; v.lock = null; v.march = null; v.guide = null; v.spreadTo = null; v.engaged = false; v.holdT = 0; v.delay = 0; v.band = null; v.hidden = false;
+        v.spinTarget = null; v.aims = null; v.lock = null; v.march = null; v.guide = null; v.goal = null; v.spreadTo = null; v.engaged = false; v.holdT = 0; v.delay = 0; v.band = null; v.hidden = false;
         v.slowT = 0; v.slowMove = 0; v.slowAtk = 0; v.shrinkT = 0; v.shrinkM = 0; v.kids = null; v.stunT = 0; v.frenzy = 0;
         sides[v.side].push(v); stats[v.side].totalHp += v.hp;
         for (const b of all) {

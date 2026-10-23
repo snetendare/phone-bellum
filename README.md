@@ -65,6 +65,10 @@ Factions go in `src/factions.json`, then run `node tools/counter-table.js` and r
 - The draft order, picks per player and the map are in `FACTION_MODE` in `src/game.js`. A ban phase later is a matter of adding `{ "who": "A", "act": "ban" }` steps to its order.
 - `node tools/tests/factions.js` checks the draft and faction matches headlessly with six throwaway test factions.
 
+### Factions – devtest
+
+A test bed for the Factions mode while it's being designed: the Test Grid board, a draft where both players may take the same faction, no tower until round 3, a free pick every round (lesser buildings, the Powertower, Powers, neutral units), spells, arrows that guide a squad, and disguised units. vs AI only. The plan, who does what and the data formats are in [docs/FACTIONS-DEVTEST.md](docs/FACTIONS-DEVTEST.md); notes on unit awareness and targeting in [docs/AWARENESS.md](docs/AWARENESS.md).
+
 ## Tools (`tools/`)
 
 - `tools/match-history.gs` saves two-player matches to a Google Sheet. Paste it into the sheet's Apps Script, deploy it as a web app (Execute as: Me, Who has access: Anyone) and put the `/exec` URL in `HISTORY_URL` in `src/site-template.html` (already set to the live sheet; a new deployment gets a new URL, so update it then). The hosting phone then saves every round, and a Match history button appears on the start screen. The URL is public, so anyone could add rows; delete junk rows in the sheet.

@@ -64,7 +64,7 @@ Everything goes in `src/factions.json`. Then run `node tools/counter-table.js` a
 }
 ```
 
-- Units use the same fields as `default-roster.json`, so anything Counter Lab can make works here. Two new fields: `"disguise": "Unit name"` (it looks like that unit to the opponent until it first attacks) and `"neutral": true` is not needed (neutral units go in the neutral list).
+- Units use the same fields as `default-roster.json`, so anything Counter Lab can make works here. One new field: `"disguise": "Unit name"` (it looks like that unit to the opponent until it first attacks). `unlock` is the gold to unlock it in a match (0 = open from the start).
 - `trait` changes all the faction's units: `hp`, `hit`, `aps`, `range`, `speed` in %, `armor` flat.
 
 ### A lesser building
@@ -136,11 +136,13 @@ Neutral units can be names from the standard roster or full units. Picking one u
 ## Order of work (Claude)
 
 1. Plan (this file). Done.
-2. Devtest mode, round-by-round picks, simple pick card UI.
-3. Buildings and spells: game rules, battle engine, 2D and 3D boards.
-4. Mechites and Sunken Deep: placeholders until the designs arrive, then the real rosters.
-5. Disguise and the arrow guide.
-6. Awareness research and a prototype behind a switch, used in the devtest only.
-7. Tests, build, push, publish the artifact.
+2. Devtest mode, round-by-round picks, simple pick card UI. Done.
+3. Buildings and spells: game rules, battle engine, 2D and 3D boards. Done (buildings and walls have simple placeholder 3D models).
+4. Mechites and Sunken Deep: placeholder rosters are in (marked PLACEHOLDER in their theme line), waiting for the real designs.
+5. Disguise and the arrow guide. Done. The disguise still shows the real number of bodies.
+6. Awareness research and a prototype, on in the devtest only. Done, see [AWARENESS.md](AWARENESS.md).
+7. Tests, build, push, publish the artifact. Done.
+
+Checks: `node tools/tests/devtest.js` (rules, headless) and `node tools/tests/devtest-ui.js` (the page; `PB_BOARD=3d` for the 3D board).
 
 Later, once the devtest settles: live matches in the devtest, the AI using buildings and spells well, the round 1 objective, map-specific buildings, and moving the devtest rules into the real Factions mode.
