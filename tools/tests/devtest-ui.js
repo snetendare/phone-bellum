@@ -53,7 +53,7 @@ const ctxFor = require('./board2d');
   await pickFirst();
   s = await st();
   check(s.b.length === 1 && s.b[0].col == null, 'picked a building, not placed yet');
-  const spot = await p.evaluate(() => { const { m, me } = window.__pb(), rows = Game.zoneRows(me); for (const row of rows.slice(4)) for (let col = 2; col < Game.COLS - 2; col++) if (Game.buildingSpotOk(m, me, Game.devBuilding(m.dev.buildings[me][0].id), col, row, m.dev.buildings[me][0].key)) return [col, row]; });
+  const spot = await p.evaluate(() => { const { m, me } = window.__pb(), rows = Game.zoneRows(me); for (const row of rows.slice(4)) for (let col = 2; col < Game.COLS - 2; col++) if (Game.lesserSpotOk(m, me, Game.devBuilding(m.dev.buildings[me][0].id), col, row, m.dev.buildings[me][0].key)) return [col, row]; });
   await tap(...spot);
   s = await st();
   check(s.b[0].col === spot[0] && s.b[0].row === spot[1], 'building placed on the tapped tile');
@@ -66,7 +66,7 @@ const ctxFor = require('./board2d');
   check(g && g.length >= 1 && g[g.length - 1].col === Math.max(0, sq.col - 3) && g[g.length - 1].row === sq.row - 6, 'arrow drawn: ' + JSON.stringify(g));
   await p.screenshot({ path: 'devtest-2.png' });
   await fight();
-  check(await p.evaluate(() => window.__pb().bt.bodies.some(x => x.u.building)), 'the building fought');
+  check(await p.evaluate(() => window.__pb().bt.bodies.some(x => x.u.lesser)), 'the building fought');
   await next();
   // round 3: the tower pick, then a spell (given through a Power, for the test)
   check((await p.locator('#pick [data-opt]').count()) >= 1, 'round 3: the tower pick');

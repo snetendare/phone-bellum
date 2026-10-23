@@ -962,7 +962,7 @@ const Engine = (() => {
         v.x = v.u.teleport.x; v.y = v.u.teleport.y;
         return;
       }
-      if (v.u.structure && !v.u.building) cripple[v.side] = towerDown.secs; // a lesser building (Factions devtest) doesn't cripple its side
+      if (v.u.structure && !v.u.lesser) cripple[v.side] = towerDown.secs; // a lesser building (Factions devtest) doesn't cripple its side
       if (v.u.deathBlast > 0) {
         const dmg = v.u.hp * v.u.deathBlast / 100, rad = v.u.blastAt > 0 ? v.u.blastAt : BLAST_RADIUS;
         if (opts.record) shots.push([v.x, v.y, v.x, v.y, v.side, rad, 1, 0, 0]);
@@ -3040,16 +3040,16 @@ const Game = (() => {
         idx += ab.length; out.push(...ab);
       }
     }
-    // devtest: lesser buildings and walls (spells) stand on their tiles; squad ids BUILDING_SQ - key, WALL_SQ - cast index
+    // devtest: lesser buildings and walls (spells) stand on their tiles; squad ids LESSER_SQ - key, WALL_SQ - cast index
     if (isDev(m)) {
-      for (const bd of placedBuildings(m, side)) {
-        const w = tileToWorld(bd.col, bd.row), bb = E.buildSquad(buildingUnit(m, side, bd), side, w.x, w.y, BUILDING_SQ - bd.key, TILE, idx);
+      for (const bd of placedLessers(m, side)) {
+        const w = tileToWorld(bd.col, bd.row), bb = E.buildSquad(lesserUnit(m, side, bd), side, w.x, w.y, LESSER_SQ - bd.key, TILE, idx);
         idx += bb.length; out.push(...bb);
       }
       casts(m).forEach((c, k) => {
         const sp = devSpell(c.id) || {};
         if (c.side !== side || sp.kind !== 'wall' || !castActive(m, c)) return;
-        const wu = E.withTraits({ name: sp.name || 'Wall', cost: 0, bodies: 1, hp: +sp.hp || 600, hit: 0, aps: 1, range: 0, speed: 0, splash: 0, shape: 'square', color: '#9C8F7A', structure: true, building: true, kind: 'wall', level: 0 });
+        const wu = E.withTraits({ name: sp.name || 'Wall', cost: 0, bodies: 1, hp: +sp.hp || 600, hit: 0, aps: 1, range: 0, speed: 0, splash: 0, shape: 'square', color: '#9C8F7A', structure: true, lesser: true, kind: 'wall', level: 0 });
         const w = tileToWorld(c.col, c.row), wb = E.buildSquad(wu, side, w.x, w.y, WALL_SQ - k, TILE, idx);
         idx += wb.length; out.push(...wb);
       });
@@ -3230,8 +3230,8 @@ const Game = (() => {
     if (isDev(m)) {
       summary.devLoss = [0, 1].map(sd => {
         const out = { hp: 0, gold: 0, fell: [] };
-        for (const bd of placedBuildings(m, sd)) {
-          const q = res.squads[sd + ':' + (BUILDING_SQ - bd.key)];
+        for (const bd of placedLessers(m, sd)) {
+          const q = res.squads[sd + ':' + (LESSER_SQ - bd.key)];
           if (!q || q.alive > 0) continue;
           const od = (devBuilding(bd.id) || {}).onDestroyed || {};
           out.hp += Math.max(0, Math.round(+od.hp || 0)); out.gold += Math.max(0, Math.round(+od.gold || 0)); out.fell.push(bd.id);
@@ -3430,7 +3430,7 @@ const Game = (() => {
     awareness: true,   // fights use the awareness prototype (see docs/AWARENESS.md)
   };
   const CAT_NAMES = { building: 'Lesser building', tower: 'Powertower', power: 'Power', neutral: 'Neutral unit' };
-  const BUILDING_SQ = -1000, WALL_SQ = -2000; // squad ids in fights: building key k is BUILDING_SQ - k, wall cast k is WALL_SQ - k
+  const LESSER_SQ = -1000, WALL_SQ = -2000; // squad ids in fights: building key k is LESSER_SQ - k, wall cast k is WALL_SQ - k
   let DEVDATA = { buildings: [], powers: [], spells: [] };
   // fd: faction-units.json ({ factions (with their buildings and powers), neutral: { buildings, powers }, spells })
   function setDevData(fd) {
@@ -3502,33 +3502,33 @@ const Game = (() => {
   const devShown = (m, viewer, deploying, side, round) => side === viewer || !deploying || round < m.round;
 
   // ---- lesser buildings ----
-  const buildingsOf = (m, side) => (isDev(m) && m.dev.buildings[side]) || [];
-  const placedBuildings = (m, side) => buildingsOf(m, side).filter(b => b.col != null);
-  const unplacedBuilding = (m, side) => buildingsOf(m, side).find(b => b.col == null) || null;
-  const buildingAt = (m, side, col, row) => placedBuildings(m, side).find(b => b.col === col && b.row === row) || null;
-  const devOccupied = (m, side, col, row) => !!buildingAt(m, side, col, row) || !!wallAt(m, col, row);
+  const lessersOf = (m, side) => (isDev(m) && m.dev.buildings[side]) || [];
+  const placedLessers = (m, side) => lessersOf(m, side).filter(b => b.col != null);
+  const unplacedLesser = (m, side) => lessersOf(m, side).find(b => b.col == null) || null;
+  const lesserAt = (m, side, col, row) => placedLessers(m, side).find(b => b.col === col && b.row === row) || null;
+  const devOccupied = (m, side, col, row) => !!lesserAt(m, side, col, row) || !!wallAt(m, col, row);
   // where a building may stand: def.place is 'zone' (default), 'front' (zone or no man's land) or 'flank' (zone or own flank tiles)
-  function buildingSpotOk(m, side, def, col, row, key) {
+  function lesserSpotOk(m, side, def, col, row, key) {
     if (!isDev(m) || col < 0 || col >= COLS || row < 0 || row >= ROWS) return false;
     const where = (def && def.place) || 'zone';
     const ok = inZone(side, row) || (where === 'front' && inNoMans(row)) || (where === 'flank' && isFlank(side, col, row));
     if (!ok || reserved(side, col, row) || towerAt(m, side, col, row) || elfOwnAt(m, side, col, row) || wallAt(m, col, row)) return false;
     if (m.armies[side].some(s => s.col === col && s.row === row)) return false;
-    return !placedBuildings(m, side).some(b => b.key !== key && b.col === col && b.row === row);
+    return !placedLessers(m, side).some(b => b.key !== key && b.col === col && b.row === row);
   }
   // place (or move) a building: any time in the round it was picked, fixed after its first fight
-  function placeBuilding(m, side, key, col, row) {
-    const b = buildingsOf(m, side).find(x => x.key === key);
-    if (!b || b.round !== m.round || !buildingSpotOk(m, side, devBuilding(b.id), col, row, key)) return false;
+  function placeLesser(m, side, key, col, row) {
+    const b = lessersOf(m, side).find(x => x.key === key);
+    if (!b || b.round !== m.round || !lesserSpotOk(m, side, devBuilding(b.id), col, row, key)) return false;
     b.col = col; b.row = row;
     return true;
   }
   // a building's fighting stats
-  function buildingUnit(m, side, b) {
+  function lesserUnit(m, side, b) {
     const d = devBuilding(b.id) || {};
     const hpPct = powersOf(m, side).reduce((s, p) => s + (+p.buildingHp || 0), 0);
     const u = { name: d.name || 'Building', cost: 0, bodies: 1, hp: 400, hit: 0, aps: 1, range: 0, speed: 0, splash: 0, shape: 'square', color: (factionInfo(d.faction) || {}).color || '#B7AE9C',
-      ...(d.unit || {}), structure: true, building: true, kind: 'building', bid: d.id || null, level: 0 };
+      ...(d.unit || {}), structure: true, lesser: true, kind: 'lesser', bid: d.id || null, level: 0 };
     u.hp = u.hp * (1 + hpPct / 100);
     const sp = d.spawn, ui = sp ? m.units.findIndex(x => x.name === sp.unit) : -1;
     if (ui >= 0) {
@@ -3540,7 +3540,7 @@ const Game = (() => {
   // the bonus a squad standing on (col, row) at the start of the fight gets from its side's buildings' auras
   function auraFor(m, side, col, row) {
     let mods = null;
-    for (const b of placedBuildings(m, side)) {
+    for (const b of placedLessers(m, side)) {
       const a = (devBuilding(b.id) || {}).aura;
       if (!a || Math.max(Math.abs(b.col - col), Math.abs(b.row - row)) > Math.max(0, Math.round(+a.tiles || 1))) continue;
       mods = mods || {};
@@ -3573,7 +3573,7 @@ const Game = (() => {
   const devDeploys = (m, side) => powersOf(m, side).reduce((s, p) => s + Math.max(0, Math.round(+p.deploys || 0)), 0);
   // extra gold at the start of a round: the Powers' gold and the buildings' income
   const devGold = (m, side) => !isDev(m) ? 0 : powersOf(m, side).reduce((s, p) => s + (+p.gold || 0), 0)
-    + placedBuildings(m, side).reduce((s, b) => s + (+(devBuilding(b.id) || {}).income || 0), 0);
+    + placedLessers(m, side).reduce((s, b) => s + (+(devBuilding(b.id) || {}).income || 0), 0);
 
   // ---- spells: temporary items on the map, cast for gold ----
   const spellsOf = (m, side) => [...new Set(powersOf(m, side).map(p => p.spell).filter(id => id && devSpell(id)))];
@@ -3655,19 +3655,19 @@ const Game = (() => {
     if (!isDev(m)) return;
     for (const sd of [0, 1]) {
       if (needsDevPick(m, sd)) devPick(m, sd, devOffer(m, sd).ids[0]);
-      for (let b; (b = unplacedBuilding(m, sd));) {
-        const spot = buildingSpot(m, sd, b, rng(m.seed + m.round * 37 + b.key));
+      for (let b; (b = unplacedLesser(m, sd));) {
+        const spot = lesserSpot(m, sd, b, rng(m.seed + m.round * 37 + b.key));
         if (!spot) { m.dev.buildings[sd].splice(m.dev.buildings[sd].indexOf(b), 1); continue; } // no room left: it's lost
-        placeBuilding(m, sd, b.key, spot.col, spot.row);
+        placeLesser(m, sd, b.key, spot.col, spot.row);
       }
     }
   }
   // a free tile for a building: the back half of the zone, near the middle, a little random
-  function buildingSpot(m, side, b, r) {
+  function lesserSpot(m, side, b, r) {
     const rows = zoneRows(side), def = devBuilding(b.id);
     let best = null, bc = Infinity;
     rows.forEach((row, zi) => { for (let col = 0; col < COLS; col++) {
-      if (!buildingSpotOk(m, side, def, col, row, b.key)) continue;
+      if (!lesserSpotOk(m, side, def, col, row, b.key)) continue;
       const c = Math.abs(zi - (rows.length - 2)) * 1.5 + Math.abs(col - (COLS - 1) / 2) * 0.6 + r() * 2;
       if (c < bc) { bc = c; best = { col, row }; }
     } });
@@ -3683,7 +3683,7 @@ const Game = (() => {
         return (d && ((d.unit && d.unit.hit > 0) || d.aura || d.mods) ? 1 : 0) + r(); };
       devPick(m, side, o.ids.slice().sort((a, b) => score(b) - score(a))[0]);
     }
-    for (let b; (b = unplacedBuilding(m, side));) { const s = buildingSpot(m, side, b, r); if (!s || !placeBuilding(m, side, b.key, s.col, s.row)) break; }
+    for (let b; (b = unplacedLesser(m, side));) { const s = lesserSpot(m, side, b, r); if (!s || !placeLesser(m, side, b.key, s.col, s.row)) break; }
     const foes = m.armies[1 - side].filter(s => s.round < m.round);
     for (const id of spellsOf(m, side)) {
       const sp = devSpell(id);
@@ -3858,8 +3858,8 @@ const Game = (() => {
     createDraft, draftTurn, draftOpen, draftAct, draftDone, draftPossible, aiDraftChoice,
     zoneRows, inZone, tileToWorld, squadRange, createMatch, place, unplace, bodiesFor, startBattle, resolve, aiDeploy, occupied,
     GRID, useGrid,
-    DEV, CAT_NAMES, BUILDING_SQ, WALL_SQ, setDevData, devBuilding, devPower, devSpell, isDev, towerUp, pickCat, devOffer, pickNow, needsDevPick, devPick, undoDevPick, devShown,
-    buildingsOf, placedBuildings, unplacedBuilding, buildingAt, buildingSpotOk, placeBuilding, buildingUnit, auraFor, modUnit, powersOf, devGold, devDeploys,
+    DEV, CAT_NAMES, LESSER_SQ, WALL_SQ, setDevData, devBuilding, devPower, devSpell, isDev, towerUp, pickCat, devOffer, pickNow, needsDevPick, devPick, undoDevPick, devShown,
+    lessersOf, placedLessers, unplacedLesser, lesserAt, lesserSpotOk, placeLesser, lesserUnit, auraFor, modUnit, powersOf, devGold, devDeploys,
     spellsOf, casts, activeCasts, castActive, castRounds, castNow, wallAt, castSpotOk, spellCost, canCast, castSpell, undoCast, castTiles, castEffects,
     canGuide, setGuide, clearGuide, shownUnit, settleDev, aiDev,
   };
@@ -4380,9 +4380,9 @@ const Render2D = (cv, view) => {
     if (dev && dev.guideId != null && dev.guide) { const sq = v.armies[me].find(q => q.id === dev.guideId); if (sq) drawArrow(sq, dev.guide, 1); }
     if (!dev || !editable) return;
     if (dev.bPlacing != null) { // where the building may go
-      const b = Game.buildingsOf(v, me).find(x => x.key === dev.bPlacing), d = b && Game.devBuilding(b.id);
+      const b = Game.lessersOf(v, me).find(x => x.key === dev.bPlacing), d = b && Game.devBuilding(b.id);
       ctx.strokeStyle = css('--gold'); ctx.globalAlpha = 0.6; ctx.lineWidth = 1.5;
-      if (b) for (let row = 0; row < Game.ROWS; row++) for (let c = 0; c < Game.COLS; c++) if (Game.buildingSpotOk(v, me, d, c, row, b.key)) ctx.strokeRect(scol(c) * t + 3, srow(row) * t + 3, t - 6, t - 6);
+      if (b) for (let row = 0; row < Game.ROWS; row++) for (let c = 0; c < Game.COLS; c++) if (Game.lesserSpotOk(v, me, d, c, row, b.key)) ctx.strokeRect(scol(c) * t + 3, srow(row) * t + 3, t - 6, t - 6);
     }
     if (dev.castMode) { // where the spell may go
       const sp = Game.devSpell(dev.castMode);
@@ -4403,7 +4403,7 @@ const Render2D = (cv, view) => {
     ctx.globalAlpha = 1;
   }
   // a lesser building: a small house in its faction's colour with a roof in its side's colour (hpr: health left in a fight)
-  function drawBuilding(x, y, t, side, u, hpr, fresh) {
+  function drawLesser(x, y, t, side, u, hpr, fresh) {
     const s = t * 0.62, c = teamCol(side);
     ctx.globalAlpha = 1;
     ctx.fillStyle = u.color || '#B7AE9C'; ctx.strokeStyle = c; ctx.lineWidth = 2;
@@ -4422,12 +4422,12 @@ const Render2D = (cv, view) => {
     ctx.globalAlpha = 1;
   }
   // the buildings this screen may see while deploying (an opponent's new one only from the fight on)
-  function drawBuildings() {
+  function drawLessers() {
     const t = tilePx();
-    for (const side of [me, foe()]) for (const b of Game.placedBuildings(m, side)) {
+    for (const side of [me, foe()]) for (const b of Game.placedLessers(m, side)) {
       if (!Game.devShown(m, me, phase === 'deploy', side, b.round)) continue;
       const at = drag && drag.bkey === b.key && drag.moved && side === me ? drag.over : b;
-      drawBuilding((scol(at.col) + 0.5) * t, (srow(at.row) + 0.5) * t, t, side, Game.buildingUnit(m, side, b), null, side === me && b.round === m.round);
+      drawLesser((scol(at.col) + 0.5) * t, (srow(at.row) + 0.5) * t, t, side, Game.lesserUnit(m, side, b), null, side === me && b.round === m.round);
     }
   }
 
@@ -4619,7 +4619,7 @@ const Render2D = (cv, view) => {
       }
     }
     for (const side of [me, foe()]) if (towerVisible(side) && Game.towerUp(m, side)) drawTowerTile(side);
-    if (Game.isDev(m)) drawBuildings();
+    if (Game.isDev(m)) drawLessers();
     // the squad tapped last: its range as a dotted ring round its tile (theirs as you can know it)
     const rs = rangeOf && phase === 'deploy' && m.armies[rangeOf.side].find(s => s.id === rangeOf.id);
     if (rs) {
@@ -4671,7 +4671,7 @@ const Render2D = (cv, view) => {
       if (!b.alive || !b.u.structure) continue;
       const hpr = b.hp / b.u.hp, t = tilePx();
       if (b.u.kind === 'wall') { drawWallBlock(PX(b.x), PY(b.y), t, b.side, hpr); continue; }
-      if (b.u.building) { drawBuilding(PX(b.x), PY(b.y), t, b.side, b.u, hpr, false); continue; }
+      if (b.u.lesser) { drawLesser(PX(b.x), PY(b.y), t, b.side, b.u, hpr, false); continue; }
       drawKeep(PX(b.x), PY(b.y), t, b.side, hpr, b.u.kind, null, Game.charOf(battlePre || m, b.side));
       ctx.strokeStyle = teamCol(b.side); ctx.lineWidth = 2;
       ctx.beginPath(); ctx.arc(PX(b.x), PY(b.y), t * 0.5, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * hpr); ctx.stroke();
@@ -5596,7 +5596,7 @@ const Render2D = (cv, view) => {
       changed();
     } else if (o.kind === 'dev') {
       if (!Game.devPick(m, me, key)) return;
-      const b = Game.unplacedBuilding(m, me);
+      const b = Game.unplacedLesser(m, me);
       if (b) { bPlacing = b.key; selected = null; } // a building goes on the board next
       const ui = units.findIndex(u => u.name === key && u.faction === 'neutral');
       if (ui >= 0) shopTier = tierOf(ui);
@@ -5615,7 +5615,7 @@ const Render2D = (cv, view) => {
   const modsText = (mo) => !mo ? '' : ['hp:health', 'hit:damage', 'aps:attack speed', 'range:range', 'speed:speed'].map(x => x.split(':')).filter(([k]) => +mo[k])
     .map(([k, n]) => `${+mo[k] > 0 ? '+' : ''}${mo[k]}% ${n}`).concat(+mo.armor ? [`${+mo.armor > 0 ? '+' : ''}${mo.armor} armor`] : []).join(', ');
   // what a building does, in one block of text (stats, aura, income, spawn, when destroyed)
-  function buildingText(d) {
+  function lesserText(d) {
     if (!d) return '';
     const u = d.unit || {}, out = [];
     out.push(`${Math.round(u.hp || 400)} health${u.mend > 0 ? ` · heals ${u.mend} × ${u.aps || 1}/s within ${u.range || 0} m` : u.hit > 0 ? ` · hit ${u.hit} × ${u.aps || 1}/s · ${u.range || 0} m${u.splash ? ` · ${u.splash} m splash` : ''}` : ''}`);
@@ -5642,7 +5642,7 @@ const Render2D = (cv, view) => {
     if (cat === 'building') {
       const d = Game.devBuilding(id) || {}, c = facColor(d.faction);
       return { key: id, art: DEV_ICON.building(c), name: esc(d.name || id), who: `<span style="color:${c}">${esc(facName(d.faction))}</span>`,
-        sub: `${Math.round((d.unit || {}).hp || 400)} hp`, det: `<b>${esc(d.name || id)}</b> · ${esc(d.text || '')}<br>${buildingText(d)}` };
+        sub: `${Math.round((d.unit || {}).hp || 400)} hp`, det: `<b>${esc(d.name || id)}</b> · ${esc(d.text || '')}<br>${lesserText(d)}` };
     }
     if (cat === 'power') {
       const p = Game.devPower(id) || {}, c = facColor(p.faction);
@@ -5654,14 +5654,14 @@ const Render2D = (cv, view) => {
       det: `<b>${esc(id)}</b>${ROLES[id] ? ` · ${esc(ROLES[id])}` : ''}<br>${u.bodies} × ${Math.round(u.hp)} hp · hit ${Math.round(u.hit)} × ${u.aps}/s · ${u.range} m · ${Game.unitCostOf(u)} gold a squad` };
   }
   // a building's sheet (yours or the opponent's)
-  function openBuildingSheet(side, b) {
+  function openLesserSheet(side, b) {
     const d = Game.devBuilding(b.id) || {}, c = facColor(d.faction), mine = side === me;
     const canMove = mine && editable() && b.round === m.round;
     $('sheet').innerHTML = `
       <div class="bar"><h3 id="sheet-h"><span style="color:${c}">${DEV_ICON.building(c)}</span> ${esc(d.name || b.id)}</h3><button class="btn small" id="close">Close</button></div>
       <p class="role" style="margin:0">${mine ? 'Your' : `${esc(foeName())}’s`} ${esc(facName(d.faction))} building${b.round === m.round ? ' · new this round' : ''}</p>
       <p style="margin:0">${esc(d.text || '')}</p>
-      <p class="hint" style="margin:0;line-height:1.5">${buildingText(d)}</p>
+      <p class="hint" style="margin:0;line-height:1.5">${lesserText(d)}</p>
       ${canMove ? `<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" id="bld-move">Move</button>${Game.pickNow(m, me) && Game.pickNow(m, me).cat === 'building' ? '<button class="btn" id="bld-undo">Undo pick</button>' : ''}</div>` : mine ? '<p class="hint" style="margin:0">Fixed in place since its first fight.</p>' : ''}`;
     $('sheet-back').hidden = false;
     $('close').addEventListener('click', closeSheet);
@@ -5835,7 +5835,7 @@ const Render2D = (cv, view) => {
       if (choosingTower()) hint = `Choose your tower on the board. The clock starts once ${solo() ? 'you have' : 'both players have'} picked.`;
       if (placingElf()) hint = 'Tap a free tile in your zone to place your elf tower. Tap anywhere else to cancel.';
       if (devPicking()) hint = 'Pick one card on the board. If time runs out you get the first one.';
-      const pb = bPlacing != null && Game.buildingsOf(m, me).find(b => b.key === bPlacing);
+      const pb = bPlacing != null && Game.lessersOf(m, me).find(b => b.key === bPlacing);
       if (pb) hint = `Tap a gold tile to place your ${esc((Game.devBuilding(pb.id) || {}).name || 'building')}.${pb.col != null ? ' Tap anywhere else to leave it where it is.' : ''}`;
       if (castMode) hint = `Tap a tile to cast ${esc((Game.devSpell(castMode) || {}).name || 'the spell')}${(Game.devSpell(castMode) || {}).kind === 'zone' ? ' (its top left corner on your screen)' : ''}. Tap anywhere it can't go to cancel.`;
       if (guideMode === 'pick') hint = 'Tap one of your squads, or drag from it to draw its path.';
@@ -5850,7 +5850,7 @@ const Render2D = (cv, view) => {
     helpTip = inline ? '' : hint;
     // phone: the task the next board tap is for, shown over the board while the drawer is down (dock())
     dockTask = !can ? null : placingTower() ? { text: hint, x: false }
-      : selected !== null || moveMode || (charmMode && Game.canGiveCharm(m, me)) || placingElf() || devTask ? { text: hint, x: !(bPlacing != null && Game.unplacedBuilding(m, me)) } : null;
+      : selected !== null || moveMode || (charmMode && Game.canGiveCharm(m, me)) || placingElf() || devTask ? { text: hint, x: !(bPlacing != null && Game.unplacedLesser(m, me)) } : null;
     const news = can && selected === null && !fresh && !inline && (Game.hailRound(m) || Game.altarRound(m) || m.round === Game.FLANK.round || (tskillOffer() && m.round === Game.TOWER_PICK_ROUND));
     const extraBtns = `<span class="xbtns" style="display:flex;gap:6px;flex-wrap:wrap">
         <button class="btn small" id="buy-deploy" ${can && Game.canBuyDeploy(m, me) ? '' : 'disabled'}>+1 deployment · ${Game.CONFIG.extraDeployCost}</button>
@@ -5859,7 +5859,7 @@ const Render2D = (cv, view) => {
         ${tskillOffer() ? `<button class="btn small" id="buy-tskill" ${can && Game.canBuyTowerSkill(m, me) ? '' : 'disabled'}>${esc(Game.towerType(m, me).skill.name)} · ${Game.towerSkillCost(m, me)}</button>` : ''}
         ${can && m.extraDeploys[me] > 0 && left > 0 ? `<button class="btn small" id="refund-deploy">Refund unused</button>` : ''}
         ${Game.isDev(m) ? (() => { // Factions devtest: the building to place, spells, arrows, this round's pick
-          const ub = Game.unplacedBuilding(m, me), pk = Game.pickNow(m, me);
+          const ub = Game.unplacedLesser(m, me), pk = Game.pickNow(m, me);
           return `${ub ? `<button class="btn small primary" id="dev-place" ${can ? '' : 'disabled'}>Place ${esc((Game.devBuilding(ub.id) || {}).name || 'building')}</button>` : ''}
             ${Game.spellsOf(m, me).length ? `<button class="btn small" id="dev-spells" ${can ? '' : 'disabled'}>Spells${Game.spellsOf(m, me).some(id => Game.castNow(m, me, id)) ? ' · cast' : ''}…</button>` : ''}
             <button class="btn small" id="dev-guide" aria-pressed="${guideMode != null}" ${can && m.armies[me].some(q => Game.canGuide(m, me, q)) ? '' : 'disabled'}>${guideMode != null ? 'Cancel path' : 'Draw path'}</button>
@@ -5921,7 +5921,7 @@ const Render2D = (cv, view) => {
     if ($('charm-undo')) $('charm-undo').addEventListener('click', () => { const q = charmGivenNow(); if (editable() && q && Game.undoCharm(m, me, q.id)) changed(); });
     if ($('move-btn')) $('move-btn').addEventListener('click', () => { if (!editable()) return; moveMode = !moveMode; moving = null; if (moveMode) selected = null; changed(); });
     if ($('undo-move')) $('undo-move').addEventListener('click', () => { if (editable() && Game.undoMove(m, me)) changed(); });
-    if ($('dev-place')) $('dev-place').addEventListener('click', () => { const b = Game.unplacedBuilding(m, me); if (!editable() || !b) return; bPlacing = b.key; selected = null; castMode = null; guideMode = null; panelDeploy(); render(); });
+    if ($('dev-place')) $('dev-place').addEventListener('click', () => { const b = Game.unplacedLesser(m, me); if (!editable() || !b) return; bPlacing = b.key; selected = null; castMode = null; guideMode = null; panelDeploy(); render(); });
     if ($('dev-spells')) $('dev-spells').addEventListener('click', openSpellSheet);
     if ($('dev-guide')) $('dev-guide').addEventListener('click', () => { if (!editable()) return; const on = guideMode == null; stopTask(); if (on) { guideMode = 'pick'; panelDeploy(); render(); } });
     if ($('dev-unpick')) $('dev-unpick').addEventListener('click', () => { if (editable() && Game.undoDevPick(m, me)) { bPlacing = null; changed(); } });
@@ -7003,7 +7003,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       return true;
     }
     if (bPlacing != null || castMode != null) return false;
-    const myB = Game.isDev(m) && Game.buildingAt(m, me, t.col, t.row);
+    const myB = Game.isDev(m) && Game.lesserAt(m, me, t.col, t.row);
     if (myB && myB.round === m.round) { guideDrag = null; drag = { bkey: myB.key, from: t, over: t, moved: false }; return true; } // drag a new building
     const sq = Game.squadAt(m, me, t.col, t.row);
     if (!sq) return false;
@@ -7032,7 +7032,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     const d = drag; drag = null;
     if (!ended || !d.moved || (d.over.col === d.from.col && d.over.row === d.from.row)) { render(); return; }
     dragEndAt = performance.now(); // the click that follows a drag is not a tap
-    if (d.bkey != null) { Game.placeBuilding(m, me, d.bkey, d.over.col, d.over.row); changed(); return; } // a building dragged
+    if (d.bkey != null) { Game.placeLesser(m, me, d.bkey, d.over.col, d.over.row); changed(); return; } // a building dragged
     if (Game.moveSquad(m, me, d.id, d.over.col, d.over.row) && m.armies[me].find(s => s.id === d.id).round < m.round) { moveMode = false; moving = null; }
     changed();
   }
@@ -7083,7 +7083,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (placingElf()) { if (editable() && Game.buyElfOwn(m, me, t.col, t.row)) { elfPlacing = false; changed(); } else if (!Game.elfOwnSpotOk(m, me, t.col, t.row)) { elfPlacing = false; render(); hud(); panelDeploy(); } return; }
     if (Game.elfOwnAt(m, me, t.col, t.row)) { openMapSheet(); return; }
     if (Game.isDev(m)) { // Factions devtest: placing a building, casting a spell, drawing an arrow; building and spell sheets
-      if (bPlacing != null) { if (editable() && Game.placeBuilding(m, me, bPlacing, t.col, t.row)) { bPlacing = Game.unplacedBuilding(m, me) ? Game.unplacedBuilding(m, me).key : null; changed(); } else if (!Game.unplacedBuilding(m, me)) { bPlacing = null; panelDeploy(); render(); } return; }
+      if (bPlacing != null) { if (editable() && Game.placeLesser(m, me, bPlacing, t.col, t.row)) { bPlacing = Game.unplacedLesser(m, me) ? Game.unplacedLesser(m, me).key : null; changed(); } else if (!Game.unplacedLesser(m, me)) { bPlacing = null; panelDeploy(); render(); } return; }
       if (castMode != null) { const id = castMode; castMode = null; if (editable() && Game.castSpell(m, me, id, t.col, t.row)) changed(); else { panelDeploy(); render(); } return; }
       if (guideMode === 'pick') { const gs = Game.squadAt(m, me, t.col, t.row); if (gs && Game.canGuide(m, me, gs)) { guideMode = gs.id; guideDraft = []; panelDeploy(); render(); } return; }
       if (guideMode != null) {
@@ -7094,10 +7094,10 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
         if (guideDraft.length >= Game.DEV.guidePoints) { stopTask(); changed(); return; }
         panelDeploy(); render(); return;
       }
-      const myB = Game.buildingAt(m, me, t.col, t.row);
-      if (myB) { openBuildingSheet(me, myB); return; }
-      const foeB = Game.buildingAt(m, foe(), t.col, t.row);
-      if (foeB && Game.devShown(m, me, true, foe(), foeB.round)) { openBuildingSheet(foe(), foeB); return; }
+      const myB = Game.lesserAt(m, me, t.col, t.row);
+      if (myB) { openLesserSheet(me, myB); return; }
+      const foeB = Game.lesserAt(m, foe(), t.col, t.row);
+      if (foeB && Game.devShown(m, me, true, foe(), foeB.round)) { openLesserSheet(foe(), foeB); return; }
       const cs = selected === null && castAt(t.col, t.row);
       if (cs && !Game.squadAt(m, me, t.col, t.row)) { openCastSheet(cs); return; }
     }

@@ -29,12 +29,12 @@ assert.deepStrictEqual(Game.devOffer(m, 0), o, 'same offer every time');
 assert.ok(Game.devPick(m, 0, o.ids[0]));
 assert.deepStrictEqual(Game.devOffer(m, 0), o, 'offer stays after picking');
 assert.ok(!Game.needsDevPick(m, 0));
-const b = Game.unplacedBuilding(m, 0); assert.ok(b);
+const b = Game.unplacedLesser(m, 0); assert.ok(b);
 const row = Game.zoneRows(0)[4];
-assert.ok(!Game.placeBuilding(m, 0, b.key, 3, Game.zoneRows(1)[0]), 'not in the enemy zone');
-assert.ok(Game.placeBuilding(m, 0, b.key, 3, row));
+assert.ok(!Game.placeLesser(m, 0, b.key, 3, Game.zoneRows(1)[0]), 'not in the enemy zone');
+assert.ok(Game.placeLesser(m, 0, b.key, 3, row));
 assert.ok(Game.occupied(m, 0, 3, row), 'a building takes its tile');
-assert.ok(Game.undoDevPick(m, 0) && !Game.buildingsOf(m, 0).length, 'pick taken back');
+assert.ok(Game.undoDevPick(m, 0) && !Game.lessersOf(m, 0).length, 'pick taken back');
 assert.ok(Game.devPick(m, 0, 'boiler-works') || Game.devPick(m, 0, o.ids[0]));
 // an aura building next to a squad
 m.dev.buildings[0] = [{ key: 99, id: 'boiler-works', col: 5, row, round: 2 }];
@@ -42,7 +42,7 @@ m.armies[0] = [{ id: 50, unit: units.findIndex(u => u.name === 'Scrap Hounds'), 
 bodies = Game.bodiesFor(m, 0);
 const hound = bodies.find(x => x.squad === 50), base = Game.unitFor(m, 0, m.armies[0][0].unit);
 assert.ok(Math.abs(hound.u.hp - base.hp * 1.15) < 1e-6 && hound.u.bonusArmor === (base.bonusArmor || 0) + 2, 'aura applied');
-assert.ok(bodies.some(x => x.squad === Game.BUILDING_SQ - 99 && x.u.building), 'building in the fight');
+assert.ok(bodies.some(x => x.squad === Game.LESSER_SQ - 99 && x.u.lesser), 'building in the fight');
 // an arrow
 assert.ok(Game.setGuide(m, 0, 50, [{ col: 6, row: 9 }, { col: 1, row: 8 }]));
 bodies = Game.bodiesFor(m, 0);

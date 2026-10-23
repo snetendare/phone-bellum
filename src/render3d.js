@@ -444,15 +444,15 @@ const Render3D = (THREE, el, view, opts = {}) => {
     // towers: their type and coat of arms only where this screen may see them
     // devtest: buildings (an opponent's new one from the fight on) and walls cast this round
     if (Game.isDev(m)) for (const side of [me, foe]) {
-      for (const b of Game.placedBuildings(m, side)) {
+      for (const b of Game.placedLessers(m, side)) {
         if (!Game.devShown(m, me, deploying, side, b.round)) continue;
         const at = drag && drag.bkey === b.key && drag.moved && side === me ? drag.over : b, w = Game.tileToWorld(at.col, at.row);
-        bodies.push({ u: Game.buildingUnit(m, side, b), side, x: w.x, y: w.y, look: 'solid', edge: Art.teamCol(side, me), tag: `${side}|b${b.key}`, scale: 0.75 });
+        bodies.push({ u: Game.lesserUnit(m, side, b), side, x: w.x, y: w.y, look: 'solid', edge: Art.teamCol(side, me), tag: `${side}|b${b.key}`, scale: 0.75 });
         if (side === me && b.round === m.round && deploying) { const st = tileCenter(v, at.col, at.row); tileSq(st.c, st.r, teamColor(side, me), 0.8, 0.05, 14); }
       }
       for (const c of Game.activeCasts(m)) if (c.side === side && (Game.devSpell(c.id) || {}).kind === 'wall' && Game.devShown(m, me, deploying, side, c.round)) {
         const w = Game.tileToWorld(c.col, c.row);
-        bodies.push({ u: { structure: true, building: true, kind: 'wall', color: '#9C7E58', hp: 1 }, side, x: w.x, y: w.y, look: 'solid', scale: 0.8 });
+        bodies.push({ u: { structure: true, lesser: true, kind: 'wall', color: '#9C7E58', hp: 1 }, side, x: w.x, y: w.y, look: 'solid', scale: 0.8 });
       }
     }
     for (const side of [me, foe]) if (m.towers && m.towers[side] && Game.towerUp(m, side)) {

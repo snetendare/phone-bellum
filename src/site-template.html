@@ -1091,7 +1091,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
       changed();
     } else if (o.kind === 'dev') {
       if (!Game.devPick(m, me, key)) return;
-      const b = Game.unplacedBuilding(m, me);
+      const b = Game.unplacedLesser(m, me);
       if (b) { bPlacing = b.key; selected = null; } // a building goes on the board next
       const ui = units.findIndex(u => u.name === key && u.faction === 'neutral');
       if (ui >= 0) shopTier = tierOf(ui);
@@ -1110,7 +1110,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
   const modsText = (mo) => !mo ? '' : ['hp:health', 'hit:damage', 'aps:attack speed', 'range:range', 'speed:speed'].map(x => x.split(':')).filter(([k]) => +mo[k])
     .map(([k, n]) => `${+mo[k] > 0 ? '+' : ''}${mo[k]}% ${n}`).concat(+mo.armor ? [`${+mo.armor > 0 ? '+' : ''}${mo.armor} armor`] : []).join(', ');
   // what a building does, in one block of text (stats, aura, income, spawn, when destroyed)
-  function buildingText(d) {
+  function lesserText(d) {
     if (!d) return '';
     const u = d.unit || {}, out = [];
     out.push(`${Math.round(u.hp || 400)} health${u.mend > 0 ? ` · heals ${u.mend} × ${u.aps || 1}/s within ${u.range || 0} m` : u.hit > 0 ? ` · hit ${u.hit} × ${u.aps || 1}/s · ${u.range || 0} m${u.splash ? ` · ${u.splash} m splash` : ''}` : ''}`);
@@ -1137,7 +1137,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
     if (cat === 'building') {
       const d = Game.devBuilding(id) || {}, c = facColor(d.faction);
       return { key: id, art: DEV_ICON.building(c), name: esc(d.name || id), who: `<span style="color:${c}">${esc(facName(d.faction))}</span>`,
-        sub: `${Math.round((d.unit || {}).hp || 400)} hp`, det: `<b>${esc(d.name || id)}</b> · ${esc(d.text || '')}<br>${buildingText(d)}` };
+        sub: `${Math.round((d.unit || {}).hp || 400)} hp`, det: `<b>${esc(d.name || id)}</b> · ${esc(d.text || '')}<br>${lesserText(d)}` };
     }
     if (cat === 'power') {
       const p = Game.devPower(id) || {}, c = facColor(p.faction);
@@ -1149,14 +1149,14 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
       det: `<b>${esc(id)}</b>${ROLES[id] ? ` · ${esc(ROLES[id])}` : ''}<br>${u.bodies} × ${Math.round(u.hp)} hp · hit ${Math.round(u.hit)} × ${u.aps}/s · ${u.range} m · ${Game.unitCostOf(u)} gold a squad` };
   }
   // a building's sheet (yours or the opponent's)
-  function openBuildingSheet(side, b) {
+  function openLesserSheet(side, b) {
     const d = Game.devBuilding(b.id) || {}, c = facColor(d.faction), mine = side === me;
     const canMove = mine && editable() && b.round === m.round;
     $('sheet').innerHTML = `
       <div class="bar"><h3 id="sheet-h"><span style="color:${c}">${DEV_ICON.building(c)}</span> ${esc(d.name || b.id)}</h3><button class="btn small" id="close">Close</button></div>
       <p class="role" style="margin:0">${mine ? 'Your' : `${esc(foeName())}’s`} ${esc(facName(d.faction))} building${b.round === m.round ? ' · new this round' : ''}</p>
       <p style="margin:0">${esc(d.text || '')}</p>
-      <p class="hint" style="margin:0;line-height:1.5">${buildingText(d)}</p>
+      <p class="hint" style="margin:0;line-height:1.5">${lesserText(d)}</p>
       ${canMove ? `<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" id="bld-move">Move</button>${Game.pickNow(m, me) && Game.pickNow(m, me).cat === 'building' ? '<button class="btn" id="bld-undo">Undo pick</button>' : ''}</div>` : mine ? '<p class="hint" style="margin:0">Fixed in place since its first fight.</p>' : ''}`;
     $('sheet-back').hidden = false;
     $('close').addEventListener('click', closeSheet);
@@ -1330,7 +1330,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
       if (choosingTower()) hint = `Choose your tower on the board. The clock starts once ${solo() ? 'you have' : 'both players have'} picked.`;
       if (placingElf()) hint = 'Tap a free tile in your zone to place your elf tower. Tap anywhere else to cancel.';
       if (devPicking()) hint = 'Pick one card on the board. If time runs out you get the first one.';
-      const pb = bPlacing != null && Game.buildingsOf(m, me).find(b => b.key === bPlacing);
+      const pb = bPlacing != null && Game.lessersOf(m, me).find(b => b.key === bPlacing);
       if (pb) hint = `Tap a gold tile to place your ${esc((Game.devBuilding(pb.id) || {}).name || 'building')}.${pb.col != null ? ' Tap anywhere else to leave it where it is.' : ''}`;
       if (castMode) hint = `Tap a tile to cast ${esc((Game.devSpell(castMode) || {}).name || 'the spell')}${(Game.devSpell(castMode) || {}).kind === 'zone' ? ' (its top left corner on your screen)' : ''}. Tap anywhere it can't go to cancel.`;
       if (guideMode === 'pick') hint = 'Tap one of your squads, or drag from it to draw its path.';
@@ -1345,7 +1345,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
     helpTip = inline ? '' : hint;
     // phone: the task the next board tap is for, shown over the board while the drawer is down (dock())
     dockTask = !can ? null : placingTower() ? { text: hint, x: false }
-      : selected !== null || moveMode || (charmMode && Game.canGiveCharm(m, me)) || placingElf() || devTask ? { text: hint, x: !(bPlacing != null && Game.unplacedBuilding(m, me)) } : null;
+      : selected !== null || moveMode || (charmMode && Game.canGiveCharm(m, me)) || placingElf() || devTask ? { text: hint, x: !(bPlacing != null && Game.unplacedLesser(m, me)) } : null;
     const news = can && selected === null && !fresh && !inline && (Game.hailRound(m) || Game.altarRound(m) || m.round === Game.FLANK.round || (tskillOffer() && m.round === Game.TOWER_PICK_ROUND));
     const extraBtns = `<span class="xbtns" style="display:flex;gap:6px;flex-wrap:wrap">
         <button class="btn small" id="buy-deploy" ${can && Game.canBuyDeploy(m, me) ? '' : 'disabled'}>+1 deployment · ${Game.CONFIG.extraDeployCost}</button>
@@ -1354,7 +1354,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
         ${tskillOffer() ? `<button class="btn small" id="buy-tskill" ${can && Game.canBuyTowerSkill(m, me) ? '' : 'disabled'}>${esc(Game.towerType(m, me).skill.name)} · ${Game.towerSkillCost(m, me)}</button>` : ''}
         ${can && m.extraDeploys[me] > 0 && left > 0 ? `<button class="btn small" id="refund-deploy">Refund unused</button>` : ''}
         ${Game.isDev(m) ? (() => { // Factions devtest: the building to place, spells, arrows, this round's pick
-          const ub = Game.unplacedBuilding(m, me), pk = Game.pickNow(m, me);
+          const ub = Game.unplacedLesser(m, me), pk = Game.pickNow(m, me);
           return `${ub ? `<button class="btn small primary" id="dev-place" ${can ? '' : 'disabled'}>Place ${esc((Game.devBuilding(ub.id) || {}).name || 'building')}</button>` : ''}
             ${Game.spellsOf(m, me).length ? `<button class="btn small" id="dev-spells" ${can ? '' : 'disabled'}>Spells${Game.spellsOf(m, me).some(id => Game.castNow(m, me, id)) ? ' · cast' : ''}…</button>` : ''}
             <button class="btn small" id="dev-guide" aria-pressed="${guideMode != null}" ${can && m.armies[me].some(q => Game.canGuide(m, me, q)) ? '' : 'disabled'}>${guideMode != null ? 'Cancel path' : 'Draw path'}</button>
@@ -1416,7 +1416,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
     if ($('charm-undo')) $('charm-undo').addEventListener('click', () => { const q = charmGivenNow(); if (editable() && q && Game.undoCharm(m, me, q.id)) changed(); });
     if ($('move-btn')) $('move-btn').addEventListener('click', () => { if (!editable()) return; moveMode = !moveMode; moving = null; if (moveMode) selected = null; changed(); });
     if ($('undo-move')) $('undo-move').addEventListener('click', () => { if (editable() && Game.undoMove(m, me)) changed(); });
-    if ($('dev-place')) $('dev-place').addEventListener('click', () => { const b = Game.unplacedBuilding(m, me); if (!editable() || !b) return; bPlacing = b.key; selected = null; castMode = null; guideMode = null; panelDeploy(); render(); });
+    if ($('dev-place')) $('dev-place').addEventListener('click', () => { const b = Game.unplacedLesser(m, me); if (!editable() || !b) return; bPlacing = b.key; selected = null; castMode = null; guideMode = null; panelDeploy(); render(); });
     if ($('dev-spells')) $('dev-spells').addEventListener('click', openSpellSheet);
     if ($('dev-guide')) $('dev-guide').addEventListener('click', () => { if (!editable()) return; const on = guideMode == null; stopTask(); if (on) { guideMode = 'pick'; panelDeploy(); render(); } });
     if ($('dev-unpick')) $('dev-unpick').addEventListener('click', () => { if (editable() && Game.undoDevPick(m, me)) { bPlacing = null; changed(); } });
@@ -2498,7 +2498,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       return true;
     }
     if (bPlacing != null || castMode != null) return false;
-    const myB = Game.isDev(m) && Game.buildingAt(m, me, t.col, t.row);
+    const myB = Game.isDev(m) && Game.lesserAt(m, me, t.col, t.row);
     if (myB && myB.round === m.round) { guideDrag = null; drag = { bkey: myB.key, from: t, over: t, moved: false }; return true; } // drag a new building
     const sq = Game.squadAt(m, me, t.col, t.row);
     if (!sq) return false;
@@ -2527,7 +2527,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     const d = drag; drag = null;
     if (!ended || !d.moved || (d.over.col === d.from.col && d.over.row === d.from.row)) { render(); return; }
     dragEndAt = performance.now(); // the click that follows a drag is not a tap
-    if (d.bkey != null) { Game.placeBuilding(m, me, d.bkey, d.over.col, d.over.row); changed(); return; } // a building dragged
+    if (d.bkey != null) { Game.placeLesser(m, me, d.bkey, d.over.col, d.over.row); changed(); return; } // a building dragged
     if (Game.moveSquad(m, me, d.id, d.over.col, d.over.row) && m.armies[me].find(s => s.id === d.id).round < m.round) { moveMode = false; moving = null; }
     changed();
   }
@@ -2578,7 +2578,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (placingElf()) { if (editable() && Game.buyElfOwn(m, me, t.col, t.row)) { elfPlacing = false; changed(); } else if (!Game.elfOwnSpotOk(m, me, t.col, t.row)) { elfPlacing = false; render(); hud(); panelDeploy(); } return; }
     if (Game.elfOwnAt(m, me, t.col, t.row)) { openMapSheet(); return; }
     if (Game.isDev(m)) { // Factions devtest: placing a building, casting a spell, drawing an arrow; building and spell sheets
-      if (bPlacing != null) { if (editable() && Game.placeBuilding(m, me, bPlacing, t.col, t.row)) { bPlacing = Game.unplacedBuilding(m, me) ? Game.unplacedBuilding(m, me).key : null; changed(); } else if (!Game.unplacedBuilding(m, me)) { bPlacing = null; panelDeploy(); render(); } return; }
+      if (bPlacing != null) { if (editable() && Game.placeLesser(m, me, bPlacing, t.col, t.row)) { bPlacing = Game.unplacedLesser(m, me) ? Game.unplacedLesser(m, me).key : null; changed(); } else if (!Game.unplacedLesser(m, me)) { bPlacing = null; panelDeploy(); render(); } return; }
       if (castMode != null) { const id = castMode; castMode = null; if (editable() && Game.castSpell(m, me, id, t.col, t.row)) changed(); else { panelDeploy(); render(); } return; }
       if (guideMode === 'pick') { const gs = Game.squadAt(m, me, t.col, t.row); if (gs && Game.canGuide(m, me, gs)) { guideMode = gs.id; guideDraft = []; panelDeploy(); render(); } return; }
       if (guideMode != null) {
@@ -2589,10 +2589,10 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
         if (guideDraft.length >= Game.DEV.guidePoints) { stopTask(); changed(); return; }
         panelDeploy(); render(); return;
       }
-      const myB = Game.buildingAt(m, me, t.col, t.row);
-      if (myB) { openBuildingSheet(me, myB); return; }
-      const foeB = Game.buildingAt(m, foe(), t.col, t.row);
-      if (foeB && Game.devShown(m, me, true, foe(), foeB.round)) { openBuildingSheet(foe(), foeB); return; }
+      const myB = Game.lesserAt(m, me, t.col, t.row);
+      if (myB) { openLesserSheet(me, myB); return; }
+      const foeB = Game.lesserAt(m, foe(), t.col, t.row);
+      if (foeB && Game.devShown(m, me, true, foe(), foeB.round)) { openLesserSheet(foe(), foeB); return; }
       const cs = selected === null && castAt(t.col, t.row);
       if (cs && !Game.squadAt(m, me, t.col, t.row)) { openCastSheet(cs); return; }
     }

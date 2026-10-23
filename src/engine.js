@@ -372,7 +372,7 @@ const Engine = (() => {
         v.x = v.u.teleport.x; v.y = v.u.teleport.y;
         return;
       }
-      if (v.u.structure && !v.u.building) cripple[v.side] = towerDown.secs; // a lesser building (Factions devtest) doesn't cripple its side
+      if (v.u.structure && !v.u.lesser) cripple[v.side] = towerDown.secs; // a lesser building (Factions devtest) doesn't cripple its side
       if (v.u.deathBlast > 0) {
         const dmg = v.u.hp * v.u.deathBlast / 100, rad = v.u.blastAt > 0 ? v.u.blastAt : BLAST_RADIUS;
         if (opts.record) shots.push([v.x, v.y, v.x, v.y, v.side, rad, 1, 0, 0]);

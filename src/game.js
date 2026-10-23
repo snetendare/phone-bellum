@@ -1140,16 +1140,16 @@ const Game = (() => {
         idx += ab.length; out.push(...ab);
       }
     }
-    // devtest: lesser buildings and walls (spells) stand on their tiles; squad ids BUILDING_SQ - key, WALL_SQ - cast index
+    // devtest: lesser buildings and walls (spells) stand on their tiles; squad ids LESSER_SQ - key, WALL_SQ - cast index
     if (isDev(m)) {
-      for (const bd of placedBuildings(m, side)) {
-        const w = tileToWorld(bd.col, bd.row), bb = E.buildSquad(buildingUnit(m, side, bd), side, w.x, w.y, BUILDING_SQ - bd.key, TILE, idx);
+      for (const bd of placedLessers(m, side)) {
+        const w = tileToWorld(bd.col, bd.row), bb = E.buildSquad(lesserUnit(m, side, bd), side, w.x, w.y, LESSER_SQ - bd.key, TILE, idx);
         idx += bb.length; out.push(...bb);
       }
       casts(m).forEach((c, k) => {
         const sp = devSpell(c.id) || {};
         if (c.side !== side || sp.kind !== 'wall' || !castActive(m, c)) return;
-        const wu = E.withTraits({ name: sp.name || 'Wall', cost: 0, bodies: 1, hp: +sp.hp || 600, hit: 0, aps: 1, range: 0, speed: 0, splash: 0, shape: 'square', color: '#9C8F7A', structure: true, building: true, kind: 'wall', level: 0 });
+        const wu = E.withTraits({ name: sp.name || 'Wall', cost: 0, bodies: 1, hp: +sp.hp || 600, hit: 0, aps: 1, range: 0, speed: 0, splash: 0, shape: 'square', color: '#9C8F7A', structure: true, lesser: true, kind: 'wall', level: 0 });
         const w = tileToWorld(c.col, c.row), wb = E.buildSquad(wu, side, w.x, w.y, WALL_SQ - k, TILE, idx);
         idx += wb.length; out.push(...wb);
       });
@@ -1330,8 +1330,8 @@ const Game = (() => {
     if (isDev(m)) {
       summary.devLoss = [0, 1].map(sd => {
         const out = { hp: 0, gold: 0, fell: [] };
-        for (const bd of placedBuildings(m, sd)) {
-          const q = res.squads[sd + ':' + (BUILDING_SQ - bd.key)];
+        for (const bd of placedLessers(m, sd)) {
+          const q = res.squads[sd + ':' + (LESSER_SQ - bd.key)];
           if (!q || q.alive > 0) continue;
           const od = (devBuilding(bd.id) || {}).onDestroyed || {};
           out.hp += Math.max(0, Math.round(+od.hp || 0)); out.gold += Math.max(0, Math.round(+od.gold || 0)); out.fell.push(bd.id);
@@ -1530,7 +1530,7 @@ const Game = (() => {
     awareness: true,   // fights use the awareness prototype (see docs/AWARENESS.md)
   };
   const CAT_NAMES = { building: 'Lesser building', tower: 'Powertower', power: 'Power', neutral: 'Neutral unit' };
-  const BUILDING_SQ = -1000, WALL_SQ = -2000; // squad ids in fights: building key k is BUILDING_SQ - k, wall cast k is WALL_SQ - k
+  const LESSER_SQ = -1000, WALL_SQ = -2000; // squad ids in fights: building key k is LESSER_SQ - k, wall cast k is WALL_SQ - k
   let DEVDATA = { buildings: [], powers: [], spells: [] };
   // fd: faction-units.json ({ factions (with their buildings and powers), neutral: { buildings, powers }, spells })
   function setDevData(fd) {
@@ -1602,33 +1602,33 @@ const Game = (() => {
   const devShown = (m, viewer, deploying, side, round) => side === viewer || !deploying || round < m.round;
 
   // ---- lesser buildings ----
-  const buildingsOf = (m, side) => (isDev(m) && m.dev.buildings[side]) || [];
-  const placedBuildings = (m, side) => buildingsOf(m, side).filter(b => b.col != null);
-  const unplacedBuilding = (m, side) => buildingsOf(m, side).find(b => b.col == null) || null;
-  const buildingAt = (m, side, col, row) => placedBuildings(m, side).find(b => b.col === col && b.row === row) || null;
-  const devOccupied = (m, side, col, row) => !!buildingAt(m, side, col, row) || !!wallAt(m, col, row);
+  const lessersOf = (m, side) => (isDev(m) && m.dev.buildings[side]) || [];
+  const placedLessers = (m, side) => lessersOf(m, side).filter(b => b.col != null);
+  const unplacedLesser = (m, side) => lessersOf(m, side).find(b => b.col == null) || null;
+  const lesserAt = (m, side, col, row) => placedLessers(m, side).find(b => b.col === col && b.row === row) || null;
+  const devOccupied = (m, side, col, row) => !!lesserAt(m, side, col, row) || !!wallAt(m, col, row);
   // where a building may stand: def.place is 'zone' (default), 'front' (zone or no man's land) or 'flank' (zone or own flank tiles)
-  function buildingSpotOk(m, side, def, col, row, key) {
+  function lesserSpotOk(m, side, def, col, row, key) {
     if (!isDev(m) || col < 0 || col >= COLS || row < 0 || row >= ROWS) return false;
     const where = (def && def.place) || 'zone';
     const ok = inZone(side, row) || (where === 'front' && inNoMans(row)) || (where === 'flank' && isFlank(side, col, row));
     if (!ok || reserved(side, col, row) || towerAt(m, side, col, row) || elfOwnAt(m, side, col, row) || wallAt(m, col, row)) return false;
     if (m.armies[side].some(s => s.col === col && s.row === row)) return false;
-    return !placedBuildings(m, side).some(b => b.key !== key && b.col === col && b.row === row);
+    return !placedLessers(m, side).some(b => b.key !== key && b.col === col && b.row === row);
   }
   // place (or move) a building: any time in the round it was picked, fixed after its first fight
-  function placeBuilding(m, side, key, col, row) {
-    const b = buildingsOf(m, side).find(x => x.key === key);
-    if (!b || b.round !== m.round || !buildingSpotOk(m, side, devBuilding(b.id), col, row, key)) return false;
+  function placeLesser(m, side, key, col, row) {
+    const b = lessersOf(m, side).find(x => x.key === key);
+    if (!b || b.round !== m.round || !lesserSpotOk(m, side, devBuilding(b.id), col, row, key)) return false;
     b.col = col; b.row = row;
     return true;
   }
   // a building's fighting stats
-  function buildingUnit(m, side, b) {
+  function lesserUnit(m, side, b) {
     const d = devBuilding(b.id) || {};
     const hpPct = powersOf(m, side).reduce((s, p) => s + (+p.buildingHp || 0), 0);
     const u = { name: d.name || 'Building', cost: 0, bodies: 1, hp: 400, hit: 0, aps: 1, range: 0, speed: 0, splash: 0, shape: 'square', color: (factionInfo(d.faction) || {}).color || '#B7AE9C',
-      ...(d.unit || {}), structure: true, building: true, kind: 'building', bid: d.id || null, level: 0 };
+      ...(d.unit || {}), structure: true, lesser: true, kind: 'lesser', bid: d.id || null, level: 0 };
     u.hp = u.hp * (1 + hpPct / 100);
     const sp = d.spawn, ui = sp ? m.units.findIndex(x => x.name === sp.unit) : -1;
     if (ui >= 0) {
@@ -1640,7 +1640,7 @@ const Game = (() => {
   // the bonus a squad standing on (col, row) at the start of the fight gets from its side's buildings' auras
   function auraFor(m, side, col, row) {
     let mods = null;
-    for (const b of placedBuildings(m, side)) {
+    for (const b of placedLessers(m, side)) {
       const a = (devBuilding(b.id) || {}).aura;
       if (!a || Math.max(Math.abs(b.col - col), Math.abs(b.row - row)) > Math.max(0, Math.round(+a.tiles || 1))) continue;
       mods = mods || {};
@@ -1673,7 +1673,7 @@ const Game = (() => {
   const devDeploys = (m, side) => powersOf(m, side).reduce((s, p) => s + Math.max(0, Math.round(+p.deploys || 0)), 0);
   // extra gold at the start of a round: the Powers' gold and the buildings' income
   const devGold = (m, side) => !isDev(m) ? 0 : powersOf(m, side).reduce((s, p) => s + (+p.gold || 0), 0)
-    + placedBuildings(m, side).reduce((s, b) => s + (+(devBuilding(b.id) || {}).income || 0), 0);
+    + placedLessers(m, side).reduce((s, b) => s + (+(devBuilding(b.id) || {}).income || 0), 0);
 
   // ---- spells: temporary items on the map, cast for gold ----
   const spellsOf = (m, side) => [...new Set(powersOf(m, side).map(p => p.spell).filter(id => id && devSpell(id)))];
@@ -1755,19 +1755,19 @@ const Game = (() => {
     if (!isDev(m)) return;
     for (const sd of [0, 1]) {
       if (needsDevPick(m, sd)) devPick(m, sd, devOffer(m, sd).ids[0]);
-      for (let b; (b = unplacedBuilding(m, sd));) {
-        const spot = buildingSpot(m, sd, b, rng(m.seed + m.round * 37 + b.key));
+      for (let b; (b = unplacedLesser(m, sd));) {
+        const spot = lesserSpot(m, sd, b, rng(m.seed + m.round * 37 + b.key));
         if (!spot) { m.dev.buildings[sd].splice(m.dev.buildings[sd].indexOf(b), 1); continue; } // no room left: it's lost
-        placeBuilding(m, sd, b.key, spot.col, spot.row);
+        placeLesser(m, sd, b.key, spot.col, spot.row);
       }
     }
   }
   // a free tile for a building: the back half of the zone, near the middle, a little random
-  function buildingSpot(m, side, b, r) {
+  function lesserSpot(m, side, b, r) {
     const rows = zoneRows(side), def = devBuilding(b.id);
     let best = null, bc = Infinity;
     rows.forEach((row, zi) => { for (let col = 0; col < COLS; col++) {
-      if (!buildingSpotOk(m, side, def, col, row, b.key)) continue;
+      if (!lesserSpotOk(m, side, def, col, row, b.key)) continue;
       const c = Math.abs(zi - (rows.length - 2)) * 1.5 + Math.abs(col - (COLS - 1) / 2) * 0.6 + r() * 2;
       if (c < bc) { bc = c; best = { col, row }; }
     } });
@@ -1783,7 +1783,7 @@ const Game = (() => {
         return (d && ((d.unit && d.unit.hit > 0) || d.aura || d.mods) ? 1 : 0) + r(); };
       devPick(m, side, o.ids.slice().sort((a, b) => score(b) - score(a))[0]);
     }
-    for (let b; (b = unplacedBuilding(m, side));) { const s = buildingSpot(m, side, b, r); if (!s || !placeBuilding(m, side, b.key, s.col, s.row)) break; }
+    for (let b; (b = unplacedLesser(m, side));) { const s = lesserSpot(m, side, b, r); if (!s || !placeLesser(m, side, b.key, s.col, s.row)) break; }
     const foes = m.armies[1 - side].filter(s => s.round < m.round);
     for (const id of spellsOf(m, side)) {
       const sp = devSpell(id);
@@ -1958,8 +1958,8 @@ const Game = (() => {
     createDraft, draftTurn, draftOpen, draftAct, draftDone, draftPossible, aiDraftChoice,
     zoneRows, inZone, tileToWorld, squadRange, createMatch, place, unplace, bodiesFor, startBattle, resolve, aiDeploy, occupied,
     GRID, useGrid,
-    DEV, CAT_NAMES, BUILDING_SQ, WALL_SQ, setDevData, devBuilding, devPower, devSpell, isDev, towerUp, pickCat, devOffer, pickNow, needsDevPick, devPick, undoDevPick, devShown,
-    buildingsOf, placedBuildings, unplacedBuilding, buildingAt, buildingSpotOk, placeBuilding, buildingUnit, auraFor, modUnit, powersOf, devGold, devDeploys,
+    DEV, CAT_NAMES, LESSER_SQ, WALL_SQ, setDevData, devBuilding, devPower, devSpell, isDev, towerUp, pickCat, devOffer, pickNow, needsDevPick, devPick, undoDevPick, devShown,
+    lessersOf, placedLessers, unplacedLesser, lesserAt, lesserSpotOk, placeLesser, lesserUnit, auraFor, modUnit, powersOf, devGold, devDeploys,
     spellsOf, casts, activeCasts, castActive, castRounds, castNow, wallAt, castSpotOk, spellCost, canCast, castSpell, undoCast, castTiles, castEffects,
     canGuide, setGuide, clearGuide, shownUnit, settleDev, aiDev,
   };

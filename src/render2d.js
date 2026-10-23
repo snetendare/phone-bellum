@@ -381,9 +381,9 @@ const Render2D = (cv, view) => {
     if (dev && dev.guideId != null && dev.guide) { const sq = v.armies[me].find(q => q.id === dev.guideId); if (sq) drawArrow(sq, dev.guide, 1); }
     if (!dev || !editable) return;
     if (dev.bPlacing != null) { // where the building may go
-      const b = Game.buildingsOf(v, me).find(x => x.key === dev.bPlacing), d = b && Game.devBuilding(b.id);
+      const b = Game.lessersOf(v, me).find(x => x.key === dev.bPlacing), d = b && Game.devBuilding(b.id);
       ctx.strokeStyle = css('--gold'); ctx.globalAlpha = 0.6; ctx.lineWidth = 1.5;
-      if (b) for (let row = 0; row < Game.ROWS; row++) for (let c = 0; c < Game.COLS; c++) if (Game.buildingSpotOk(v, me, d, c, row, b.key)) ctx.strokeRect(scol(c) * t + 3, srow(row) * t + 3, t - 6, t - 6);
+      if (b) for (let row = 0; row < Game.ROWS; row++) for (let c = 0; c < Game.COLS; c++) if (Game.lesserSpotOk(v, me, d, c, row, b.key)) ctx.strokeRect(scol(c) * t + 3, srow(row) * t + 3, t - 6, t - 6);
     }
     if (dev.castMode) { // where the spell may go
       const sp = Game.devSpell(dev.castMode);
@@ -404,7 +404,7 @@ const Render2D = (cv, view) => {
     ctx.globalAlpha = 1;
   }
   // a lesser building: a small house in its faction's colour with a roof in its side's colour (hpr: health left in a fight)
-  function drawBuilding(x, y, t, side, u, hpr, fresh) {
+  function drawLesser(x, y, t, side, u, hpr, fresh) {
     const s = t * 0.62, c = teamCol(side);
     ctx.globalAlpha = 1;
     ctx.fillStyle = u.color || '#B7AE9C'; ctx.strokeStyle = c; ctx.lineWidth = 2;
@@ -423,12 +423,12 @@ const Render2D = (cv, view) => {
     ctx.globalAlpha = 1;
   }
   // the buildings this screen may see while deploying (an opponent's new one only from the fight on)
-  function drawBuildings() {
+  function drawLessers() {
     const t = tilePx();
-    for (const side of [me, foe()]) for (const b of Game.placedBuildings(m, side)) {
+    for (const side of [me, foe()]) for (const b of Game.placedLessers(m, side)) {
       if (!Game.devShown(m, me, phase === 'deploy', side, b.round)) continue;
       const at = drag && drag.bkey === b.key && drag.moved && side === me ? drag.over : b;
-      drawBuilding((scol(at.col) + 0.5) * t, (srow(at.row) + 0.5) * t, t, side, Game.buildingUnit(m, side, b), null, side === me && b.round === m.round);
+      drawLesser((scol(at.col) + 0.5) * t, (srow(at.row) + 0.5) * t, t, side, Game.lesserUnit(m, side, b), null, side === me && b.round === m.round);
     }
   }
 
@@ -620,7 +620,7 @@ const Render2D = (cv, view) => {
       }
     }
     for (const side of [me, foe()]) if (towerVisible(side) && Game.towerUp(m, side)) drawTowerTile(side);
-    if (Game.isDev(m)) drawBuildings();
+    if (Game.isDev(m)) drawLessers();
     // the squad tapped last: its range as a dotted ring round its tile (theirs as you can know it)
     const rs = rangeOf && phase === 'deploy' && m.armies[rangeOf.side].find(s => s.id === rangeOf.id);
     if (rs) {
@@ -672,7 +672,7 @@ const Render2D = (cv, view) => {
       if (!b.alive || !b.u.structure) continue;
       const hpr = b.hp / b.u.hp, t = tilePx();
       if (b.u.kind === 'wall') { drawWallBlock(PX(b.x), PY(b.y), t, b.side, hpr); continue; }
-      if (b.u.building) { drawBuilding(PX(b.x), PY(b.y), t, b.side, b.u, hpr, false); continue; }
+      if (b.u.lesser) { drawLesser(PX(b.x), PY(b.y), t, b.side, b.u, hpr, false); continue; }
       drawKeep(PX(b.x), PY(b.y), t, b.side, hpr, b.u.kind, null, Game.charOf(battlePre || m, b.side));
       ctx.strokeStyle = teamCol(b.side); ctx.lineWidth = 2;
       ctx.beginPath(); ctx.arc(PX(b.x), PY(b.y), t * 0.5, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * hpr); ctx.stroke();
