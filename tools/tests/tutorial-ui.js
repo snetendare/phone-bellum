@@ -1,5 +1,5 @@
 // The tutorial, on both boards on a phone (390 x 744), then the range circle on a PC window.
-// Tutorial: the menu leads with it on a first visit. Round 1: your zone blinks, then the coach's ring on your tower,
+// Tutorial: the menu leads with it on a first visit. The coach line sits right above what it talks about. Round 1: your zone blinks, then the coach's ring on your tower,
 // then one card; a pick puts the drawer down, a tap places; taking the squad back steps the coach back; the enemy
 // tower shows up with Fight; the hidden archers win (your health drops). Round 2: Fire Mage and Sniper, Sniper is turned
 // away, Fire Mage wins. Round 3: the tower pick, a tap on your tower opens its sheet, a shop of five with the deployment
@@ -30,6 +30,13 @@ const { chromium } = require('playwright-core');
       : p.evaluate(([c, r]) => window.__pb().board3d.screenAt(c, r, 0), [c, r]),
   });
   const wait = (p, ms = 400) => p.waitForTimeout(ms);
+  // the coach line against the blinking tiles or the ring: how many it covers, and whether it sits right above them
+  const beside = (p) => p.evaluate(() => {
+    const c = document.getElementById('coach').getBoundingClientRect(), ring = document.getElementById('coach-ring');
+    const rs = [...document.querySelectorAll('#marks .tut-tile')].map(t => t.getBoundingClientRect()).concat(ring.hidden ? [] : [(() => { const r = ring.getBoundingClientRect(), x = (r.left + r.right) / 2, y = (r.top + r.bottom) / 2, h = ring.offsetWidth / 2; return { left: x - h, right: x + h, top: y - h, bottom: y + h }; })()]); // the ring at its own size, not mid-pulse
+    const top = Math.min(...rs.map(r => r.top));
+    return { covers: rs.filter(r => r.left < c.right && r.right > c.left && r.top < c.bottom && r.bottom > c.top).length, gap: Math.round(top - c.bottom), pointer: document.getElementById('coach').classList.contains('pt-down') };
+  });
 
   for (const board of ['2d', '3d']) {
     const { ctx, p } = await open(board, false), { coach, st, pt } = helpers(p, board);
@@ -38,10 +45,14 @@ const { chromium } = require('playwright-core');
     await p.click('#tutorial'); await wait(p);
     let s = await st();
     check(/deployment zone/.test(await coach()) && s.tiles === 59 && !s.ring && s.mine === 0 && !s.foeTower && await p.evaluate(() => document.getElementById('panel').innerHTML === ''), `${board}: first your zone blinks (${s.tiles} tiles), no panel`);
+    let bs = await beside(p);
+    check(bs.covers === 0 && bs.gap >= 0 && bs.gap < 40 && bs.pointer, `${board}: the coach line sits right above the zone, pointing at it (${JSON.stringify(bs)})`);
     await p.screenshot({ path: `tutorial-${board}-zone.png` });
     await p.click('#coach-btns .btn'); await wait(p);
     s = await st();
     check(/^This is your Tower\. Protect it\.$/.test(await coach()) && s.ring && s.tiles === 0 && s.cards === 0, `${board}: then your tower, "Protect it", a ring on it, still no panel`);
+    bs = await beside(p);
+    check(bs.covers === 0 && bs.gap >= 0 && bs.gap < 40, `${board}: the coach line moves down to the tower (${JSON.stringify(bs)})`);
     await p.click('#coach-btns .btn'); await wait(p);
     s = await st();
     check(/Goblin Swarm/.test(await coach()) && s.cards === 1 && s.tiles === 0 && await p.locator('#shop .ucard.tut-glow').count() === 1, `${board}: then one glowing card`);
@@ -95,6 +106,8 @@ const { chromium } = require('playwright-core');
     await p.click('#coach-btns .btn'); await wait(p);
     s = await st();
     check(s.round === 4 && /level up/.test(await coach()) && s.ring, `${board}: round 4: a squad can level up, the ring on it`);
+    bs = await beside(p);
+    check(bs.covers === 0 && bs.gap >= 0 && bs.gap < 40, `${board}: the coach line sits right above that squad (${JSON.stringify(bs)})`);
     const ready = await p.evaluate(() => { const { m, me } = window.__pb(); const q = m.armies[me].find(s => Game.isReady(m, s)); return [q.col, q.row]; });
     const [rx, ry] = await pt(...ready);
     await p.evaluate(() => { window.__stray = 0; document.getElementById('sheet-back').addEventListener('click', () => window.__stray++); });

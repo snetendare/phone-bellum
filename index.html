@@ -339,6 +339,10 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
 .coach p { margin: 0; padding-right: 26px; }
 .coach-x { position: absolute; top: 6px; right: 6px; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--muted); font-size: 14px; line-height: 1; }
 .coach b { color: var(--gold); }
+.coach { transition: top 0.25s ease, left 0.25s ease, right 0.25s ease; }
+.coach.pt-up::after, .coach.pt-down::after { content: ''; position: absolute; left: var(--ax, 50%); width: 12px; height: 12px; margin-left: -7px; background: inherit; border: 1px solid var(--gold); transform: rotate(45deg); }
+.coach.pt-up::after { top: -7px; border-right: 0; border-bottom: 0; }
+.coach.pt-down::after { bottom: -7px; border-left: 0; border-top: 0; }
 .coach .btnrow { justify-content: flex-end; }
 .coach .btnrow:empty { display: none; }
 .coach-ring { position: absolute; z-index: 2; width: 56px; height: 56px; margin: -28px 0 0 -28px; border: 2px solid var(--gold); border-radius: 50%; pointer-events: none; animation: coach-ring 1.4s ease-out infinite; }
@@ -6434,25 +6438,78 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       if (ring) { const c = Game.tileToWorld(ring.col, ring.row), [x, y] = at(c.x, c.y); el.style.left = x + 'px'; el.style.top = y + 'px'; }
     }
     $('coach-ring').hidden = !ring || cinematic;
-    coachClear(mode === 'tutorial' && tutStep() === 'flank' && !cinematic ? tiles : []);
+    coachPlace(cinematic);
     if (marksHtml !== html) { marksHtml = html; svg.innerHTML = html; } // only on a change, so the blinking runs on
   }
 
-  // the coach line between the blinking flank tiles, so it doesn't cover the top ones
-  function coachClear(tiles) {
+  // what the coach line talks about, so it can sit next to it: tiles on the board, or something in the panel
+  function coachAnchor() {
+    const st = tutStep(), el = document.querySelector('#panel .tut-glow');
+    if (st === 'zone' || st === 'place') return { tiles: Array.from({ length: Game.ROWS }, (_, r) => r).filter(r => Game.inZone(me, r)).map(r => ({ col: (Game.COLS - 1) / 2, row: r })) };
+    if (st === 'tower' || st === 'level') { const t = tutTarget(); return t && { tiles: [t], ring: true }; }
+    if (st === 'fight' && m.round === 1) return { tiles: Array.from({ length: Game.ROWS }, (_, r) => r).filter(r => Game.inZone(foe(), r)).map(r => ({ col: (Game.COLS - 1) / 2, row: r })) };
+    if (st === 'fight' || st === 'counter' && !tut.wrong) { // your goblins are back / their archers in sight
+      const sq = st === 'fight' ? m.armies[me].find(s => s.round < m.round) : m.armies[foe()].find(s => units[s.unit].name === TUT.foe);
+      if (sq) return { tiles: [st === 'fight' ? sq : Game.seenAt(m, sq)] };
+    }
+    if (el) return { el };
+    if (st === 'pick' || st === 'counter' || st === 'tskill' || st === 'free') return { el: $('panel') };
+    return null;
+  }
+  // put the coach line next to what it talks about (above it, or below when there's no room), with a pointer at it;
+  // between the flank tiles while they blink; at the top otherwise
+  function coachPlace(cinematic) {
     const el = $('coach');
-    let l = '', r = '';
-    if (tiles.length) {
-      const at = wrapMap(), W = $('wrap').clientWidth, d = Game.TILE / 2;
+    if (el.hidden) return;
+    const W = $('wrap').clientWidth, H = $('wrap').clientHeight, wr = $('wrap').getBoundingClientRect();
+    let l = '', r = '', top = '', pt = '', ax = '';
+    const st = mode === 'tutorial' && !cinematic ? tutStep() : null;
+    if (st === 'flank') {
+      const at = wrapMap(), d = Game.TILE / 2;
       let a = 0, b = 0;
-      for (const t of tiles) {
+      for (const t of tutTiles()) {
         const c = Game.tileToWorld(t.col, t.row), xs = [at(c.x - d, c.y)[0], at(c.x + d, c.y)[0]];
         if (xs[0] + xs[1] < W) a = Math.max(a, ...xs); else b = Math.max(b, W - Math.min(...xs)); // left or right of the middle
       }
       if (W - a - b > 200) { l = Math.ceil(a + 6) + 'px'; r = Math.ceil(b + 6) + 'px'; }
+    } else if (st) {
+      const an = coachAnchor();
+      let y0 = Infinity, y1 = -Infinity, x = W / 2;
+      if (an && an.tiles) {
+        const at = wrapMap(), d = Game.TILE / 2, xs = [];
+        for (const t of an.tiles) {
+          const c = Game.tileToWorld(t.col, t.row);
+          for (const [dx, dy] of [[-d, -d], [d, -d], [-d, d], [d, d]]) { const [px, py] = at(c.x + dx, c.y + dy); y0 = Math.min(y0, py); y1 = Math.max(y1, py); xs.push(px); }
+        }
+        x = (Math.min(...xs) + Math.max(...xs)) / 2;
+        if (an.ring) { const cy = (y0 + y1) / 2; y0 = Math.min(y0, cy - 36); y1 = Math.max(y1, cy + 36); } // the coach's ring is bigger than a tile
+      } else if (an && an.el) {
+        const b = an.el.getBoundingClientRect();
+        y0 = b.top - wr.top; y1 = b.bottom - wr.top; x = b.left + b.width / 2 - wr.left;
+      }
+      if (y0 < Infinity) {
+        // the docked drawer covers the bottom of the board
+        const pb = $('panel').getBoundingClientRect(), floor = document.documentElement.classList.contains('dock') && pb.height ? Math.min(H, pb.top - wr.top) : H;
+        const h = el.offsetHeight, gap = 12;
+        let t;
+        if (y0 - gap - h >= 8) { t = Math.min(y0, floor) - gap - h; pt = 'pt-down'; }
+        else if (y1 + gap + h <= floor - 8) { t = y1 + gap; pt = 'pt-up'; }
+        else t = 8;
+        t = Math.max(8, Math.min(t, floor - h - 8));
+        top = Math.round(t) + 'px';
+        if (pt) {
+          const ex = el.getBoundingClientRect().left - wr.left;
+          const a = Math.max(18, Math.min(el.offsetWidth - 18, x - ex));
+          if (x < ex + 8 || x > ex + el.offsetWidth - 8) pt = ''; // it's beside the line (the panel on a PC): no pointer
+          ax = Math.round(a) + 'px';
+        }
+      }
     }
     if (el.style.left !== l) el.style.left = l;
     if (el.style.right !== r) el.style.right = r;
+    if (el.style.top !== top) el.style.top = top;
+    el.classList.toggle('pt-up', pt === 'pt-up'); el.classList.toggle('pt-down', pt === 'pt-down');
+    if (el.style.getPropertyValue('--ax') !== ax) el.style.setProperty('--ax', ax);
   }
 
   // ---------- the 3D board (src/render3d.js): the default, with a setting (Board: 2D / 3D in the in-match Settings) ----------
