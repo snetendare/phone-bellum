@@ -8,6 +8,18 @@ A small auto-battler for the phone browser. Buy squads, place them, and watch th
 - **Counter Lab** (`lab.html`): a balance sandbox for designing units. Units saved there show up in the game under Load units on the same device.
 - **3D test** (`lab3d.html`): real battles on the 3D board, with low-poly units, to try the 3D renderer and camera. You deploy blue against the AI in the strategic view (or set Blue: AI to watch): pick a unit in the shop and tap a tile, tap a squad from this round to take it back, drag it to move it, Auto lets the AI deploy for you. Blue has unlimited gold here. You can also place and drag in the angled view while deploying; there a tap places instead of going back, so use the Strategic / Angled / Ground buttons (or pinch out, scroll, Esc). Strategic view straight down; spread two fingers (or scroll) for the angled and ground-level views, drag to look around, twist (or right/middle drag, Q/E) to rotate, tap (or Esc) to go back. Fight, Next round and New armies drive the match.
 
+## Standard pack
+
+The start screen and the friend lobby have **Units: Standard pack / All units** (saved on the device; the host's choice counts in a match with a friend). Standard is the default: a smaller match for new players, set in `STANDARD_PACK` in `src/game.js`:
+
+- 12 units: Goblin Swarm, Skeleton Archers, Fire Mage, Sniper (tier 1); Brute, Leaf Wizard, Earth Wizard (tier 2); Flame Wizard, Steel Wizard (tier 3); Ether Golem, Sun Priest, War Mammoth (tier 4).
+- 6 leaders: Frickolas Cage, Zoe, Emile, Wilhelm, Phil, Felix.
+- No mage or slime tower: the round 3 offer is drawn from the Keep, Sniper tower, Bastion and Bank tower.
+
+All units plays with everything, minus what Match settings → Leaders and Units leave out. A Counter Lab roster always plays as All units.
+
+Frozen Peak's hailstorm and altar of ice are switched off for now (`iceOff` on the map in `src/game.js`): the map keeps its snowy floor and music, with no special rules.
+
 ## How live matches work
 
 - Phones connect directly over WebRTC using [PeerJS](https://peerjs.com) and its free public matchmaking server. There is no backend of our own.
@@ -64,6 +76,7 @@ Factions go in `src/factions.json`, then run `node tools/counter-table.js` and r
 - Unit names must be unique across all factions.
 - The draft order, picks per player and the map are in `FACTION_MODE` in `src/game.js`. A ban phase later is a matter of adding `{ "who": "A", "act": "ban" }` steps to its order.
 - `node tools/tests/factions.js` checks the draft and faction matches headlessly with six throwaway test factions.
+- `node tools/tests/standard-pack.js` checks the Standard pack (units, leaders, packages, towers), the bank's one action a round (a loan or the Major investment) and Frozen Peak with its extras off, headlessly.
 
 ### Factions – devtest
 

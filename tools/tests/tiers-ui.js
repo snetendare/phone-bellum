@@ -16,7 +16,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   await p.screenshot({ path: 'tiers-2.png' });
   await p.click('.ucard >> nth=0'); await sleep(200);
   await p.click('#unlock'); await sleep(200);
-  console.log('confirm:', (await p.locator('.confirm').innerText()).replace(/\s+/g, ' '), '| gold', await p.locator('.gold').first().textContent());
+  console.log('confirm:', (await p.locator('.unlock-cta').innerText()).replace(/\s+/g, ' '), '| gold', await p.locator('.gold').first().textContent());
   await p.screenshot({ path: 'tiers-confirm.png' });
   await p.click('#unlock-no'); await sleep(150);
   console.log('after No: still locked:', await p.locator('#unlock').count(), '| gold', await p.locator('.gold').first().textContent());

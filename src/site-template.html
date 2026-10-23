@@ -82,10 +82,23 @@ a { color: var(--you); }
 .shop .ucard .n { font-size: 14px; }
 .shop .ucard .c { white-space: nowrap; }
 .ucard .tier { font: 600 10px var(--font-data); letter-spacing: 0.08em; color: var(--tier); text-transform: uppercase; }
-.ucard[data-locked] { opacity: 0.55; background: repeating-linear-gradient(135deg, transparent 0 8px, rgba(255,255,255,0.03) 8px 16px), var(--bg); }
+.ucard[data-locked] { opacity: 0.55; border-style: dashed; background: repeating-linear-gradient(135deg, transparent 0 8px, rgba(255,255,255,0.03) 8px 16px), var(--bg); }
 .ucard[data-locked] .t > span:first-child { filter: grayscale(1); }
 .ucard[data-locked] .n { color: var(--muted); }
-.ucard .lock { white-space: nowrap; display: inline-flex; align-items: center; gap: 4px; font: 600 12px var(--font-data); color: var(--gold); }
+.ucard .lock { display: inline-flex; align-items: center; gap: 4px; font: 700 11px/1.15 var(--font-data); letter-spacing: 0.02em; text-transform: uppercase; color: var(--muted); }
+.ucard .lock svg { flex: none; }
+/* a locked unit you can afford to unlock now: a gold card with darker gold text */
+.ucard[data-locked="can"] { opacity: 1; border-style: solid; border-color: var(--gold); background: linear-gradient(180deg, rgba(230, 184, 74, 0.30), rgba(230, 184, 74, 0.14)), var(--bg); box-shadow: inset 0 0 0 1px rgba(230, 184, 74, 0.35); }
+.ucard[data-locked="can"] .n { color: var(--ink); }
+.ucard[data-locked="can"] .t > span:first-child { filter: none; }
+.ucard[data-locked="can"] .roles { filter: none; }
+.ucard[data-locked="can"] .lock { color: var(--gold-dark); }
+/* the unlock button in the unit sheet: big, centred, gold */
+.unlock-cta { display: grid; gap: 8px; justify-items: center; text-align: center; border: 1px solid var(--gold); border-radius: 8px; padding: 12px; background: linear-gradient(180deg, rgba(230, 184, 74, 0.16), rgba(230, 184, 74, 0.05)); }
+.unlock-cta.short { border-color: var(--line); background: none; }
+.unlock-cta .btn { width: min(100%, 300px); display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 14px 18px; font: 700 17px var(--font-display); letter-spacing: 0.02em; }
+.unlock-cta .btn svg { width: 15px; height: 16px; }
+.unlock-cta .btn.no { padding: 8px 18px; font-size: 14px; }
 /* role symbols on unit cards and in the info sheet */
 .roles { display: flex; align-items: center; gap: 5px; }
 .roles svg { width: 16px; height: 16px; flex: none; fill: currentColor; }
@@ -98,7 +111,8 @@ a { color: var(--you); }
 .uwrap { flex-basis: 118px; }
 .ucard { padding: 6px 24px 6px 8px; gap: 1px; }
 .ucard .n { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ucard .t, .ucard .c, .ucard .lock { font-size: 11px; }
+.ucard .t, .ucard .c { font-size: 11px; }
+.ucard .lock { font-size: 10px; }
 .ucard .c { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ucard .roles { margin: 1px -18px 0 0; }
 .ucard .roles svg { width: 13px; height: 13px; }
@@ -696,12 +710,42 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
   try { offUnits = JSON.parse(localStorage.getItem('pb-off-units') || '[]').filter(n => typeof n === 'string'); } catch (e) {}
   const offIdx = () => units.map((u, i) => offUnits.includes(u.name) ? i : -1).filter(i => i >= 0);
   const unitsOn = () => units.length - offIdx().length;
-  // what a new match takes from the menu: units left out, and the rules of a Counter Lab roster
-  const matchOpts = () => ({ offUnits: offIdx(), rules: customSet && rawSet.rules && typeof rawSet.rules === 'object' ? rawSet.rules : null });
+  // the unit pack: 'standard' (Game.STANDARD_PACK: fewer units, leaders and towers, for new players; the default) or
+  // 'all' (everything, minus what Leaders and Units leave out). Saved on this device; the host's counts with a friend.
+  // A Counter Lab roster always plays as 'all'.
+  const PACK_STORE = 'pb-unit-pack';
+  let unitPack = 'standard';
+  try { if (localStorage.getItem(PACK_STORE) === 'all') unitPack = 'all'; } catch (e) {}
+  const packOn = () => unitPack === 'standard' && !customSet;
+  const SP = Game.STANDARD_PACK;
+  const packUnits = () => units.filter(u => SP.units.includes(u.name)).length;
+  const packTowers = () => Game.TOWER_TYPES.filter(x => !SP.offTowers.includes(x.id));
+  // what a new match takes from the menu: units, leaders and towers left out, and the rules of a Counter Lab roster
+  const matchOff = () => packOn() && packUnits() >= 2 ? units.map((u, i) => SP.units.includes(u.name) ? -1 : i).filter(i => i >= 0) : offIdx();
+  const matchChars = () => packOn() ? Game.CHARACTERS.map(c => c.id).filter(id => !SP.chars.includes(id)) : offChars;
+  const matchOpts = () => ({ offUnits: matchOff(), offTowers: packOn() ? SP.offTowers : [], rules: customSet && rawSet.rules && typeof rawSet.rules === 'object' ? rawSet.rules : null });
+  const packNote = () => packOn()
+    ? `${packUnits()} units, ${SP.chars.length} leaders, ${packTowers().length} towers. A good first match.`
+    : `All ${unitsOn() === units.length ? units.length : `${unitsOn()} of ${units.length}`} units, ${charsOn()} leaders, ${Game.TOWER_TYPES.length} towers. Pick which in Match settings.`;
+  const packSeg = () => customSet ? '' : `<div class="bar">
+        <span class="hint">Units</span>
+        <div class="seg" role="group" aria-label="Unit pack">
+          <button data-pack="standard" aria-pressed="${unitPack === 'standard'}">Standard pack</button><button data-pack="all" aria-pressed="${unitPack === 'all'}">All units</button>
+        </div>
+      </div>
+      <span class="hint" id="pack-note" style="margin-top:-6px">${packNote()}</span>`;
+  const wirePackSeg = () => $('panel').querySelectorAll('[data-pack]').forEach(b => b.addEventListener('click', () => {
+    unitPack = b.dataset.pack === 'all' ? 'all' : 'standard';
+    try { localStorage.setItem(PACK_STORE, unitPack); } catch (e) {}
+    $('panel').querySelectorAll('[data-pack]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+    $('pack-note').textContent = packNote();
+    const picks = $('panel').querySelector('.picks');
+    if (picks) { pickOpen = ''; picks.outerHTML = charSeg(); wireCharSeg(); }
+  }));
   // Leaders and Units: a button each, opening a small menu to leave some out (one open at a time)
   let pickOpen = '';
   const charsOn = () => Game.CHARACTERS.length - offChars.length;
-  const charSeg = () => `<div class="bar picks">
+  const charSeg = () => packOn() ? `<div class="bar picks"><span class="hint">The Standard pack picks the units and leaders, and leaves out the mage and slime towers. Choose All units to pick them yourself.</span></div>` : `<div class="bar picks">
         <span class="btnrow">
           <button class="btn small" id="pick-chars" aria-expanded="${pickOpen === 'chars'}" aria-controls="pick-menu">Leaders <span class="num" id="chars-n">${charsOn()}/${Game.CHARACTERS.length}</span> ${pickOpen === 'chars' ? '▴' : '▾'}</button>
           <button class="btn small" id="pick-units" aria-expanded="${pickOpen === 'units'}" aria-controls="pick-menu">Units <span class="num" id="units-n">${unitsOn()}/${units.length}</span> ${pickOpen === 'units' ? '▴' : '▾'}</button>
@@ -725,7 +769,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
   };
   const wireCharSeg = () => {
     const box = $('panel').querySelector('.picks');
-    if (!box) return;
+    if (!box || !$('pick-chars')) return;
     const redraw = () => {
       ['chars', 'units'].forEach(k => { const b = $('pick-' + k); b.setAttribute('aria-expanded', String(pickOpen === k)); b.lastChild.textContent = ' ' + (pickOpen === k ? '▴' : '▾'); });
       const menu = $('pick-menu'); menu.hidden = !pickOpen; menu.innerHTML = pickMenu(); wireMenu();
@@ -738,6 +782,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
         try { localStorage.setItem('pb-off-chars', JSON.stringify(offChars)); } catch (e) {}
         b.setAttribute('aria-pressed', String(off));
         $('chars-n').textContent = `${charsOn()}/${Game.CHARACTERS.length}`;
+        if ($('pack-note')) $('pack-note').textContent = packNote();
       }));
       box.querySelectorAll('[data-unit]').forEach(b => b.addEventListener('click', () => {
         const name = b.dataset.unit, off = offUnits.includes(name);
@@ -746,6 +791,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
         try { localStorage.setItem('pb-off-units', JSON.stringify(offUnits)); } catch (e) {}
         b.setAttribute('aria-pressed', String(off));
         $('units-n').textContent = `${unitsOn()}/${units.length}`;
+        if ($('pack-note')) $('pack-note').textContent = packNote();
       }));
     };
     ['chars', 'units'].forEach(k => $('pick-' + k).addEventListener('click', () => { pickOpen = pickOpen === k ? '' : k; redraw(); }));
@@ -1234,12 +1280,13 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
   // a unit's card in the shop (disabled: it can't be picked now)
   function shopCard(i, disabled) {
     const u = units[i], locked = !Game.isUnlocked(m, me, i), free = Game.freeLeft(m, me).filter(x => x === i).length, stars = Engine.SLOTS.filter(k => Game.hasSkill(m, me, i, k)).length;
+    const canUnlock = locked && m.gold[me] >= Game.unlockCost(m, i, me); // a locked card shows gold when it can be unlocked now
     return `
         <div class="uwrap" style="--tier:${tierColor(tierOf(i))}">
-          <button class="ucard" data-i="${i}" aria-pressed="${selected === i}" aria-disabled="${disabled}" ${locked ? `data-locked="1" style="border-style:dashed" aria-label="${esc(u.name)}, locked, unlock for ${Game.unlockCost(m, i, me)} gold"` : ''}>
+          <button class="ucard" data-i="${i}" aria-pressed="${selected === i}" aria-disabled="${disabled}" ${locked ? `data-locked="${canUnlock ? 'can' : 'short'}" aria-label="${esc(u.name)}, locked, ${canUnlock ? `can unlock for ${Game.unlockCost(m, i, me)} gold` : `can't afford the ${Game.unlockCost(m, i, me)} gold unlock`}"` : ''}>
             <span class="t"><span style="color:${u.color};display:inline-flex">${Shapes.svg(u.shape, 13)}</span> ${tag(u)} <span class="tier">T${tierOf(i)}</span></span><span class="n">${esc(u.name)}</span>
             ${roleRow(i)}
-            ${locked ? `<span class="lock">${LOCK_SVG} Locked · ${Game.unlockCost(m, i, me)}g</span>` : ''}
+            ${locked ? (canUnlock ? `<span class="lock">${LOCK_SVG}<span>Can unlock for ${Game.unlockCost(m, i, me)} gold</span></span>` : `<span class="lock">${LOCK_SVG}<span>Can’t afford · ${Game.unlockCost(m, i, me)}g</span></span>`) : ''}
             ${free ? `<span class="c" style="color:var(--win, #6FD08C)">Free ×${free}</span>` : ''}
             <span class="c">${Game.shopCost(m, me, i)} · ${u.bodies} ${u.bodies === 1 ? 'body' : 'bodies'}${stars ? ` · ${stars}★` : ''}</span>
           </button>
@@ -1256,6 +1303,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
     const price = (i) => Game.shopCost(m, me, i);
     const can = editable();
     const locked = (i) => !Game.isUnlocked(m, me, i);
+    const canUnlock = (i) => locked(i) && g >= Game.unlockCost(m, i, me); // a locked card shows gold when it can be unlocked now
     const freeN = (i) => Game.freeLeft(m, me).filter(x => x === i).length;
     const canBuy = (i) => can && !choosingPack() && !choosingTower() && !devPicking() && !placingTower() && (freeN(i) > 0 || (!locked(i) && g >= price(i) && left > 0));
     let hint;
@@ -1301,7 +1349,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
     const news = can && selected === null && !fresh && !inline && (Game.hailRound(m) || Game.altarRound(m) || m.round === Game.FLANK.round || (tskillOffer() && m.round === Game.TOWER_PICK_ROUND));
     const extraBtns = `<span class="xbtns" style="display:flex;gap:6px;flex-wrap:wrap">
         <button class="btn small" id="buy-deploy" ${can && Game.canBuyDeploy(m, me) ? '' : 'disabled'}>+1 deployment · ${Game.CONFIG.extraDeployCost}</button>
-        ${loanOffer() ? (Game.loanNow(m, me) ? `<button class="btn small" id="loan-undo" ${can && m.gold[me] >= Game.LOAN.gold ? '' : 'disabled'}>Pay back loan · −${Game.LOAN.gold}</button>` : `<button class="btn small" id="loan" ${can && Game.canTakeLoan(m, me) ? '' : 'disabled'}>Loan · +${Game.LOAN.gold}</button>`) : ''}
+        ${loanOffer() ? (Game.loanNow(m, me) ? `<button class="btn small" id="loan-undo" ${can && m.gold[me] >= Game.LOAN.gold ? '' : 'disabled'}>Pay back loan · −${Game.LOAN.gold}</button>` : `<button class="btn small" id="loan" ${can && Game.canTakeLoan(m, me) ? '' : 'disabled'}${Game.investNow(m, me) ? ' title="Not this round: you made the Major investment"' : ''}>Loan · +${Game.LOAN.gold}</button>`) : ''}
         ${mageOffer() ? `<button class="btn small" id="mage-gen" ${can ? '' : 'disabled'}>${Game.mageGenOf(m, me) || Game.mageTpOf(m, me) ? [Game.mageGenOf(m, me), Game.mageTpOf(m, me) && 'teleport'].filter(Boolean).map(id => esc(Game.mageGenInfo(id).name)).join(' + ') : 'Mage general'}…</button>` : ''}
         ${tskillOffer() ? `<button class="btn small" id="buy-tskill" ${can && Game.canBuyTowerSkill(m, me) ? '' : 'disabled'}>${esc(Game.towerType(m, me).skill.name)} · ${Game.towerSkillCost(m, me)}</button>` : ''}
         ${can && m.extraDeploys[me] > 0 && left > 0 ? `<button class="btn small" id="refund-deploy">Refund unused</button>` : ''}
@@ -1460,6 +1508,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
         <span class="joinrow"><input id="code-in" maxlength="5" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-label="Match code" placeholder="CODE"><button class="btn" id="join">Join</button></span>
       </div>
       <span class="hint" id="join-msg" aria-live="polite" hidden></span>
+      ${packSeg()}
       ${settingsBox(`
         ${mapSeg()}
         ${charSeg()}
@@ -1499,7 +1548,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
       Game.CONFIG.levelCostPerTier = +b.dataset.c;
       $('panel').querySelectorAll('[data-c]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
     }));
-    wireMapSeg(); wireCharSeg(); wireSettings();
+    wireMapSeg(); wireCharSeg(); wirePackSeg(); wireSettings();
     $('panel').querySelectorAll('[data-tm]').forEach(b => b.addEventListener('click', () => {
       timerOn = b.dataset.tm === '1';
       $('panel').querySelectorAll('[data-tm]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
@@ -1536,7 +1585,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
             <li>A squad placed on a flank waits ${Game.FLANK.delay} s before it moves or attacks, in its first fight only. Then it marches in sideways, toward the middle of the board, until it spots an enemy.</li>`],
           ['Growing your army', 'Level up squads, unlock units, buy skills, sell what you don’t need.', `
             <li>Squads earn experience. A gold + means you can upgrade one: level 2 doubles health and attack, level 3 triples them.</li>
-            <li>Some units start unlocked. The rest cost gold once to unlock for the match; tap a locked card.</li>
+            <li>Some units start unlocked. The rest cost gold once to unlock for the match. A gold card says you can unlock it now: tap it, then the gold Unlock button. Grey cards say Can’t afford until you have the gold.</li>
             <li>Each unit has three skills. Buy one and all your squads of that unit get it. Every skill you buy for a unit makes that unit’s other skills ${Game.SKILL_STEP} gold more expensive.</li>
             <li>You can buy one extra deployment per round for ${Game.CONFIG.extraDeployCost} gold. Tap a squad from an earlier round to sell it for half its worth: its price plus the upgrades it has.</li>`],
         ].map(([h, gist, body]) => `<details><summary><b>${h}</b><span>${gist}</span></summary><ul>${body}</ul></details>`).join('')}
@@ -1755,7 +1804,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
     if (!sampleFn) { startAiMatch(); return; }
     leaveNet();
     mode = 'claude'; me = 0; restoreSet();
-    m = Game.createMatch(units, M, (now() ^ (Math.random() * 1e9)) >>> 0, mapPick, m && m.map ? m.map.id : null, offChars, matchOpts());
+    m = Game.createMatch(units, M, (now() ^ (Math.random() * 1e9)) >>> 0, mapPick, m && m.map ? m.map.id : null, matchChars(), matchOpts());
     nextReady = [false, false]; rematch = [false, false];
     claude.off = false; claude.history = [];
     startReport();
@@ -1915,12 +1964,12 @@ ${theirSkills.length ? 'Their skills: ' + theirSkills.join(', ') : ''}
 TOWERS
 - Each player has one tower. It never moves, is rebuilt every round and doesn't count for winning a round. If a tower falls during a fight, its owner's whole army deals ${Engine.TOWER_DOWN.attack}% less damage, moves ${Engine.TOWER_DOWN.move}% slower and takes ${Engine.TOWER_DOWN.taken}% more damage for ${Engine.TOWER_DOWN.secs} s. Sending a squad down an empty lane to break their tower can turn a fight; guard the lane to yours.
 - Until round ${Game.TOWER_PICK_ROUND} each tower is an Outpost (${Game.OUTPOST.unit.hp} hp, hit ${Game.OUTPOST.unit.hit} x ${Game.OUTPOST.unit.aps}/s, range ${Game.OUTPOST.unit.range} m). In round ${Game.TOWER_PICK_ROUND} each player picks a tower type that stays for the rest of the match: ${Game.towerChoices(m, 1).map(x => `"${x.id}" ${x.name}: ${x.unit.hp} hp, hit ${x.unit.hit} x ${x.unit.aps}/s, range ${x.unit.range} m${x.unit.splash ? `, ${x.unit.splash} m splash` : ''}`).join('; ')}.${Game.needsTowerPick(m, 1) ? ` ROUND ${Game.TOWER_PICK_ROUND}: pick yours now with "towerType" in your reply.` : ''}
-- Tower skills (one per tower type, ${Game.TOWER_SKILL.cost} gold, bought once per match after the pick with "towerSkill": true): ${Game.TOWER_TYPES.filter(x => x.skill).map(x => `${x.name}: "${x.skill.name}", ${x.skill.text}`).join(' ')} Second tower skills (bought once per match, each for its own price, with "towerSkill2": true): ${Game.TOWER_TYPES.filter(x => x.skill2).map(x => `${x.name}: "${x.skill2.name}" (${x.skill2.cost} gold), ${x.skill2.text}`).join(' ')}${Game.towerSkill2Of(m, 1) ? ' You own yours.' : ''} Every round the Bank tower may also take a loan with "loan": true: +${Game.LOAN.gold} gold now, ${Game.LOAN.payback} less gold next round (never below nothing).${Game.loanNow(m, 1) ? ' You took one this round.' : ''} The Slime tower has no skill to buy; every skill you buy for Slime Wizards or Slimeshots also works on it. The Mage tower has no such skill; instead, every round you may call ONE mage general with "mageGeneral": "${Game.MAGE_GENERALS.filter(g => !g.extra).map(g => g.id).join('" | "')}", and/or the teleport general on top of it (e.g. "mageGeneral": ["lightning", "teleport"]), for that round's fight only: ${Game.MAGE_GENERALS.map(g => `"${g.id}" ${g.name} (${g.cost} gold): ${g.text}`).join(' ')}${Game.towerSkillOf(m, 1) ? ' You own yours.' : Game.towerPicked(m, 1) || Game.needsTowerPick(m, 1) ? ' You can buy yours this round.' : ''}
+- Tower skills (one per tower type, ${Game.TOWER_SKILL.cost} gold, bought once per match after the pick with "towerSkill": true): ${Game.TOWER_TYPES.filter(x => x.skill).map(x => `${x.name}: "${x.skill.name}", ${x.skill.text}`).join(' ')} Second tower skills (bought once per match, each for its own price, with "towerSkill2": true): ${Game.TOWER_TYPES.filter(x => x.skill2).map(x => `${x.name}: "${x.skill2.name}" (${x.skill2.cost} gold), ${x.skill2.text}`).join(' ')}${Game.towerSkill2Of(m, 1) ? ' You own yours.' : ''} Every round the Bank tower may also take a loan with "loan": true: +${Game.LOAN.gold} gold now, ${Game.LOAN.payback} less gold next round (never below nothing). The bank does one thing a round: a loan or Major investment, never both in the same round.${Game.loanNow(m, 1) ? ' You took one this round.' : ''} The Slime tower has no skill to buy; every skill you buy for Slime Wizards or Slimeshots also works on it. The Mage tower has no such skill; instead, every round you may call ONE mage general with "mageGeneral": "${Game.MAGE_GENERALS.filter(g => !g.extra).map(g => g.id).join('" | "')}", and/or the teleport general on top of it (e.g. "mageGeneral": ["lightning", "teleport"]), for that round's fight only: ${Game.MAGE_GENERALS.map(g => `"${g.id}" ${g.name} (${g.cost} gold): ${g.text}`).join(' ')}${Game.towerSkillOf(m, 1) ? ' You own yours.' : Game.towerPicked(m, 1) || Game.needsTowerPick(m, 1) ? ' You can buy yours this round.' : ''}
 - Your tower: ${Game.towerType(m, 1).name}, col ${m.towers[1].col}, row ${m.towers[1].row} (fixed; squads can't share its tile).
 - Their tower: ${m.round !== Game.TOWER_PICK_ROUND ? Game.towerType(m, 0).name + (Game.towerSkillVisible(m, 0) && Game.towerType(m, 0).skill ? ` with "${Game.towerType(m, 0).skill.name}"` : '') + (Game.towerSkill2Visible(m, 0) && Game.towerType(m, 0).skill2 ? ` with "${Game.towerType(m, 0).skill2.name}"` : '') + ', ' : 'type hidden until the fight, '}col ${m.towers[0].col}, row ${m.towers[0].row}.
 
 MAP
-${(() => { const mp = Game.mapOf(m), e = Game.elfSpot(m); return mp ? `- ${mp.name}: ${mp.text}${e ? ` The elf tower stands in column ${e.col}, on the line between rows ${Game.ROWS / 2 - 1} and ${Game.ROWS / 2}; it hits for ${Game.ELF_TOWER.hit}, ${Game.ELF_TOWER.aps} times a second, range ${Game.ELF_TOWER.range} m, and can't be attacked. Bribe-off: you can bribe any number of times per round ("bribe": number of bribes); the first bribe in a round costs ${Game.BRIBE_COST} gold and each further one that round ${Game.BRIBE_COST} more (${Game.BRIBE_COST}, ${2 * Game.BRIBE_COST}, ${3 * Game.BRIBE_COST}, ...). In every fight the tower sides with whoever has bribed it the most times (count, not gold) over the whole match: it never shoots their units, heals their wounded units near it for ${Game.ELF_TOWER.healHit} (x${mp.healMul || 1} on this map, ${Game.ELF_TOWER.healSplash} m splash) every ${Math.round(10 / Game.ELF_TOWER.healAps) / 10} s, and shoots only the other player's units. With totals level it shoots both sides. Totals are secret; you only see who was ahead after the last fight. ${Game.elfPowered(m) ? `From round ${Game.ELF_POWER.fromRound} on the elves hit and heal twice as hard (now ${Game.elfUnit(m).hit} damage, ${Game.elfUnit(m).healHit} heal).` : `After round ${Game.ELF_POWER.fromRound - 1} the elves hit and heal twice as hard.`} You have bribed ${Game.bribeCount(m, 1)} times (${Game.bribeGold(m, 1)} gold). ${Game.elfOwnOf(m, 1) ? `Your own elf tower stands at col ${Game.elfOwnOf(m, 1).col}, row ${Game.elfOwnOf(m, 1).row}.` : Game.elfOwnOffered(m, 1) ? `The elves now sell you one elf tower of your own for ${Game.elfOwnCost(m, 1)} gold ("elfTower":{"col":5,"row":2}, a free tile of your zone): permanent, can't be attacked, shoots only the opponent's units and heals yours.` : `Once ${Game.ELF_OWN.unlock} bribes have been paid in all (both players), each player who has bribed at least once (in an earlier round) can buy one elf tower of their own for ${Game.elfOwnCost(m, 1)} gold, from the next round on.${Game.elfOwnUnlocked(m) ? ' That point has been reached, but you have never bribed, so the elves sell you none until you do.' : ''}`} ${(() => { const l = Game.bribeLeader(m, true); return l < 0 ? 'After the last fight the bribe-off was level.' : l === 1 ? 'After the last fight you were ahead.' : 'After the last fight your opponent was ahead.'; })()}` : ''}${mp.ice ? ` Storm band rows now: ${Game.stormRows(m).join(', ')}.${Game.hailRound(m) ? ` Hail tiles this round: ${Game.hailTiles(m).map(h => `col ${h.col}, row ${h.row}`).join('; ')}.` : ''}${Game.altarRound(m) ? ` The altar of ice is up this round. "altar" can list any of: "walls" (${Game.altarCost(m, 1, 'walls')} gold: your tower's 4 walls each block the first ${Game.ICE.wallHits} hits from their side, this fight only), "push" (${Game.altarCost(m, 1, 'push')} gold: storm band moves ${Game.ICE.push} rows toward the opponent from the next hailstorm on; list it more than once to push further), "snowgre" (${Game.altarCost(m, 1, 'snowgre')} gold: a permanent hail-immune Ether Golem at ${Math.round(Game.ICE.snowFirst * Math.pow(2, Game.snowgres(m, 1).length) * 100)}% strength, standing in your half of no man's land each fight).` : ''} Your Snowgres: ${Game.snowgres(m, 1).length}.` : ''}${mp.shrooms ? ` Removing a mushroom tile costs ${Game.shroomCost(m, 1)} gold ("removeTiles":[{"col":3,"row":6}]); it is gone from the next fight on. Mushroom tiles still there: ${(m.map.tiles || []).filter(x => Game.shroomAt(m, x.col, x.row)).map(x => `${x.type} at col ${x.col}, row ${x.row}`).join('; ')}.` : ''}` : '- No special map.'; })()}
+${(() => { const mp = Game.mapOf(m), e = Game.elfSpot(m); return mp ? `- ${mp.name}: ${mp.text}${e ? ` The elf tower stands in column ${e.col}, on the line between rows ${Game.ROWS / 2 - 1} and ${Game.ROWS / 2}; it hits for ${Game.ELF_TOWER.hit}, ${Game.ELF_TOWER.aps} times a second, range ${Game.ELF_TOWER.range} m, and can't be attacked. Bribe-off: you can bribe any number of times per round ("bribe": number of bribes); the first bribe in a round costs ${Game.BRIBE_COST} gold and each further one that round ${Game.BRIBE_COST} more (${Game.BRIBE_COST}, ${2 * Game.BRIBE_COST}, ${3 * Game.BRIBE_COST}, ...). In every fight the tower sides with whoever has bribed it the most times (count, not gold) over the whole match: it never shoots their units, heals their wounded units near it for ${Game.ELF_TOWER.healHit} (x${mp.healMul || 1} on this map, ${Game.ELF_TOWER.healSplash} m splash) every ${Math.round(10 / Game.ELF_TOWER.healAps) / 10} s, and shoots only the other player's units. With totals level it shoots both sides. Totals are secret; you only see who was ahead after the last fight. ${Game.elfPowered(m) ? `From round ${Game.ELF_POWER.fromRound} on the elves hit and heal twice as hard (now ${Game.elfUnit(m).hit} damage, ${Game.elfUnit(m).healHit} heal).` : `After round ${Game.ELF_POWER.fromRound - 1} the elves hit and heal twice as hard.`} You have bribed ${Game.bribeCount(m, 1)} times (${Game.bribeGold(m, 1)} gold). ${Game.elfOwnOf(m, 1) ? `Your own elf tower stands at col ${Game.elfOwnOf(m, 1).col}, row ${Game.elfOwnOf(m, 1).row}.` : Game.elfOwnOffered(m, 1) ? `The elves now sell you one elf tower of your own for ${Game.elfOwnCost(m, 1)} gold ("elfTower":{"col":5,"row":2}, a free tile of your zone): permanent, can't be attacked, shoots only the opponent's units and heals yours.` : `Once ${Game.ELF_OWN.unlock} bribes have been paid in all (both players), each player who has bribed at least once (in an earlier round) can buy one elf tower of their own for ${Game.elfOwnCost(m, 1)} gold, from the next round on.${Game.elfOwnUnlocked(m) ? ' That point has been reached, but you have never bribed, so the elves sell you none until you do.' : ''}`} ${(() => { const l = Game.bribeLeader(m, true); return l < 0 ? 'After the last fight the bribe-off was level.' : l === 1 ? 'After the last fight you were ahead.' : 'After the last fight your opponent was ahead.'; })()}` : ''}${Game.isIce(m) ? ` Storm band rows now: ${Game.stormRows(m).join(', ')}.${Game.hailRound(m) ? ` Hail tiles this round: ${Game.hailTiles(m).map(h => `col ${h.col}, row ${h.row}`).join('; ')}.` : ''}${Game.altarRound(m) ? ` The altar of ice is up this round. "altar" can list any of: "walls" (${Game.altarCost(m, 1, 'walls')} gold: your tower's 4 walls each block the first ${Game.ICE.wallHits} hits from their side, this fight only), "push" (${Game.altarCost(m, 1, 'push')} gold: storm band moves ${Game.ICE.push} rows toward the opponent from the next hailstorm on; list it more than once to push further), "snowgre" (${Game.altarCost(m, 1, 'snowgre')} gold: a permanent hail-immune Ether Golem at ${Math.round(Game.ICE.snowFirst * Math.pow(2, Game.snowgres(m, 1).length) * 100)}% strength, standing in your half of no man's land each fight).` : ''} Your Snowgres: ${Game.snowgres(m, 1).length}.` : ''}${mp.shrooms ? ` Removing a mushroom tile costs ${Game.shroomCost(m, 1)} gold ("removeTiles":[{"col":3,"row":6}]); it is gone from the next fight on. Mushroom tiles still there: ${(m.map.tiles || []).filter(x => Game.shroomAt(m, x.col, x.row)).map(x => `${x.type} at col ${x.col}, row ${x.row}`).join('; ')}.` : ''}` : '- No special map.'; })()}
 
 CHARACTERS (each package comes with one; its ability lasts the whole match)
 - Yours: ${Game.charOf(m, 1) ? `${Game.charInfo(Game.charOf(m, 1)).name}: ${Game.charInfo(Game.charOf(m, 1)).ability}` : 'the one that comes with the package you pick'}${Game.charOf(m, 1) === 'zoe' ? ` Your buff tiles this round: ${(m.buff[1] || []).map(t => `col ${t.col}, row ${t.row}`).join('; ')}. A squad that starts the fight on one keeps the bonus all fight, even after it moves. This round's bonus: +${Game.zoeBuff(m, 1).dmg}% damage, +${Game.zoeBuff(m, 1).hp}% health, +${Game.zoeBuff(m, 1).aps}% attack speed.` : ''}
@@ -2283,7 +2332,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (matchKind === 'factions' && factionsReady()) { startDraft(); return; }
     if (matchKind === 'devtest' && devReady()) { startDraft(); return; }
     restoreSet();
-    m = Game.createMatch(units, M, (now() ^ (Math.random() * 1e9)) >>> 0, mapPick, m && m.map ? m.map.id : null, offChars, matchOpts());
+    m = Game.createMatch(units, M, (now() ^ (Math.random() * 1e9)) >>> 0, mapPick, m && m.map ? m.map.id : null, matchChars(), matchOpts());
     nextReady = [false, false]; rematch = [false, false];
     startReport();
     beginAiRound();
@@ -2850,14 +2899,18 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       const undo = phase === 'deploy' && editable() && m.unlocks[me][i] === m.round && !m.armies[me].some(q => q.unit === i);
       return `<div class="bar"><span class="hint">Unlocked${m.unlocks[me][i] === m.round ? ' this round' : ''}</span>${undo ? '<button class="btn small" id="unlock-undo">Undo unlock</button>' : ''}</div>`;
     }
-    const why = phase !== 'deploy' ? '' : !editable() ? '' : m.gold[me] < cost ? `Need ${cost} gold` : '';
-    if (unlockAsk === i && phase === 'deploy' && editable() && !why) return `<div class="confirm" role="alertdialog" aria-label="Confirm unlock">
-      <b style="font-family:var(--font-display)">Unlock ${esc(units[i].name)} for ${cost} gold?</b>
+    const short = phase === 'deploy' && editable() && m.gold[me] < cost;
+    if (unlockAsk === i && phase === 'deploy' && editable() && !short) return `<div class="unlock-cta" role="alertdialog" aria-label="Confirm unlock">
+      <b style="font-family:var(--font-display);font-size:16px">Unlock ${esc(units[i].name)} for ${cost} gold?</b>
       <span class="hint">You'll have ${m.gold[me] - cost} gold left. This lasts the whole match.</span>
-      <div class="btnrow" style="justify-content:stretch"><button class="btn primary unlock-btn" id="unlock-yes" style="flex:2">Yes, unlock</button><button class="btn" id="unlock-no" style="flex:1">No</button></div></div>`;
-    return `<div style="display:grid;gap:6px">
-      ${phase === 'deploy' ? `<button class="btn primary unlock-btn" ${why || !editable() ? 'disabled' : 'id="unlock"'}>${LOCK_SVG} ${why || `Unlock · ${cost} gold`}</button>` : `<b style="font-family:var(--font-display);display:inline-flex;gap:6px;align-items:center;color:var(--gold)">${LOCK_SVG} Locked · ${cost} gold to unlock</b>`}
-      <span class="hint">Pay once to field this unit for the rest of the match. The opponent sees it after the next fight.</span></div>`;
+      <button class="btn primary" id="unlock-yes">${LOCK_SVG} Yes, unlock</button><button class="btn no" id="unlock-no">No</button></div>`;
+    const btn = phase !== 'deploy' ? `<span class="hint">${cost} gold to unlock</span>`
+      : short ? `<button class="btn" disabled>Can’t afford · ${cost} gold</button>`
+      : `<button class="btn primary" id="unlock" ${editable() ? '' : 'disabled'}>${LOCK_SVG} Unlock for ${cost} gold</button>`;
+    return `<div class="unlock-cta${short || phase !== 'deploy' ? ' short' : ''}">
+      <b style="font-family:var(--font-display);display:inline-flex;gap:6px;align-items:center">${LOCK_SVG} Locked</b>
+      ${btn}
+      <span class="hint">Pay once to be able to field this unit for the rest of the match${short ? `. You have ${m.gold[me]} gold` : ''}. The opponent sees it after the next fight.</span></div>`;
   }
   // sq (optional): the squad whose sheet this is, to show the skill it came with (Enzo)
   function skillBlock(i, side, sq) {
@@ -2924,9 +2977,10 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     let act;
     if (side !== me) act = took && phase !== 'deploy' ? chip('Took one', 'var(--foe)') : '';
     else if (took) act = chip('Taken', 'var(--gold)') + (phase === 'deploy' && editable() ? ` <button class="btn small" id="tloan-undo" ${m.gold[me] >= L.gold ? '' : 'disabled'}>Pay back · −${L.gold}</button>` : '');
-    else if (phase === 'deploy') { const ok = editable() && Game.canTakeLoan(m, me); act = `<button class="btn small${ok ? ' primary' : ''}" id="tloan" ${ok ? '' : 'disabled'}>${Game.bankBusy(m, me, 'loan') ? 'Not with an investment this round' : `Take · +${L.gold} gold`}</button>`; }
+    else if (phase === 'deploy' && Game.investNow(m, me)) act = `<button class="btn small" disabled>Not with the investment</button>`;
+    else if (phase === 'deploy') act = `<button class="btn small${editable() ? ' primary' : ''}" id="tloan" ${editable() ? '' : 'disabled'}>Take · +${L.gold} gold</button>`;
     else act = '';
-    return abilityRow('Loan', act, esc(loanText()) + (side === me && took ? ` Next round: −${L.payback}.` : ''));
+    return abilityRow('Loan', act, esc(loanText()) + (side === me && took ? ` Next round: −${L.payback}.` : '') + (side === me && tt.skill2 ? ` The bank does one thing a round: a loan or the ${esc(tt.skill2.name)}, not both.` : ''));
   }
   // an always-on tower ability (slime tower: the slime skills it gets)
   function passiveBlock(side, tt) {
@@ -3441,10 +3495,11 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
         </span>
         <button class="btn" id="cancel">Cancel</button>
       </div>
+      ${packSeg()}
       ${settingsBox(`
         ${mapSeg()}
         ${charSeg()}
-        <span class="hint">You both play with the units on this device: ${customSet ? `your ${units.length} Counter Lab units` : `the ${units.length} built-in units`}.</span>`)}`;
+        <span class="hint">You both play with the units on this device: ${customSet ? `your ${units.length} Counter Lab units` : packOn() ? `the Standard pack (${packUnits()} of the ${units.length} built-in units)` : `the ${units.length} built-in units`}.</span>`)}`;
     if ($('share')) $('share').addEventListener('click', () => { navigator.share({ title: 'No Mans Land', text: `Fight me in No Mans Land! Code ${net.code}`, url: link }).catch(() => {}); });
     $('copy').addEventListener('click', () => {
       const done = () => { $('copy').textContent = 'Copied'; setTimeout(() => { if ($('copy')) $('copy').textContent = 'Copy link'; }, 1500); };
@@ -3454,7 +3509,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     $('cancel').addEventListener('click', () => { clearHost(); showStart(); });
     $('start').addEventListener('click', hostStartMatch);
     $('overlay').querySelectorAll('[data-kind]').forEach(b => b.addEventListener('click', () => { matchKind = b.dataset.kind; drawLobby(); }));
-    wireMapSeg(); wireCharSeg(); wireSettings();
+    wireMapSeg(); wireCharSeg(); wirePackSeg(); wireSettings();
   }
   function selectLink() { const r = document.createRange(); r.selectNodeContents($('link')); const s = getSelection(); s.removeAllRanges(); s.addRange(r); }
 
@@ -3462,7 +3517,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (!net.connected) return;
     if (matchKind === 'factions' && factionsReady()) { startDraft(); return; }
     restoreSet();
-    m = Game.createMatch(units, M, (now() ^ (Math.random() * 1e9)) >>> 0, mapPick, m && m.map ? m.map.id : null, offChars, matchOpts());
+    m = Game.createMatch(units, M, (now() ^ (Math.random() * 1e9)) >>> 0, mapPick, m && m.map ? m.map.id : null, matchChars(), matchOpts());
     lastSummary = null; nextReady = [false, false]; rematch = [false, false];
     startReport();
     hostBeginRound();
@@ -3619,7 +3674,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     // the guest's bank loan: an earlier one stays (it is paid back after this round's fight), one sent for this round is taken
     if (!m.loan) m.loan = [0, 0];
     if (!(m.loan[1] > 0 && m.loan[1] < m.round)) m.loan[1] = 0;
-    if ((d.loan | 0) === m.round && Game.towerPicked(m, 1) && Game.towerType(m, 1).id === 'bank' && m.towerSkill2[1] !== m.round) m.loan[1] = m.round; // one bank ability a round
+    if ((d.loan | 0) === m.round && Game.towerPicked(m, 1) && Game.towerType(m, 1).id === 'bank' && !Game.investNow(m, 1)) m.loan[1] = m.round; // one bank action a round
     // the guest's elf bribes: earlier ones stay, the ones sent for this round are taken (gold was checked on their side)
     if (!m.bribe) m.bribe = [[], []];
     const newBribes = Game.elfSpot(m) ? (Array.isArray(d.bribe) ? d.bribe : [d.bribe]).filter(r => (r | 0) === m.round).slice(0, 200) : [];

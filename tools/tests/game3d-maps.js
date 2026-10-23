@@ -2,7 +2,7 @@
 // - Forest Clearing: a tap on the elf tower opens its sheet, Bribe; after 10 bribes, the next round, buying an elf
 //   tower of your own and placing it with a tap on a tile of your zone (drawn as your spire), and a tap on it opens
 //   the sheet again.
-// - Frozen Peak, round 2: a tap on the middle of the board opens the altar, ice walls and a Snowgre bought there (the
+// - Frozen Peak (its extras switched back on for the check), round 2: a tap on the middle of the board opens the altar, ice walls and a Snowgre bought there (the
 //   Snowgre drawn on your side).
 // - Matteo: Give Charisma, then a tap on one of your squads gives it the first stack.
 // Screenshots go to the current folder. Headless Chromium needs software WebGL (the args below), about 5-10 fps.
@@ -72,6 +72,7 @@ const dock = require('./dock'); // the phone layout's deploy drawer
   // ---------- Frozen Peak: the altar in round 2 ----------
   {
     const { p, tap, sheet, closeSheet, pb, nextRound, drawn } = await game('ice');
+    await pb(() => { Game.MAPS.find(x => x.id === 'ice').iceOff = false; }); // switched off in the game for now (iceOff); on for this check
     await nextRound();
     check(await pb(() => Game.altarRound(window.__pb().m)), 'round 2: the altar is up');
     await pb(() => { const { m, me } = window.__pb(); m.gold[me] += 5000; });
