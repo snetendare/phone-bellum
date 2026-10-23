@@ -2083,8 +2083,8 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   }
 
   // ---------- tutorial: four guided rounds of one match, the screen built up one step at a time ----------
-  // Round 1: the board holds only your tower, then your zone blinks, then the deploy panel comes in with one card
-  // (Goblin Swarm). The enemy's Skeleton Archers stay hidden until the fight and beat the goblins wherever they stand,
+  // Round 1: your zone blinks on a board that holds only your tower, then a ring on the tower ("Protect it"), then the
+  // deploy panel comes in with one card (Goblin Swarm). The enemy's Skeleton Archers stay hidden until the fight and beat the goblins wherever they stand,
   // which shows how damage works. Round 2: the archers are in sight now. Of the two cards on offer, Fire Mage beats
   // crowds and wins the fight from any tile; Sniper beats giants and is turned away with a hint (it nearly always loses).
   // From round 3 the gates open a little, in the same match: the tower pick and its ability (a glowing panel button),
@@ -2116,7 +2116,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     m.gold = [Game.SQUAD_COST, 0]; // just the first squad
     m.towers[1] = null;            // the enemy's tower comes with the enemy (the fight step)
     m.towerOffer = Object.keys(TUT.towers); // round 3: Bastion or Keep only
-    tut = { intro: 0, wrong: false, tskillSeen: false, sheetSeen: false }; // intro: 0 the tower, 1 the zone, 2 on to the shop
+    tut = { intro: 0, wrong: false, tskillSeen: false, sheetSeen: false }; // intro: 0 the zone, 1 the tower, 2 on to the shop
     nextReady = [false, false]; rematch = [false, false];
     enterDeploy(0);
   }
@@ -2139,7 +2139,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (phase === 'result') return 'result';
     if (phase !== 'deploy') return null;
     const r = m.round;
-    if (r === 1 && tut.intro < 2) return tut.intro ? 'zone' : 'tower';
+    if (r === 1 && tut.intro < 2) return tut.intro ? 'tower' : 'zone';
     if (r <= 2) return m.armies[me].some(s => s.round === r) ? 'fight' : selected !== null ? 'place' : r === 1 ? 'pick' : 'counter';
     if (r === 3) return choosingTower() ? 'towerpick' : !tut.tskillSeen && towerBtn() ? 'tskill' : 'free';
     if (!tut.sheetSeen) { // a level-up, then what else the squad's sheet has
@@ -2661,7 +2661,25 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       if (ring) { const c = Game.tileToWorld(ring.col, ring.row), [x, y] = at(c.x, c.y); el.style.left = x + 'px'; el.style.top = y + 'px'; }
     }
     $('coach-ring').hidden = !ring || cinematic;
+    coachClear(mode === 'tutorial' && tutStep() === 'flank' && !cinematic ? tiles : []);
     if (marksHtml !== html) { marksHtml = html; svg.innerHTML = html; } // only on a change, so the blinking runs on
+  }
+
+  // the coach line between the blinking flank tiles, so it doesn't cover the top ones
+  function coachClear(tiles) {
+    const el = $('coach');
+    let l = '', r = '';
+    if (tiles.length) {
+      const at = wrapMap(), W = $('wrap').clientWidth, d = Game.TILE / 2;
+      let a = 0, b = 0;
+      for (const t of tiles) {
+        const c = Game.tileToWorld(t.col, t.row), xs = [at(c.x - d, c.y)[0], at(c.x + d, c.y)[0]];
+        if (xs[0] + xs[1] < W) a = Math.max(a, ...xs); else b = Math.max(b, W - Math.min(...xs)); // left or right of the middle
+      }
+      if (W - a - b > 200) { l = Math.ceil(a + 6) + 'px'; r = Math.ceil(b + 6) + 'px'; }
+    }
+    if (el.style.left !== l) el.style.left = l;
+    if (el.style.right !== r) el.style.right = r;
   }
 
   // ---------- the 3D board (src/render3d.js): the default, with a setting (Board: 2D / 3D in the in-match Settings) ----------

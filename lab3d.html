@@ -4769,12 +4769,21 @@ const Camera3D = (THREE, camera, el, opts) => {
     pts.delete(e.pointerId);
     if (grab === e.pointerId) dropGrab(e.type === 'pointerup' ? groundAt(e.clientX, e.clientY) : null);
     if (tap && tap.id === e.pointerId && e.type === 'pointerup' && performance.now() - tap.t < TAP_MS) {
+      swallow = { x: e.clientX, y: e.clientY, t: performance.now() };
       if (handsOn()) { if (opts.onTap) opts.onTap(groundAt(e.clientX, e.clientY), e.clientX, e.clientY); }
       else goStrategic();
     }
     tap = null;
     if (two && pts.size < 2) { two = null; settleTo(nearest()); }
   }
+  // the click the browser sends after a tap: the tap was taken on the lift, so whatever it opened (a sheet over the
+  // board) must not get that click too, or it lands on the sheet's backdrop and closes it, or on one of its buttons
+  let swallow = null;
+  function swallowClick(e) {
+    if (swallow && performance.now() - swallow.t < 700 && Math.hypot(e.clientX - swallow.x, e.clientY - swallow.y) < 30) { e.stopPropagation(); e.preventDefault(); }
+    swallow = null;
+  }
+  window.addEventListener('click', swallowClick, true);
   el.addEventListener('pointerup', lift);
   el.addEventListener('pointercancel', lift);
   el.addEventListener('pointerleave', (e) => { if (e.pointerType === 'mouse' && opts.onHover) opts.onHover(null); });
@@ -4810,7 +4819,7 @@ const Camera3D = (THREE, camera, el, opts) => {
   window.addEventListener('keydown', keyDown);
   window.addEventListener('keyup', keyUp);
   // the page is done with this camera: let go of the window's keys (the element's listeners go with the element)
-  function dispose() { window.removeEventListener('keydown', keyDown); window.removeEventListener('keyup', keyUp); keys.clear(); }
+  function dispose() { window.removeEventListener('click', swallowClick, true); window.removeEventListener('keydown', keyDown); window.removeEventListener('keyup', keyUp); keys.clear(); }
 
   function update(dt) {
     if (settle) {

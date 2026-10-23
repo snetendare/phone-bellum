@@ -1,10 +1,11 @@
 // The tutorial, on both boards on a phone (390 x 744), then the range circle on a PC window.
-// Tutorial: the menu leads with it on a first visit. Round 1: only your tower (the coach's ring on it), then your zone
-// blinks, then one card; a pick puts the drawer down, a tap places; taking the squad back steps the coach back; the enemy
+// Tutorial: the menu leads with it on a first visit. Round 1: your zone blinks, then the coach's ring on your tower,
+// then one card; a pick puts the drawer down, a tap places; taking the squad back steps the coach back; the enemy
 // tower shows up with Fight; the hidden archers win (your health drops). Round 2: Fire Mage and Sniper, Sniper is turned
 // away, Fire Mage wins. Round 3: the tower pick, a tap on your tower opens its sheet, a shop of five with the deployment
 // cap (a squad picked stays picked); the result names the enemy's hidden Brute. Round 4: a squad ready to level up (the
-// ring on it, its sheet levels it), the flanks blink and only a flank tile takes the next squad, Fight. Then the
+// ring on it, a touch tap opens its sheet and the click after it doesn't close it, the sheet levels it), the flanks
+// blink with the coach line between them and only a flank tile takes the next squad, Fight. Then the
 // tutorial is saved as done and Keep playing hands the match to the AI with the full shop.
 // Range: with the mouse over a squad (yours or the enemy's) while deploying, and over a body in a fight, a dotted circle
 // shows its reach; off it, none. Screenshots go to the current folder.
@@ -36,11 +37,11 @@ const { chromium } = require('playwright-core');
     check(await p.locator('#panel #tutorial.primary').count() === 1, `${board}: a first visit leads the menu with the tutorial`);
     await p.click('#tutorial'); await wait(p);
     let s = await st();
-    check(/^This is your Tower\. Protect it\.$/.test(await coach()) && s.ring && s.mine === 0 && !s.foeTower && await p.evaluate(() => document.getElementById('panel').innerHTML === ''), `${board}: only your tower, "Protect it", a ring on it, no panel`);
+    check(/deployment zone/.test(await coach()) && s.tiles === 59 && !s.ring && s.mine === 0 && !s.foeTower && await p.evaluate(() => document.getElementById('panel').innerHTML === ''), `${board}: first your zone blinks (${s.tiles} tiles), no panel`);
+    await p.screenshot({ path: `tutorial-${board}-zone.png` });
     await p.click('#coach-btns .btn'); await wait(p);
     s = await st();
-    check(/deployment zone/.test(await coach()) && s.tiles === 59 && !s.ring && s.cards === 0, `${board}: then your zone blinks (${s.tiles} tiles), still no panel`);
-    await p.screenshot({ path: `tutorial-${board}-zone.png` });
+    check(/^This is your Tower\. Protect it\.$/.test(await coach()) && s.ring && s.tiles === 0 && s.cards === 0, `${board}: then your tower, "Protect it", a ring on it, still no panel`);
     await p.click('#coach-btns .btn'); await wait(p);
     s = await st();
     check(/Goblin Swarm/.test(await coach()) && s.cards === 1 && s.tiles === 0 && await p.locator('#shop .ucard.tut-glow').count() === 1, `${board}: then one glowing card`);
@@ -95,13 +96,19 @@ const { chromium } = require('playwright-core');
     s = await st();
     check(s.round === 4 && /level up/.test(await coach()) && s.ring, `${board}: round 4: a squad can level up, the ring on it`);
     const ready = await p.evaluate(() => { const { m, me } = window.__pb(); const q = m.armies[me].find(s => Game.isReady(m, s)); return [q.col, q.row]; });
-    await tap(...ready);
+    const [rx, ry] = await pt(...ready);
+    await p.evaluate(() => { window.__stray = 0; document.getElementById('sheet-back').addEventListener('click', () => window.__stray++); });
+    await p.touchscreen.tap(rx, ry); await wait(p);
+    check(await p.evaluate(() => !document.getElementById('sheet-back').hidden && window.__stray === 0), `${board}: a touch tap opens its sheet, and the click after it doesn't reach the sheet`);
     check(await p.locator('[data-act="lvl-up"]').count() === 1 && await p.locator('[data-act="sell"]').count() === 1, `${board}: its sheet has Level up, Move and Sell`);
     await p.click('[data-act="lvl-up"]'); await wait(p); await p.click('#close'); await wait(p);
     check(/Move/.test(await coach()) && /Skills/.test(await coach()), `${board}: then a line on Move, Sell and Skills`);
     await p.click('#coach-btns .btn'); await wait(p);
     s = await st();
     check(/flanks/.test(await coach()) && s.tiles > 0, `${board}: then the flanks blink (${s.tiles} tiles)`);
+    const hid = await p.evaluate(() => { const c = document.getElementById('coach').getBoundingClientRect(); return [...document.querySelectorAll('#marks .tut-tile')].filter(t => { const r = t.getBoundingClientRect(); return r.left < c.right && r.right > c.left && r.top < c.bottom && r.bottom > c.top; }).length; });
+    check(hid === 0, `${board}: the coach line covers none of them (${hid})`);
+    await p.screenshot({ path: `tutorial-${board}-flank.png` });
     await p.click('#shop .ucard >> nth=0'); await wait(p);
     await tap(5, 12);
     check((await st()).fresh === 0, `${board}: a tile in your zone doesn't take it`);
