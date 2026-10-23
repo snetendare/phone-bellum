@@ -703,7 +703,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
     camDown.setFromMatrixColumn(camera.matrixWorld, 1).negate(); camDown.y = 0;
     if (camDown.lengthSq() < 1e-6) camDown.set(0, 0, 1); camDown.normalize();
     const z = cam.zoom();
-    viewMode = z < 0.5 ? 'strategic' : z < 1.5 ? 'tilted' : z < 2.5 ? 'angled' : 'ground'; uiOff = viewMode === 'ground';
+    viewMode = z < -0.5 ? 'tilted' : z < 0.5 ? 'strategic' : z < 1.5 ? 'angled' : 'ground'; uiOff = viewMode === 'ground';
     paintFloor(v, dt);
     used.clear(); ns = 0;
     placeBodies(v, dt);
@@ -714,7 +714,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
     sprGeo.instanceCount = ns;
     for (const a of Object.values(sprAttr)) { a.clearUpdateRanges(); a.addUpdateRange(0, ns * a.itemSize); a.needsUpdate = true; }
     showNote(uiOff ? {} : v);
-    const near = Math.max(0, Math.min(1, (cam.zoom() - 1) / 2)); // fog only at the ground view: the strategic, tilted and angled views see the whole board
+    const near = Math.max(0, Math.min(1, cam.zoom() / 2)); // fog only at the ground view: the strategic, tilted and angled views see the whole board
     scene.fog.near = 400 - 310 * near; scene.fog.far = 600 - 380 * near;
     renderer.render(scene, camera);
   }

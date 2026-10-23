@@ -26,7 +26,8 @@
       "name": "Poison shot",
       "cost": 100,
       "params": {
-        "pct": 150
+        "pct": 150,
+        "duration": 6
       }
     },
     {
@@ -288,7 +289,7 @@
       "hit": 19,
       "aps": 1.2,
       "range": 2,
-      "speed": 8,
+      "speed": 7.5,
       "splash": 0,
       "shape": "triangle",
       "color": "#9BD35A",
