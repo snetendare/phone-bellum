@@ -28,11 +28,11 @@ const Render2D = (cv, view) => {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     S = W / (Game.COLS * Game.TILE);
   }
-  const half = Game.COLS * Game.TILE / 2, halfY = Game.ROWS * Game.TILE / 2;
-  // The board is turned around for side 1, so both players see their own zone at the bottom
+  // The board is turned around for side 1, so both players see their own zone at the bottom (read from Game each
+  // time: the Test Grid map has a bigger board)
   const flip = () => me === 1 ? -1 : 1;
-  const PX = (x) => (half + x * flip()) * S;
-  const PY = (y) => (halfY - y * flip()) * S;
+  const PX = (x) => (Game.COLS * Game.TILE / 2 + x * flip()) * S;
+  const PY = (y) => (Game.ROWS * Game.TILE / 2 - y * flip()) * S;
   const scol = (c) => me === 1 ? Game.COLS - 1 - c : c;   // model column -> screen column (and back)
   const srow = (r) => me === 1 ? Game.ROWS - 1 - r : r;
   const tilePx = () => Game.TILE * S;

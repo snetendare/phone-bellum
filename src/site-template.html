@@ -125,7 +125,7 @@ html.pc .panel > .bar:last-child { margin: -6px -12px -12px; padding: 6px 12px 1
 /* map picker: a small picture of each map */
 .maps { width: 100%; display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
 .maps button { border: 1px solid var(--line); border-radius: 4px; background: transparent; padding: 4px; display: grid; gap: 4px; justify-items: center; font-family: var(--font-data); font-size: 12px; min-width: 0; }
-.maps img { width: 100%; aspect-ratio: 12 / 16; border-radius: 3px; display: block; background: var(--board); }
+.maps img { width: 100%; aspect-ratio: 12 / 16; object-fit: contain; border-radius: 3px; display: block; background: var(--board); }
 .chars-pick { width: 100%; display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
 .chars-pick button { border: 1px solid var(--line); border-radius: 4px; background: transparent; padding: 4px; display: flex; align-items: center; justify-content: center; font-family: var(--font-data); font-size: 12px; min-width: 0; color: var(--muted); opacity: 0.45; text-decoration: line-through; }
 .chars-pick button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -186,7 +186,7 @@ html.pc .panel > .bar:last-child { margin: -6px -12px -12px; padding: 6px 12px 1
 .fgrid .fac[aria-pressed="true"] { border-color: var(--gold); border-left-color: var(--fc); box-shadow: 0 0 0 1px var(--gold); }
 .fgrid .fac:disabled { opacity: 0.45; cursor: default; }
 @media (prefers-reduced-motion: reduce) { .status.wait::after { animation: none; content: "…"; } }
-#wrap { aspect-ratio: 12 / 16; width: min(100%, calc((100svh - 440px) * 0.75)); min-width: 240px; margin: 0 auto; }
+#wrap { aspect-ratio: var(--board-ar, 0.75); width: min(100%, calc((100svh - 440px) * var(--board-ar, 0.75))); min-width: 240px; margin: 0 auto; }
 html:not(.pc) .panel { padding: 10px; gap: 8px; }
 html:not(.pc) .panel .hint { font-size: 12px; line-height: 1.35; }
 html:not(.pc) body { padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px)); }
@@ -195,14 +195,14 @@ html.pc .app { max-width: none; grid-template-columns: auto 440px; justify-conte
 html.pc .app:has(> .panel:empty) { grid-template-columns: auto; }
 html.pc .hud, html.pc .net, html.pc #wrap { grid-column: 1; }
 html.pc .panel { grid-column: 2; grid-row: 1 / span 3; min-width: 0; max-height: calc(100svh - 40px); overflow-y: auto; }
-html.pc #wrap { width: min(calc(100vw - 32px - 460px), calc((100svh - 110px) * 0.75)); min-width: 360px; }
+html.pc #wrap { width: min(calc(100vw - 32px - 460px), calc((100svh - 110px) * var(--board-ar, 0.75))); min-width: 360px; }
 html.pc .shop { display: grid; grid-template-columns: repeat(auto-fill, minmax(124px, 1fr)); overflow-x: visible; }
 html.pc .sheet { max-width: 640px; }
 /* Phone in a match (html.dock, see dock()): the board fills the screen above a panel docked at the bottom. While
    deploying the panel is a drawer with a blue pull tab on its top edge: hold the tab and slide the drawer up over the
    bottom of the board or down to its last row (a tap on the tab works too; picking a unit also puts it down). A task on the board (placing a unit, Move, Charisma, a tower) shows in a line over the board, with an X. */
 html.dock body { padding-inline: 6px; padding-bottom: calc(var(--dock-h, 64px) + 6px); }
-html.dock #wrap { width: min(100%, calc(var(--board-h, 480px) * 0.75)); min-width: 0; }
+html.dock #wrap { width: min(100%, calc(var(--board-h, 480px) * var(--board-ar, 0.75))); min-width: 0; }
 html.dock #wrap:has(> .board3d) { width: 100%; aspect-ratio: auto; height: var(--board-h, 480px); } /* the 3D camera fits the board to any shape */
 html.dock .panel { position: fixed; left: 0; right: 0; bottom: 0; z-index: 4; max-width: 560px; margin: 0 auto; max-height: 62svh; overflow-y: auto; border-bottom: 0; border-radius: 10px 10px 0 0; box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.45); }
 /* tighter than the side panel: less padding, no overlap of the shop by the last row (the whole drawer is in sight, so
@@ -671,7 +671,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
   }
   let mapPick = '';         // the map the host picked for the next match ('' = random)
   let pickFor = '', pickSel = null, pickPeek = false, pickHtml = ''; // the choose-one-of-3 cards over the board (syncPick)
-  const MAP_SHORT = { standard: 'Standard', forest: 'Forest', cavern: 'Cavern', ice: 'Peak' };
+  const MAP_SHORT = { standard: 'Standard', forest: 'Forest', cavern: 'Cavern', ice: 'Peak', testgrid: 'Test' };
   const mapSeg = () => `<div class="bar">
         <span class="hint">Map</span>
         <div class="maps" role="group" aria-label="Map">
@@ -878,7 +878,19 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
   }
   new MutationObserver(dock).observe($('panel'), { childList: true });
   addEventListener('resize', dock);
+  // The board's shape follows the match's map (Test Grid has a bigger board; no match: the standard one). On a change
+  // the 2D board resizes and the 3D board starts again, as it builds its ground and camera for one size.
+  let gridKey = Game.COLS + 'x' + Game.ROWS;
+  function syncGrid() {
+    Game.useGrid(m);
+    const key = Game.COLS + 'x' + Game.ROWS;
+    if (key === gridKey) return;
+    gridKey = key;
+    document.documentElement.style.setProperty('--board-ar', String(Game.COLS / Game.ROWS));
+    if (board3d) { stop3d(); start3d(); } else size();
+  }
   function render() {
+    syncGrid();
     syncMusic();
     cv.style.touchAction = phase === 'deploy' ? 'none' : ''; // so a finger can drag squads without scrolling the page
     if (board3d) wake3d(); else { board.draw(); boardMarks(); }
@@ -889,7 +901,8 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
   const thumbs = {};
   function mapThumb(id) {
     if (thumbs[id] == null) {
-      try { thumbs[id] = board.thumb(id ? Game.createMatch(units, M, 12345, id) : null); } catch (e) { thumbs[id] = ''; }
+      try { Game.useGrid(id); thumbs[id] = board.thumb(id ? Game.createMatch(units, M, 12345, id) : null); } catch (e) { thumbs[id] = ''; }
+      finally { Game.useGrid(m); } // back to the board of the match in play
     }
     return thumbs[id];
   }

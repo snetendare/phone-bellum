@@ -2,7 +2,10 @@
 const Game = (() => {
   const E = (typeof Engine !== 'undefined') ? Engine : require('./engine.js');
 
-  const COLS = 12, ROWS = 16, TILE = 6, ZONE = 6; // each side builds in ZONE rows; the rows between are no man's land
+  // each side builds in ZONE rows; the rows between are no man's land. A map with its own `grid` (Test Grid) changes
+  // COLS, ROWS and ZONE while a match on it is in play (see useGrid); every other map keeps these.
+  const TILE = 6, GRID = { cols: 12, rows: 16, zone: 6 };
+  let COLS = GRID.cols, ROWS = GRID.rows, ZONE = GRID.zone;
   const START_HP = 60, MAX_ROUND_DMG = 20, START_GOLD = 250, INCOME = 250, LOSER_BONUS = 50;
   const SQUAD_COST = 100, SQUAD_POINTS = 2;
   const SETTINGS = { dt: 0.05, timeCap: 60, spacing: 3.5, minDmgPct: 15, absorbXp: 1, armorXp: 0.5, sight: 15, minSight: 18, drift: 15, flameReach: 1.2 }; // sight: metres beyond range a unit notices an enemy (at least minSight), drift: it leans toward one this much further out. flameReach: flame cones reach 1.2x the unit's range
@@ -253,7 +256,7 @@ const Game = (() => {
   }
   // the skill in force for a fight: the tower's type and whether it was bought
   const towerSkillOn = (m, side, id) => towerSkillOf(m, side) && towerType(m, side).id === id;
-  const TOWER_MID = [4, 7]; // columns the tower can't stand in
+  const TOWER_MID = [4, 7]; // columns the tower can't stand in (set for the grid by useGrid)
   const TOWER_SPOT = [{ col: 8, row: ROWS - 2 }, { col: 8, row: 1 }];
 
   // ---------- characters ----------
@@ -341,6 +344,7 @@ const Game = (() => {
     { id: 'forest', name: 'Forest Clearing', short: 'Bribe the elf tower to fight for you.', text: 'Ents and Earth Wizards have 15% more health. Healing and regeneration are 1.5× as strong. A neutral elf tower in no man’s land sides with whoever has bribed the elves the most times: it heals their units and shoots the other player’s. With bribes level, it shoots both. Bribe as often as you like: 50 gold, and 50 more for each extra bribe in the same round. Totals stay secret; the flag on the tower shows who is ahead. After round 5 the elves hit and heal twice as hard. From the round after 10 bribes have been paid in all, each player who has bribed can buy one elf tower of their own for 400 gold.', boostHp: 15, boostUnits: ['Ent', 'Earth Wizard'], healMul: 1.5, elfTower: true },
     { id: 'cavern', name: 'Mushroom Cavern', short: 'Shorter range. Mushroom tiles buff, speed up or poison.', text: 'All units have 25% less range (units with 5 m range or less keep theirs). Stealth units deal 20% more damage. Glowing mushroom tiles stay on the same tiles all match, mirrored on both halves. Purple: a squad that starts the fight there gets +10% damage, +10% health and +5% attack speed. Yellow: a unit that starts on it or walks over it moves 30% faster for the rest of the fight. Green: a unit that starts on it or walks over it is poisoned and slowed (slime units are healed and sped up instead). Yellow and green work once per unit, for both sides. Either player can remove a mushroom tile for 50 gold.', stealthDmg: 20, rangeCut: 25, rangeKeep: 5, shrooms: true, pointMirror: true },
     { id: 'ice', name: 'Frozen Peak', short: 'Hail from round 2. An ice altar rises on even rounds.', text: 'Every fight from round 2: a hailstorm drops 10 hail tiles in the storm band (no man’s land at first); units standing in hail take 20 damage per second. Even rounds: the altar of ice rises in the middle of the board. Tap it to buy ice walls for your tower, push the storm band toward your opponent, or summon a Snowgre.', ice: true },
+    { id: 'testgrid', name: 'Test Grid', short: 'A bigger board: 2 more rows and 1 more column per side.', text: 'A test map with no special rules on a bigger board: each zone is 2 rows deeper and the board 1 column wider.', plain: true, grid: { cols: 13, rows: 20, zone: 8 } }, // only when picked, never random
   ];
   // ---------- Frozen Peak: hailstorm and the altar of ice ----------
   // The storm band is 4 rows deep: no man's land to start with. Each push moves it ICE.push rows toward the other
@@ -516,7 +520,7 @@ const Game = (() => {
     if (wasFree) passMapFree(m, side);
     return true;
   }
-  const ELF_COLS = [2, 9]; // the elf tower's column is picked from these (never the flank edges)
+  const ELF_COLS = [2, 9]; // the elf tower's column is picked from these (never the flank edges; set for the grid by useGrid)
   // Random never gives Standard, nor the map of the last match (lastId), so a rematch is on a new map
   function rollMap(seed, mapId, lastId) {
     const r = rng(seed + 31337);
@@ -651,6 +655,23 @@ const Game = (() => {
   const syncRiders = (m, side) => { for (const s of m.armies[side]) if (isRider(s)) { const c = carrierOf(m, side, s); if (c) { s.col = c.col; s.row = c.row; } else delete s.in; } };
   const tileToWorld = (col, row) => ({ x: (col - (COLS - 1) / 2) * TILE, y: ((ROWS - 1) / 2 - row) * TILE });
   const BOUNDS = { x0: -COLS * TILE / 2, x1: COLS * TILE / 2, y0: -ROWS * TILE / 2, y1: ROWS * TILE / 2 }; // the board in world metres
+  // Switches the board to the grid of a match's map (or of a map id): COLS, ROWS, ZONE and what hangs on them. The
+  // objects keep their identity, so everything holding them sees the new grid. Returns true when the grid changed.
+  // Every exported function that takes a match calls it first (see the end of this file), so callers needn't.
+  function useGrid(mOrId) {
+    const id = mOrId && typeof mOrId === 'object' ? (mOrId.map && mOrId.map.id) : mOrId;
+    const mp = id ? MAPS.find(x => x.id === id) : null, g = (mp && mp.grid) || GRID;
+    if (g.cols === COLS && g.rows === ROWS && g.zone === ZONE) return false;
+    COLS = g.cols; ROWS = g.rows; ZONE = g.zone;
+    const mid = (COLS - 1) / 2;
+    TOWER_MID[0] = Math.ceil(mid - 1.5); TOWER_MID[1] = Math.floor(mid + 1.5);
+    TOWER_SPOT[0].col = TOWER_SPOT[1].col = COLS - 4; TOWER_SPOT[0].row = ROWS - 2;
+    ELF_COLS[1] = COLS - 3;
+    FLANK.cols[1] = COLS - 1;
+    Object.assign(BOUNDS, { x0: -COLS * TILE / 2, x1: COLS * TILE / 2, y0: -ROWS * TILE / 2, y1: ROWS * TILE / 2 });
+    Object.assign(api, { COLS, ROWS, ZONE });
+    return true;
+  }
 
   function rng(seed) { // mulberry32
     let a = seed >>> 0;
@@ -738,6 +759,7 @@ const Game = (() => {
     const r = rng((seed >>> 0) + 777);
     const factions = opts && Array.isArray(opts.factions) && opts.factions.length === 2 && opts.factions.every(Array.isArray) ? opts.factions.map(f => f.map(String)) : null;
     if (factions) mapId = FACTION_MODE.map;
+    useGrid(rollMap(seed >>> 0, mapId, lastMapId).id); // the board this match is on, before anything is placed on it
     let off = factions ? [] : ((opts && opts.offUnits) || []).filter((ui, k, a) => Number.isInteger(ui) && ui >= 0 && ui < units.length && a.indexOf(ui) === k);
     if (units.length - off.length < 2) off = [];
     // a player's packages only hold units of their own factions
@@ -1168,7 +1190,7 @@ const Game = (() => {
     ensurePack(m, 0); ensurePack(m, 1);
     ensureCharm(m, 0); ensureCharm(m, 1);
     const mp = mapOf(m), elf = elfSpot(m);
-    let g = { ...SETTINGS, bounds: BOUNDS, ...(mp && mp.healMul ? { healMul: mp.healMul } : {}) };
+    let g = { ...SETTINGS, bounds: { ...BOUNDS }, ...(mp && mp.healMul ? { healMul: mp.healMul } : {}) };
     if (m.rules) g = { ...g, rules: m.rules }; // the roster's rules (a Counter Lab roster can switch mechanics off)
     const T2 = TILE / 2, tiles = [];
     if (mp && mp.shrooms) for (const t of m.map.tiles || []) {
@@ -1569,7 +1591,7 @@ const Game = (() => {
     return best;
   }
 
-  return {
+  const api = {
     MAX_ROUND_DMG, TIER_DMG, bankBusy, seenAt, charShown, towerTypeShown, altarShown, elfOwnShown, shroomShown, removingShroom, movedId, canMove, moveSquad, undoMove,
     COLS, ROWS, TILE, ZONE, START_HP, START_GOLD, INCOME, incomeFor, LOSER_BONUS, SQUAD_COST, SQUAD_POINTS, SETTINGS, XP_STEPS, xpNeeded, unitCostOf,
     levelCost, isReady, levelUp, undoLevel, seenLevel, aiLevel, AI, CONFIG,
@@ -1586,6 +1608,14 @@ const Game = (() => {
     FACTION_MODE, FACTIONS: () => FACTIONS, setFactions, factionInfo, factionsOf, factionTowers, towerTypeById, ownsUnit, withFactionTrait, factionSet,
     createDraft, draftTurn, draftOpen, draftAct, draftDone, draftPossible, aiDraftChoice,
     zoneRows, inZone, tileToWorld, squadRange, createMatch, place, unplace, bodiesFor, startBattle, resolve, aiDeploy, occupied,
+    GRID, useGrid,
   };
+  // a call from outside with a match first puts the board on that match's grid
+  const isMatch = (x) => x && typeof x === 'object' && Array.isArray(x.armies) && x.map;
+  for (const k of Object.keys(api)) {
+    const f = api[k];
+    if (typeof f === 'function' && f !== useGrid && f !== createMatch) api[k] = function (a) { if (isMatch(a)) useGrid(a); return f.apply(this, arguments); };
+  }
+  return api;
 })();
 if (typeof module !== 'undefined') module.exports = Game;

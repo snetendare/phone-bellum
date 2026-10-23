@@ -33,6 +33,10 @@ The source is in `src/`. After changing it, run `node src/build.js` from the rep
 
 `vendor/` holds three.js (0.180.0, MIT licence), used by the 3D test page.
 
+## Test Grid map
+
+A test map (Test Grid, only when picked, never random) on a bigger board: 13 columns by 20 rows, with each player's zone 8 rows deep instead of 6 (no man's land stays 4 rows). It has no other rules. The size is the map's `grid` in `MAPS` (`src/game.js`); `Game.useGrid(m)` puts the board on a match's grid, and every exported function that takes a match does it first, so all other maps keep the standard 12 by 16 board. The page's `syncGrid()` resizes the 2D board and starts the 3D board again when the grid changes.
+
 ## Factions gamemode
 
 A second gamemode on the standard map. Each faction is a small roster with its own theme, a trait and its own tower. Before the match the players draft factions one at a time, two each (A, B, B, A). Each player can then only unlock, buy and place units of their own two factions, and at round 3 they pick between their two factions' towers instead of the usual tower offer. Starting packages are dealt from your own factions' units, so give every faction at least one unit at 200 gold or less.
