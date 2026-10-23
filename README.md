@@ -35,7 +35,7 @@ The source is in `src/`. After changing it, run `node src/build.js` from the rep
 
 ## Test Grid map
 
-A test map (Test Grid, only when picked, never random) on a bigger board: 13 columns by 20 rows, with each player's zone 8 rows deep instead of 6 (no man's land stays 4 rows). It has no other rules. The size is the map's `grid` in `MAPS` (`src/game.js`); `Game.useGrid(m)` puts the board on a match's grid, and every exported function that takes a match does it first, so all other maps keep the standard 12 by 16 board. The page's `syncGrid()` resizes the 2D board and starts the 3D board again when the grid changes.
+A test map (Test Grid, only when picked, never random) on a bigger board: 14 columns by 18 rows, so each player's zone is 14 by 7 tiles instead of 12 by 6 (no man's land stays 4 rows). It has no other rules. The size is the map's `grid` in `MAPS` (`src/game.js`); `Game.useGrid(m)` puts the board on a match's grid, and every exported function that takes a match does it first, so all other maps keep the standard 12 by 16 board. The page's `syncGrid()` resizes the 2D board and starts the 3D board again when the grid changes.
 
 ## Factions gamemode
 
