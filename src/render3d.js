@@ -79,7 +79,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
     if (!v.m) return;
     // while deploying, the board changes with what the player buys (mushrooms, buff tiles, the altar): look again twice a second
     floorAge += dt;
-    const key = [idOf(v.m), idOf(v.battlePre), v.m.round, v.me, v.phase, uiOff].join('|');
+    const key = [idOf(v.m), idOf(v.battlePre), v.m.round, v.me, v.phase, uiOff, v.dev ? JSON.stringify([v.dev, v.editable, v.m.dev.casts.length, v.m.armies[v.me].map(q => q.guide || 0)]) : ''].join('|'); // devtest: arrows, spells and placing show at once
     if (key === floorKey && !(v.phase === 'deploy' && floorAge > 0.5)) return;
     floorKey = key; floorAge = 0;
     floorView = { ...v, bt: v.phase === 'battle' ? null : v.bt, fx: [], selected: null, moving: null, drag: null, hoverTile: null, placingElf: false, placingTower: false };
@@ -371,8 +371,9 @@ const Render3D = (THREE, el, view, opts = {}) => {
       const p = glide(b, dt);
       const look = b.u.aloft ? 'glass' : b.hidden ? (b.side === me ? 'ghost' : 'ghostFoe') : b.delay > 0 ? 'ghost' : 'solid';
       const crest = b.u.structure ? Game.charOf(src, b.side) : null;
-      const tag = b.u.structure || b.u.aloft || (b.hidden && b.side !== me) ? null : `${b.side}|${b.squad}|${b.u.name}`;
-      bodies.push({ u: b.u, side: b.side, x: p.x, y: p.y, hx: b.hx, hy: b.hy, look, moving: p.moving, phase: p.phase, b, crest, edge: Art.teamCol(b.side, me), tag });
+      const u = b.mask && b.side !== me && !b.revealed ? { ...b.u, ...b.mask } : b.u; // a disguise, until its first attack (devtest)
+      const tag = b.u.structure || b.u.aloft || (b.hidden && b.side !== me) ? null : `${b.side}|${b.squad}|${u.name}`;
+      bodies.push({ u, side: b.side, x: p.x, y: p.y, hx: b.hx, hy: b.hy, look, moving: p.moving, phase: p.phase, b, crest, edge: Art.teamCol(b.side, me), tag });
       if (b.u.structure && b.walls) addWalls(f, b.x, b.y, b.walls);
     }
     addSpires(v, src, false, f);
@@ -407,7 +408,8 @@ const Render3D = (THREE, el, view, opts = {}) => {
     // the opponent's squads from this round stay hidden until the fight; a squad they moved shows on its old tile
     for (const sq of m.armies[foe]) if ((sq.round < m.round || !deploying) && !Game.hiddenFromFoe(m, sq)) {
       const p = deploying ? Game.seenAt(m, sq) : sq;
-      squad(deploying ? { ...sq, col: p.col, row: p.row, level: Game.seenLevel(m, sq) } : sq, foe, false); // a level-up bought this round stays hidden
+      const look = Game.shownUnit(m, me, foe, sq.unit); // a disguised unit shows as what it pretends to be
+      squad(deploying ? { ...sq, unit: look, col: p.col, row: p.row, level: Game.seenLevel(m, sq) } : { ...sq, unit: look }, foe, false); // a level-up bought this round stays hidden
     }
     for (const sq of m.armies[me]) {
       if (deploying && sq.from && sq.movedRound === m.round) { const s = tileCenter(v, sq.from.col, sq.from.row); tileSq(s.c, s.r, color(css('--muted') || '#8DA1A1'), 0.6, 0.04, 10, 0.1); }
@@ -440,7 +442,20 @@ const Render3D = (THREE, el, view, opts = {}) => {
       if (Game.towerColOk(c) && !Game.reserved(me, c, row) && !Game.occupied(m, me, c, row)) { const s = tileCenter(v, c, row); tileSq(s.c, s.r, gold, 0.5, 0.06); }
     }
     // towers: their type and coat of arms only where this screen may see them
-    for (const side of [me, foe]) if (m.towers && m.towers[side]) {
+    // devtest: buildings (an opponent's new one from the fight on) and walls cast this round
+    if (Game.isDev(m)) for (const side of [me, foe]) {
+      for (const b of Game.placedBuildings(m, side)) {
+        if (!Game.devShown(m, me, deploying, side, b.round)) continue;
+        const at = drag && drag.bkey === b.key && drag.moved && side === me ? drag.over : b, w = Game.tileToWorld(at.col, at.row);
+        bodies.push({ u: Game.buildingUnit(m, side, b), side, x: w.x, y: w.y, look: 'solid', edge: Art.teamCol(side, me), tag: `${side}|b${b.key}`, scale: 0.75 });
+        if (side === me && b.round === m.round && deploying) { const st = tileCenter(v, at.col, at.row); tileSq(st.c, st.r, teamColor(side, me), 0.8, 0.05, 14); }
+      }
+      for (const c of Game.activeCasts(m)) if (c.side === side && (Game.devSpell(c.id) || {}).kind === 'wall' && Game.devShown(m, me, deploying, side, c.round)) {
+        const w = Game.tileToWorld(c.col, c.row);
+        bodies.push({ u: { structure: true, building: true, kind: 'wall', color: '#9C7E58', hp: 1 }, side, x: w.x, y: w.y, look: 'solid', scale: 0.8 });
+      }
+    }
+    for (const side of [me, foe]) if (m.towers && m.towers[side] && Game.towerUp(m, side)) {
       const w = Game.tileToWorld(m.towers[side].col, m.towers[side].row);
       const crest = Game.charShown(m, me, deploying, side) ? Game.charOf(m, side) : null;
       bodies.push({ u: towerUnit(m, side, Game.towerTypeShown(m, me, deploying, side)), side, x: w.x, y: w.y, look: 'solid', crest, edge: Art.teamCol(side, me) });

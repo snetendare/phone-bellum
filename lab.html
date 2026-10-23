@@ -942,7 +942,7 @@ const Engine = (() => {
         v.x = v.u.teleport.x; v.y = v.u.teleport.y;
         return;
       }
-      if (v.u.structure) cripple[v.side] = towerDown.secs;
+      if (v.u.structure && !v.u.building) cripple[v.side] = towerDown.secs; // a lesser building (Factions devtest) doesn't cripple its side
       if (v.u.deathBlast > 0) {
         const dmg = v.u.hp * v.u.deathBlast / 100, rad = v.u.blastAt > 0 ? v.u.blastAt : BLAST_RADIUS;
         if (opts.record) shots.push([v.x, v.y, v.x, v.y, v.side, rad, 1, 0, 0]);
@@ -1015,6 +1015,9 @@ const Engine = (() => {
     // Each is { x0, x1, y0, y1 (world rectangle), type: 'speed' | 'toxic' | 'hail', ...settings }.
     // 'hail' is different: it hurts every unit standing in it, every tick (dps), unless the unit is hailImmune.
     const tiles = opts.tiles || [];
+    // timed strikes (Factions devtest spells): { t, x, y, r, dmg, side }: at fight time t, dmg to every enemy of side
+    // within r metres of (x, y), armor counting. Each fires once.
+    const strikes = (opts.strikes || []).map(s => ({ ...s, done: false }));
     let projectiles = [];
     let t = 0, shots = [], over = false, tick = 0;
     const dist = (a, b) => hyp(a.x - b.x, a.y - b.y);
@@ -1058,10 +1061,21 @@ const Engine = (() => {
     // a unit is on a map tile: its effect, once per unit and tile type
     function onTile(b, tl) {
       if (tl.type === 'hail') { if (!b.u.hailImmune) { neutralDamage(b, tl.dps * dt); b.hailT = tick; } return; }
+      // spell zones (Factions devtest), every tick while the unit stands in them; tl.side is the caster:
+      // burn hurts the caster's enemies, mend heals the caster's units, mud slows the caster's enemies
+      if (tl.type === 'burn') { if (b.side !== tl.side) neutralDamage(b, tl.dps * dt); return; }
+      if (tl.type === 'mend') { if (b.side === tl.side && b.hp < b.u.hp) b.hp = Math.min(b.u.hp, b.hp + tl.dps * healMul * dt); return; }
+      if (tl.type === 'mud') {
+        if (b.side === tl.side) return;
+        if (!(b.slowT > 0)) { b.slowMove = 0; b.slowAtk = 0; }
+        b.slowMove = Math.max(b.slowMove, tl.slow); b.slowT = Math.max(b.slowT, 0.25); // wears off a moment after it walks out
+        return;
+      }
+      if (tl.type === 'haste' && b.side !== tl.side) return; // only the caster's units speed up
       const seen = b.tilesHit || (b.tilesHit = {});
       if (seen[tl.type]) return;
       seen[tl.type] = true;
-      if (tl.type === 'speed') { b.u = { ...b.u, speed: b.u.speed * (1 + tl.speed / 100) }; b.fast = true; }
+      if (tl.type === 'speed' || tl.type === 'haste') { b.u = { ...b.u, speed: b.u.speed * (1 + tl.speed / 100) }; b.fast = true; }
       if (tl.type === 'toxic') {
         (b.poison || (b.poison = [])).push({ src: null, dps: b.u.hp * tl.poisonPct / 100, t: tl.poisonDur });
         // slime units get it the other way round: the poison heals them (see the ongoing effects) and the slow speeds them up
@@ -1241,7 +1255,7 @@ const Engine = (() => {
       const charged = canCharge && b.u.charge > 1 && b.moved >= CHARGE_RUN;
       b.moved = 0;
       if (!b.u.aloft) b.hidden = false; // attacking gives a stealth unit away (it hides again after STEALTH_BACK s without attacking); an airship stays out of reach
-      b.lastAtk = t;
+      b.lastAtk = t; b.revealed = true; // a disguised body (b.mask) shows what it is from its first attack
       if (b.u.healPct > 0) {
         // heal a random wounded ally (not itself)
         const hurtAllies = sides[b.side].filter(a => a.alive && a !== b && a.hp < a.u.hp);
@@ -1410,6 +1424,23 @@ const Engine = (() => {
         }
         b.near = near;
         const rg = b.u.hover > 0 ? Math.min(R(b), b.u.hover) : R(b); // hover: an airship flies in closer than its range
+        // an arrow drawn by the player (Factions devtest): b.guide = [{ x, y }, ...]. The body walks the points in turn,
+        // standing to fight only enemies already in its own range, then fights as usual from the last point on.
+        if (b.guide && b.guide.length) {
+          const p = b.guide[0], gx = p.x - b.x, gy = p.y - b.y, gd = hyp(gx, gy);
+          if (gd < 1.5) { b.guide.shift(); if (!b.guide.length) b.guide = null; continue; }
+          if (near && nd <= reachOf(b)) continue; // something in reach: stand and fight it
+          const step = b.u.speed * (b.slowT > 0 ? 1 - b.slowMove / 100 : 1) * (cripple[b.side] > 0 ? 1 - towerDown.move / 100 : 1) * dt;
+          if (b.hx === undefined) { b.hx = gx / gd; b.hy = gy / gd; }
+          const k = Math.min(1, TURN * dt);
+          let hx = b.hx + (gx / gd - b.hx) * k, hy = b.hy + (gy / gd - b.hy) * k, hl = hyp(hx, hy);
+          if (hl < 1e-6) { hx = gx / gd; hy = gy / gd; hl = 1; }
+          b.hx = hx / hl; b.hy = hy / hl;
+          const mv = Math.min(step, gd);
+          b.x += b.hx * mv; b.y += b.hy * mv; b.moved += mv;
+          if (b.u.windUp > 0 && mv > 0) { b.setUp = false; if (b.windTarget) { b.windTarget = null; stats[b.side].windLost++; } }
+          continue;
+        }
         if (near && nd > (g.stopPct > 0 && g.stopPct < 1 && b.engaged ? stopAt(rg) : rg)) {
           const step = b.u.speed * (b.slowT > 0 ? 1 - b.slowMove / 100 : 1) * (cripple[b.side] > 0 ? 1 - towerDown.move / 100 : 1) * dt;
           let mv;
@@ -1491,6 +1522,17 @@ const Engine = (() => {
               a.x -= minSep / 2 * ka; c.x += minSep / 2 * kc;
             }
           }
+        }
+      }
+      for (const s of strikes) {
+        if (s.done || t + 1e-9 < s.t) continue;
+        s.done = true;
+        if (opts.record) shots.push([s.x, s.y, s.x, s.y, s.side, s.r, 1, 0, 0]);
+        for (const f of sides[1 - s.side]) {
+          if (!f.alive || f.u.aloft || hyp(f.x - s.x, f.y - s.y) > s.r) continue;
+          const dmg = damageAfterDefense(s.dmg, f, g);
+          stats[s.side].dealt += Math.min(dmg, f.hp);
+          neutralDamage(f, dmg);
         }
       }
       // ongoing effects: poison, regeneration, shortsight wearing off, spawns
@@ -1719,7 +1761,7 @@ const Engine = (() => {
         v.convert = { side: v.side, squad: v.squad, xp: v.xp, dealt: v.dealt || 0 }; // what it earned for its old squad
         v.side = 1 - v.side; v.squad = CONVERT_SQUAD; v.xp = 0; v.dealt = 0; v.turning = false;
         v.windTarget = null; v.windT = 0; v.setUp = false; v.firing = -1; v.burstLeft = 0; v.trampleLeft = 0; v.trampled = null;
-        v.spinTarget = null; v.aims = null; v.lock = null; v.march = null; v.spreadTo = null; v.engaged = false; v.holdT = 0; v.delay = 0; v.band = null; v.hidden = false;
+        v.spinTarget = null; v.aims = null; v.lock = null; v.march = null; v.guide = null; v.spreadTo = null; v.engaged = false; v.holdT = 0; v.delay = 0; v.band = null; v.hidden = false;
         v.slowT = 0; v.slowMove = 0; v.slowAtk = 0; v.shrinkT = 0; v.shrinkM = 0; v.kids = null; v.stunT = 0; v.frenzy = 0;
         sides[v.side].push(v); stats[v.side].totalHp += v.hp;
         for (const b of all) {

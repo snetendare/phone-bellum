@@ -31,9 +31,16 @@ for (const fc of f.factions || []) {
   meta.push({ ...rest, units: units.map(u => u.name) });
   for (const u of units) fUnits.push({ ...u, faction: fc.id });
 }
+// neutral units (the Factions devtest): names from the standard roster, or full units; faction 'neutral'
+const nt = f.neutral || {};
+for (const x of nt.units || []) {
+  const u = typeof x === 'string' ? r.units.find(y => y.name === x) : x;
+  if (!u) throw new Error(`neutral unit ${x} isn't in src/default-roster.json`);
+  fUnits.push({ ...u, faction: 'neutral' });
+}
 const names = fUnits.map(u => u.name), dup = names.find((x, i) => names.indexOf(x) !== i);
-if (dup) throw new Error(`two faction units are called ${dup}: unit names must be unique across factions`);
-const ft = table('factions', 'src/faction-units.json', fUnits, fSkills, { factions: meta });
+if (dup) throw new Error(`two faction units are called ${dup}: unit names must be unique across factions and the neutral units`);
+const ft = table('factions', 'src/faction-units.json', fUnits, fSkills, { factions: meta, neutral: { buildings: nt.buildings || [], powers: nt.powers || [] }, spells: f.spells || [] });
 // each faction's average against every other faction
 meta.forEach((a) => {
   const A = ft.units.map((u, i) => u.faction === a.id ? i : -1).filter(i => i >= 0);

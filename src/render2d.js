@@ -2,7 +2,9 @@
 // It sees the game only through view(), which it calls at the start of every draw and which returns what this
 // screen shows right now:
 //   { m, me, phase, units, mode, bt, battlePre, fx, selected, moving, drag, hoverTile, rangeOf,
-//     editable, placingUnit, placingElf, placingTower, battleCam }
+//     editable, placingUnit, placingElf, placingTower, battleCam, dev }
+// dev (Factions devtest only): { bPlacing, castMode, guideMode, guideId, guide }: the building being placed, the spell being
+// cast, and the arrow being drawn (guide: its points so far, for squad guideId).
 // fx: short-lived battle effects as plain data (shots, flames, bolts, heals, deaths), in board metres.
 // rangeOf: { side, id } of the squad whose range shows as a dotted ring while deploying, or null.
 // battleCam: { zoom, x, y } while the battle cam zooms in on the final seconds of a fight (board metres), else null.
@@ -14,8 +16,8 @@
 const Render2D = (cv, view) => {
   let ctx = cv.getContext('2d'); // swapped for a moment while drawing map thumbnails (thumb)
   let m = null, me = 0, phase = 'start', units = [], mode = 'ai', bt = null, battlePre = null, fx = [], battleCam = null;
-  let selected = null, moving = null, drag = null, hoverTile = null, rangeOf = null, editable = false, placingUnit = null, placingElf = false, placingTower = false;
-  const pull = () => { ({ m, me, phase, units, mode, bt, battlePre, fx, selected, moving, drag, hoverTile, rangeOf, editable, placingUnit, placingElf, placingTower, battleCam } = view()); };
+  let selected = null, moving = null, drag = null, hoverTile = null, rangeOf = null, editable = false, placingUnit = null, placingElf = false, placingTower = false, dev = null;
+  const pull = () => { ({ m, me, phase, units, mode, bt, battlePre, fx, selected, moving, drag, hoverTile, rangeOf, editable, placingUnit, placingElf, placingTower, battleCam, dev } = view()); };
   const foe = () => 1 - me;
   const css = Art.css, tag = Shapes.tag;
   const { ELF_COL, SHROOM_COL, CHARM_COL } = Art;
@@ -321,6 +323,7 @@ const Render2D = (cv, view) => {
         ctx.strokeRect(x + 2.5, y + 2.5, t - 5, t - 5); ctx.setLineDash([]); ctx.globalAlpha = 1;
       }
     }
+    if (v && v.dev) devFloor(v, plain);
     if (plain) return;
     if (v && v.buff) for (const side of [0, 1]) { // Zoe's buff tiles: a gold tile with a star
       if (!charVisible(side)) continue;
@@ -341,6 +344,92 @@ const Render2D = (cv, view) => {
     ctx.strokeStyle = css('--you');
     ctx.beginPath(); ctx.moveTo(0, mine); ctx.lineTo(W, mine); ctx.stroke();
     ctx.setLineDash([]); ctx.globalAlpha = 1;
+  }
+
+  // ---------- Factions devtest: spells, arrows, the tower's tile, where things may go (on the floor, so the 3D board
+  // gets them too), and buildings ----------
+  const ZONE_COL = { burn: '#E07A4F', mend: '#7FCB8A', mud: '#9C8456', haste: '#E6D27A' };
+  function devFloor(v, plain) {
+    const t = tilePx(), deploying = phase === 'deploy';
+    for (const c of Game.activeCasts(v)) {
+      if (!Game.devShown(v, me, deploying, c.side, c.round)) continue;
+      const sp = Game.devSpell(c.id) || {}, team = teamCol(c.side);
+      if (sp.kind === 'zone') for (const tl of Game.castTiles(c)) {
+        const x = scol(tl.col) * t, y = srow(tl.row) * t;
+        ctx.fillStyle = ZONE_COL[sp.effect] || '#C9B79C'; ctx.globalAlpha = 0.3; ctx.fillRect(x, y, t, t);
+        ctx.globalAlpha = 0.7; ctx.strokeStyle = team; ctx.lineWidth = 1; ctx.setLineDash([3, 3]); ctx.strokeRect(x + 1.5, y + 1.5, t - 3, t - 3); ctx.setLineDash([]);
+      }
+      if (sp.kind === 'strike') { // where it will land: a dashed ring of its radius and a cross
+        const w = Game.tileToWorld(c.col, c.row), x = PX(w.x), y = PY(w.y), r = (+sp.radius || 6) * S;
+        ctx.strokeStyle = '#E8A15A'; ctx.globalAlpha = 0.85; ctx.lineWidth = 1.5; ctx.setLineDash([5, 4]);
+        ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
+        ctx.strokeStyle = team; ctx.beginPath(); ctx.moveTo(x - t * 0.25, y); ctx.lineTo(x + t * 0.25, y); ctx.moveTo(x, y - t * 0.25); ctx.lineTo(x, y + t * 0.25); ctx.stroke();
+      }
+      if (sp.kind === 'wall' && deploying) drawWallBlock(PX(Game.tileToWorld(c.col, c.row).x), PY(Game.tileToWorld(c.col, c.row).y), t, c.side, 1);
+    }
+    ctx.globalAlpha = 1;
+    // the tower's tile before the tower stands (rounds 1 and 2)
+    if (v.towers) for (const side of [0, 1]) if (v.towers[side] && !Game.towerUp(v, side)) {
+      const x = scol(v.towers[side].col) * t, y = srow(v.towers[side].row) * t;
+      ctx.strokeStyle = teamCol(side); ctx.globalAlpha = 0.55; ctx.lineWidth = 1.5; ctx.setLineDash([4, 4]); ctx.strokeRect(x + 4, y + 4, t - 8, t - 8); ctx.setLineDash([]);
+      ctx.fillStyle = teamCol(side); ctx.font = `600 ${Math.max(8, Math.round(t * 0.24))}px "IBM Plex Mono", monospace`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('R' + Game.TOWER_PICK_ROUND, x + t / 2, y + t / 2); ctx.globalAlpha = 1;
+    }
+    if (plain || !deploying) return;
+    // your arrows, and the one being drawn
+    for (const sq of v.armies[me]) if (sq.guide && !(dev && dev.guideId === sq.id)) drawArrow(sq, sq.guide, 0.75);
+    if (dev && dev.guideId != null && dev.guide) { const sq = v.armies[me].find(q => q.id === dev.guideId); if (sq) drawArrow(sq, dev.guide, 1); }
+    if (!dev || !editable) return;
+    if (dev.bPlacing != null) { // where the building may go
+      const b = Game.buildingsOf(v, me).find(x => x.key === dev.bPlacing), d = b && Game.devBuilding(b.id);
+      ctx.strokeStyle = css('--gold'); ctx.globalAlpha = 0.6; ctx.lineWidth = 1.5;
+      if (b) for (let row = 0; row < Game.ROWS; row++) for (let c = 0; c < Game.COLS; c++) if (Game.buildingSpotOk(v, me, d, c, row, b.key)) ctx.strokeRect(scol(c) * t + 3, srow(row) * t + 3, t - 6, t - 6);
+    }
+    if (dev.castMode) { // where the spell may go
+      const sp = Game.devSpell(dev.castMode);
+      ctx.strokeStyle = '#E8A15A'; ctx.globalAlpha = 0.35; ctx.lineWidth = 1;
+      for (let row = 0; row < Game.ROWS; row++) for (let c = 0; c < Game.COLS; c++) if (Game.castSpotOk(v, me, sp, c, row)) ctx.strokeRect(scol(c) * t + 4, srow(row) * t + 4, t - 8, t - 8);
+    }
+    ctx.globalAlpha = 1;
+  }
+  // a squad's arrow: from its tile through its points, with a head at the end
+  function drawArrow(sq, pts, a) {
+    const t = tilePx(), at = (p) => [(scol(p.col) + 0.5) * t, (srow(p.row) + 0.5) * t];
+    const list = [sq, ...pts].map(at).filter((p, i, l) => !i || p[0] !== l[i - 1][0] || p[1] !== l[i - 1][1]);
+    if (list.length < 2) return;
+    ctx.strokeStyle = css('--you'); ctx.fillStyle = css('--you'); ctx.globalAlpha = a; ctx.lineWidth = Math.max(2, t * 0.08); ctx.lineJoin = 'round'; ctx.setLineDash([t * 0.18, t * 0.12]);
+    ctx.beginPath(); ctx.moveTo(...list[0]); for (const p of list.slice(1)) ctx.lineTo(...p); ctx.stroke(); ctx.setLineDash([]);
+    const [x2, y2] = list[list.length - 1], [x1, y1] = list[list.length - 2], ang = Math.atan2(y2 - y1, x2 - x1), h = t * 0.32;
+    ctx.beginPath(); ctx.moveTo(x2, y2); ctx.lineTo(x2 - h * Math.cos(ang - 0.5), y2 - h * Math.sin(ang - 0.5)); ctx.lineTo(x2 - h * Math.cos(ang + 0.5), y2 - h * Math.sin(ang + 0.5)); ctx.closePath(); ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+  // a lesser building: a small house in its faction's colour with a roof in its side's colour (hpr: health left in a fight)
+  function drawBuilding(x, y, t, side, u, hpr, fresh) {
+    const s = t * 0.62, c = teamCol(side);
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = u.color || '#B7AE9C'; ctx.strokeStyle = c; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.rect(x - s / 2, y - s * 0.2, s, s * 0.62); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = c; ctx.beginPath(); ctx.moveTo(x - s * 0.62, y - s * 0.18); ctx.lineTo(x, y - s * 0.62); ctx.lineTo(x + s * 0.62, y - s * 0.18); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = css('--bg'); ctx.fillRect(x - s * 0.1, y + s * 0.12, s * 0.2, s * 0.3);
+    if (hpr != null) { ctx.strokeStyle = c; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, t * 0.5, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * hpr); ctx.stroke(); }
+    if (fresh) { ctx.strokeStyle = c; ctx.setLineDash([3, 3]); ctx.lineWidth = 1; ctx.strokeRect(x - t / 2 + 1.5, y - t / 2 + 1.5, t - 3, t - 3); ctx.setLineDash([]); }
+    if (t >= 26 && u.name) { ctx.font = `500 ${Math.max(8, Math.round(t * 0.24))}px "IBM Plex Mono", monospace`; ctx.fillStyle = css('--ink'); ctx.textAlign = 'center'; ctx.textBaseline = 'bottom'; ctx.globalAlpha = 0.85; ctx.fillText(tag(u), x, y + t / 2 - 1); ctx.globalAlpha = 1; }
+  }
+  // a wall (spell): a row of stakes
+  function drawWallBlock(x, y, t, side, hpr) {
+    const s = t * 0.8;
+    ctx.fillStyle = '#9C7E58'; ctx.strokeStyle = teamCol(side); ctx.lineWidth = 1.5; ctx.globalAlpha = 0.5 + 0.5 * hpr;
+    for (let k = 0; k < 4; k++) { const sx = x - s / 2 + k * s / 4; ctx.beginPath(); ctx.moveTo(sx + 1, y + s * 0.3); ctx.lineTo(sx + 1, y - s * 0.2); ctx.lineTo(sx + s / 8, y - s * 0.38); ctx.lineTo(sx + s / 4 - 1, y - s * 0.2); ctx.lineTo(sx + s / 4 - 1, y + s * 0.3); ctx.closePath(); ctx.fill(); ctx.stroke(); }
+    ctx.globalAlpha = 1;
+  }
+  // the buildings this screen may see while deploying (an opponent's new one only from the fight on)
+  function drawBuildings() {
+    const t = tilePx();
+    for (const side of [me, foe()]) for (const b of Game.placedBuildings(m, side)) {
+      if (!Game.devShown(m, me, phase === 'deploy', side, b.round)) continue;
+      const at = drag && drag.bkey === b.key && drag.moved && side === me ? drag.over : b;
+      drawBuilding((scol(at.col) + 0.5) * t, (srow(at.row) + 0.5) * t, t, side, Game.buildingUnit(m, side, b), null, side === me && b.round === m.round);
+    }
   }
 
   function drawSquad(sq, side, fresh) {
@@ -507,7 +596,8 @@ const Render2D = (cv, view) => {
     // a squad they moved this round still shows on its old tile
     for (const sq of m.armies[foe()]) if ((sq.round < m.round || phase !== 'deploy') && !Game.hiddenFromFoe(m, sq)) {
       const p = phase === 'deploy' ? Game.seenAt(m, sq) : sq;
-      drawSquad(phase === 'deploy' ? { ...sq, col: p.col, row: p.row, level: Game.seenLevel(m, sq) } : sq, foe(), false); // a level-up bought this round stays hidden
+      const look = Game.shownUnit(m, me, foe(), sq.unit); // a disguised unit shows as what it pretends to be
+      drawSquad(phase === 'deploy' ? { ...sq, unit: look, col: p.col, row: p.row, level: Game.seenLevel(m, sq) } : { ...sq, unit: look }, foe(), false); // a level-up bought this round stays hidden
     }
     for (const sq of m.armies[me]) {
       if (phase === 'deploy' && sq.from && sq.movedRound === m.round) { // where your moved squad came from
@@ -529,7 +619,8 @@ const Render2D = (cv, view) => {
         ctx.strokeRect(scol(sq.col) * t + 1, srow(sq.row) * t + 1, t - 2, t - 2);
       }
     }
-    for (const side of [me, foe()]) if (towerVisible(side)) drawTowerTile(side);
+    for (const side of [me, foe()]) if (towerVisible(side) && Game.towerUp(m, side)) drawTowerTile(side);
+    if (Game.isDev(m)) drawBuildings();
     // the squad tapped last: its range as a dotted ring round its tile (theirs as you can know it)
     const rs = rangeOf && phase === 'deploy' && m.armies[rangeOf.side].find(s => s.id === rangeOf.id);
     if (rs) {
@@ -580,6 +671,8 @@ const Render2D = (cv, view) => {
     for (const b of bt.bodies) {
       if (!b.alive || !b.u.structure) continue;
       const hpr = b.hp / b.u.hp, t = tilePx();
+      if (b.u.kind === 'wall') { drawWallBlock(PX(b.x), PY(b.y), t, b.side, hpr); continue; }
+      if (b.u.building) { drawBuilding(PX(b.x), PY(b.y), t, b.side, b.u, hpr, false); continue; }
       drawKeep(PX(b.x), PY(b.y), t, b.side, hpr, b.u.kind, null, Game.charOf(battlePre || m, b.side));
       ctx.strokeStyle = teamCol(b.side); ctx.lineWidth = 2;
       ctx.beginPath(); ctx.arc(PX(b.x), PY(b.y), t * 0.5, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * hpr); ctx.stroke();
@@ -595,7 +688,8 @@ const Render2D = (cv, view) => {
         ctx.setLineDash([]); ctx.globalAlpha = 1;
         continue;
       }
-      Shapes.body(ctx, b.u.shape, PX(b.x), PY(b.y), r, upOf(b.side), b.u.color, c, (0.35 + 0.65 * hpr) * (b.delay > 0 ? 0.45 : 1));
+      const lk = b.mask && b.side !== me && !b.revealed ? b.mask : b.u; // a disguise, until its first attack (devtest)
+      Shapes.body(ctx, lk.shape, PX(b.x), PY(b.y), r, upOf(b.side), lk.color, c, (0.35 + 0.65 * hpr) * (b.delay > 0 ? 0.45 : 1));
       if (b.delay > 0) { // flank squads arrive a few seconds late: a shrinking ring shows the wait
         ctx.strokeStyle = css('--gold'); ctx.lineWidth = 1.5;
         ctx.beginPath(); ctx.arc(PX(b.x), PY(b.y), r + 3, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * b.delay / Game.FLANK.delay); ctx.stroke();

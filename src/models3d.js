@@ -296,6 +296,12 @@ const Models3D = (THREE) => {
       door(-1.75, 0.8, 1.1), ...flagOn(9.0)],
   };
   for (const [k, f] of Object.entries(TOWERS)) BUILD['tower:' + k] = f;
+  // Factions devtest: a lesser building (a small workshop in its faction's colour, a roof in the team colour) and a
+  // wall raised by a spell (a row of sharpened stakes). Placeholders until the buildings get their own models.
+  BUILD.building = () => [P(box(3.0, 2.0, 2.6), 'tint', [0, 1.0, 0]), P(cone(2.4, 1.6, 4), 'team', [0, 2.8, 0], [0, Math.PI / 4, 0]),
+    P(box(0.7, 1.1, 0.15), DARK, [0, 0.55, -1.32]), P(cyl(0.25, 0.25, 1.2, 6), STONE, [0.9, 3.0, 0.5]), ...flagOn(3.4)];
+  BUILD.wall = () => [...[-1.5, -0.75, 0, 0.75, 1.5].map((x, k) => P(cyl(0.32, 0.32, 2.2 + (k % 2) * 0.3, 6), WOOD, [x, 1.1 + (k % 2) * 0.15, 0])),
+    ...[-1.5, -0.75, 0, 0.75, 1.5].map((x, k) => P(cone(0.32, 0.6, 6), '#B79A6E', [x, 2.5 + (k % 2) * 0.3, 0])), P(box(3.6, 0.25, 0.2), 'team', [0, 1.4, -0.3])];
 
   const NAMED = { 'Ether Golem': 'golem', 'Sun Priest': 'sunPriest', 'Meteor Caller': 'meteor', 'War Mammoth': 'mammoth', 'Necromancer': 'necro', 'Truespear': 'truespear',
     'Ent': 'ent', 'Rogue': 'rogue', 'Sniper': 'sniper', 'Slimeshots': 'slimeshot', 'Skeleton Archers': 'skeleton',
@@ -303,6 +309,7 @@ const Models3D = (THREE) => {
   const RANGED = 12; // metres: from this range on, a unit is drawn as an archer or a caster
   function kindOf(u) {
     if (u.spire) return 'spire';
+    if (u.structure && (u.kind === 'building' || u.kind === 'wall')) return u.kind;
     if (u.structure) return TOWERS[u.kind] ? 'tower:' + u.kind : /^f-/.test(u.kind || '') ? 'tower:faction' : 'tower:keep';
     if (u.aloft) return 'airship';
     if (NAMED[u.name]) return NAMED[u.name];

@@ -943,7 +943,7 @@ const Engine = (() => {
         v.x = v.u.teleport.x; v.y = v.u.teleport.y;
         return;
       }
-      if (v.u.structure) cripple[v.side] = towerDown.secs;
+      if (v.u.structure && !v.u.building) cripple[v.side] = towerDown.secs; // a lesser building (Factions devtest) doesn't cripple its side
       if (v.u.deathBlast > 0) {
         const dmg = v.u.hp * v.u.deathBlast / 100, rad = v.u.blastAt > 0 ? v.u.blastAt : BLAST_RADIUS;
         if (opts.record) shots.push([v.x, v.y, v.x, v.y, v.side, rad, 1, 0, 0]);
@@ -1016,6 +1016,9 @@ const Engine = (() => {
     // Each is { x0, x1, y0, y1 (world rectangle), type: 'speed' | 'toxic' | 'hail', ...settings }.
     // 'hail' is different: it hurts every unit standing in it, every tick (dps), unless the unit is hailImmune.
     const tiles = opts.tiles || [];
+    // timed strikes (Factions devtest spells): { t, x, y, r, dmg, side }: at fight time t, dmg to every enemy of side
+    // within r metres of (x, y), armor counting. Each fires once.
+    const strikes = (opts.strikes || []).map(s => ({ ...s, done: false }));
     let projectiles = [];
     let t = 0, shots = [], over = false, tick = 0;
     const dist = (a, b) => hyp(a.x - b.x, a.y - b.y);
@@ -1059,10 +1062,21 @@ const Engine = (() => {
     // a unit is on a map tile: its effect, once per unit and tile type
     function onTile(b, tl) {
       if (tl.type === 'hail') { if (!b.u.hailImmune) { neutralDamage(b, tl.dps * dt); b.hailT = tick; } return; }
+      // spell zones (Factions devtest), every tick while the unit stands in them; tl.side is the caster:
+      // burn hurts the caster's enemies, mend heals the caster's units, mud slows the caster's enemies
+      if (tl.type === 'burn') { if (b.side !== tl.side) neutralDamage(b, tl.dps * dt); return; }
+      if (tl.type === 'mend') { if (b.side === tl.side && b.hp < b.u.hp) b.hp = Math.min(b.u.hp, b.hp + tl.dps * healMul * dt); return; }
+      if (tl.type === 'mud') {
+        if (b.side === tl.side) return;
+        if (!(b.slowT > 0)) { b.slowMove = 0; b.slowAtk = 0; }
+        b.slowMove = Math.max(b.slowMove, tl.slow); b.slowT = Math.max(b.slowT, 0.25); // wears off a moment after it walks out
+        return;
+      }
+      if (tl.type === 'haste' && b.side !== tl.side) return; // only the caster's units speed up
       const seen = b.tilesHit || (b.tilesHit = {});
       if (seen[tl.type]) return;
       seen[tl.type] = true;
-      if (tl.type === 'speed') { b.u = { ...b.u, speed: b.u.speed * (1 + tl.speed / 100) }; b.fast = true; }
+      if (tl.type === 'speed' || tl.type === 'haste') { b.u = { ...b.u, speed: b.u.speed * (1 + tl.speed / 100) }; b.fast = true; }
       if (tl.type === 'toxic') {
         (b.poison || (b.poison = [])).push({ src: null, dps: b.u.hp * tl.poisonPct / 100, t: tl.poisonDur });
         // slime units get it the other way round: the poison heals them (see the ongoing effects) and the slow speeds them up
@@ -1242,7 +1256,7 @@ const Engine = (() => {
       const charged = canCharge && b.u.charge > 1 && b.moved >= CHARGE_RUN;
       b.moved = 0;
       if (!b.u.aloft) b.hidden = false; // attacking gives a stealth unit away (it hides again after STEALTH_BACK s without attacking); an airship stays out of reach
-      b.lastAtk = t;
+      b.lastAtk = t; b.revealed = true; // a disguised body (b.mask) shows what it is from its first attack
       if (b.u.healPct > 0) {
         // heal a random wounded ally (not itself)
         const hurtAllies = sides[b.side].filter(a => a.alive && a !== b && a.hp < a.u.hp);
@@ -1411,6 +1425,23 @@ const Engine = (() => {
         }
         b.near = near;
         const rg = b.u.hover > 0 ? Math.min(R(b), b.u.hover) : R(b); // hover: an airship flies in closer than its range
+        // an arrow drawn by the player (Factions devtest): b.guide = [{ x, y }, ...]. The body walks the points in turn,
+        // standing to fight only enemies already in its own range, then fights as usual from the last point on.
+        if (b.guide && b.guide.length) {
+          const p = b.guide[0], gx = p.x - b.x, gy = p.y - b.y, gd = hyp(gx, gy);
+          if (gd < 1.5) { b.guide.shift(); if (!b.guide.length) b.guide = null; continue; }
+          if (near && nd <= reachOf(b)) continue; // something in reach: stand and fight it
+          const step = b.u.speed * (b.slowT > 0 ? 1 - b.slowMove / 100 : 1) * (cripple[b.side] > 0 ? 1 - towerDown.move / 100 : 1) * dt;
+          if (b.hx === undefined) { b.hx = gx / gd; b.hy = gy / gd; }
+          const k = Math.min(1, TURN * dt);
+          let hx = b.hx + (gx / gd - b.hx) * k, hy = b.hy + (gy / gd - b.hy) * k, hl = hyp(hx, hy);
+          if (hl < 1e-6) { hx = gx / gd; hy = gy / gd; hl = 1; }
+          b.hx = hx / hl; b.hy = hy / hl;
+          const mv = Math.min(step, gd);
+          b.x += b.hx * mv; b.y += b.hy * mv; b.moved += mv;
+          if (b.u.windUp > 0 && mv > 0) { b.setUp = false; if (b.windTarget) { b.windTarget = null; stats[b.side].windLost++; } }
+          continue;
+        }
         if (near && nd > (g.stopPct > 0 && g.stopPct < 1 && b.engaged ? stopAt(rg) : rg)) {
           const step = b.u.speed * (b.slowT > 0 ? 1 - b.slowMove / 100 : 1) * (cripple[b.side] > 0 ? 1 - towerDown.move / 100 : 1) * dt;
           let mv;
@@ -1492,6 +1523,17 @@ const Engine = (() => {
               a.x -= minSep / 2 * ka; c.x += minSep / 2 * kc;
             }
           }
+        }
+      }
+      for (const s of strikes) {
+        if (s.done || t + 1e-9 < s.t) continue;
+        s.done = true;
+        if (opts.record) shots.push([s.x, s.y, s.x, s.y, s.side, s.r, 1, 0, 0]);
+        for (const f of sides[1 - s.side]) {
+          if (!f.alive || f.u.aloft || hyp(f.x - s.x, f.y - s.y) > s.r) continue;
+          const dmg = damageAfterDefense(s.dmg, f, g);
+          stats[s.side].dealt += Math.min(dmg, f.hp);
+          neutralDamage(f, dmg);
         }
       }
       // ongoing effects: poison, regeneration, shortsight wearing off, spawns
@@ -1720,7 +1762,7 @@ const Engine = (() => {
         v.convert = { side: v.side, squad: v.squad, xp: v.xp, dealt: v.dealt || 0 }; // what it earned for its old squad
         v.side = 1 - v.side; v.squad = CONVERT_SQUAD; v.xp = 0; v.dealt = 0; v.turning = false;
         v.windTarget = null; v.windT = 0; v.setUp = false; v.firing = -1; v.burstLeft = 0; v.trampleLeft = 0; v.trampled = null;
-        v.spinTarget = null; v.aims = null; v.lock = null; v.march = null; v.spreadTo = null; v.engaged = false; v.holdT = 0; v.delay = 0; v.band = null; v.hidden = false;
+        v.spinTarget = null; v.aims = null; v.lock = null; v.march = null; v.guide = null; v.spreadTo = null; v.engaged = false; v.holdT = 0; v.delay = 0; v.band = null; v.hidden = false;
         v.slowT = 0; v.slowMove = 0; v.slowAtk = 0; v.shrinkT = 0; v.shrinkM = 0; v.kids = null; v.stunT = 0; v.frenzy = 0;
         sides[v.side].push(v); stats[v.side].totalHp += v.hp;
         for (const b of all) {
@@ -1823,7 +1865,7 @@ const Game = (() => {
   // Gold both players get at the start of a round: 250 going into round 2, then 100 more each round (like Mechabellum)
   const incomeFor = (round) => INCOME + CONFIG.incomeStep * Math.max(0, round - 2);
   const deploysAllowed = (m, side) => CONFIG.deployCap
-    ? (m.round === 1 ? CONFIG.firstRoundDeploys : CONFIG.deploysPerRound) + m.extraDeploys[side]
+    ? (m.round === 1 ? CONFIG.firstRoundDeploys : CONFIG.deploysPerRound) + m.extraDeploys[side] + devDeploys(m, side)
     : Infinity;
   const deployedThisRound = (m, side) => m.armies[side].filter(s => s.round === m.round && !s.free).length; // package squads don't count
   const deploysLeft = (m, side) => deploysAllowed(m, side) - deployedThisRound(m, side);
@@ -2564,6 +2606,8 @@ const Game = (() => {
     const r = rng((seed >>> 0) + 777);
     const factions = opts && Array.isArray(opts.factions) && opts.factions.length === 2 && opts.factions.every(Array.isArray) ? opts.factions.map(f => f.map(String)) : null;
     if (factions) mapId = FACTION_MODE.map;
+    const dev = !!(opts && opts.dev);
+    if (dev) mapId = DEV.map;
     useGrid(rollMap(seed >>> 0, mapId, lastMapId).id); // the board this match is on, before anything is placed on it
     let off = factions ? [] : ((opts && opts.offUnits) || []).filter((ui, k, a) => Number.isInteger(ui) && ui >= 0 && ui < units.length && a.indexOf(ui) === k);
     if (units.length - off.length < 2) off = [];
@@ -2595,6 +2639,7 @@ const Game = (() => {
       mageGen: [null, null], // the mage generals each player called this round: { round, id, tp } (Mage tower)
       mapFree: [{}, {}], // Blixten's discounted map purchase per round (see mapFreeOf)
       factions, // Factions mode: each player's drafted faction ids (null = a normal match)
+      dev: dev ? { picks: [[], []], buildings: [[], []], casts: [], nextKey: 1 } : null, // the Factions devtest (see DEV)
     };
     m.towers = [towerSpot(m, 0), towerSpot(m, 1)];
     return m;
@@ -2641,6 +2686,7 @@ const Game = (() => {
     if (charOf(m, side) === 'mubarak' && base && SLIME_UNITS.includes(base.name)) defs.push(...slimeSkillDefs(m, side, ui));
     let u = defs.length ? E.applySkills(base, defs, m.units) : base;
     u = withFactionTrait(u, base && base.faction);
+    u = withPowers(m, side, u, base);
     if (base && SLIME_UNITS.includes(base.name)) u = { ...u, slime: true }; // poison heals slime units
     if (charOf(m, side) === 'noah') { // Noah: 10% less health and damage, spawned ones too
       const k = 1 - CHAR.noahCut / 100;
@@ -2787,7 +2833,7 @@ const Game = (() => {
   }
 
   const towerAt = (m, side, col, row) => !!(m.towers && m.towers[side] && m.towers[side].col === col && m.towers[side].row === row);
-  const occupied = (m, side, col, row) => towerAt(m, side, col, row) || elfOwnAt(m, side, col, row) || m.armies[side].some(s => s.col === col && s.row === row);
+  const occupied = (m, side, col, row) => towerAt(m, side, col, row) || elfOwnAt(m, side, col, row) || m.armies[side].some(s => s.col === col && s.row === row) || devOccupied(m, side, col, row);
   const needsTower = (m, side) => !!(m.towers && !m.towers[side]);
   // the tower can be placed (or moved) during round 1 only
   function placeTower(m, side, col, row) {
@@ -2870,7 +2916,13 @@ const Game = (() => {
       if (zoe) { const zb = zoeBuff(m, side); u = { ...u, hit: u.hit * (1 + zb.dmg / 100), hp: u.hp * (1 + zb.hp / 100), aps: u.aps * (1 + zb.aps / 100) }; }
       if (eagle && u.name === 'Sniper') u = { ...u, range: u.range + TOWER_SKILL.eagleRange, aps: u.aps * (1 + TOWER_SKILL.eagleAps / 100) };
       if (mp && mp.rangeCut && u.range > mp.rangeKeep) u = { ...u, range: Math.max(mp.rangeKeep, u.range * (1 - mp.rangeCut / 100)) }; // the map shortens reach (never below rangeKeep)
+      const aura = isDev(m) ? auraFor(m, side, sq.col, sq.row) : null; // devtest: a building's aura
+      if (aura) u = modUnit(u, aura);
       const b = E.buildSquad(u, side, w.x, w.y, sq.id, TILE, idx, sq.level);
+      if (aura) for (const x of b) x.aura = true;
+      const dis = isDev(m) && m.units[sq.unit].disguise ? m.units.find(x => x.name === m.units[sq.unit].disguise) : null; // devtest: a disguise, until its first attack
+      if (dis) { const mask = { name: dis.name, shape: dis.shape, color: dis.color, bodies: dis.bodies, range: dis.range }; for (const x of b) x.mask = mask; }
+      if (isDev(m) && sq.guide && sq.guide.length && !isRider(sq)) for (const x of b) x.guide = sq.guide.map(p => tileToWorld(p.col, p.row)); // devtest: the squad's arrow
       if (airship && u.name === 'Sniper') { const su = { ...b[0].u, hit: b[0].u.hit + AIRSHIP.sniperHit }; for (const x of b) x.u = su; } // flat, after levels
       if (home) for (const x of b) x.band = { ...home };
       if (zoe) for (const x of b) x.zoe = true; // for the rising-stars effect
@@ -2887,7 +2939,7 @@ const Game = (() => {
       for (const x of out) if (x.squad === sq.id) { if (c) { x.boarded = true; x.alive = false; x.carrier = c; x.x = c.x; x.y = c.y; x.delay = 0; } }
     }
     const t = m.towers && m.towers[side];
-    if (t) {
+    if (t && towerUp(m, side)) {
       let tu = mageTowerUnit(m, side, towerType(m, side).unit);
       if (towerType(m, side).id === 'slime') tu = { ...slimeTowerUnit(m, side, tu), slime: true };
       if (towerSkill2On(m, side, 'bastion')) tu = { ...tu, moat: { ...MOAT } };
@@ -2918,6 +2970,20 @@ const Game = (() => {
         const ab = E.buildSquad(au, side, aw.x, aw.y, -4, TILE, idx);
         idx += ab.length; out.push(...ab);
       }
+    }
+    // devtest: lesser buildings and walls (spells) stand on their tiles; squad ids BUILDING_SQ - key, WALL_SQ - cast index
+    if (isDev(m)) {
+      for (const bd of placedBuildings(m, side)) {
+        const w = tileToWorld(bd.col, bd.row), bb = E.buildSquad(buildingUnit(m, side, bd), side, w.x, w.y, BUILDING_SQ - bd.key, TILE, idx);
+        idx += bb.length; out.push(...bb);
+      }
+      casts(m).forEach((c, k) => {
+        const sp = devSpell(c.id) || {};
+        if (c.side !== side || sp.kind !== 'wall' || !castActive(m, c)) return;
+        const wu = E.withTraits({ name: sp.name || 'Wall', cost: 0, bodies: 1, hp: +sp.hp || 600, hit: 0, aps: 1, range: 0, speed: 0, splash: 0, shape: 'square', color: '#9C8F7A', structure: true, building: true, kind: 'wall', level: 0 });
+        const w = tileToWorld(c.col, c.row), wb = E.buildSquad(wu, side, w.x, w.y, WALL_SQ - k, TILE, idx);
+        idx += wb.length; out.push(...wb);
+      });
     }
     // Snowgres stand on their own tiles in no man's land; squad ids -10, -11, ... (not squads in the army)
     snowgres(m, side).forEach((sg, k) => {
@@ -2994,6 +3060,7 @@ const Game = (() => {
     settleTowerPicks(m);
     ensurePack(m, 0); ensurePack(m, 1);
     ensureCharm(m, 0); ensureCharm(m, 1);
+    settleDev(m);
     const mp = mapOf(m), elf = elfSpot(m);
     let g = { ...SETTINGS, bounds: { ...BOUNDS }, ...(mp && mp.healMul ? { healMul: mp.healMul } : {}) };
     if (m.rules) g = { ...g, rules: m.rules }; // the roster's rules (a Counter Lab roster can switch mechanics off)
@@ -3005,9 +3072,12 @@ const Game = (() => {
         : { type: 'toxic', poisonPct: SHROOM.poisonPct, poisonDur: SHROOM.poisonDur, slowMove: SHROOM.slowMove, slowAtk: SHROOM.slowAtk, slowDur: SHROOM.slowDur, x0: w.x - T2, x1: w.x + T2, y0: w.y - T2, y1: w.y + T2 });
     }
     for (const h of hailTiles(m)) { const w = tileToWorld(h.col, h.row); tiles.push({ type: 'hail', dps: ICE.hailDps, x0: w.x - T2, x1: w.x + T2, y0: w.y - T2, y1: w.y + T2 }); }
+    const fx = isDev(m) ? castEffects(m) : { tiles: [], strikes: [] }; // devtest spells
+    tiles.push(...fx.tiles);
+    if (isDev(m) && DEV.awareness) g = { ...g, aware2: true };
     const neutrals = elf ? [{ u: elfUnit(m), x: elf.x, y: elf.y, friends: [bribeLeader(m) === 0, bribeLeader(m) === 1] }] : [];
     for (const side of [0, 1]) { const e = elfOwnOf(m, side); if (e) { const w = tileToWorld(e.col, e.row); neutrals.push({ u: elfUnit(m), x: w.x, y: w.y, friends: [side === 0, side === 1], side }); } }
-    return E.createBattle(bodiesFor(m, 0), bodiesFor(m, 1), g, { record: true, tiles, neutrals, charm: [charmMap(m, 0), charmMap(m, 1)] });
+    return E.createBattle(bodiesFor(m, 0), bodiesFor(m, 1), g, { record: true, tiles, strikes: fx.strikes, neutrals, charm: [charmMap(m, 0), charmMap(m, 1)] });
   }
 
   // Damage a side deals = points of its squads, scaled by how much of each squad is still alive.
@@ -3087,6 +3157,20 @@ const Game = (() => {
       return Object.keys(by).map(key => ({ key, dealt: Math.round(by[key]), ...(key === 'tower' ? { name: towerType(m, sd).name } : {}) }));
     });
     const summary = { round: m.round, winner: roundWinner, timeout: res.timeout, dmg, time: res.time, newlyReady, squads, towerFell, gentlemen, converted: res.converted || [0, 0], dealtBy };
+    // devtest: buildings destroyed in the fight cost their owner what their onDestroyed says (health now, gold below)
+    if (isDev(m)) {
+      summary.devLoss = [0, 1].map(sd => {
+        const out = { hp: 0, gold: 0, fell: [] };
+        for (const bd of placedBuildings(m, sd)) {
+          const q = res.squads[sd + ':' + (BUILDING_SQ - bd.key)];
+          if (!q || q.alive > 0) continue;
+          const od = (devBuilding(bd.id) || {}).onDestroyed || {};
+          out.hp += Math.max(0, Math.round(+od.hp || 0)); out.gold += Math.max(0, Math.round(+od.gold || 0)); out.fell.push(bd.id);
+        }
+        m.hp[sd] = Math.max(0, m.hp[sd] - out.hp);
+        return out;
+      });
+    }
     m.history.push(summary);
     if (m.hp[0] <= 0 || m.hp[1] <= 0) {
       m.over = true;
@@ -3104,6 +3188,10 @@ const Game = (() => {
     summary.income = income;
     summary.felix = [0, 1].map(sd => felixGold(m, sd));
     for (const sd of [0, 1]) m.gold[sd] += summary.felix[sd];
+    if (isDev(m)) { // devtest: Powers' gold and buildings' income in, destroyed buildings' gold out
+      summary.devGold = [0, 1].map(sd => devGold(m, sd));
+      for (const sd of [0, 1]) m.gold[sd] = Math.max(0, m.gold[sd] + summary.devGold[sd] - summary.devLoss[sd].gold);
+    }
     const loser = dmg[0] > dmg[1] ? 0 : dmg[1] > dmg[0] ? 1 : -1;
     if (loser >= 0) m.gold[loser] += LOSER_BONUS;
     summary.bonusTo = loser;
@@ -3192,15 +3280,14 @@ const Game = (() => {
   // the tower types a player can pick in a Factions match: one per drafted faction
   const factionTowers = (m, side) => factionsOf(m, side).map(id => factionInfo(id)).filter(Boolean).map(f => f.tower);
   // whether a player may use unit ui: always in a normal match; in a Factions match only units of their factions
-  const ownsUnit = (m, side, ui) => !(m && m.factions) || !!(m.units[ui] && factionsOf(m, side).includes(m.units[ui].faction));
+  const ownsUnit = (m, side, ui) => !(m && m.factions) || !!(m.units[ui] && (factionsOf(m, side).includes(m.units[ui].faction)
+    || (m.units[ui].faction === 'neutral' && pickedIds(m, side, 'neutral').includes(m.units[ui].name)))); // devtest: neutral units picked
+
   // a faction's trait on one of its units (spawned units too)
   function withFactionTrait(u, fid) {
     const t = fid && factionInfo(fid) && factionInfo(fid).trait;
     if (!u || !t) return u;
-    const mul = (x) => { const o = { ...x }; for (const k of TRAIT_STATS) if (isFinite(+t[k]) && +t[k]) o[k] = x[k] * (1 + t[k] / 100); return o; };
-    const out = mul(u);
-    if (u.spawn && u.spawn.unit) out.spawn = { ...u.spawn, unit: mul(u.spawn.unit) };
-    return out;
+    return modUnit(u, t);
   }
   // the roster for a match between drafted factions: the faction units of `ids` (in that order) out of the full
   // faction set ({ units, matrix, skills } from faction-units.json), with the counter table cut to match
@@ -3211,8 +3298,9 @@ const Game = (() => {
   }
   // ---- the draft ----
   // first: the player who drafts first (0 or 1). pool (optional): faction ids that can be drafted (default: all)
-  function createDraft(first, pool) {
-    return { first: first ? 1 : 0, pool: (pool || FACTIONS.map(f => f.id)).slice(), step: 0, picks: [[], []], bans: [[], []] };
+  // shared: both players may draft the same faction (the devtest, while there are few factions)
+  function createDraft(first, pool, shared) {
+    return { first: first ? 1 : 0, pool: (pool || FACTIONS.map(f => f.id)).slice(), step: 0, picks: [[], []], bans: [[], []], ...(shared ? { shared: true } : {}) };
   }
   const draftDone = (d) => !d || d.step >= FACTION_MODE.order.length;
   // whose turn it is and what they do, or null when the draft is over
@@ -3222,7 +3310,12 @@ const Game = (() => {
     return { side: o.who === 'A' ? d.first : 1 - d.first, act: o.act };
   }
   const draftTaken = (d) => [...d.picks[0], ...d.picks[1], ...d.bans[0], ...d.bans[1]];
-  const draftOpen = (d) => d.pool.filter(id => !draftTaken(d).includes(id));
+  // shared (devtest): a faction is only closed to a player who has it already (or banned)
+  const draftOpen = (d) => {
+    if (!d.shared) return d.pool.filter(id => !draftTaken(d).includes(id));
+    const t = draftTurn(d), mine = t ? d.picks[t.side] : [];
+    return d.pool.filter(id => !mine.includes(id) && !d.bans[0].includes(id) && !d.bans[1].includes(id));
+  };
   // enough factions for a draft: every pick and ban needs its own
   const draftPossible = (pool) => (pool || FACTIONS).length >= FACTION_MODE.order.length;
   function draftAct(d, side, id) {
@@ -3253,6 +3346,287 @@ const Game = (() => {
     return open[sc.indexOf(Math.max(...sc))];
   }
 
+  // ---------- Factions devtest ----------
+  // A test bed for the Factions mode while it is being designed (docs/FACTIONS-DEVTEST.md): the Test Grid board, a
+  // faction draft in which both players may take the same faction, no tower in rounds 1 and 2, and from round 2 a free
+  // pick every round of 1 out of 3 things that change your side of the board (DEV.schedule): lesser buildings, the
+  // Powertower (round 3: the usual tower pick), Powers and neutral units. Also spells (temporary map items, for gold),
+  // arrows that guide a squad, and units disguised as other units. m.dev holds it all; other matches have no m.dev.
+  const DEV = {
+    map: 'testgrid',
+    schedule: { 2: 'building', 3: 'tower' }, cycle: ['power', 'building', 'neutral'], // from round 4 the picks go round the cycle
+    offer: 3,          // options per pick
+    guideAll: true,    // every squad can get an arrow (false: only units with "guide": true)
+    guidePoints: 4,    // most points in one arrow
+    awareness: true,   // fights use the awareness prototype (see docs/AWARENESS.md)
+  };
+  const CAT_NAMES = { building: 'Lesser building', tower: 'Powertower', power: 'Power', neutral: 'Neutral unit' };
+  const BUILDING_SQ = -1000, WALL_SQ = -2000; // squad ids in fights: building key k is BUILDING_SQ - k, wall cast k is WALL_SQ - k
+  let DEVDATA = { buildings: [], powers: [], spells: [] };
+  // fd: faction-units.json ({ factions (with their buildings and powers), neutral: { buildings, powers }, spells })
+  function setDevData(fd) {
+    const own = (list, faction) => (Array.isArray(list) ? list : []).filter(x => x && typeof x.id === 'string' && x.id).map(x => ({ ...x, faction }));
+    const fs = (fd && fd.factions) || [], nt = (fd && fd.neutral) || {};
+    DEVDATA = {
+      buildings: [].concat(...fs.map(f => own(f.buildings, f.id)), own(nt.buildings, 'neutral')),
+      powers: [].concat(...fs.map(f => own(f.powers, f.id)), own(nt.powers, 'neutral')),
+      spells: own(fd && fd.spells, null),
+    };
+    return DEVDATA;
+  }
+  const devBuilding = (id) => DEVDATA.buildings.find(b => b.id === id) || null;
+  const devPower = (id) => DEVDATA.powers.find(p => p.id === id) || null;
+  const devSpell = (id) => DEVDATA.spells.find(s => s.id === id) || null;
+  const isDev = (m) => !!(m && m.dev);
+  // in the devtest the tower only stands from round 3 (its tile is reserved from the start)
+  const towerUp = (m, side) => !isDev(m) || m.round >= TOWER_PICK_ROUND;
+  // what the pick in a round is about (null: no pick that round)
+  const pickCat = (m, round = m.round) => DEV.schedule[round] || (round > TOWER_PICK_ROUND ? DEV.cycle[(round - TOWER_PICK_ROUND - 1) % DEV.cycle.length] : null);
+  const devPicks = (m, side) => (isDev(m) && m.dev.picks[side]) || [];
+  const pickedIds = (m, side, cat) => devPicks(m, side).filter(p => !cat || p.cat === cat).map(p => p.id);
+  // what a player could still pick in a category: their factions' things and the neutral ones
+  function pickPool(m, side, cat) {
+    const mine = factionsOf(m, side).concat('neutral'), had = pickedIds(m, side, cat);
+    if (cat === 'building') return DEVDATA.buildings.filter(b => mine.includes(b.faction) && !had.includes(b.id)).map(b => b.id);
+    if (cat === 'power') return DEVDATA.powers.filter(p => mine.includes(p.faction) && !had.includes(p.id)).map(p => p.id);
+    if (cat === 'neutral') return m.units.filter(u => u.faction === 'neutral' && !had.includes(u.name)).map(u => u.name);
+    return [];
+  }
+  // this round's offer to a player: { round, cat, ids } (null: nothing to pick). A category with nothing left falls
+  // back to the next one in the cycle. Seeded from the match, so both phones get the same offer.
+  function devOffer(m, side) {
+    const cat = isDev(m) ? pickCat(m) : null;
+    if (!cat || cat === 'tower') return null; // the tower round's pick is the tower pick (towerChoices)
+    for (const c of [cat, ...DEV.cycle.filter(x => x !== cat)]) {
+      const left = pickPool(m, side, c).concat(pickNow(m, side) && pickNow(m, side).cat === c ? [pickNow(m, side).id] : []);
+      if (!left.length) continue;
+      left.sort();
+      const r = rng(m.seed + m.round * 6151 + side * 911 + 3), ids = [];
+      while (ids.length < DEV.offer && left.length) ids.push(left.splice(Math.floor(r() * left.length), 1)[0]);
+      return { round: m.round, cat: c, ids };
+    }
+    return null;
+  }
+  const pickNow = (m, side) => devPicks(m, side).find(p => p.round === m.round) || null;
+  const needsDevPick = (m, side) => !pickNow(m, side) && !!devOffer(m, side);
+  function devPick(m, side, id) {
+    const o = devOffer(m, side);
+    if (!o || pickNow(m, side) || !o.ids.includes(id)) return false;
+    m.dev.picks[side].push({ round: m.round, cat: o.cat, id });
+    if (o.cat === 'building') m.dev.buildings[side].push({ key: m.dev.nextKey++, id, col: null, row: null, round: m.round });
+    if (o.cat === 'neutral') { const ui = m.units.findIndex(u => u.name === id); if (ui >= 0) m.unlocks[side][ui] = m.round; }
+    return true;
+  }
+  // take back this round's pick (not a neutral unit already bought, nor a Power whose spell was cast this round)
+  function undoDevPick(m, side) {
+    const p = pickNow(m, side);
+    if (!p) return false;
+    const ui = p.cat === 'neutral' ? m.units.findIndex(u => u.name === p.id) : -1;
+    if (ui >= 0 && m.armies[side].some(s => s.unit === ui)) return false;
+    if (p.cat === 'power' && (devPower(p.id) || {}).spell && castNow(m, side, devPower(p.id).spell)) return false;
+    m.dev.picks[side] = m.dev.picks[side].filter(x => x !== p);
+    if (p.cat === 'building') m.dev.buildings[side] = m.dev.buildings[side].filter(b => !(b.round === m.round && b.id === p.id));
+    if (ui >= 0) delete m.unlocks[side][ui];
+    return true;
+  }
+  // what the opponent may see of something placed or picked: from the fight of its round on
+  const devShown = (m, viewer, deploying, side, round) => side === viewer || !deploying || round < m.round;
+
+  // ---- lesser buildings ----
+  const buildingsOf = (m, side) => (isDev(m) && m.dev.buildings[side]) || [];
+  const placedBuildings = (m, side) => buildingsOf(m, side).filter(b => b.col != null);
+  const unplacedBuilding = (m, side) => buildingsOf(m, side).find(b => b.col == null) || null;
+  const buildingAt = (m, side, col, row) => placedBuildings(m, side).find(b => b.col === col && b.row === row) || null;
+  const devOccupied = (m, side, col, row) => !!buildingAt(m, side, col, row) || !!wallAt(m, col, row);
+  // where a building may stand: def.place is 'zone' (default), 'front' (zone or no man's land) or 'flank' (zone or own flank tiles)
+  function buildingSpotOk(m, side, def, col, row, key) {
+    if (!isDev(m) || col < 0 || col >= COLS || row < 0 || row >= ROWS) return false;
+    const where = (def && def.place) || 'zone';
+    const ok = inZone(side, row) || (where === 'front' && inNoMans(row)) || (where === 'flank' && isFlank(side, col, row));
+    if (!ok || reserved(side, col, row) || towerAt(m, side, col, row) || elfOwnAt(m, side, col, row) || wallAt(m, col, row)) return false;
+    if (m.armies[side].some(s => s.col === col && s.row === row)) return false;
+    return !placedBuildings(m, side).some(b => b.key !== key && b.col === col && b.row === row);
+  }
+  // place (or move) a building: any time in the round it was picked, fixed after its first fight
+  function placeBuilding(m, side, key, col, row) {
+    const b = buildingsOf(m, side).find(x => x.key === key);
+    if (!b || b.round !== m.round || !buildingSpotOk(m, side, devBuilding(b.id), col, row, key)) return false;
+    b.col = col; b.row = row;
+    return true;
+  }
+  // a building's fighting stats
+  function buildingUnit(m, side, b) {
+    const d = devBuilding(b.id) || {};
+    const hpPct = powersOf(m, side).reduce((s, p) => s + (+p.buildingHp || 0), 0);
+    const u = { name: d.name || 'Building', cost: 0, bodies: 1, hp: 400, hit: 0, aps: 1, range: 0, speed: 0, splash: 0, shape: 'square', color: (factionInfo(d.faction) || {}).color || '#B7AE9C',
+      ...(d.unit || {}), structure: true, building: true, kind: 'building', bid: d.id || null, level: 0 };
+    u.hp = u.hp * (1 + hpPct / 100);
+    const sp = d.spawn, ui = sp ? m.units.findIndex(x => x.name === sp.unit) : -1;
+    if (ui >= 0) {
+      const { skills, skillDefs, skillsOn, skillsInnate, skillMods, spawn, ...plain } = unitFor(m, side, ui);
+      u.spawn = { unit: E.withTraits({ ...plain, level: 0 }), count: Math.max(1, Math.round(+sp.count || 2)), every: Math.max(0.5, +sp.every || 6), max: Math.max(1, Math.round(+sp.max || 4)), waves: Math.max(0, Math.round(+sp.waves || 0)) };
+    }
+    return E.withTraits(u);
+  }
+  // the bonus a squad standing on (col, row) at the start of the fight gets from its side's buildings' auras
+  function auraFor(m, side, col, row) {
+    let mods = null;
+    for (const b of placedBuildings(m, side)) {
+      const a = (devBuilding(b.id) || {}).aura;
+      if (!a || Math.max(Math.abs(b.col - col), Math.abs(b.row - row)) > Math.max(0, Math.round(+a.tiles || 1))) continue;
+      mods = mods || {};
+      for (const k of [...TRAIT_STATS, 'armor']) if (isFinite(+a[k]) && +a[k]) mods[k] = (mods[k] || 0) + +a[k];
+    }
+    return mods;
+  }
+  // stat changes: hp, hit, aps, range, speed in %, armor flat (spawned units get them too)
+  function modUnit(u, mods) {
+    if (!u || !mods) return u;
+    const o = { ...u };
+    for (const k of TRAIT_STATS) if (isFinite(+mods[k]) && +mods[k]) o[k] = u[k] * (1 + mods[k] / 100);
+    if (isFinite(+mods.armor) && +mods.armor) o.bonusArmor = (u.bonusArmor || 0) + +mods.armor;
+    if (u.spawn && u.spawn.unit) o.spawn = { ...u.spawn, unit: modUnit(u.spawn.unit, mods) };
+    return o;
+  }
+
+  // ---- Powers ----
+  const powersOf = (m, side) => pickedIds(m, side, 'power').map(devPower).filter(Boolean);
+  // a unit with the stat changes of its player's Powers (base: the roster unit, for its faction and name)
+  function withPowers(m, side, u, base) {
+    if (!isDev(m) || !u || side == null) return u;
+    for (const p of powersOf(m, side)) {
+      const who = p.units || 'all';
+      if (!p.mods || (who === 'faction' && !(base && base.faction === p.faction)) || (Array.isArray(who) && !(base && who.includes(base.name)))) continue;
+      u = modUnit(u, p.mods);
+    }
+    return u;
+  }
+  const devDeploys = (m, side) => powersOf(m, side).reduce((s, p) => s + Math.max(0, Math.round(+p.deploys || 0)), 0);
+  // extra gold at the start of a round: the Powers' gold and the buildings' income
+  const devGold = (m, side) => !isDev(m) ? 0 : powersOf(m, side).reduce((s, p) => s + (+p.gold || 0), 0)
+    + placedBuildings(m, side).reduce((s, b) => s + (+(devBuilding(b.id) || {}).income || 0), 0);
+
+  // ---- spells: temporary items on the map, cast for gold ----
+  const spellsOf = (m, side) => [...new Set(powersOf(m, side).map(p => p.spell).filter(id => id && devSpell(id)))];
+  const casts = (m) => (isDev(m) && m.dev.casts) || [];
+  const castRounds = (c) => Math.max(1, Math.round(+(devSpell(c.id) || {}).rounds || 1));
+  const castActive = (m, c) => c.round <= m.round && m.round < c.round + castRounds(c);
+  const activeCasts = (m) => casts(m).filter(c => castActive(m, c));
+  const castNow = (m, side, id) => casts(m).find(c => c.side === side && c.id === id && c.round === m.round) || null;
+  const wallAt = (m, col, row) => activeCasts(m).find(c => (devSpell(c.id) || {}).kind === 'wall' && c.col === col && c.row === row) || null;
+  // where a spell may be cast: place 'own' (own zone), 'front' (own zone or no man's land) or 'any' (default)
+  function castSpotOk(m, side, sp, col, row) {
+    if (!sp || col < 0 || col >= COLS || row < 0 || row >= ROWS) return false;
+    const where = sp.place || 'any';
+    if ((where === 'own' && !inZone(side, row)) || (where === 'front' && !(inZone(side, row) || inNoMans(row)))) return false;
+    return !(sp.kind === 'wall' && (occupied(m, 0, col, row) || occupied(m, 1, col, row)));
+  }
+  const spellCost = (id) => Math.max(0, Math.round(+(devSpell(id) || {}).cost || 0));
+  const canCast = (m, side, id) => spellsOf(m, side).includes(id) && !castNow(m, side, id) && m.gold[side] >= spellCost(id);
+  function castSpell(m, side, id, col, row) {
+    if (!canCast(m, side, id) || !castSpotOk(m, side, devSpell(id), col, row)) return false;
+    m.gold[side] -= spellCost(id);
+    m.dev.casts.push({ side, id, col, row, round: m.round });
+    return true;
+  }
+  function undoCast(m, side, id) {
+    const c = castNow(m, side, id);
+    if (!c) return false;
+    m.dev.casts.splice(m.dev.casts.indexOf(c), 1);
+    m.gold[side] += spellCost(id);
+    return true;
+  }
+  // the tiles a zone spell covers: size by size, from its tile toward higher columns and rows
+  const castTiles = (c) => { const n = Math.max(1, Math.round(+(devSpell(c.id) || {}).size || 1)), out = [];
+    for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) if (c.col + i < COLS && c.row + j < ROWS) out.push({ col: c.col + i, row: c.row + j }); return out; };
+  // what the spells cast add to a fight: zone tiles and timed strikes for the engine
+  function castEffects(m) {
+    const T2 = TILE / 2, tiles = [], strikes = [];
+    for (const c of activeCasts(m)) {
+      const sp = devSpell(c.id) || {};
+      if (sp.kind === 'zone') for (const t of castTiles(c)) {
+        const w = tileToWorld(t.col, t.row);
+        tiles.push({ type: sp.effect || 'burn', side: c.side, dps: +sp.dps || 20, slow: +sp.slow || 40, speed: +sp.speed || 30, x0: w.x - T2, x1: w.x + T2, y0: w.y - T2, y1: w.y + T2 });
+      }
+      if (sp.kind === 'strike') { const w = tileToWorld(c.col, c.row); strikes.push({ t: +sp.at || 2, x: w.x, y: w.y, r: +sp.radius || 6, dmg: +sp.dmg || 100, side: c.side }); }
+    }
+    return { tiles, strikes };
+  }
+
+  // ---- arrows: guide a squad along points drawn from it ----
+  const canGuide = (m, side, sq) => isDev(m) && !!sq && !isRider(sq) && (DEV.guideAll || !!(m.units[sq.unit] || {}).guide);
+  function setGuide(m, side, sqId, pts) {
+    const sq = m.armies[side].find(s => s.id === sqId);
+    if (!canGuide(m, side, sq) || !Array.isArray(pts)) return false;
+    const list = pts.map(p => ({ col: Math.round(+p.col), row: Math.round(+p.row) })).filter(p => p.col >= 0 && p.col < COLS && p.row >= 0 && p.row < ROWS && !(p.col === sq.col && p.row === sq.row)).slice(0, DEV.guidePoints);
+    if (!list.length) return false;
+    sq.guide = list;
+    return true;
+  }
+  function clearGuide(m, side, sqId) {
+    const sq = m.armies[side].find(s => s.id === sqId);
+    if (!sq || !sq.guide) return false;
+    delete sq.guide;
+    return true;
+  }
+
+  // ---- disguise ----
+  // a unit with "disguise": "Unit name" looks like that unit to its opponent: on the board, in its sheet, and in the
+  // fight until its first attack. The unit index viewer is shown for side's unit ui.
+  function shownUnit(m, viewer, side, ui) {
+    const u = m && m.units && m.units[ui];
+    if (side === viewer || !u || !u.disguise) return ui;
+    const k = m.units.findIndex(x => x.name === u.disguise);
+    return k >= 0 ? k : ui;
+  }
+
+  // ---- settling and the AI ----
+  // at the fight: a pick not made is the first on offer, a building not placed goes on a free back tile
+  function settleDev(m) {
+    if (!isDev(m)) return;
+    for (const sd of [0, 1]) {
+      if (needsDevPick(m, sd)) devPick(m, sd, devOffer(m, sd).ids[0]);
+      for (let b; (b = unplacedBuilding(m, sd));) {
+        const spot = buildingSpot(m, sd, b, rng(m.seed + m.round * 37 + b.key));
+        if (!spot) { m.dev.buildings[sd].splice(m.dev.buildings[sd].indexOf(b), 1); continue; } // no room left: it's lost
+        placeBuilding(m, sd, b.key, spot.col, spot.row);
+      }
+    }
+  }
+  // a free tile for a building: the back half of the zone, near the middle, a little random
+  function buildingSpot(m, side, b, r) {
+    const rows = zoneRows(side), def = devBuilding(b.id);
+    let best = null, bc = Infinity;
+    rows.forEach((row, zi) => { for (let col = 0; col < COLS; col++) {
+      if (!buildingSpotOk(m, side, def, col, row, b.key)) continue;
+      const c = Math.abs(zi - (rows.length - 2)) * 1.5 + Math.abs(col - (COLS - 1) / 2) * 0.6 + r() * 2;
+      if (c < bc) { bc = c; best = { col, row }; }
+    } });
+    return best;
+  }
+  // the AI's devtest turn: its pick (seeded, leaning to buildings that fight and Powers with stat changes), its
+  // buildings placed, and sometimes a spell on the enemy's army (or its own front for helpful ones)
+  function aiDev(m, side, r) {
+    if (!isDev(m)) return;
+    const o = needsDevPick(m, side) ? devOffer(m, side) : null;
+    if (o) {
+      const score = (id) => { const d = o.cat === 'building' ? devBuilding(id) : o.cat === 'power' ? devPower(id) : null;
+        return (d && ((d.unit && d.unit.hit > 0) || d.aura || d.mods) ? 1 : 0) + r(); };
+      devPick(m, side, o.ids.slice().sort((a, b) => score(b) - score(a))[0]);
+    }
+    for (let b; (b = unplacedBuilding(m, side));) { const s = buildingSpot(m, side, b, r); if (!s || !placeBuilding(m, side, b.key, s.col, s.row)) break; }
+    const foes = m.armies[1 - side].filter(s => s.round < m.round);
+    for (const id of spellsOf(m, side)) {
+      const sp = devSpell(id);
+      if (!canCast(m, side, id) || m.gold[side] - spellCost(id) < SQUAD_COST * 2 || r() >= 0.4) continue;
+      const harm = sp.kind === 'strike' || (sp.kind === 'zone' && (sp.effect === 'burn' || sp.effect === 'mud'));
+      let col, row;
+      if (harm && foes.length) { col = Math.round(foes.reduce((s, q) => s + q.col, 0) / foes.length); row = Math.round(foes.reduce((s, q) => s + q.row, 0) / foes.length); }
+      else { col = Math.floor(r() * COLS); row = zoneRows(side)[0]; }
+      castSpell(m, side, id, col, row);
+    }
+  }
+
   // ---------- AI ----------
   // Buys units that counter the opponent's army as it stood at the start of the round,
   // using the counter table, with a nudge toward variety and a little randomness.
@@ -3281,6 +3655,7 @@ const Game = (() => {
       const q = rng(m.seed + m.round * 577 + side * 29), g = MAGE_GENERALS[Math.floor(q() * MAGE_GENERALS.length)];
       if (q() < 0.6 && m.gold[side] - g.cost >= SQUAD_COST) buyMageGen(m, side, g.id);
     }
+    aiDev(m, side, rng(m.seed + m.round * 829 + side * 53)); // devtest: pick, buildings, spells (own stream)
     const opp = 1 - side;
     const oppArmy = m.armies[opp].filter(s => s.round < m.round);
     for (const ui of freeLeft(m, side)) { const spot = aiSpot(m, side, ui, oppArmy, r); if (spot) place(m, side, ui, spot.col, spot.row); }
@@ -3414,6 +3789,10 @@ const Game = (() => {
     createDraft, draftTurn, draftOpen, draftAct, draftDone, draftPossible, aiDraftChoice,
     zoneRows, inZone, tileToWorld, squadRange, createMatch, place, unplace, bodiesFor, startBattle, resolve, aiDeploy, occupied,
     GRID, useGrid,
+    DEV, CAT_NAMES, BUILDING_SQ, WALL_SQ, setDevData, devBuilding, devPower, devSpell, isDev, towerUp, pickCat, devOffer, pickNow, needsDevPick, devPick, undoDevPick, devShown,
+    buildingsOf, placedBuildings, unplacedBuilding, buildingAt, buildingSpotOk, placeBuilding, buildingUnit, auraFor, modUnit, powersOf, devGold, devDeploys,
+    spellsOf, casts, activeCasts, castActive, castRounds, castNow, wallAt, castSpotOk, spellCost, canCast, castSpell, undoCast, castTiles, castEffects,
+    canGuide, setGuide, clearGuide, shownUnit, settleDev, aiDev,
   };
   // a call from outside with a match first puts the board on that match's grid
   const isMatch = (x) => x && typeof x === 'object' && Array.isArray(x.armies) && x.map;
@@ -3553,7 +3932,9 @@ const Art = (() => {
 // It sees the game only through view(), which it calls at the start of every draw and which returns what this
 // screen shows right now:
 //   { m, me, phase, units, mode, bt, battlePre, fx, selected, moving, drag, hoverTile, rangeOf,
-//     editable, placingUnit, placingElf, placingTower, battleCam }
+//     editable, placingUnit, placingElf, placingTower, battleCam, dev }
+// dev (Factions devtest only): { bPlacing, castMode, guideMode, guideId, guide }: the building being placed, the spell being
+// cast, and the arrow being drawn (guide: its points so far, for squad guideId).
 // fx: short-lived battle effects as plain data (shots, flames, bolts, heals, deaths), in board metres.
 // rangeOf: { side, id } of the squad whose range shows as a dotted ring while deploying, or null.
 // battleCam: { zoom, x, y } while the battle cam zooms in on the final seconds of a fight (board metres), else null.
@@ -3565,8 +3946,8 @@ const Art = (() => {
 const Render2D = (cv, view) => {
   let ctx = cv.getContext('2d'); // swapped for a moment while drawing map thumbnails (thumb)
   let m = null, me = 0, phase = 'start', units = [], mode = 'ai', bt = null, battlePre = null, fx = [], battleCam = null;
-  let selected = null, moving = null, drag = null, hoverTile = null, rangeOf = null, editable = false, placingUnit = null, placingElf = false, placingTower = false;
-  const pull = () => { ({ m, me, phase, units, mode, bt, battlePre, fx, selected, moving, drag, hoverTile, rangeOf, editable, placingUnit, placingElf, placingTower, battleCam } = view()); };
+  let selected = null, moving = null, drag = null, hoverTile = null, rangeOf = null, editable = false, placingUnit = null, placingElf = false, placingTower = false, dev = null;
+  const pull = () => { ({ m, me, phase, units, mode, bt, battlePre, fx, selected, moving, drag, hoverTile, rangeOf, editable, placingUnit, placingElf, placingTower, battleCam, dev } = view()); };
   const foe = () => 1 - me;
   const css = Art.css, tag = Shapes.tag;
   const { ELF_COL, SHROOM_COL, CHARM_COL } = Art;
@@ -3872,6 +4253,7 @@ const Render2D = (cv, view) => {
         ctx.strokeRect(x + 2.5, y + 2.5, t - 5, t - 5); ctx.setLineDash([]); ctx.globalAlpha = 1;
       }
     }
+    if (v && v.dev) devFloor(v, plain);
     if (plain) return;
     if (v && v.buff) for (const side of [0, 1]) { // Zoe's buff tiles: a gold tile with a star
       if (!charVisible(side)) continue;
@@ -3892,6 +4274,92 @@ const Render2D = (cv, view) => {
     ctx.strokeStyle = css('--you');
     ctx.beginPath(); ctx.moveTo(0, mine); ctx.lineTo(W, mine); ctx.stroke();
     ctx.setLineDash([]); ctx.globalAlpha = 1;
+  }
+
+  // ---------- Factions devtest: spells, arrows, the tower's tile, where things may go (on the floor, so the 3D board
+  // gets them too), and buildings ----------
+  const ZONE_COL = { burn: '#E07A4F', mend: '#7FCB8A', mud: '#9C8456', haste: '#E6D27A' };
+  function devFloor(v, plain) {
+    const t = tilePx(), deploying = phase === 'deploy';
+    for (const c of Game.activeCasts(v)) {
+      if (!Game.devShown(v, me, deploying, c.side, c.round)) continue;
+      const sp = Game.devSpell(c.id) || {}, team = teamCol(c.side);
+      if (sp.kind === 'zone') for (const tl of Game.castTiles(c)) {
+        const x = scol(tl.col) * t, y = srow(tl.row) * t;
+        ctx.fillStyle = ZONE_COL[sp.effect] || '#C9B79C'; ctx.globalAlpha = 0.3; ctx.fillRect(x, y, t, t);
+        ctx.globalAlpha = 0.7; ctx.strokeStyle = team; ctx.lineWidth = 1; ctx.setLineDash([3, 3]); ctx.strokeRect(x + 1.5, y + 1.5, t - 3, t - 3); ctx.setLineDash([]);
+      }
+      if (sp.kind === 'strike') { // where it will land: a dashed ring of its radius and a cross
+        const w = Game.tileToWorld(c.col, c.row), x = PX(w.x), y = PY(w.y), r = (+sp.radius || 6) * S;
+        ctx.strokeStyle = '#E8A15A'; ctx.globalAlpha = 0.85; ctx.lineWidth = 1.5; ctx.setLineDash([5, 4]);
+        ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
+        ctx.strokeStyle = team; ctx.beginPath(); ctx.moveTo(x - t * 0.25, y); ctx.lineTo(x + t * 0.25, y); ctx.moveTo(x, y - t * 0.25); ctx.lineTo(x, y + t * 0.25); ctx.stroke();
+      }
+      if (sp.kind === 'wall' && deploying) drawWallBlock(PX(Game.tileToWorld(c.col, c.row).x), PY(Game.tileToWorld(c.col, c.row).y), t, c.side, 1);
+    }
+    ctx.globalAlpha = 1;
+    // the tower's tile before the tower stands (rounds 1 and 2)
+    if (v.towers) for (const side of [0, 1]) if (v.towers[side] && !Game.towerUp(v, side)) {
+      const x = scol(v.towers[side].col) * t, y = srow(v.towers[side].row) * t;
+      ctx.strokeStyle = teamCol(side); ctx.globalAlpha = 0.55; ctx.lineWidth = 1.5; ctx.setLineDash([4, 4]); ctx.strokeRect(x + 4, y + 4, t - 8, t - 8); ctx.setLineDash([]);
+      ctx.fillStyle = teamCol(side); ctx.font = `600 ${Math.max(8, Math.round(t * 0.24))}px "IBM Plex Mono", monospace`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('R' + Game.TOWER_PICK_ROUND, x + t / 2, y + t / 2); ctx.globalAlpha = 1;
+    }
+    if (plain || !deploying) return;
+    // your arrows, and the one being drawn
+    for (const sq of v.armies[me]) if (sq.guide && !(dev && dev.guideId === sq.id)) drawArrow(sq, sq.guide, 0.75);
+    if (dev && dev.guideId != null && dev.guide) { const sq = v.armies[me].find(q => q.id === dev.guideId); if (sq) drawArrow(sq, dev.guide, 1); }
+    if (!dev || !editable) return;
+    if (dev.bPlacing != null) { // where the building may go
+      const b = Game.buildingsOf(v, me).find(x => x.key === dev.bPlacing), d = b && Game.devBuilding(b.id);
+      ctx.strokeStyle = css('--gold'); ctx.globalAlpha = 0.6; ctx.lineWidth = 1.5;
+      if (b) for (let row = 0; row < Game.ROWS; row++) for (let c = 0; c < Game.COLS; c++) if (Game.buildingSpotOk(v, me, d, c, row, b.key)) ctx.strokeRect(scol(c) * t + 3, srow(row) * t + 3, t - 6, t - 6);
+    }
+    if (dev.castMode) { // where the spell may go
+      const sp = Game.devSpell(dev.castMode);
+      ctx.strokeStyle = '#E8A15A'; ctx.globalAlpha = 0.35; ctx.lineWidth = 1;
+      for (let row = 0; row < Game.ROWS; row++) for (let c = 0; c < Game.COLS; c++) if (Game.castSpotOk(v, me, sp, c, row)) ctx.strokeRect(scol(c) * t + 4, srow(row) * t + 4, t - 8, t - 8);
+    }
+    ctx.globalAlpha = 1;
+  }
+  // a squad's arrow: from its tile through its points, with a head at the end
+  function drawArrow(sq, pts, a) {
+    const t = tilePx(), at = (p) => [(scol(p.col) + 0.5) * t, (srow(p.row) + 0.5) * t];
+    const list = [sq, ...pts].map(at).filter((p, i, l) => !i || p[0] !== l[i - 1][0] || p[1] !== l[i - 1][1]);
+    if (list.length < 2) return;
+    ctx.strokeStyle = css('--you'); ctx.fillStyle = css('--you'); ctx.globalAlpha = a; ctx.lineWidth = Math.max(2, t * 0.08); ctx.lineJoin = 'round'; ctx.setLineDash([t * 0.18, t * 0.12]);
+    ctx.beginPath(); ctx.moveTo(...list[0]); for (const p of list.slice(1)) ctx.lineTo(...p); ctx.stroke(); ctx.setLineDash([]);
+    const [x2, y2] = list[list.length - 1], [x1, y1] = list[list.length - 2], ang = Math.atan2(y2 - y1, x2 - x1), h = t * 0.32;
+    ctx.beginPath(); ctx.moveTo(x2, y2); ctx.lineTo(x2 - h * Math.cos(ang - 0.5), y2 - h * Math.sin(ang - 0.5)); ctx.lineTo(x2 - h * Math.cos(ang + 0.5), y2 - h * Math.sin(ang + 0.5)); ctx.closePath(); ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+  // a lesser building: a small house in its faction's colour with a roof in its side's colour (hpr: health left in a fight)
+  function drawBuilding(x, y, t, side, u, hpr, fresh) {
+    const s = t * 0.62, c = teamCol(side);
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = u.color || '#B7AE9C'; ctx.strokeStyle = c; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.rect(x - s / 2, y - s * 0.2, s, s * 0.62); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = c; ctx.beginPath(); ctx.moveTo(x - s * 0.62, y - s * 0.18); ctx.lineTo(x, y - s * 0.62); ctx.lineTo(x + s * 0.62, y - s * 0.18); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = css('--bg'); ctx.fillRect(x - s * 0.1, y + s * 0.12, s * 0.2, s * 0.3);
+    if (hpr != null) { ctx.strokeStyle = c; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, t * 0.5, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * hpr); ctx.stroke(); }
+    if (fresh) { ctx.strokeStyle = c; ctx.setLineDash([3, 3]); ctx.lineWidth = 1; ctx.strokeRect(x - t / 2 + 1.5, y - t / 2 + 1.5, t - 3, t - 3); ctx.setLineDash([]); }
+    if (t >= 26 && u.name) { ctx.font = `500 ${Math.max(8, Math.round(t * 0.24))}px "IBM Plex Mono", monospace`; ctx.fillStyle = css('--ink'); ctx.textAlign = 'center'; ctx.textBaseline = 'bottom'; ctx.globalAlpha = 0.85; ctx.fillText(tag(u), x, y + t / 2 - 1); ctx.globalAlpha = 1; }
+  }
+  // a wall (spell): a row of stakes
+  function drawWallBlock(x, y, t, side, hpr) {
+    const s = t * 0.8;
+    ctx.fillStyle = '#9C7E58'; ctx.strokeStyle = teamCol(side); ctx.lineWidth = 1.5; ctx.globalAlpha = 0.5 + 0.5 * hpr;
+    for (let k = 0; k < 4; k++) { const sx = x - s / 2 + k * s / 4; ctx.beginPath(); ctx.moveTo(sx + 1, y + s * 0.3); ctx.lineTo(sx + 1, y - s * 0.2); ctx.lineTo(sx + s / 8, y - s * 0.38); ctx.lineTo(sx + s / 4 - 1, y - s * 0.2); ctx.lineTo(sx + s / 4 - 1, y + s * 0.3); ctx.closePath(); ctx.fill(); ctx.stroke(); }
+    ctx.globalAlpha = 1;
+  }
+  // the buildings this screen may see while deploying (an opponent's new one only from the fight on)
+  function drawBuildings() {
+    const t = tilePx();
+    for (const side of [me, foe()]) for (const b of Game.placedBuildings(m, side)) {
+      if (!Game.devShown(m, me, phase === 'deploy', side, b.round)) continue;
+      const at = drag && drag.bkey === b.key && drag.moved && side === me ? drag.over : b;
+      drawBuilding((scol(at.col) + 0.5) * t, (srow(at.row) + 0.5) * t, t, side, Game.buildingUnit(m, side, b), null, side === me && b.round === m.round);
+    }
   }
 
   function drawSquad(sq, side, fresh) {
@@ -4058,7 +4526,8 @@ const Render2D = (cv, view) => {
     // a squad they moved this round still shows on its old tile
     for (const sq of m.armies[foe()]) if ((sq.round < m.round || phase !== 'deploy') && !Game.hiddenFromFoe(m, sq)) {
       const p = phase === 'deploy' ? Game.seenAt(m, sq) : sq;
-      drawSquad(phase === 'deploy' ? { ...sq, col: p.col, row: p.row, level: Game.seenLevel(m, sq) } : sq, foe(), false); // a level-up bought this round stays hidden
+      const look = Game.shownUnit(m, me, foe(), sq.unit); // a disguised unit shows as what it pretends to be
+      drawSquad(phase === 'deploy' ? { ...sq, unit: look, col: p.col, row: p.row, level: Game.seenLevel(m, sq) } : { ...sq, unit: look }, foe(), false); // a level-up bought this round stays hidden
     }
     for (const sq of m.armies[me]) {
       if (phase === 'deploy' && sq.from && sq.movedRound === m.round) { // where your moved squad came from
@@ -4080,7 +4549,8 @@ const Render2D = (cv, view) => {
         ctx.strokeRect(scol(sq.col) * t + 1, srow(sq.row) * t + 1, t - 2, t - 2);
       }
     }
-    for (const side of [me, foe()]) if (towerVisible(side)) drawTowerTile(side);
+    for (const side of [me, foe()]) if (towerVisible(side) && Game.towerUp(m, side)) drawTowerTile(side);
+    if (Game.isDev(m)) drawBuildings();
     // the squad tapped last: its range as a dotted ring round its tile (theirs as you can know it)
     const rs = rangeOf && phase === 'deploy' && m.armies[rangeOf.side].find(s => s.id === rangeOf.id);
     if (rs) {
@@ -4131,6 +4601,8 @@ const Render2D = (cv, view) => {
     for (const b of bt.bodies) {
       if (!b.alive || !b.u.structure) continue;
       const hpr = b.hp / b.u.hp, t = tilePx();
+      if (b.u.kind === 'wall') { drawWallBlock(PX(b.x), PY(b.y), t, b.side, hpr); continue; }
+      if (b.u.building) { drawBuilding(PX(b.x), PY(b.y), t, b.side, b.u, hpr, false); continue; }
       drawKeep(PX(b.x), PY(b.y), t, b.side, hpr, b.u.kind, null, Game.charOf(battlePre || m, b.side));
       ctx.strokeStyle = teamCol(b.side); ctx.lineWidth = 2;
       ctx.beginPath(); ctx.arc(PX(b.x), PY(b.y), t * 0.5, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * hpr); ctx.stroke();
@@ -4146,7 +4618,8 @@ const Render2D = (cv, view) => {
         ctx.setLineDash([]); ctx.globalAlpha = 1;
         continue;
       }
-      Shapes.body(ctx, b.u.shape, PX(b.x), PY(b.y), r, upOf(b.side), b.u.color, c, (0.35 + 0.65 * hpr) * (b.delay > 0 ? 0.45 : 1));
+      const lk = b.mask && b.side !== me && !b.revealed ? b.mask : b.u; // a disguise, until its first attack (devtest)
+      Shapes.body(ctx, lk.shape, PX(b.x), PY(b.y), r, upOf(b.side), lk.color, c, (0.35 + 0.65 * hpr) * (b.delay > 0 ? 0.45 : 1));
       if (b.delay > 0) { // flank squads arrive a few seconds late: a shrinking ring shows the wait
         ctx.strokeStyle = css('--gold'); ctx.lineWidth = 1.5;
         ctx.beginPath(); ctx.arc(PX(b.x), PY(b.y), r + 3, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * b.delay / Game.FLANK.delay); ctx.stroke();
@@ -4282,8 +4755,9 @@ const Render2D = (cv, view) => {
 <script>
 (() => {
   const DATA = {"units":[{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Goblin Swarm","cost":1,"bodies":12,"hp":26,"hit":19,"aps":1.2,"range":2,"speed":8,"splash":0,"shape":"triangle","color":"#9BD35A","skills":["swift","shrink","spread"],"skillMods":[null,{"params":{},"cost":50},null],"skillsInnate":[false,false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Skeleton Archers","cost":1,"bodies":8,"hp":32,"hit":14,"aps":0.75,"range":19,"speed":2.1,"splash":0,"shape":"triangle","color":"#E9E3CF","skills":["range","rapid","boneShield"],"skillMods":[null,null,null],"skillsInnate":[false,false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Ember Imps","cost":1,"bodies":4,"hp":110,"hit":20,"aps":0.8,"range":10,"speed":4,"splash":3,"shape":"imp","color":"#FFA94D","skills":["swift","heavy","emberMortar"],"skillMods":[null,null,null],"skillsInnate":[false,false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":35,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Fire Mage","cost":1,"bodies":1,"hp":155,"hit":33,"aps":0.75,"range":20,"speed":3,"splash":4,"shape":"hexagon","color":"#fb0022","skills":["range","armorHp","dualFlame"],"skillMods":[null,null,null],"skillsInnate":[false,false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":1,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Sniper","cost":1,"bodies":1,"hp":140,"hit":210,"aps":0.25,"range":29,"speed":2,"splash":0,"shape":"cross","color":"#F7D154","skills":["rapid","spawn","range"],"skillMods":[{"params":{"range":0,"aps":15},"cost":150},{"params":{"waves":3,"every":8.5}},null],"skillsInnate":[false,false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"armor","defVal":3,"level":0,"unlock":50,"name":"Brute","cost":2,"bodies":1,"hp":1100,"hit":98,"aps":1.1,"range":2,"speed":5,"splash":0,"shape":"square","color":"#8D99AE","skills":["armorHp","swift"],"skillMods":[null,null],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":20,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":40,"level":0,"unlock":50,"name":"Wisps","cost":1,"bodies":2,"hp":80,"hit":75,"aps":0.8,"range":19,"speed":4,"splash":0,"shape":"ring","color":"#ff90ff","skills":["stealth","skmv5oxj501"],"skillMods":[null,{"params":{},"cost":200}],"skillsInnate":[false,false]},{"burst":6,"pellets":2,"spinUp":0,"pierce":0,"projSpeed":35,"minRange":0,"charge":1,"knockback":0,"windUp":0.2,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Leaf Wizard","cost":2,"bodies":1,"hp":240,"hit":21,"aps":0.45,"range":27,"speed":5,"splash":0,"shape":"hexagon","color":"#00d200","skills":["rapid","range","dodge"],"skillMods":[null,null,null],"skillsInnate":[false,false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":5,"projSpeed":35,"minRange":0,"charge":1,"knockback":0,"windUp":0.5,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Earth Wizard","cost":2,"bodies":1,"hp":650,"hit":440,"aps":0.2,"range":24,"speed":3,"splash":2,"shape":"circle","color":"#24590d","skills":["regen","range","heavy"],"skillMods":[null,null,{"params":{"hit":20,"slow":30},"cost":150}],"skillsInnate":[false,false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":30,"defense":"none","defVal":0,"level":0,"unlock":100,"name":"Flame Wizard","cost":3,"bodies":1,"hp":2000,"hit":12,"aps":4,"range":15,"speed":2,"splash":0,"shape":"flame","color":"#b95018","skills":["armorHp","range"],"skillMods":[null,null],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":100,"name":"Steel Wizard","cost":3,"bodies":1,"hp":1900,"hit":150,"aps":0.9,"range":15,"speed":2,"splash":2,"shape":"bar","color":"#57535a","skills":["range","heavy","steelPlating"],"skillMods":[null,{"params":{"slow":20,"hit":20}},null],"skillsInnate":[false,false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":40,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":100,"name":"Slime Wizard","cost":3,"bodies":1,"hp":700,"hit":480,"aps":0.2,"range":22,"speed":2.5,"splash":6,"shape":"ring","color":"#81f038","skills":["skmv5oxpgk2","range"],"skillMods":[null,null],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"armor","defVal":6,"level":0,"unlock":150,"splash":3,"skillsInnate":[false,false],"skillMods":[null,null],"name":"Ether Golem","cost":5,"bodies":1,"hp":3450,"hit":69,"aps":0.6,"range":5,"speed":2.5,"shape":"square","color":"#51005c","skills":["regen","armorHp"]},{"burst":1,"pellets":1,"spinUp":50,"spinHit":50,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":150,"splash":0,"skillsInnate":[false,false],"skillMods":[null,null],"name":"Sun Priest","cost":5,"bodies":1,"hp":2800,"hit":38,"aps":2,"range":18,"speed":3,"shape":"sun","color":"#FFD23F","skills":["split","shrink"]},{"burst":3,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":22,"minRange":12,"charge":1,"knockback":0,"windUp":2,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":150,"splash":6,"skillsInnate":[false,false],"skillMods":[null,null],"name":"Meteor Caller","cost":5,"bodies":1,"hp":400,"hit":114,"aps":0.3,"range":50,"speed":2,"shape":"diamond","color":"#FF6B35","skills":["range","skmv5oxpgk2"]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":3,"knockback":4,"windUp":0,"flame":0,"defense":"armor","defVal":6,"level":0,"unlock":150,"splash":3,"skillsInnate":[false,false],"skillMods":[null,null],"name":"War Mammoth","cost":5,"bodies":1,"hp":2450,"hit":169,"aps":0.5,"range":3,"speed":8,"shape":"pentagon","color":"#A0785A","skills":["swift","armorHp"],"trample":50,"chargeStun":1.5},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":150,"splash":0,"skillsInnate":[true,false],"skillMods":[null,null],"name":"Necromancer","cost":5,"bodies":1,"hp":2300,"hit":56,"aps":1,"range":20,"speed":2.2,"shape":"hexagon","color":"#9D4EDD","skills":["raiseDead","healer"]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":180,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Ent","cost":1,"bodies":2,"hp":400,"hit":25,"aps":1.1,"range":4,"speed":2.2,"splash":0,"shape":"square","color":"#0d3000","skills":["armorHp","forward","explode"],"skillsInnate":[false,false,false],"skillMods":[{"params":{"armor":4,"hp":20}},null,null],"deathBlast":0},{"burst":1,"pellets":1,"spinUp":0.1,"pierce":0,"projSpeed":30,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"name":"Slimeshots","cost":2,"unlock":100,"bodies":10,"hp":95,"hit":7,"aps":0.8,"range":21,"speed":6,"splash":3,"shape":"diamond","color":"#20d300","skills":["range","heavy"],"skillsInnate":[false,false],"skillMods":[{"params":{"m":3},"cost":150},{"params":{"hit":25,"slow":0,"instant":0},"cost":150}]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Just a horse","cost":2,"bodies":1,"hp":500,"hit":200,"aps":1,"range":1,"speed":6,"splash":0,"shape":"horse","color":"#C8A27A","ram":1,"noFlank":1,"carrier":1,"noPack":1,"skills":["gallop","armorHp","deathBurst"],"skillMods":[null,{"params":{"armor":4,"hp":20},"cost":150},null],"skillsInnate":[false,false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":30,"minRange":0,"charge":4,"knockback":0,"windUp":0,"flame":0,"trample":0,"deathBlast":0,"defense":"none","defVal":0,"level":0,"unlock":100,"name":"Rogue","cost":3,"bodies":2,"hp":310,"hit":80,"aps":1.1,"range":4,"speed":6,"splash":0,"shape":"triangle","color":"#460000","skills":["stealth","skmv5oxj501","frenzy"],"skillsInnate":[true,false,false],"skillMods":[null,{"params":{"cap":200},"cost":150},null]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"trample":0,"deathBlast":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Spiders","cost":2,"bodies":5,"hp":185,"hit":20,"aps":0.8,"range":2,"speed":6,"splash":0,"shape":"spider","color":"#000000","skills":["spiderlings","poison","stealth"],"skillsInnate":[false,false,false],"skillMods":[null,null,{"params":{},"cost":200}]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":35,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"trample":0,"deathBlast":0,"pctHit":20,"defense":"none","defVal":0,"level":0,"unlock":150,"name":"Truespear","cost":5,"bodies":1,"hp":750,"hit":60,"aps":0.8,"range":25,"speed":3,"splash":0,"shape":"spear","color":"#C9D1D9","skills":["lifesteal","armorHp","dualSpear"],"skillMods":[null,null,null],"skillsInnate":[false,false,false]}],"matrix":[[0,-1,-0.883,-0.992,0.853,0.514,0.222,0.328,0.55,-1,-0.345,-0.182,-0.686,0.522,-0.786,-0.441,0.541,-0.793,-0.703,0.958,0.694,0.595,0.892],[1,0,0.268,-0.514,0.521,0.658,0.692,-0.189,0.383,-0.804,0.362,-0.542,0.158,-0.614,-0.959,0.592,-0.352,0.795,-0.524,0.946,0.842,0.819,0.825],[0.883,-0.268,0,-0.604,0.333,0.663,-0.225,0.415,0.125,-1,-0.528,-0.6,0.099,0.464,-0.992,-0.141,0.229,0.437,0.117,0.875,0.753,0.848,0.817],[0.992,0.514,0.604,0,-1,-0.25,0.454,-0.443,-0.882,-0.72,-0.216,-0.901,-0.331,-0.487,-1,-0.702,-0.331,0.743,0.097,0.733,-0.121,0.86,0.428],[-0.853,-0.521,-0.333,1,0,-0.095,0.598,0.397,-0.49,-0.363,-0.135,0.133,0.836,0.033,-1,-0.292,-0.578,0.994,-0.567,0.8,-0.415,0.8,0.858],[-0.514,-0.658,-0.663,0.25,0.095,0,-0.6,0.298,-0.799,-0.535,-0.527,-0.986,0.223,-0.542,0.04,-0.335,-0.197,-0.648,0.63,0.821,0.264,0.798,0.216],[-0.222,-0.692,0.225,-0.454,-0.598,0.6,0,-0.546,-0.413,-0.688,-0.22,-0.736,0.754,0.318,-0.906,-0.169,-0.49,0.926,-0.64,0.95,0.517,0.946,0.767],[-0.328,0.189,-0.415,0.443,-0.397,-0.298,0.546,0,-0.593,-0.434,-0.227,-0.566,-0.164,-0.36,-0.439,-0.72,-0.573,0.615,-0.518,0.778,-0.683,0.567,0.673],[-0.55,-0.383,-0.125,0.882,0.49,0.799,0.413,0.593,0,0.053,0.779,-0.311,0.915,0.577,-0.833,-0.097,-0.074,1,0.474,1,0.47,0.867,0.777],[1,0.804,1,0.72,0.363,0.535,0.688,0.434,-0.053,0,0.59,-0.722,-0.092,-0.225,-1,-0.538,0.753,1,0.847,0.98,0.688,1,0.116],[0.345,-0.362,0.528,0.216,0.135,0.527,0.22,0.227,-0.779,-0.59,0,-1,0.753,-0.533,-1,0.235,-0.286,0.575,0.378,0.905,0.444,0.771,0.015],[0.182,0.542,0.6,0.901,-0.133,0.986,0.736,0.566,0.311,0.722,1,0,1,0.874,-1,0.369,0.864,1,0.525,1,-0.05,0.971,0.686],[0.686,-0.158,-0.099,0.331,-0.836,-0.223,-0.754,0.164,-0.915,0.092,-0.753,-1,0,-0.918,-0.885,-0.631,-0.518,-0.094,0.885,0.859,0.301,0.882,-1],[-0.522,0.614,-0.464,0.487,-0.033,0.542,-0.318,0.36,-0.577,0.225,0.533,-0.874,0.918,0,-0.38,0.467,0.412,-0.182,-0.308,0.869,-0.164,0.706,-0.635],[0.786,0.959,0.992,1,1,-0.04,0.906,0.439,0.833,1,1,1,0.885,0.38,0,-0.515,0.796,1,0.489,1,-1,0.992,0.942],[0.441,-0.592,0.141,0.702,0.292,0.335,0.169,0.72,0.097,0.538,-0.235,-0.369,0.631,-0.467,0.515,0,-0.109,0.257,0.896,0.894,0.44,0.864,-0.251],[-0.541,0.352,-0.229,0.331,0.578,0.197,0.49,0.573,0.074,-0.753,0.286,-0.864,0.518,-0.412,-0.796,0.109,0,0.016,0.028,0.947,0.607,0.591,0.784],[0.793,-0.795,-0.437,-0.743,-0.994,0.648,-0.926,-0.615,-1,-1,-0.575,-1,0.094,0.182,-1,-0.257,-0.016,0,0.182,0.875,0.617,0.923,0.621],[0.703,0.524,-0.117,-0.097,0.567,-0.63,0.64,0.518,-0.474,-0.847,-0.378,-0.525,-0.885,0.308,-0.489,-0.896,-0.028,-0.182,0,0.9,0.682,0.684,0.861],[-0.958,-0.946,-0.875,-0.733,-0.8,-0.821,-0.95,-0.778,-1,-0.98,-0.905,-1,-0.859,-0.869,-1,-0.894,-0.947,-0.875,-0.9,0,-0.65,-0.8,-0.567],[-0.694,-0.842,-0.753,0.121,0.415,-0.264,-0.517,0.683,-0.47,-0.688,-0.444,0.05,-0.301,0.164,1,-0.44,-0.607,-0.617,-0.682,0.65,0,0.419,0.871],[-0.595,-0.819,-0.848,-0.86,-0.8,-0.798,-0.946,-0.567,-0.867,-1,-0.771,-0.971,-0.882,-0.706,-0.992,-0.864,-0.591,-0.923,-0.684,0.8,-0.419,0,0.392],[-0.892,-0.825,-0.817,-0.428,-0.858,-0.216,-0.767,-0.673,-0.777,-0.116,-0.015,-0.686,1,0.635,-0.942,0.251,-0.784,-0.621,-0.861,0.567,-0.871,-0.392,0]],"skills":[{"id":"regen","type":"regen","name":"Regeneration","cost":100,"params":{}},{"id":"poison","type":"poison","name":"Poison shot","cost":100,"params":{"pct":150}},{"id":"stealth","type":"stealth","name":"Stealth","cost":100,"params":{}},{"id":"armorHp","type":"armorHp","name":"Armor and health","cost":200,"params":{}},{"id":"spawn","type":"spawn","name":"Spawn goblins","cost":200,"params":{"every":7}},{"id":"rapid","type":"rapid","name":"Rapid fire","cost":100,"params":{}},{"id":"swift","type":"swift","name":"Swift strikes","cost":100,"params":{}},{"id":"heavy","type":"heavy","name":"Heavy shot","cost":100,"params":{}},{"id":"healer","type":"healer","name":"Healing touch","cost":200,"params":{}},{"id":"range","type":"range","name":"Long reach","cost":200,"params":{}},{"id":"shrink","type":"shrink","name":"Shortsight","cost":100,"params":{"m":6,"duration":4}},{"id":"skmv5oxj501","type":"ward","name":"Ward","cost":100,"params":{}},{"id":"skmv5oxpgk2","type":"slow","name":"Slow","cost":100,"params":{}},{"id":"raiseDead","type":"spawn","name":"Raise dead","cost":0,"params":{"unit":"Skeleton Archers","count":3,"every":2,"max":12}},{"id":"spiderlings","type":"deathSpawn","name":"Spiderlings","cost":200,"params":{"unit":"Spiders","count":2,"strength":50}},{"id":"split","type":"split","name":"Split beam","cost":100,"params":{}},{"id":"forward","type":"forward","name":"Forward planting","cost":100,"params":{}},{"id":"gallop","type":"swift","name":"Gallop","cost":200,"params":{"speed":25,"hit":0}},{"id":"deathBurst","type":"blast","name":"Death burst","cost":200,"params":{"radius":7,"pct":100}},{"id":"dualFlame","type":"turret","name":"Dual Flame","cost":200,"params":{"turrets":2}},{"id":"lifesteal","type":"lifesteal","name":"Lifesteal","cost":150,"params":{"pct":10}},{"id":"dualSpear","type":"turret","name":"Dual Spear","cost":300,"params":{"turrets":2}},{"id":"frenzy","type":"frenzy","name":"Frenzy","cost":250,"params":{"pct":10,"cap":2}},{"id":"spread","type":"spread","name":"Spread","cost":300,"params":{"min":1,"max":6}},{"id":"boneShield","type":"shield","name":"Bone shield","cost":200,"params":{"hits":1}},{"id":"emberMortar","type":"mortar","name":"Ember Mortar","cost":300,"params":{"range":15,"min":5,"aps":0.1}},{"id":"explode","type":"explode","name":"Explode on death","cost":200,"params":{"pct":30,"radius":5}},{"id":"dodge","type":"dodge","name":"Dodge","cost":200,"params":{"pct":33}},{"id":"steelPlating","type":"armorHp","name":"Steel plating","cost":300,"params":{"armor":16,"hp":0}}]};
-  const FDATA = {"factions":[],"units":[],"matrix":[],"skills":[{"id":"regen","type":"regen","name":"Regeneration","cost":100,"params":{}},{"id":"poison","type":"poison","name":"Poison shot","cost":100,"params":{"pct":150}},{"id":"stealth","type":"stealth","name":"Stealth","cost":100,"params":{}},{"id":"armorHp","type":"armorHp","name":"Armor and health","cost":200,"params":{}},{"id":"spawn","type":"spawn","name":"Spawn goblins","cost":200,"params":{"every":7}},{"id":"rapid","type":"rapid","name":"Rapid fire","cost":100,"params":{}},{"id":"swift","type":"swift","name":"Swift strikes","cost":100,"params":{}},{"id":"heavy","type":"heavy","name":"Heavy shot","cost":100,"params":{}},{"id":"healer","type":"healer","name":"Healing touch","cost":200,"params":{}},{"id":"range","type":"range","name":"Long reach","cost":200,"params":{}},{"id":"shrink","type":"shrink","name":"Shortsight","cost":100,"params":{"m":6,"duration":4}},{"id":"skmv5oxj501","type":"ward","name":"Ward","cost":100,"params":{}},{"id":"skmv5oxpgk2","type":"slow","name":"Slow","cost":100,"params":{}},{"id":"raiseDead","type":"spawn","name":"Raise dead","cost":0,"params":{"unit":"Skeleton Archers","count":3,"every":2,"max":12}},{"id":"spiderlings","type":"deathSpawn","name":"Spiderlings","cost":200,"params":{"unit":"Spiders","count":2,"strength":50}},{"id":"split","type":"split","name":"Split beam","cost":100,"params":{}},{"id":"forward","type":"forward","name":"Forward planting","cost":100,"params":{}},{"id":"gallop","type":"swift","name":"Gallop","cost":200,"params":{"speed":25,"hit":0}},{"id":"deathBurst","type":"blast","name":"Death burst","cost":200,"params":{"radius":7,"pct":100}},{"id":"dualFlame","type":"turret","name":"Dual Flame","cost":200,"params":{"turrets":2}},{"id":"lifesteal","type":"lifesteal","name":"Lifesteal","cost":150,"params":{"pct":10}},{"id":"dualSpear","type":"turret","name":"Dual Spear","cost":300,"params":{"turrets":2}},{"id":"frenzy","type":"frenzy","name":"Frenzy","cost":250,"params":{"pct":10,"cap":2}},{"id":"spread","type":"spread","name":"Spread","cost":300,"params":{"min":1,"max":6}},{"id":"boneShield","type":"shield","name":"Bone shield","cost":200,"params":{"hits":1}},{"id":"emberMortar","type":"mortar","name":"Ember Mortar","cost":300,"params":{"range":15,"min":5,"aps":0.1}},{"id":"explode","type":"explode","name":"Explode on death","cost":200,"params":{"pct":30,"radius":5}},{"id":"dodge","type":"dodge","name":"Dodge","cost":200,"params":{"pct":33}},{"id":"steelPlating","type":"armorHp","name":"Steel plating","cost":300,"params":{"armor":16,"hp":0}}]}; // the Factions gamemode: { factions, units (each with its faction), matrix, skills } (tools/counter-table.js)
+  const FDATA = {"factions":[{"id":"mechites","name":"Mechites","color":"#C08A4E","theme":"PLACEHOLDER until Vilhelm's roster: scrap-built machines that get tougher the longer they stand.","trait":{"name":"Riveted","text":"+2 armor on all Mechite units","armor":2},"tower":{"name":"Gear Spire","text":"A steady turret with a long reach.","gem":"Powergem: not designed yet.","unit":{"hp":700,"hit":35,"aps":1,"range":12}},"buildings":[{"id":"rivet-post","name":"Rivet Post","text":"A small turret. If it falls you lose 2 health.","unit":{"hp":450,"hit":14,"aps":1.2,"range":14,"projSpeed":40},"onDestroyed":{"hp":2}},{"id":"boiler-works","name":"Boiler Works","text":"Squads that start next to it get +15% health and +2 armor. If it falls you lose 50 gold.","unit":{"hp":500},"aura":{"tiles":1,"hp":15,"armor":2},"onDestroyed":{"gold":50}}],"powers":[{"id":"overclock","name":"Overclock","text":"Mechite units attack 10% faster.","mods":{"aps":10},"units":"faction"},{"id":"scrap-market","name":"Scrap market","text":"+50 gold every round.","gold":50},{"id":"furnace-vents","name":"Furnace vents","text":"Unlocks the spell Furnace vent.","spell":"furnace-vent"}],"units":["Scrap Hounds","Rivet Gunners","Boiler Brute","Arc Cannon","Clockwork Colossus"]},{"id":"sunken","name":"Sunken Deep","color":"#3F8FA6","theme":"PLACEHOLDER until Vilhelm's roster: slow, heavy things from the deep that wear the enemy down.","trait":{"name":"Pressure-born","text":"+15% health, -10% speed","hp":15,"speed":-10},"tower":{"name":"Coral Spire","text":"Lobs heavy globs of brine that splash.","gem":"Powergem: not designed yet.","unit":{"hp":650,"hit":22,"aps":0.8,"range":16,"splash":2.5,"projSpeed":28}},"buildings":[{"id":"brine-well","name":"Brine Well","text":"Heals the most wounded of your units in range. If it falls you lose 2 health.","unit":{"hp":450,"mend":30,"aps":0.8,"range":14},"onDestroyed":{"hp":2}},{"id":"spawning-pool","name":"Spawning Pool","text":"Releases 2 Drowned Swarm every 7 s (up to 6 at once). If it falls you lose 50 gold.","unit":{"hp":500},"spawn":{"unit":"Drowned Swarm","count":2,"every":7,"max":6},"onDestroyed":{"gold":50}}],"powers":[{"id":"deep-pressure","name":"Deep pressure","text":"Sunken Deep units get +10% health.","mods":{"hp":10},"units":"faction"},{"id":"riptide","name":"Riptide","text":"Unlocks the spell Riptide pool.","spell":"riptide-pool"},{"id":"tidal-surge","name":"Tidal surge","text":"Lure Anglers and Drowned Swarm move 20% faster.","mods":{"speed":20},"units":["Lure Angler","Drowned Swarm"]}],"units":["Drowned Swarm","Lure Angler","Tide Caller","Kelp Horror","Leviathan"]}],"neutral":{"buildings":[{"id":"watchtower","name":"Watchtower","text":"A long-range turret. If it falls you lose 1 health.","unit":{"hp":400,"hit":25,"aps":0.6,"range":20,"projSpeed":40},"onDestroyed":{"hp":1}},{"id":"war-banner","name":"War banner","text":"Squads that start next to it deal 15% more damage. If it falls you lose 2 health.","unit":{"hp":300},"aura":{"tiles":1,"hit":15},"onDestroyed":{"hp":2}},{"id":"trading-post","name":"Trading post","text":"+75 gold every round. If it falls you lose 100 gold.","unit":{"hp":350},"income":75,"onDestroyed":{"gold":100}}],"powers":[{"id":"field-rations","name":"Field rations","text":"All your units get +8% health.","mods":{"hp":8}},{"id":"recruiters","name":"Recruiters","text":"+1 deployment every round.","deploys":1},{"id":"fire-pots","name":"Fire pots","text":"Unlocks the spell Fire pot.","spell":"fire-pot"},{"id":"stonemasons","name":"Stonemasons","text":"Your buildings and tower get +40% health, and you can raise palisades.","buildingHp":40,"spell":"palisade"},{"id":"herbalists","name":"Herbalists","text":"Unlocks the spell Healing spring.","spell":"healing-spring"}]},"spells":[{"id":"fire-pot","name":"Fire pot","text":"3 s into the fight, 160 damage to every enemy within 7 m of the tile.","cost":75,"kind":"strike","at":3,"radius":7,"dmg":160,"place":"any"},{"id":"palisade","name":"Palisade","text":"A wooden wall with 700 health, for 2 fights.","cost":50,"kind":"wall","hp":700,"rounds":2,"place":"front"},{"id":"healing-spring","name":"Healing spring","text":"Your units on these 2×2 tiles heal 25 health a second.","cost":50,"kind":"zone","effect":"mend","dps":25,"size":2,"place":"front"},{"id":"riptide-pool","name":"Riptide pool","text":"Enemies on these 2×2 tiles move 45% slower.","cost":50,"kind":"zone","effect":"mud","slow":45,"size":2,"place":"any"},{"id":"furnace-vent","name":"Furnace vent","text":"Enemies on these 2×2 tiles burn for 25 damage a second.","cost":75,"kind":"zone","effect":"burn","dps":25,"size":2,"place":"any"}],"units":[{"name":"Scrap Hounds","cost":1,"unlock":0,"bodies":8,"hp":40,"hit":12,"aps":1.2,"range":2,"speed":8,"splash":0,"faction":"mechites"},{"name":"Rivet Gunners","cost":1,"unlock":0,"bodies":4,"hp":90,"hit":14,"aps":1,"range":16,"speed":4,"splash":0,"projSpeed":40,"faction":"mechites"},{"name":"Boiler Brute","cost":2,"unlock":50,"bodies":1,"hp":900,"hit":60,"aps":0.7,"range":3,"speed":3.5,"splash":0,"defense":"armor","defVal":6,"faction":"mechites"},{"name":"Arc Cannon","cost":3,"unlock":100,"bodies":1,"hp":300,"hit":90,"aps":0.35,"range":30,"speed":2.5,"splash":3,"projSpeed":25,"faction":"mechites"},{"name":"Clockwork Colossus","cost":5,"unlock":150,"bodies":1,"hp":3000,"hit":70,"aps":0.7,"range":5,"speed":2.5,"splash":3,"defense":"armor","defVal":8,"faction":"mechites"},{"name":"Drowned Swarm","cost":1,"unlock":0,"bodies":10,"hp":35,"hit":10,"aps":1.1,"range":2,"speed":6,"splash":0,"faction":"sunken"},{"name":"Lure Angler","cost":1,"unlock":0,"bodies":3,"hp":220,"hit":40,"aps":0.8,"range":4,"speed":5,"splash":0,"disguise":"Drowned Swarm","faction":"sunken"},{"name":"Tide Caller","cost":2,"unlock":50,"bodies":1,"hp":400,"hit":45,"aps":0.6,"range":22,"speed":3,"splash":2.5,"projSpeed":26,"faction":"sunken"},{"name":"Kelp Horror","cost":3,"unlock":100,"bodies":1,"hp":1600,"hit":50,"aps":0.8,"range":3,"speed":3,"splash":1.5,"defense":"ward","defVal":60,"faction":"sunken"},{"name":"Leviathan","cost":5,"unlock":150,"bodies":1,"hp":3600,"hit":120,"aps":0.5,"range":6,"speed":2.2,"splash":4,"faction":"sunken"},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Goblin Swarm","cost":1,"bodies":12,"hp":26,"hit":19,"aps":1.2,"range":2,"speed":8,"splash":0,"shape":"triangle","color":"#9BD35A","skills":["swift","shrink","spread"],"skillMods":[null,{"params":{},"cost":50},null],"skillsInnate":[false,false,false],"faction":"neutral"},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Skeleton Archers","cost":1,"bodies":8,"hp":32,"hit":14,"aps":0.75,"range":19,"speed":2.1,"splash":0,"shape":"triangle","color":"#E9E3CF","skills":["range","rapid","boneShield"],"skillMods":[null,null,null],"skillsInnate":[false,false,false],"faction":"neutral"},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"armor","defVal":3,"level":0,"unlock":50,"name":"Brute","cost":2,"bodies":1,"hp":1100,"hit":98,"aps":1.1,"range":2,"speed":5,"splash":0,"shape":"square","color":"#8D99AE","skills":["armorHp","swift"],"skillMods":[null,null],"skillsInnate":[false,false],"faction":"neutral"},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":20,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":40,"level":0,"unlock":50,"name":"Wisps","cost":1,"bodies":2,"hp":80,"hit":75,"aps":0.8,"range":19,"speed":4,"splash":0,"shape":"ring","color":"#ff90ff","skills":["stealth","skmv5oxj501"],"skillMods":[null,{"params":{},"cost":200}],"skillsInnate":[false,false],"faction":"neutral"},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":180,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Ent","cost":1,"bodies":2,"hp":400,"hit":25,"aps":1.1,"range":4,"speed":2.2,"splash":0,"shape":"square","color":"#0d3000","skills":["armorHp","forward","explode"],"skillsInnate":[false,false,false],"skillMods":[{"params":{"armor":4,"hp":20}},null,null],"deathBlast":0,"faction":"neutral"},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":30,"minRange":0,"charge":4,"knockback":0,"windUp":0,"flame":0,"trample":0,"deathBlast":0,"defense":"none","defVal":0,"level":0,"unlock":100,"name":"Rogue","cost":3,"bodies":2,"hp":310,"hit":80,"aps":1.1,"range":4,"speed":6,"splash":0,"shape":"triangle","color":"#460000","skills":["stealth","skmv5oxj501","frenzy"],"skillsInnate":[true,false,false],"skillMods":[null,{"params":{"cap":200},"cost":150},null],"faction":"neutral"}],"matrix":[[0,-0.637,-0.415,0.45,-0.946,0.249,-0.838,-0.422,-0.387,-0.872,-0.464,-0.906,-0.578,-0.659,-0.909,0.237],[0.637,0,0.589,0.4,-0.556,0.543,-0.386,0.454,0.82,-0.481,0.264,-0.526,-0.467,-0.256,-0.191,0.671],[0.415,-0.589,0,0.52,-0.62,0.58,-0.757,0.596,0.452,-0.833,-0.703,-0.75,-0.713,-0.925,-0.843,-0.615],[-0.45,-0.4,-0.52,0,-0.749,-0.357,-0.761,-0.183,-0.756,-0.787,-0.733,-0.508,-0.736,-0.2,-0.642,-0.734],[0.946,0.556,0.62,0.749,0,0.972,0.203,0.737,0.614,-0.647,0.746,0.244,-0.124,-0.773,0.193,0.309],[-0.249,-0.543,-0.58,0.357,-0.972,0,-0.848,-0.497,-0.404,-0.901,-0.537,-1,-0.668,-0.535,-0.914,0.037],[0.838,0.386,0.757,0.761,-0.203,0.848,0,0.696,0.825,-0.646,0.535,-0.329,0.461,-0.65,-0.667,0.603],[0.422,-0.454,-0.596,0.183,-0.737,0.497,-0.696,0,-0.502,-0.775,-0.336,-0.308,-0.779,-0.386,-0.725,-0.769],[0.387,-0.82,-0.452,0.756,-0.614,0.404,-0.825,0.502,0,-0.667,-0.5,-0.867,-0.68,-0.892,-0.885,-0.339],[0.872,0.481,0.833,0.787,0.647,0.901,0.646,0.775,0.667,0,0.724,-0.579,0.461,-0.583,0.447,0.615],[0.464,-0.264,0.703,0.733,-0.746,0.537,-0.535,0.336,0.5,-0.724,0,-1,0.514,0.222,-0.793,0.694],[0.906,0.526,0.75,0.508,-0.244,1,0.329,0.308,0.867,0.579,1,0,0.658,0.692,0.795,0.842],[0.578,0.467,0.713,0.736,0.124,0.668,-0.461,0.779,0.68,-0.461,-0.514,-0.658,0,-0.6,-0.648,0.264],[0.659,0.256,0.925,0.2,0.773,0.535,0.65,0.386,0.892,0.583,-0.222,-0.692,0.6,0,0.926,0.517],[0.909,0.191,0.843,0.642,-0.193,0.914,0.667,0.725,0.885,-0.447,0.793,-0.795,0.648,-0.926,0,0.617],[-0.237,-0.671,0.615,0.734,-0.309,-0.037,-0.603,0.769,0.339,-0.615,-0.694,-0.842,-0.264,-0.517,-0.617,0]],"skills":[{"id":"regen","type":"regen","name":"Regeneration","cost":100,"params":{}},{"id":"poison","type":"poison","name":"Poison shot","cost":100,"params":{"pct":150}},{"id":"stealth","type":"stealth","name":"Stealth","cost":100,"params":{}},{"id":"armorHp","type":"armorHp","name":"Armor and health","cost":200,"params":{}},{"id":"spawn","type":"spawn","name":"Spawn goblins","cost":200,"params":{"every":7}},{"id":"rapid","type":"rapid","name":"Rapid fire","cost":100,"params":{}},{"id":"swift","type":"swift","name":"Swift strikes","cost":100,"params":{}},{"id":"heavy","type":"heavy","name":"Heavy shot","cost":100,"params":{}},{"id":"healer","type":"healer","name":"Healing touch","cost":200,"params":{}},{"id":"range","type":"range","name":"Long reach","cost":200,"params":{}},{"id":"shrink","type":"shrink","name":"Shortsight","cost":100,"params":{"m":6,"duration":4}},{"id":"skmv5oxj501","type":"ward","name":"Ward","cost":100,"params":{}},{"id":"skmv5oxpgk2","type":"slow","name":"Slow","cost":100,"params":{}},{"id":"raiseDead","type":"spawn","name":"Raise dead","cost":0,"params":{"unit":"Skeleton Archers","count":3,"every":2,"max":12}},{"id":"spiderlings","type":"deathSpawn","name":"Spiderlings","cost":200,"params":{"unit":"Spiders","count":2,"strength":50}},{"id":"split","type":"split","name":"Split beam","cost":100,"params":{}},{"id":"forward","type":"forward","name":"Forward planting","cost":100,"params":{}},{"id":"gallop","type":"swift","name":"Gallop","cost":200,"params":{"speed":25,"hit":0}},{"id":"deathBurst","type":"blast","name":"Death burst","cost":200,"params":{"radius":7,"pct":100}},{"id":"dualFlame","type":"turret","name":"Dual Flame","cost":200,"params":{"turrets":2}},{"id":"lifesteal","type":"lifesteal","name":"Lifesteal","cost":150,"params":{"pct":10}},{"id":"dualSpear","type":"turret","name":"Dual Spear","cost":300,"params":{"turrets":2}},{"id":"frenzy","type":"frenzy","name":"Frenzy","cost":250,"params":{"pct":10,"cap":2}},{"id":"spread","type":"spread","name":"Spread","cost":300,"params":{"min":1,"max":6}},{"id":"boneShield","type":"shield","name":"Bone shield","cost":200,"params":{"hits":1}},{"id":"emberMortar","type":"mortar","name":"Ember Mortar","cost":300,"params":{"range":15,"min":5,"aps":0.1}},{"id":"explode","type":"explode","name":"Explode on death","cost":200,"params":{"pct":30,"radius":5}},{"id":"dodge","type":"dodge","name":"Dodge","cost":200,"params":{"pct":33}},{"id":"steelPlating","type":"armorHp","name":"Steel plating","cost":300,"params":{"armor":16,"hp":0}}]}; // the Factions gamemode: { factions, units (each with its faction), matrix, skills } (tools/counter-table.js)
   Game.setFactions(FDATA.factions);
+  Game.setDevData(FDATA); // the Factions devtest: buildings, Powers, spells
   const ROLES = {
     'Goblin Swarm': 'Fast melee swarm. Soaks shots and overwhelms single-target units.',
     'Skeleton Archers': 'Cheap ranged squad that deals steady damage from behind.',
@@ -4449,6 +4923,9 @@ const Render2D = (cv, view) => {
   let hoverTile = null;
   let charmMode = false;    // Matteo is giving his first Charisma stack: tap one of your squads
   let moveMode = false;     // the Move ability is active: tap an older squad, then a tile
+  // Factions devtest: placing (or moving) a building (its key), casting a spell (its id), drawing a squad's arrow
+  // ('pick': choose the squad; else its id, with the points so far in guideDraft; guideDrag while dragging one out)
+  let bPlacing = null, castMode = null, guideMode = null, guideDraft = [], guideDrag = null;
   let moving = null;        // id of the older squad picked to move
   // the unit being placed or moved right now (some units may use extra tiles, e.g. Forward planting)
   function placingUnit() {
@@ -4742,6 +5219,7 @@ const Render2D = (cv, view) => {
   const cv = $('board');
   const boardView = () => ({ m, me, phase, units, mode, bt, battlePre, fx, selected, moving, drag, hoverTile, rangeOf,
     editable: editable(), placingUnit: placingUnit(), placingElf: placingElf(), placingTower: placingTower(),
+    dev: m && m.dev ? { bPlacing, castMode, guideMode, guideId: guideDrag ? guideDrag.id : guideMode !== 'pick' ? guideMode : null, guide: guideDrag ? guideDrag.pts : guideMode != null && guideMode !== 'pick' ? guideDraft : null } : null,
     battleCam: cam && cam.k > 0 ? { zoom: 1 + (CAM.zoom - 1) * cam.k, x: cam.x, y: cam.y, k: cam.k } : null });
   const board = Render2D(cv, boardView);
   let board3d = null; // the 3D board when it's on (see "the 3D board" below)
@@ -4807,7 +5285,9 @@ const Render2D = (cv, view) => {
   }
   // the X on the task line: stop placing that unit (or the Move, the Charisma, the elf tower)
   function stopTask() {
+    if (guideMode != null && guideMode !== 'pick' && guideDraft.length && m && editable()) Game.setGuide(m, me, guideMode, guideDraft); // the ✕ finishes an arrow
     selected = null; moveMode = false; moving = null; charmMode = false; elfPlacing = false;
+    bPlacing = null; castMode = null; guideMode = null; guideDraft = []; guideDrag = null;
     if (phase === 'deploy') panelDeploy();
     render();
   }
@@ -4903,6 +5383,8 @@ const Render2D = (cv, view) => {
   const LOCK_SVG = '<svg width="11" height="12" viewBox="0 0 11 12" aria-hidden="true"><rect x="1" y="5" width="9" height="7" rx="1.5" fill="currentColor"/><path d="M3 5V3.5a2.5 2.5 0 0 1 5 0V5" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>';
   let shopTier = 1, unlockAsk = null;
   const choosingPack = () => phase === 'deploy' && m && Game.needsPack(m, me);
+  // Factions devtest: this round's pick (after the package and the tower)
+  const devPicking = () => phase === 'deploy' && !!m && Game.isDev(m) && !Game.needsPack(m, me) && !Game.needsTowerPick(m, me) && Game.needsDevPick(m, me);
   const placingTower = () => phase === 'deploy' && m && !Game.needsPack(m, me) && Game.needsTower(m, me);
   let elfPlacing = false; // picking the tile for the elf tower this player is buying
   const placingElf = () => elfPlacing && phase === 'deploy' && !!m && Game.canBuyElfOwn(m, me);
@@ -4985,6 +5467,14 @@ const Render2D = (cv, view) => {
         };
       }),
     };
+    if (devPicking()) {
+      const o = Game.devOffer(m, me);
+      return {
+        kind: 'dev', eyebrow: `Round ${m.round} · Factions – devtest`, title: `Pick a ${Game.CAT_NAMES[o.cat].toLowerCase()}`,
+        sub: o.cat === 'building' ? 'You place it on your side of the board this round.' : o.cat === 'power' ? 'It works for the rest of the match.' : 'It joins your shop for the rest of the match.',
+        items: o.ids.map(id => devItem(o.cat, id)),
+      };
+    }
     if (choosingTower()) return {
       kind: 'tower', eyebrow: `Round ${m.round}`, title: 'Choose your tower',
       sub: mode === 'tutorial' ? 'Your outpost becomes a real tower. It stays all match.' : 'It stays for the rest of the match.',
@@ -5003,7 +5493,119 @@ const Render2D = (cv, view) => {
       if (!Game.choosePack(m, me, +key)) return;
       const f = Game.freeLeft(m, me); if (f.length) shopTier = tierOf(f[0]); // show the tier of the first free squad
       changed();
+    } else if (o.kind === 'dev') {
+      if (!Game.devPick(m, me, key)) return;
+      const b = Game.unplacedBuilding(m, me);
+      if (b) { bPlacing = b.key; selected = null; } // a building goes on the board next
+      const ui = units.findIndex(u => u.name === key && u.faction === 'neutral');
+      if (ui >= 0) shopTier = tierOf(ui);
+      changed();
     } else if (Game.setTowerType(m, me, key)) { changed(); releaseClock(); }
+  }
+  // ---------- Factions devtest: cards, sheets and helpers ----------
+  const DEV_ICON = {
+    building: (c) => `<svg viewBox="0 0 24 24" width="30" height="30" aria-hidden="true"><path d="M3 11 12 4l9 7v9H3z" fill="${c}" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><rect x="10" y="14" width="4" height="6" fill="var(--bg)"/></svg>`,
+    power: (c) => `<svg viewBox="0 0 24 24" width="30" height="30" aria-hidden="true"><path d="M12 2l2.6 6.6L21 9.2l-5 4.4 1.6 6.9L12 17l-5.6 3.5L8 13.6 3 9.2l6.4-.6z" fill="${c}" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>`,
+    spell: (c) => `<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="12" cy="12" r="8" fill="none" stroke="${c}" stroke-width="2.2" stroke-dasharray="3 2"/><circle cx="12" cy="12" r="3" fill="${c}"/></svg>`,
+  };
+  const facColor = (fid) => fid === 'neutral' ? '#B7AE9C' : ((Game.factionInfo(fid) || {}).color || '#B7AE9C');
+  const facName = (fid) => fid === 'neutral' ? 'Neutral' : ((Game.factionInfo(fid) || {}).name || fid);
+  const r1 = (x) => Math.round(x * 10) / 10;
+  const modsText = (mo) => !mo ? '' : ['hp:health', 'hit:damage', 'aps:attack speed', 'range:range', 'speed:speed'].map(x => x.split(':')).filter(([k]) => +mo[k])
+    .map(([k, n]) => `${+mo[k] > 0 ? '+' : ''}${mo[k]}% ${n}`).concat(+mo.armor ? [`${+mo.armor > 0 ? '+' : ''}${mo.armor} armor`] : []).join(', ');
+  // what a building does, in one block of text (stats, aura, income, spawn, when destroyed)
+  function buildingText(d) {
+    if (!d) return '';
+    const u = d.unit || {}, out = [];
+    out.push(`${Math.round(u.hp || 400)} health${u.mend > 0 ? ` · heals ${u.mend} × ${u.aps || 1}/s within ${u.range || 0} m` : u.hit > 0 ? ` · hit ${u.hit} × ${u.aps || 1}/s · ${u.range || 0} m${u.splash ? ` · ${u.splash} m splash` : ''}` : ''}`);
+    if (d.aura) out.push(`Squads that start within ${Math.max(0, Math.round(+d.aura.tiles || 1))} tile${(+d.aura.tiles || 1) === 1 ? '' : 's'}: ${modsText(d.aura)}`);
+    if (+d.income) out.push(`+${d.income} gold every round`);
+    if (d.spawn) out.push(`Releases ${d.spawn.count || 2} ${esc(d.spawn.unit)} every ${d.spawn.every || 6} s (up to ${d.spawn.max || 4})`);
+    const od = d.onDestroyed || {};
+    if (+od.hp || +od.gold) out.push(`<span style="color:var(--foe)">If destroyed: lose ${[+od.hp ? `${od.hp} health` : '', +od.gold ? `${od.gold} gold` : ''].filter(Boolean).join(' and ')}</span>`);
+    out.push({ zone: 'Stands in your zone', front: 'Stands in your zone or no man’s land', flank: 'Stands in your zone or on your flank tiles' }[d.place || 'zone']);
+    return out.join('<br>');
+  }
+  function powerText(p) {
+    if (!p) return '';
+    const out = [];
+    if (p.mods) out.push(`${modsText(p.mods)} for ${p.units === 'faction' ? `${esc(facName(p.faction))} units` : Array.isArray(p.units) ? p.units.map(esc).join(', ') : 'all your units'}`);
+    if (+p.gold) out.push(`+${p.gold} gold every round`);
+    if (+p.deploys) out.push(`+${p.deploys} deployment${+p.deploys === 1 ? '' : 's'} every round`);
+    if (+p.buildingHp) out.push(`+${p.buildingHp}% health on your buildings`);
+    if (p.spell && Game.devSpell(p.spell)) { const sp = Game.devSpell(p.spell); out.push(`Spell: <b>${esc(sp.name)}</b> (${Game.spellCost(sp.id)} gold a cast, once a round). ${esc(sp.text || '')}`); }
+    return out.join('<br>');
+  }
+  // a card in the devtest pick
+  function devItem(cat, id) {
+    if (cat === 'building') {
+      const d = Game.devBuilding(id) || {}, c = facColor(d.faction);
+      return { key: id, art: DEV_ICON.building(c), name: esc(d.name || id), who: `<span style="color:${c}">${esc(facName(d.faction))}</span>`,
+        sub: `${Math.round((d.unit || {}).hp || 400)} hp`, det: `<b>${esc(d.name || id)}</b> · ${esc(d.text || '')}<br>${buildingText(d)}` };
+    }
+    if (cat === 'power') {
+      const p = Game.devPower(id) || {}, c = facColor(p.faction);
+      return { key: id, art: DEV_ICON.power(c), name: esc(p.name || id), who: `<span style="color:${c}">${esc(facName(p.faction))}</span>`, sub: '',
+        det: `<b>${esc(p.name || id)}</b> · ${esc(p.text || '')}<br>${powerText(p)}` };
+    }
+    const ui = units.findIndex(u => u.name === id), u = units[ui] || {};
+    return { key: id, art: `<span style="color:${u.color};display:inline-flex">${Shapes.svg(u.shape, 30)}</span>`, name: esc(id), who: 'Neutral', sub: `${Game.unitCostOf(u)} gold`,
+      det: `<b>${esc(id)}</b>${ROLES[id] ? ` · ${esc(ROLES[id])}` : ''}<br>${u.bodies} × ${Math.round(u.hp)} hp · hit ${Math.round(u.hit)} × ${u.aps}/s · ${u.range} m · ${Game.unitCostOf(u)} gold a squad` };
+  }
+  // a building's sheet (yours or the opponent's)
+  function openBuildingSheet(side, b) {
+    const d = Game.devBuilding(b.id) || {}, c = facColor(d.faction), mine = side === me;
+    const canMove = mine && editable() && b.round === m.round;
+    $('sheet').innerHTML = `
+      <div class="bar"><h3 id="sheet-h"><span style="color:${c}">${DEV_ICON.building(c)}</span> ${esc(d.name || b.id)}</h3><button class="btn small" id="close">Close</button></div>
+      <p class="role" style="margin:0">${mine ? 'Your' : `${esc(foeName())}’s`} ${esc(facName(d.faction))} building${b.round === m.round ? ' · new this round' : ''}</p>
+      <p style="margin:0">${esc(d.text || '')}</p>
+      <p class="hint" style="margin:0;line-height:1.5">${buildingText(d)}</p>
+      ${canMove ? `<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" id="bld-move">Move</button>${Game.pickNow(m, me) && Game.pickNow(m, me).cat === 'building' ? '<button class="btn" id="bld-undo">Undo pick</button>' : ''}</div>` : mine ? '<p class="hint" style="margin:0">Fixed in place since its first fight.</p>' : ''}`;
+    $('sheet-back').hidden = false;
+    $('close').addEventListener('click', closeSheet);
+    if ($('bld-move')) $('bld-move').addEventListener('click', () => { closeSheet(); bPlacing = b.key; selected = null; panelDeploy(); render(); });
+    if ($('bld-undo')) $('bld-undo').addEventListener('click', () => { if (editable() && Game.undoDevPick(m, me)) { closeSheet(); bPlacing = null; changed(); } });
+  }
+  // your spells: cast one (then tap a tile), or take back this round's cast
+  function openSpellSheet() {
+    const list = Game.spellsOf(m, me);
+    $('sheet').innerHTML = `
+      <div class="bar"><h3 id="sheet-h">Spells</h3><button class="btn small" id="close">Close</button></div>
+      <p class="hint" style="margin:0">Each spell can be cast once a round, on a tile. It works in the fight${list.some(id => Game.castRounds({ id }) > 1) ? ' (some last more than one)' : ''}. Your opponent sees it when the fight starts.</p>
+      ${list.map(id => { const sp = Game.devSpell(id), now = Game.castNow(m, me, id);
+        return `<div style="display:grid;gap:4px;border-top:1px solid var(--line);padding-top:8px">
+          <b style="display:flex;gap:6px;align-items:center">${DEV_ICON.spell('var(--gold)')}${esc(sp.name)}</b>
+          <span class="hint">${esc(sp.text || '')}${Game.castRounds({ id }) > 1 ? ` Lasts ${Game.castRounds({ id })} fights.` : ''}</span>
+          ${now ? `<button class="btn" data-uncast="${esc(id)}" ${editable() ? '' : 'disabled'}>Take back (col ${now.col + 1}, row ${now.row + 1}) · +${Game.spellCost(id)}</button>`
+            : `<button class="btn primary" data-cast="${esc(id)}" ${editable() && Game.canCast(m, me, id) ? '' : 'disabled'}>${m.gold[me] >= Game.spellCost(id) ? `Cast · ${Game.spellCost(id)} gold` : `Need ${Game.spellCost(id)} gold`}</button>`}
+        </div>`; }).join('') || '<p class="hint">No spells yet. Some Powers unlock one.</p>'}`;
+    $('sheet-back').hidden = false;
+    $('close').addEventListener('click', closeSheet);
+    $('sheet').querySelectorAll('[data-cast]').forEach(b => b.addEventListener('click', () => { closeSheet(); castMode = b.dataset.cast; selected = null; bPlacing = null; panelDeploy(); render(); }));
+    $('sheet').querySelectorAll('[data-uncast]').forEach(b => b.addEventListener('click', () => { if (editable() && Game.undoCast(m, me, b.dataset.uncast)) { changed(); openSpellSheet(); } }));
+  }
+  // a spell cast on a tile (yours, or the opponent's from the fight on)
+  function castAt(col, row) {
+    return Game.activeCasts(m).find(c => Game.devShown(m, me, phase === 'deploy', c.side, c.round) && Game.castTiles(c).some(t => t.col === col && t.row === row)) || null;
+  }
+  function openCastSheet(c) {
+    const sp = Game.devSpell(c.id) || {}, left = c.round + Game.castRounds(c) - m.round;
+    $('sheet').innerHTML = `
+      <div class="bar"><h3 id="sheet-h">${DEV_ICON.spell(c.side === me ? 'var(--you)' : 'var(--foe)')} ${esc(sp.name || c.id)}</h3><button class="btn small" id="close">Close</button></div>
+      <p class="role" style="margin:0">${c.side === me ? 'Your' : `${esc(foeName())}’s`} spell · ${left > 1 ? `${left} more fights` : 'this fight'}</p>
+      <p style="margin:0">${esc(sp.text || '')}</p>
+      ${c.side === me && c.round === m.round && editable() ? `<button class="btn" id="cast-undo">Take back · +${Game.spellCost(c.id)}</button>` : ''}`;
+    $('sheet-back').hidden = false;
+    $('close').addEventListener('click', closeSheet);
+    if ($('cast-undo')) $('cast-undo').addEventListener('click', () => { if (Game.undoCast(m, me, c.id)) { closeSheet(); changed(); } });
+  }
+  // an arrow drawn by dragging: the tiles passed, cut down to where it turns (and its end), at most DEV.guidePoints
+  function simplifyPath(pts) { // pts[0] is the squad's own tile
+    const out = [], dir = (a, b) => (b.col - a.col) + ',' + (b.row - a.row);
+    for (let k = 1; k < pts.length; k++) if (k === pts.length - 1 || dir(pts[k - 1], pts[k]) !== dir(pts[k], pts[k + 1])) out.push(pts[k]);
+    while (out.length > Game.DEV.guidePoints) out.splice(Math.floor(out.length / 2) - 1, 1); // too many turns: drop some from the middle
+    return out.filter((p, i) => !i || p.col !== out[i - 1].col || p.row !== out[i - 1].row);
   }
   // a card tapped once (shown, not chosen yet) counts as chosen once the player is ready or time runs out,
   // instead of falling back to the first card
@@ -5017,7 +5619,7 @@ const Render2D = (cv, view) => {
     if (id !== pickFor) { pickFor = id; pickSel = null; pickPeek = false; }
     if (!o) { el.hidden = true; peek.hidden = true; pickHtml = ''; return; }
     el.hidden = pickPeek; peek.hidden = !pickPeek;
-    peek.textContent = o.kind === 'pack' ? 'Choose your start' : 'Choose your tower';
+    peek.textContent = o.kind === 'pack' ? 'Choose your start' : o.kind === 'dev' ? 'Choose your pick' : 'Choose your tower';
     const html = `<div class="ph"><span class="eyebrow">${o.eyebrow}</span><h2 id="pick-h">${o.title}</h2><span class="hint">${o.sub}</span></div>
       <div class="opts" style="grid-template-columns:repeat(${Math.max(2, o.items.length)},1fr)">${o.items.map(x => `<button class="opt" data-opt="${x.key}"${o.kind === 'pack' ? ` data-pack="${x.key}"` : ` data-ttype="${x.key}"`} aria-pressed="false">
         <span class="art">${x.art}</span><span class="nm">${x.name}</span>${x.who ? `<span class="who">${x.who}</span>` : ''}${x.sub ? `<span class="sub">${x.sub}</span>` : ''}
@@ -5105,7 +5707,7 @@ const Render2D = (cv, view) => {
     const can = editable();
     const locked = (i) => !Game.isUnlocked(m, me, i);
     const freeN = (i) => Game.freeLeft(m, me).filter(x => x === i).length;
-    const canBuy = (i) => can && !choosingPack() && !choosingTower() && !placingTower() && (freeN(i) > 0 || (!locked(i) && g >= price(i) && left > 0));
+    const canBuy = (i) => can && !choosingPack() && !choosingTower() && !devPicking() && !placingTower() && (freeN(i) > 0 || (!locked(i) && g >= price(i) && left > 0));
     let hint;
     if (!can) hint = mode === 'claude' && claude.fightWaiting ? 'Waiting for Claude to finish its move. The fight starts as soon as it does.' : timeUp ? 'Time’s up. The fight is about to start.' : 'You’re ready. Tap Not ready to make changes.';
     else {
@@ -5129,16 +5731,23 @@ const Render2D = (cv, view) => {
       if (tskillOffer() && m.round === Game.TOWER_PICK_ROUND && selected === null && !fresh) hint = `Your ${esc(Game.towerType(m, me).name)} has a skill: ${esc(Game.towerType(m, me).skill.name)}. ${esc(Game.towerType(m, me).skill.text)} It isn’t on until you buy it (${Game.towerSkillCost(m, me)} gold, once per match).`;
       if (choosingTower()) hint = `Choose your tower on the board. The clock starts once ${solo() ? 'you have' : 'both players have'} picked.`;
       if (placingElf()) hint = 'Tap a free tile in your zone to place your elf tower. Tap anywhere else to cancel.';
+      if (devPicking()) hint = 'Pick one card on the board. If time runs out you get the first one.';
+      const pb = bPlacing != null && Game.buildingsOf(m, me).find(b => b.key === bPlacing);
+      if (pb) hint = `Tap a gold tile to place your ${esc((Game.devBuilding(pb.id) || {}).name || 'building')}.${pb.col != null ? ' Tap anywhere else to leave it where it is.' : ''}`;
+      if (castMode) hint = `Tap a tile to cast ${esc((Game.devSpell(castMode) || {}).name || 'the spell')}${(Game.devSpell(castMode) || {}).kind === 'zone' ? ' (its top left corner on your screen)' : ''}. Tap anywhere it can't go to cancel.`;
+      if (guideMode === 'pick') hint = 'Tap one of your squads, or drag from it to draw its path.';
+      else if (guideMode != null) hint = `Tap tiles for its path (${guideDraft.length} of ${Game.DEV.guidePoints}), or drag from the squad. ✕ when done.`;
       if (placingTower()) hint = 'Next, place your tower: tap a gold tile on the left or right side of your zone. If it falls in a fight, your army is crippled for a few seconds.';
     }
     // Only hints about what the next tap does (or why it can't) stay on the panel; the rest (tips, this round's
     // news) go to the Help sheet, whose button turns gold while there's news not read yet this round.
-    const inline = !can || placingTower() || placingElf() || choosingTower() || choosingPack() || moveMode || (charmMode && Game.canGiveCharm(m, me))
+    const devTask = bPlacing != null || castMode != null || guideMode != null;
+    const inline = !can || placingTower() || placingElf() || choosingTower() || choosingPack() || devPicking() || devTask || moveMode || (charmMode && Game.canGiveCharm(m, me))
       || (selected !== null && !canBuy(selected)) ? hint : '';
     helpTip = inline ? '' : hint;
     // phone: the task the next board tap is for, shown over the board while the drawer is down (dock())
     dockTask = !can ? null : placingTower() ? { text: hint, x: false }
-      : selected !== null || moveMode || (charmMode && Game.canGiveCharm(m, me)) || placingElf() ? { text: hint, x: true } : null;
+      : selected !== null || moveMode || (charmMode && Game.canGiveCharm(m, me)) || placingElf() || devTask ? { text: hint, x: !(bPlacing != null && Game.unplacedBuilding(m, me)) } : null;
     const news = can && selected === null && !fresh && !inline && (Game.hailRound(m) || Game.altarRound(m) || m.round === Game.FLANK.round || (tskillOffer() && m.round === Game.TOWER_PICK_ROUND));
     const extraBtns = `<span class="xbtns" style="display:flex;gap:6px;flex-wrap:wrap">
         <button class="btn small" id="buy-deploy" ${can && Game.canBuyDeploy(m, me) ? '' : 'disabled'}>+1 deployment · ${Game.CONFIG.extraDeployCost}</button>
@@ -5146,6 +5755,13 @@ const Render2D = (cv, view) => {
         ${mageOffer() ? `<button class="btn small" id="mage-gen" ${can ? '' : 'disabled'}>${Game.mageGenOf(m, me) || Game.mageTpOf(m, me) ? [Game.mageGenOf(m, me), Game.mageTpOf(m, me) && 'teleport'].filter(Boolean).map(id => esc(Game.mageGenInfo(id).name)).join(' + ') : 'Mage general'}…</button>` : ''}
         ${tskillOffer() ? `<button class="btn small" id="buy-tskill" ${can && Game.canBuyTowerSkill(m, me) ? '' : 'disabled'}>${esc(Game.towerType(m, me).skill.name)} · ${Game.towerSkillCost(m, me)}</button>` : ''}
         ${can && m.extraDeploys[me] > 0 && left > 0 ? `<button class="btn small" id="refund-deploy">Refund unused</button>` : ''}
+        ${Game.isDev(m) ? (() => { // Factions devtest: the building to place, spells, arrows, this round's pick
+          const ub = Game.unplacedBuilding(m, me), pk = Game.pickNow(m, me);
+          return `${ub ? `<button class="btn small primary" id="dev-place" ${can ? '' : 'disabled'}>Place ${esc((Game.devBuilding(ub.id) || {}).name || 'building')}</button>` : ''}
+            ${Game.spellsOf(m, me).length ? `<button class="btn small" id="dev-spells" ${can ? '' : 'disabled'}>Spells${Game.spellsOf(m, me).some(id => Game.castNow(m, me, id)) ? ' · cast' : ''}…</button>` : ''}
+            <button class="btn small" id="dev-guide" aria-pressed="${guideMode != null}" ${can && m.armies[me].some(q => Game.canGuide(m, me, q)) ? '' : 'disabled'}>${guideMode != null ? 'Cancel path' : 'Draw path'}</button>
+            ${pk && can ? `<button class="btn small" id="dev-unpick">Undo ${esc(pk.cat === 'building' ? (Game.devBuilding(pk.id) || {}).name : pk.cat === 'power' ? (Game.devPower(pk.id) || {}).name : pk.id)}</button>` : ''}`;
+        })() : ''}
         ${Game.charOf(m, me) !== 'matteo' ? '' : charmGivenNow() ? `<button class="btn small" id="charm-undo" ${can ? '' : 'disabled'}>Take back Charisma</button>`
           : Game.canGiveCharm(m, me) ? `<button class="btn small" id="charm-btn" aria-pressed="${charmMode}" ${can && m.armies[me].length ? '' : 'disabled'}>${charmMode ? 'Cancel' : 'Give Charisma'}</button>` : ''}
         ${Game.movedId(m, me) != null
@@ -5164,8 +5780,8 @@ const Render2D = (cv, view) => {
     }
     $('panel').innerHTML = `
       <div class="bar"><span class="gold num">${g} gold</span><span class="deploys num">${Math.max(0, left)} of ${allowed} deployments left</span><span class="timer" id="timer">${deadline ? fmtClock(deadline - now()) : ''}</span><button class="cog help${news && helpSeen !== m.round ? ' new' : ''}" id="help-btn" aria-label="${news && helpSeen !== m.round ? 'Help, news this round' : 'Help'}">?</button></div>
-      <div class="bar">${inline ? `<span class="hint">${inline}</span>` : ''}${(choosingPack() || choosingTower()) && can ? '' : extraBtns}</div>
-      ${(choosingPack() || choosingTower()) && can ? '' : (() => {
+      <div class="bar">${inline ? `<span class="hint">${inline}</span>` : ''}${(choosingPack() || choosingTower() || devPicking()) && can ? '' : extraBtns}</div>
+      ${(choosingPack() || choosingTower() || devPicking()) && can ? '' : (() => {
         const tiers = [...new Set(units.map((u, i) => Game.isOff(m, i, me) ? 0 : tierOf(i)))].filter(t => t > 0).sort((a, b) => a - b); // units left out of the match aren't in the shop
         if (!tiers.includes(shopTier)) shopTier = tiers[0];
         return `<div class="tiers" role="tablist" aria-label="Unit tiers, higher is stronger" style="--n:${tiers.length}">${tiers.map(t => {
@@ -5173,7 +5789,7 @@ const Render2D = (cv, view) => {
           return `<button role="tab" data-tier="${t}" aria-selected="${t === shopTier}" aria-label="Tier ${t}, ${tierName(t)}, ${price(idx[0])} gold, ${open} of ${idx.length} unlocked${free ? ', has free squads' : ''}" style="--tier:${tierColor(t)}">T${t}<em>${tierName(t)}</em><small>${price(idx[0])}g · ${open}/${idx.length}</small></button>`;
         }).join('')}</div>`;
       })()}
-      ${(choosingPack() || choosingTower()) && can ? '' : `<div class="shop" id="shop">${units.map((u, i) => tierOf(i) !== shopTier || Game.isOff(m, i, me) ? '' : shopCard(i, !canBuy(i) && !(locked(i) && can))).join('')}</div>`}
+      ${(choosingPack() || choosingTower() || devPicking()) && can ? '' : `<div class="shop" id="shop">${units.map((u, i) => tierOf(i) !== shopTier || Game.isOff(m, i, me) ? '' : shopCard(i, !canBuy(i) && !(locked(i) && can))).join('')}</div>`}
       <div class="bar"><span class="dock-gold gold num">${g}g</span><span class="hint">${status}</span>${action}</div>`;
     syncPick();
     $('panel').querySelectorAll('[data-tier]').forEach(b => b.addEventListener('click', () => { shopTier = +b.dataset.tier; shopScroll = 0; panelDeploy(); }));
@@ -5202,6 +5818,10 @@ const Render2D = (cv, view) => {
     if ($('charm-undo')) $('charm-undo').addEventListener('click', () => { const q = charmGivenNow(); if (editable() && q && Game.undoCharm(m, me, q.id)) changed(); });
     if ($('move-btn')) $('move-btn').addEventListener('click', () => { if (!editable()) return; moveMode = !moveMode; moving = null; if (moveMode) selected = null; changed(); });
     if ($('undo-move')) $('undo-move').addEventListener('click', () => { if (editable() && Game.undoMove(m, me)) changed(); });
+    if ($('dev-place')) $('dev-place').addEventListener('click', () => { const b = Game.unplacedBuilding(m, me); if (!editable() || !b) return; bPlacing = b.key; selected = null; castMode = null; guideMode = null; panelDeploy(); render(); });
+    if ($('dev-spells')) $('dev-spells').addEventListener('click', openSpellSheet);
+    if ($('dev-guide')) $('dev-guide').addEventListener('click', () => { if (!editable()) return; const on = guideMode == null; stopTask(); if (on) { guideMode = 'pick'; panelDeploy(); render(); } });
+    if ($('dev-unpick')) $('dev-unpick').addEventListener('click', () => { if (editable() && Game.undoDevPick(m, me)) { bPlacing = null; changed(); } });
     tick();
     if (tutHint) coach(tutHint, [['Got it', () => { tutHint = ''; coach(null); }, true]]); // just after the tutorial
   }
@@ -5282,6 +5902,10 @@ const Render2D = (cv, view) => {
         <button class="btn small" id="factions-ai" ${factionsReady() ? '' : 'disabled'}>Factions vs AI</button>
       </div>
       <div class="bar">
+        <span class="hint">${devReady() ? 'Factions – devtest: buildings, Powers and spells on the big Test Grid.' : 'Factions – devtest: no factions yet.'}</span>
+        <button class="btn small" id="devtest-ai" ${devReady() ? '' : 'disabled'}>Factions – devtest</button>
+      </div>
+      <div class="bar">
         <span class="hint">Have a code?</span>
         <span class="joinrow"><input id="code-in" maxlength="5" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-label="Match code" placeholder="CODE"><button class="btn" id="join">Join</button></span>
       </div>
@@ -5310,6 +5934,7 @@ const Render2D = (cv, view) => {
     $('friend').addEventListener('click', hostLobby);
     $('go').addEventListener('click', () => { matchKind = 'standard'; startAiMatch(); });
     $('factions-ai').addEventListener('click', () => { matchKind = 'factions'; startAiMatch(); });
+    $('devtest-ai').addEventListener('click', () => { matchKind = 'devtest'; startAiMatch(); });
     if ($('vs-claude')) $('vs-claude').addEventListener('click', startClaudeMatch);
     if ($('resume')) $('resume').addEventListener('click', () => resumeHost(resume));
     $('load-units').addEventListener('click', openLoader);
@@ -5383,6 +6008,11 @@ const Render2D = (cv, view) => {
     if (!sum.dmg[0] && !sum.dmg[1]) lines.push('Nobody takes damage.');
     if (sum.towerFell && sum.towerFell[foe()]) lines.push(`You broke ${mode === 'claude' ? 'Claude’s' : 'the enemy’s'} tower.`);
     if (sum.towerFell && sum.towerFell[me]) lines.push('Your tower fell.');
+    if (sum.devLoss) { // Factions devtest: buildings destroyed in the fight
+      const fell = (sd) => sum.devLoss[sd].fell.map(id => esc((Game.devBuilding(id) || {}).name || id)).join(', ');
+      if (sum.devLoss[foe()].fell.length) lines.push(`You destroyed ${esc(foeName().toLowerCase() === 'enemy' ? 'the enemy’s' : foeName() + '’s')} ${fell(foe())}${sum.devLoss[foe()].hp ? ` (−${sum.devLoss[foe()].hp} health)` : ''}.`);
+      if (sum.devLoss[me].fell.length) lines.push(`Your ${fell(me)} ${sum.devLoss[me].fell.length === 1 ? 'was' : 'were'} destroyed${sum.devLoss[me].hp ? ` (−${sum.devLoss[me].hp} health)` : ''}.`);
+    }
     const lv = (list) => list.map(x => `${esc(units[x.unit].name)} (to level ${x.level + 1})`).join(', ');
     const lvLines = [];
     if (solo() && lastAiLevels.length) lvLines.push(`<p><span style="color:var(--gold)">${them} leveled up before the fight:</span> ${lv(lastAiLevels)}.</p>`);
@@ -5419,6 +6049,8 @@ const Render2D = (cv, view) => {
     if (sum.felix && sum.felix[me]) gold.push(`+${sum.felix[me]} Felix`);
     if (sum.invest && sum.invest[me]) gold.push(`+${sum.invest[me]} investment`);
     if (sum.loan && sum.loan[me]) gold.push(`−${sum.loan[me]} loan`);
+    if (sum.devGold && sum.devGold[me]) gold.push(`+${sum.devGold[me]} buildings and Powers`);
+    if (sum.devLoss && sum.devLoss[me].gold) gold.push(`−${sum.devLoss[me].gold} buildings lost`);
     const waiting = !solo() && nextReady[me];
     overlay(`<div class="card">
       <h2 class="${cls}">${head}</h2>
@@ -5817,20 +6449,23 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   // Before a Factions match the players draft factions one at a time (Game.FACTION_MODE.order). The match is then
   // played with the drafted factions' units only (useSet swaps them in; restoreSet puts the player's own units back),
   // each player with their own two factions. Live: the host runs the draft; the guest sends its picks (dpick).
-  let matchKind = 'standard'; // standard | factions: what Play vs AI / Start match / Rematch starts
+  let matchKind = 'standard'; // standard | factions | devtest (vs AI only): what Play vs AI / Start match / Rematch starts
   let draft = null, draftSel = null, draftTimer = 0, standardSet = null;
   const FALL = { units: FDATA.units, matrix: FDATA.matrix, skills: FDATA.skills || [] };
   const FSHAPES = Shapes.assign(FALL.units); // for showing each faction's units
   const factionsReady = () => Game.draftPossible() && FALL.units.length >= 2;
+  const devReady = () => Game.FACTIONS().length >= 1 && FALL.units.length >= 2; // the devtest drafts shared, so one faction will do
   function useFactionSet(picks) {
     if (!standardSet) standardSet = { set: rawSet, custom: customSet };
-    useSet(Game.factionSet(FALL, [...picks[0], ...picks[1]]), false);
+    // the devtest keeps every faction's units and the neutral ones in the match (a disguise or a building's spawn may
+    // need a unit of another faction); each player can only use their own and the neutral units they picked
+    useSet(matchKind === 'devtest' ? FALL : Game.factionSet(FALL, [...picks[0], ...picks[1]]), false);
   }
   function restoreSet() { if (standardSet) { useSet(standardSet.set, standardSet.custom); standardSet = null; } }
   function startDraft() {
     restoreSet();
     m = null; bt = null; battlePre = null; deadline = 0; draftSel = null;
-    draft = Game.createDraft(Math.random() < 0.5 ? 0 : 1);
+    draft = Game.createDraft(Math.random() < 0.5 ? 0 : 1, null, matchKind === 'devtest');
     phase = 'draft'; hud(); netStatus(); render();
     draftChanged();
   }
@@ -5850,7 +6485,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   function finishDraft() {
     const picks = draft.picks; draft = null;
     useFactionSet(picks);
-    m = Game.createMatch(units, M, (now() ^ (Math.random() * 1e9)) >>> 0, null, null, offChars, { factions: picks });
+    m = Game.createMatch(units, M, (now() ^ (Math.random() * 1e9)) >>> 0, null, null, offChars, { factions: picks, dev: matchKind === 'devtest' });
     lastSummary = null; nextReady = [false, false]; rematch = [false, false];
     startReport();
     if (mode === 'host') hostBeginRound(); else beginAiRound();
@@ -5866,16 +6501,17 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     const t = Game.draftTurn(draft), mine = t && t.side === me, open = Game.draftOpen(draft);
     if (!open.includes(draftSel)) draftSel = null;
     const who = mode === 'ai' ? 'The enemy' : 'Your opponent';
-    const owner = (id) => draft.picks[me].includes(id) ? 'Yours' : draft.picks[foe()].includes(id) ? (mode === 'ai' ? 'Enemy’s' : 'Theirs') : (draft.bans[0].includes(id) || draft.bans[1].includes(id)) ? 'Banned' : '';
+    const owner = (id) => draft.picks[me].includes(id) ? (draft.picks[foe()].includes(id) ? 'Both' : 'Yours') : draft.picks[foe()].includes(id) ? (mode === 'ai' ? 'Enemy’s' : 'Theirs') : (draft.bans[0].includes(id) || draft.bans[1].includes(id)) ? 'Banned' : '';
+    const shut = (id) => draft.shared ? draft.picks[me].includes(id) || draft.bans[0].includes(id) || draft.bans[1].includes(id) : !!owner(id); // shared: only what you have
     const names = (ids) => ids.length ? ids.map(id => { const f = Game.factionInfo(id); return `<b style="color:${f.color}">${esc(f.name)}</b>`; }).join('') : '<b>–</b>';
     overlay(`<div class="draft">
-      <span class="eyebrow">Factions · draft · ${Game.FACTION_MODE.picks} each</span>
+      <span class="eyebrow">${draft.shared ? 'Factions – devtest' : 'Factions'} · draft · ${Game.FACTION_MODE.picks} each${draft.shared ? ' · both may take the same' : ''}</span>
       <h2 style="font-size:clamp(20px,6vw,28px);margin:0">${!t ? 'Draft done' : mine ? (t.act === 'ban' ? 'Ban a faction' : 'Pick a faction') : `${who} is ${t.act === 'ban' ? 'banning' : 'picking'}…`}</h2>
       <div class="sides"><span>You${names(draft.picks[me])}</span><span>${mode === 'ai' ? 'Enemy' : 'Opponent'}${names(draft.picks[foe()])}</span></div>
       <div class="fgrid">${draft.pool.map(id => {
         const f = Game.factionInfo(id); if (!f) return '';
         const st = owner(id);
-        return `<button class="fac" data-fac="${esc(id)}" style="--fc:${f.color}" aria-pressed="${draftSel === id}" ${st ? 'disabled' : ''}>
+        return `<button class="fac" data-fac="${esc(id)}" style="--fc:${f.color}" aria-pressed="${draftSel === id}" ${shut(id) ? 'disabled' : ''}>
           <span class="nm">${esc(f.name)}</span>${f.theme ? `<span class="sub">${esc(f.theme)}</span>` : ''}${st ? `<span class="st">${st}</span>` : ''}</button>`;
       }).join('')}</div>
     </div>`);
@@ -6095,6 +6731,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     leaveNet();
     mode = 'ai'; me = 0;
     if (matchKind === 'factions' && factionsReady()) { startDraft(); return; }
+    if (matchKind === 'devtest' && devReady()) { startDraft(); return; }
     restoreSet();
     m = Game.createMatch(units, M, (now() ^ (Math.random() * 1e9)) >>> 0, mapPick, m && m.map ? m.map.id : null, offChars, matchOpts());
     nextReady = [false, false]; rematch = [false, false];
@@ -6255,6 +6892,15 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   // Returns true when a drag starts.
   function boardPress(t) {
     if (!t || phase !== 'deploy' || !m || !editable() || choosingPack() || placingTower()) return false;
+    if (guideMode != null) { // devtest: drag an arrow out of one of your squads
+      const gs = Game.squadAt(m, me, t.col, t.row);
+      if (!gs || !Game.canGuide(m, me, gs) || (guideMode !== 'pick' && guideMode !== gs.id)) return false;
+      guideDrag = { id: gs.id, pts: [{ col: t.col, row: t.row }] };
+      return true;
+    }
+    if (bPlacing != null || castMode != null) return false;
+    const myB = Game.isDev(m) && Game.buildingAt(m, me, t.col, t.row);
+    if (myB && myB.round === m.round) { guideDrag = null; drag = { bkey: myB.key, from: t, over: t, moved: false }; return true; } // drag a new building
     const sq = Game.squadAt(m, me, t.col, t.row);
     if (!sq) return false;
     if (sq.round < m.round && !(moveMode || Game.movedId(m, me) === sq.id)) return false;
@@ -6263,15 +6909,26 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     return true;
   }
   function boardDrag(t) {
+    if (guideDrag && t) { const l = guideDrag.pts[guideDrag.pts.length - 1]; if (t.col !== l.col || t.row !== l.row) { guideDrag.pts.push({ col: t.col, row: t.row }); render(); } return; }
     if (drag && t && (t.col !== drag.over.col || t.row !== drag.over.row)) { drag.over = t; drag.moved = true; render(); }
   }
   // the drag ends on tile t (null: the last tile it was over); ended is false when it was cancelled
   function boardDrop(t, ended) {
+    if (guideDrag) {
+      if (ended) boardDrag(t);
+      const gd = guideDrag; guideDrag = null;
+      if (ended && gd.pts.length > 1) { // dragged out: that's the arrow
+        dragEndAt = performance.now();
+        if (Game.setGuide(m, me, gd.id, simplifyPath(gd.pts))) { guideMode = null; guideDraft = []; changed(); return; }
+      }
+      render(); return; // a press without a drag: the tap that follows picks the squad
+    }
     if (!drag) return;
     if (ended) boardDrag(t);
     const d = drag; drag = null;
     if (!ended || !d.moved || (d.over.col === d.from.col && d.over.row === d.from.row)) { render(); return; }
     dragEndAt = performance.now(); // the click that follows a drag is not a tap
+    if (d.bkey != null) { Game.placeBuilding(m, me, d.bkey, d.over.col, d.over.row); changed(); return; } // a building dragged
     if (Game.moveSquad(m, me, d.id, d.over.col, d.over.row) && m.armies[me].find(s => s.id === d.id).round < m.round) { moveMode = false; moving = null; }
     changed();
   }
@@ -6284,7 +6941,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   cv.addEventListener('pointerup', () => boardDrop(null, true));
   cv.addEventListener('pointercancel', () => boardDrop(null, false));
   cv.addEventListener('pointermove', (ev) => {
-    if (drag) { boardDrag(tileAt(ev)); return; }
+    if (drag || guideDrag) { boardDrag(tileAt(ev)); return; }
     if (ev.pointerType === 'mouse') boardHover(tileAt(ev));
   });
   cv.addEventListener('pointerleave', () => boardHover(null));
@@ -6300,7 +6957,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   // place, take back, the abilities (Move, Charisma), the elf tower, and the unit, tower, altar and map sheets
   function tapTile(t, had) {
     if (phase !== 'deploy' || !t) return;
-    if (choosingPack() || choosingTower()) return; // the package (and in round 3 the tower) comes first
+    if (choosingPack() || choosingTower() || devPicking()) return; // the package (and in round 3 the tower, in the devtest the pick) comes first
     if (performance.now() - dragEndAt < 400) return;
     if (mode === 'tutorial') {
       const step = tutStep(), own = Game.squadAt(m, me, t.col, t.row);
@@ -6321,6 +6978,25 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (placingTower()) { if (editable() && Game.placeTower(m, me, t.col, t.row)) changed(); return; }
     if (placingElf()) { if (editable() && Game.buyElfOwn(m, me, t.col, t.row)) { elfPlacing = false; changed(); } else if (!Game.elfOwnSpotOk(m, me, t.col, t.row)) { elfPlacing = false; render(); hud(); panelDeploy(); } return; }
     if (Game.elfOwnAt(m, me, t.col, t.row)) { openMapSheet(); return; }
+    if (Game.isDev(m)) { // Factions devtest: placing a building, casting a spell, drawing an arrow; building and spell sheets
+      if (bPlacing != null) { if (editable() && Game.placeBuilding(m, me, bPlacing, t.col, t.row)) { bPlacing = Game.unplacedBuilding(m, me) ? Game.unplacedBuilding(m, me).key : null; changed(); } else if (!Game.unplacedBuilding(m, me)) { bPlacing = null; panelDeploy(); render(); } return; }
+      if (castMode != null) { const id = castMode; castMode = null; if (editable() && Game.castSpell(m, me, id, t.col, t.row)) changed(); else { panelDeploy(); render(); } return; }
+      if (guideMode === 'pick') { const gs = Game.squadAt(m, me, t.col, t.row); if (gs && Game.canGuide(m, me, gs)) { guideMode = gs.id; guideDraft = []; panelDeploy(); render(); } return; }
+      if (guideMode != null) {
+        const gs = m.armies[me].find(q => q.id === guideMode), l = guideDraft[guideDraft.length - 1];
+        if (!gs || (t.col === gs.col && t.row === gs.row && !guideDraft.length)) return;
+        if (l && l.col === t.col && l.row === t.row) { stopTask(); changed(); return; } // the last point again: done
+        guideDraft.push({ col: t.col, row: t.row });
+        if (guideDraft.length >= Game.DEV.guidePoints) { stopTask(); changed(); return; }
+        panelDeploy(); render(); return;
+      }
+      const myB = Game.buildingAt(m, me, t.col, t.row);
+      if (myB) { openBuildingSheet(me, myB); return; }
+      const foeB = Game.buildingAt(m, foe(), t.col, t.row);
+      if (foeB && Game.devShown(m, me, true, foe(), foeB.round)) { openBuildingSheet(foe(), foeB); return; }
+      const cs = selected === null && castAt(t.col, t.row);
+      if (cs && !Game.squadAt(m, me, t.col, t.row)) { openCastSheet(cs); return; }
+    }
     if (charmMode && editable() && Game.canGiveCharm(m, me)) { // Matteo: the first Charisma stack goes to the squad tapped
       const own = Game.squadAt(m, me, t.col, t.row);
       if (own && Game.giveCharm(m, me, own.id)) { charmMode = false; changed(); }
@@ -6332,11 +7008,12 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       if (own && own.round < m.round) { moving = moving === own.id ? null : own.id; changed(); return; }
       return;
     }
+    if (Game.towerAt(m, me, t.col, t.row) && !Game.towerUp(m, me)) { overlayMsgSheet('Your Powertower', `This tile is kept for your Powertower. You pick it in round ${Game.TOWER_PICK_ROUND}, from your two factions’ towers.`); return; }
     if (Game.towerAt(m, me, t.col, t.row)) {
       openTowerSheet(me);
       return;
     }
-    if (towerVisible(foe()) && Game.towerAt(m, foe(), t.col, t.row)) { openTowerSheet(foe()); return; }
+    if (towerVisible(foe()) && Game.towerAt(m, foe(), t.col, t.row) && Game.towerUp(m, foe())) { openTowerSheet(foe()); return; }
     const elf = Game.elfSpot(m);
     if (elf && t.col === elf.col && (t.row === Game.ROWS / 2 - 1 || t.row === Game.ROWS / 2) && !Game.occupied(m, me, t.col, t.row)) { openMapSheet(); return; }
     const freeTile = !Game.occupied(m, me, t.col, t.row);
@@ -6360,7 +7037,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       return;
     }
     const enemy = m.armies[foe()].find(s => { const p = Game.seenAt(m, s); return !Game.hiddenFromFoe(m, s) && p.col === t.col && p.row === t.row && s.round < m.round; });
-    if (enemy) { rangeOf = { side: foe(), id: enemy.id }; openSheet(enemy.unit, enemy, foe()); return; }
+    if (enemy) { rangeOf = { side: foe(), id: enemy.id }; openSheet(Game.shownUnit(m, me, foe(), enemy.unit), { ...enemy, unit: Game.shownUnit(m, me, foe(), enemy.unit) }, foe()); return; } // a disguise shows as what it pretends to be
     if (selected !== null && editable() && Game.canPlaceAt(m, me, t.col, t.row, selected)) {
       if (Game.place(m, me, selected, t.col, t.row)) {
         if (!Game.freeLeft(m, me).includes(selected) && (m.gold[me] < Game.shopCost(m, me, selected) || Game.deploysLeft(m, me) <= 0)) selected = null;
@@ -6891,6 +7568,8 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
         if (sq.round < m.round && editable() && Game.movedId(m, me) === sq.id) btns.push(`<button class="btn" data-act="move-undo">Undo move · +${Game.CONFIG.moveCost}</button>`);
         else if (sq.round < m.round && editable() && Game.movedId(m, me) == null) btns.push(`<button class="btn" data-act="move-sq" ${m.gold[me] >= Game.CONFIG.moveCost ? '' : 'disabled'}>${Game.isRider(sq) ? 'Take out' : 'Move'} · ${Game.CONFIG.moveCost} gold</button>`);
         if (sq.round < m.round && editable()) btns.push(`<button class="btn" data-act="sell">Sell · ${Game.sellValue(m, sq)} gold</button>`);
+        if (editable() && Game.canGuide(m, me, sq)) btns.push(`<button class="btn" data-act="guide">${sq.guide ? 'Redraw path' : 'Draw path'}</button>`);
+        if (editable() && sq.guide) btns.push(`<button class="btn" data-act="unguide">Clear path</button>`);
         if (btns.length) lvl += `<div style="display:flex;gap:8px;flex-wrap:wrap">${btns.join('')}</div>`;
         else if (next) lvl += `<p class="hint" style="margin:0">Earns XP from damage it deals and takes. Killing leveled enemies pays extra.</p>`;
       }
@@ -6952,6 +7631,8 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     root.querySelectorAll('[data-unskill]').forEach(b => b.addEventListener('click', () => { if (editable() && Game.undoSkill(m, me, i, +b.dataset.unskill)) after(); }));
     on('move-sq', () => { if (!editable()) return; closeSheet(); moveMode = true; moving = sq.id; selected = null; changed(); });
     on('move-undo', () => { if (editable() && Game.undoMove(m, me)) after(); });
+    on('guide', () => { if (!editable()) return; closeSheet(); stopTask(); guideMode = sq.id; guideDraft = []; panelDeploy(); render(); });
+    on('unguide', () => { if (editable() && Game.clearGuide(m, me, sq.id)) after(); });
     on('sell', (btn) => {
       if (!btn.dataset.sure) { btn.dataset.sure = '1'; btn.textContent = `Tap again to sell for ${Game.sellValue(m, sq)}`; btn.classList.add('primary'); return; }
       if (editable() && Game.sell(m, me, sq.id)) { closeSheet(); changed(); }

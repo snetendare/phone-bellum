@@ -18,7 +18,7 @@ const Game = (() => {
   // Gold both players get at the start of a round: 250 going into round 2, then 100 more each round (like Mechabellum)
   const incomeFor = (round) => INCOME + CONFIG.incomeStep * Math.max(0, round - 2);
   const deploysAllowed = (m, side) => CONFIG.deployCap
-    ? (m.round === 1 ? CONFIG.firstRoundDeploys : CONFIG.deploysPerRound) + m.extraDeploys[side]
+    ? (m.round === 1 ? CONFIG.firstRoundDeploys : CONFIG.deploysPerRound) + m.extraDeploys[side] + devDeploys(m, side)
     : Infinity;
   const deployedThisRound = (m, side) => m.armies[side].filter(s => s.round === m.round && !s.free).length; // package squads don't count
   const deploysLeft = (m, side) => deploysAllowed(m, side) - deployedThisRound(m, side);
@@ -759,6 +759,8 @@ const Game = (() => {
     const r = rng((seed >>> 0) + 777);
     const factions = opts && Array.isArray(opts.factions) && opts.factions.length === 2 && opts.factions.every(Array.isArray) ? opts.factions.map(f => f.map(String)) : null;
     if (factions) mapId = FACTION_MODE.map;
+    const dev = !!(opts && opts.dev);
+    if (dev) mapId = DEV.map;
     useGrid(rollMap(seed >>> 0, mapId, lastMapId).id); // the board this match is on, before anything is placed on it
     let off = factions ? [] : ((opts && opts.offUnits) || []).filter((ui, k, a) => Number.isInteger(ui) && ui >= 0 && ui < units.length && a.indexOf(ui) === k);
     if (units.length - off.length < 2) off = [];
@@ -790,6 +792,7 @@ const Game = (() => {
       mageGen: [null, null], // the mage generals each player called this round: { round, id, tp } (Mage tower)
       mapFree: [{}, {}], // Blixten's discounted map purchase per round (see mapFreeOf)
       factions, // Factions mode: each player's drafted faction ids (null = a normal match)
+      dev: dev ? { picks: [[], []], buildings: [[], []], casts: [], nextKey: 1 } : null, // the Factions devtest (see DEV)
     };
     m.towers = [towerSpot(m, 0), towerSpot(m, 1)];
     return m;
@@ -836,6 +839,7 @@ const Game = (() => {
     if (charOf(m, side) === 'mubarak' && base && SLIME_UNITS.includes(base.name)) defs.push(...slimeSkillDefs(m, side, ui));
     let u = defs.length ? E.applySkills(base, defs, m.units) : base;
     u = withFactionTrait(u, base && base.faction);
+    u = withPowers(m, side, u, base);
     if (base && SLIME_UNITS.includes(base.name)) u = { ...u, slime: true }; // poison heals slime units
     if (charOf(m, side) === 'noah') { // Noah: 10% less health and damage, spawned ones too
       const k = 1 - CHAR.noahCut / 100;
@@ -982,7 +986,7 @@ const Game = (() => {
   }
 
   const towerAt = (m, side, col, row) => !!(m.towers && m.towers[side] && m.towers[side].col === col && m.towers[side].row === row);
-  const occupied = (m, side, col, row) => towerAt(m, side, col, row) || elfOwnAt(m, side, col, row) || m.armies[side].some(s => s.col === col && s.row === row);
+  const occupied = (m, side, col, row) => towerAt(m, side, col, row) || elfOwnAt(m, side, col, row) || m.armies[side].some(s => s.col === col && s.row === row) || devOccupied(m, side, col, row);
   const needsTower = (m, side) => !!(m.towers && !m.towers[side]);
   // the tower can be placed (or moved) during round 1 only
   function placeTower(m, side, col, row) {
@@ -1065,7 +1069,13 @@ const Game = (() => {
       if (zoe) { const zb = zoeBuff(m, side); u = { ...u, hit: u.hit * (1 + zb.dmg / 100), hp: u.hp * (1 + zb.hp / 100), aps: u.aps * (1 + zb.aps / 100) }; }
       if (eagle && u.name === 'Sniper') u = { ...u, range: u.range + TOWER_SKILL.eagleRange, aps: u.aps * (1 + TOWER_SKILL.eagleAps / 100) };
       if (mp && mp.rangeCut && u.range > mp.rangeKeep) u = { ...u, range: Math.max(mp.rangeKeep, u.range * (1 - mp.rangeCut / 100)) }; // the map shortens reach (never below rangeKeep)
+      const aura = isDev(m) ? auraFor(m, side, sq.col, sq.row) : null; // devtest: a building's aura
+      if (aura) u = modUnit(u, aura);
       const b = E.buildSquad(u, side, w.x, w.y, sq.id, TILE, idx, sq.level);
+      if (aura) for (const x of b) x.aura = true;
+      const dis = isDev(m) && m.units[sq.unit].disguise ? m.units.find(x => x.name === m.units[sq.unit].disguise) : null; // devtest: a disguise, until its first attack
+      if (dis) { const mask = { name: dis.name, shape: dis.shape, color: dis.color, bodies: dis.bodies, range: dis.range }; for (const x of b) x.mask = mask; }
+      if (isDev(m) && sq.guide && sq.guide.length && !isRider(sq)) for (const x of b) x.guide = sq.guide.map(p => tileToWorld(p.col, p.row)); // devtest: the squad's arrow
       if (airship && u.name === 'Sniper') { const su = { ...b[0].u, hit: b[0].u.hit + AIRSHIP.sniperHit }; for (const x of b) x.u = su; } // flat, after levels
       if (home) for (const x of b) x.band = { ...home };
       if (zoe) for (const x of b) x.zoe = true; // for the rising-stars effect
@@ -1082,7 +1092,7 @@ const Game = (() => {
       for (const x of out) if (x.squad === sq.id) { if (c) { x.boarded = true; x.alive = false; x.carrier = c; x.x = c.x; x.y = c.y; x.delay = 0; } }
     }
     const t = m.towers && m.towers[side];
-    if (t) {
+    if (t && towerUp(m, side)) {
       let tu = mageTowerUnit(m, side, towerType(m, side).unit);
       if (towerType(m, side).id === 'slime') tu = { ...slimeTowerUnit(m, side, tu), slime: true };
       if (towerSkill2On(m, side, 'bastion')) tu = { ...tu, moat: { ...MOAT } };
@@ -1113,6 +1123,20 @@ const Game = (() => {
         const ab = E.buildSquad(au, side, aw.x, aw.y, -4, TILE, idx);
         idx += ab.length; out.push(...ab);
       }
+    }
+    // devtest: lesser buildings and walls (spells) stand on their tiles; squad ids BUILDING_SQ - key, WALL_SQ - cast index
+    if (isDev(m)) {
+      for (const bd of placedBuildings(m, side)) {
+        const w = tileToWorld(bd.col, bd.row), bb = E.buildSquad(buildingUnit(m, side, bd), side, w.x, w.y, BUILDING_SQ - bd.key, TILE, idx);
+        idx += bb.length; out.push(...bb);
+      }
+      casts(m).forEach((c, k) => {
+        const sp = devSpell(c.id) || {};
+        if (c.side !== side || sp.kind !== 'wall' || !castActive(m, c)) return;
+        const wu = E.withTraits({ name: sp.name || 'Wall', cost: 0, bodies: 1, hp: +sp.hp || 600, hit: 0, aps: 1, range: 0, speed: 0, splash: 0, shape: 'square', color: '#9C8F7A', structure: true, building: true, kind: 'wall', level: 0 });
+        const w = tileToWorld(c.col, c.row), wb = E.buildSquad(wu, side, w.x, w.y, WALL_SQ - k, TILE, idx);
+        idx += wb.length; out.push(...wb);
+      });
     }
     // Snowgres stand on their own tiles in no man's land; squad ids -10, -11, ... (not squads in the army)
     snowgres(m, side).forEach((sg, k) => {
@@ -1189,6 +1213,7 @@ const Game = (() => {
     settleTowerPicks(m);
     ensurePack(m, 0); ensurePack(m, 1);
     ensureCharm(m, 0); ensureCharm(m, 1);
+    settleDev(m);
     const mp = mapOf(m), elf = elfSpot(m);
     let g = { ...SETTINGS, bounds: { ...BOUNDS }, ...(mp && mp.healMul ? { healMul: mp.healMul } : {}) };
     if (m.rules) g = { ...g, rules: m.rules }; // the roster's rules (a Counter Lab roster can switch mechanics off)
@@ -1200,9 +1225,12 @@ const Game = (() => {
         : { type: 'toxic', poisonPct: SHROOM.poisonPct, poisonDur: SHROOM.poisonDur, slowMove: SHROOM.slowMove, slowAtk: SHROOM.slowAtk, slowDur: SHROOM.slowDur, x0: w.x - T2, x1: w.x + T2, y0: w.y - T2, y1: w.y + T2 });
     }
     for (const h of hailTiles(m)) { const w = tileToWorld(h.col, h.row); tiles.push({ type: 'hail', dps: ICE.hailDps, x0: w.x - T2, x1: w.x + T2, y0: w.y - T2, y1: w.y + T2 }); }
+    const fx = isDev(m) ? castEffects(m) : { tiles: [], strikes: [] }; // devtest spells
+    tiles.push(...fx.tiles);
+    if (isDev(m) && DEV.awareness) g = { ...g, aware2: true };
     const neutrals = elf ? [{ u: elfUnit(m), x: elf.x, y: elf.y, friends: [bribeLeader(m) === 0, bribeLeader(m) === 1] }] : [];
     for (const side of [0, 1]) { const e = elfOwnOf(m, side); if (e) { const w = tileToWorld(e.col, e.row); neutrals.push({ u: elfUnit(m), x: w.x, y: w.y, friends: [side === 0, side === 1], side }); } }
-    return E.createBattle(bodiesFor(m, 0), bodiesFor(m, 1), g, { record: true, tiles, neutrals, charm: [charmMap(m, 0), charmMap(m, 1)] });
+    return E.createBattle(bodiesFor(m, 0), bodiesFor(m, 1), g, { record: true, tiles, strikes: fx.strikes, neutrals, charm: [charmMap(m, 0), charmMap(m, 1)] });
   }
 
   // Damage a side deals = points of its squads, scaled by how much of each squad is still alive.
@@ -1282,6 +1310,20 @@ const Game = (() => {
       return Object.keys(by).map(key => ({ key, dealt: Math.round(by[key]), ...(key === 'tower' ? { name: towerType(m, sd).name } : {}) }));
     });
     const summary = { round: m.round, winner: roundWinner, timeout: res.timeout, dmg, time: res.time, newlyReady, squads, towerFell, gentlemen, converted: res.converted || [0, 0], dealtBy };
+    // devtest: buildings destroyed in the fight cost their owner what their onDestroyed says (health now, gold below)
+    if (isDev(m)) {
+      summary.devLoss = [0, 1].map(sd => {
+        const out = { hp: 0, gold: 0, fell: [] };
+        for (const bd of placedBuildings(m, sd)) {
+          const q = res.squads[sd + ':' + (BUILDING_SQ - bd.key)];
+          if (!q || q.alive > 0) continue;
+          const od = (devBuilding(bd.id) || {}).onDestroyed || {};
+          out.hp += Math.max(0, Math.round(+od.hp || 0)); out.gold += Math.max(0, Math.round(+od.gold || 0)); out.fell.push(bd.id);
+        }
+        m.hp[sd] = Math.max(0, m.hp[sd] - out.hp);
+        return out;
+      });
+    }
     m.history.push(summary);
     if (m.hp[0] <= 0 || m.hp[1] <= 0) {
       m.over = true;
@@ -1299,6 +1341,10 @@ const Game = (() => {
     summary.income = income;
     summary.felix = [0, 1].map(sd => felixGold(m, sd));
     for (const sd of [0, 1]) m.gold[sd] += summary.felix[sd];
+    if (isDev(m)) { // devtest: Powers' gold and buildings' income in, destroyed buildings' gold out
+      summary.devGold = [0, 1].map(sd => devGold(m, sd));
+      for (const sd of [0, 1]) m.gold[sd] = Math.max(0, m.gold[sd] + summary.devGold[sd] - summary.devLoss[sd].gold);
+    }
     const loser = dmg[0] > dmg[1] ? 0 : dmg[1] > dmg[0] ? 1 : -1;
     if (loser >= 0) m.gold[loser] += LOSER_BONUS;
     summary.bonusTo = loser;
@@ -1387,15 +1433,14 @@ const Game = (() => {
   // the tower types a player can pick in a Factions match: one per drafted faction
   const factionTowers = (m, side) => factionsOf(m, side).map(id => factionInfo(id)).filter(Boolean).map(f => f.tower);
   // whether a player may use unit ui: always in a normal match; in a Factions match only units of their factions
-  const ownsUnit = (m, side, ui) => !(m && m.factions) || !!(m.units[ui] && factionsOf(m, side).includes(m.units[ui].faction));
+  const ownsUnit = (m, side, ui) => !(m && m.factions) || !!(m.units[ui] && (factionsOf(m, side).includes(m.units[ui].faction)
+    || (m.units[ui].faction === 'neutral' && pickedIds(m, side, 'neutral').includes(m.units[ui].name)))); // devtest: neutral units picked
+
   // a faction's trait on one of its units (spawned units too)
   function withFactionTrait(u, fid) {
     const t = fid && factionInfo(fid) && factionInfo(fid).trait;
     if (!u || !t) return u;
-    const mul = (x) => { const o = { ...x }; for (const k of TRAIT_STATS) if (isFinite(+t[k]) && +t[k]) o[k] = x[k] * (1 + t[k] / 100); return o; };
-    const out = mul(u);
-    if (u.spawn && u.spawn.unit) out.spawn = { ...u.spawn, unit: mul(u.spawn.unit) };
-    return out;
+    return modUnit(u, t);
   }
   // the roster for a match between drafted factions: the faction units of `ids` (in that order) out of the full
   // faction set ({ units, matrix, skills } from faction-units.json), with the counter table cut to match
@@ -1406,8 +1451,9 @@ const Game = (() => {
   }
   // ---- the draft ----
   // first: the player who drafts first (0 or 1). pool (optional): faction ids that can be drafted (default: all)
-  function createDraft(first, pool) {
-    return { first: first ? 1 : 0, pool: (pool || FACTIONS.map(f => f.id)).slice(), step: 0, picks: [[], []], bans: [[], []] };
+  // shared: both players may draft the same faction (the devtest, while there are few factions)
+  function createDraft(first, pool, shared) {
+    return { first: first ? 1 : 0, pool: (pool || FACTIONS.map(f => f.id)).slice(), step: 0, picks: [[], []], bans: [[], []], ...(shared ? { shared: true } : {}) };
   }
   const draftDone = (d) => !d || d.step >= FACTION_MODE.order.length;
   // whose turn it is and what they do, or null when the draft is over
@@ -1417,7 +1463,12 @@ const Game = (() => {
     return { side: o.who === 'A' ? d.first : 1 - d.first, act: o.act };
   }
   const draftTaken = (d) => [...d.picks[0], ...d.picks[1], ...d.bans[0], ...d.bans[1]];
-  const draftOpen = (d) => d.pool.filter(id => !draftTaken(d).includes(id));
+  // shared (devtest): a faction is only closed to a player who has it already (or banned)
+  const draftOpen = (d) => {
+    if (!d.shared) return d.pool.filter(id => !draftTaken(d).includes(id));
+    const t = draftTurn(d), mine = t ? d.picks[t.side] : [];
+    return d.pool.filter(id => !mine.includes(id) && !d.bans[0].includes(id) && !d.bans[1].includes(id));
+  };
   // enough factions for a draft: every pick and ban needs its own
   const draftPossible = (pool) => (pool || FACTIONS).length >= FACTION_MODE.order.length;
   function draftAct(d, side, id) {
@@ -1448,6 +1499,287 @@ const Game = (() => {
     return open[sc.indexOf(Math.max(...sc))];
   }
 
+  // ---------- Factions devtest ----------
+  // A test bed for the Factions mode while it is being designed (docs/FACTIONS-DEVTEST.md): the Test Grid board, a
+  // faction draft in which both players may take the same faction, no tower in rounds 1 and 2, and from round 2 a free
+  // pick every round of 1 out of 3 things that change your side of the board (DEV.schedule): lesser buildings, the
+  // Powertower (round 3: the usual tower pick), Powers and neutral units. Also spells (temporary map items, for gold),
+  // arrows that guide a squad, and units disguised as other units. m.dev holds it all; other matches have no m.dev.
+  const DEV = {
+    map: 'testgrid',
+    schedule: { 2: 'building', 3: 'tower' }, cycle: ['power', 'building', 'neutral'], // from round 4 the picks go round the cycle
+    offer: 3,          // options per pick
+    guideAll: true,    // every squad can get an arrow (false: only units with "guide": true)
+    guidePoints: 4,    // most points in one arrow
+    awareness: true,   // fights use the awareness prototype (see docs/AWARENESS.md)
+  };
+  const CAT_NAMES = { building: 'Lesser building', tower: 'Powertower', power: 'Power', neutral: 'Neutral unit' };
+  const BUILDING_SQ = -1000, WALL_SQ = -2000; // squad ids in fights: building key k is BUILDING_SQ - k, wall cast k is WALL_SQ - k
+  let DEVDATA = { buildings: [], powers: [], spells: [] };
+  // fd: faction-units.json ({ factions (with their buildings and powers), neutral: { buildings, powers }, spells })
+  function setDevData(fd) {
+    const own = (list, faction) => (Array.isArray(list) ? list : []).filter(x => x && typeof x.id === 'string' && x.id).map(x => ({ ...x, faction }));
+    const fs = (fd && fd.factions) || [], nt = (fd && fd.neutral) || {};
+    DEVDATA = {
+      buildings: [].concat(...fs.map(f => own(f.buildings, f.id)), own(nt.buildings, 'neutral')),
+      powers: [].concat(...fs.map(f => own(f.powers, f.id)), own(nt.powers, 'neutral')),
+      spells: own(fd && fd.spells, null),
+    };
+    return DEVDATA;
+  }
+  const devBuilding = (id) => DEVDATA.buildings.find(b => b.id === id) || null;
+  const devPower = (id) => DEVDATA.powers.find(p => p.id === id) || null;
+  const devSpell = (id) => DEVDATA.spells.find(s => s.id === id) || null;
+  const isDev = (m) => !!(m && m.dev);
+  // in the devtest the tower only stands from round 3 (its tile is reserved from the start)
+  const towerUp = (m, side) => !isDev(m) || m.round >= TOWER_PICK_ROUND;
+  // what the pick in a round is about (null: no pick that round)
+  const pickCat = (m, round = m.round) => DEV.schedule[round] || (round > TOWER_PICK_ROUND ? DEV.cycle[(round - TOWER_PICK_ROUND - 1) % DEV.cycle.length] : null);
+  const devPicks = (m, side) => (isDev(m) && m.dev.picks[side]) || [];
+  const pickedIds = (m, side, cat) => devPicks(m, side).filter(p => !cat || p.cat === cat).map(p => p.id);
+  // what a player could still pick in a category: their factions' things and the neutral ones
+  function pickPool(m, side, cat) {
+    const mine = factionsOf(m, side).concat('neutral'), had = pickedIds(m, side, cat);
+    if (cat === 'building') return DEVDATA.buildings.filter(b => mine.includes(b.faction) && !had.includes(b.id)).map(b => b.id);
+    if (cat === 'power') return DEVDATA.powers.filter(p => mine.includes(p.faction) && !had.includes(p.id)).map(p => p.id);
+    if (cat === 'neutral') return m.units.filter(u => u.faction === 'neutral' && !had.includes(u.name)).map(u => u.name);
+    return [];
+  }
+  // this round's offer to a player: { round, cat, ids } (null: nothing to pick). A category with nothing left falls
+  // back to the next one in the cycle. Seeded from the match, so both phones get the same offer.
+  function devOffer(m, side) {
+    const cat = isDev(m) ? pickCat(m) : null;
+    if (!cat || cat === 'tower') return null; // the tower round's pick is the tower pick (towerChoices)
+    for (const c of [cat, ...DEV.cycle.filter(x => x !== cat)]) {
+      const left = pickPool(m, side, c).concat(pickNow(m, side) && pickNow(m, side).cat === c ? [pickNow(m, side).id] : []);
+      if (!left.length) continue;
+      left.sort();
+      const r = rng(m.seed + m.round * 6151 + side * 911 + 3), ids = [];
+      while (ids.length < DEV.offer && left.length) ids.push(left.splice(Math.floor(r() * left.length), 1)[0]);
+      return { round: m.round, cat: c, ids };
+    }
+    return null;
+  }
+  const pickNow = (m, side) => devPicks(m, side).find(p => p.round === m.round) || null;
+  const needsDevPick = (m, side) => !pickNow(m, side) && !!devOffer(m, side);
+  function devPick(m, side, id) {
+    const o = devOffer(m, side);
+    if (!o || pickNow(m, side) || !o.ids.includes(id)) return false;
+    m.dev.picks[side].push({ round: m.round, cat: o.cat, id });
+    if (o.cat === 'building') m.dev.buildings[side].push({ key: m.dev.nextKey++, id, col: null, row: null, round: m.round });
+    if (o.cat === 'neutral') { const ui = m.units.findIndex(u => u.name === id); if (ui >= 0) m.unlocks[side][ui] = m.round; }
+    return true;
+  }
+  // take back this round's pick (not a neutral unit already bought, nor a Power whose spell was cast this round)
+  function undoDevPick(m, side) {
+    const p = pickNow(m, side);
+    if (!p) return false;
+    const ui = p.cat === 'neutral' ? m.units.findIndex(u => u.name === p.id) : -1;
+    if (ui >= 0 && m.armies[side].some(s => s.unit === ui)) return false;
+    if (p.cat === 'power' && (devPower(p.id) || {}).spell && castNow(m, side, devPower(p.id).spell)) return false;
+    m.dev.picks[side] = m.dev.picks[side].filter(x => x !== p);
+    if (p.cat === 'building') m.dev.buildings[side] = m.dev.buildings[side].filter(b => !(b.round === m.round && b.id === p.id));
+    if (ui >= 0) delete m.unlocks[side][ui];
+    return true;
+  }
+  // what the opponent may see of something placed or picked: from the fight of its round on
+  const devShown = (m, viewer, deploying, side, round) => side === viewer || !deploying || round < m.round;
+
+  // ---- lesser buildings ----
+  const buildingsOf = (m, side) => (isDev(m) && m.dev.buildings[side]) || [];
+  const placedBuildings = (m, side) => buildingsOf(m, side).filter(b => b.col != null);
+  const unplacedBuilding = (m, side) => buildingsOf(m, side).find(b => b.col == null) || null;
+  const buildingAt = (m, side, col, row) => placedBuildings(m, side).find(b => b.col === col && b.row === row) || null;
+  const devOccupied = (m, side, col, row) => !!buildingAt(m, side, col, row) || !!wallAt(m, col, row);
+  // where a building may stand: def.place is 'zone' (default), 'front' (zone or no man's land) or 'flank' (zone or own flank tiles)
+  function buildingSpotOk(m, side, def, col, row, key) {
+    if (!isDev(m) || col < 0 || col >= COLS || row < 0 || row >= ROWS) return false;
+    const where = (def && def.place) || 'zone';
+    const ok = inZone(side, row) || (where === 'front' && inNoMans(row)) || (where === 'flank' && isFlank(side, col, row));
+    if (!ok || reserved(side, col, row) || towerAt(m, side, col, row) || elfOwnAt(m, side, col, row) || wallAt(m, col, row)) return false;
+    if (m.armies[side].some(s => s.col === col && s.row === row)) return false;
+    return !placedBuildings(m, side).some(b => b.key !== key && b.col === col && b.row === row);
+  }
+  // place (or move) a building: any time in the round it was picked, fixed after its first fight
+  function placeBuilding(m, side, key, col, row) {
+    const b = buildingsOf(m, side).find(x => x.key === key);
+    if (!b || b.round !== m.round || !buildingSpotOk(m, side, devBuilding(b.id), col, row, key)) return false;
+    b.col = col; b.row = row;
+    return true;
+  }
+  // a building's fighting stats
+  function buildingUnit(m, side, b) {
+    const d = devBuilding(b.id) || {};
+    const hpPct = powersOf(m, side).reduce((s, p) => s + (+p.buildingHp || 0), 0);
+    const u = { name: d.name || 'Building', cost: 0, bodies: 1, hp: 400, hit: 0, aps: 1, range: 0, speed: 0, splash: 0, shape: 'square', color: (factionInfo(d.faction) || {}).color || '#B7AE9C',
+      ...(d.unit || {}), structure: true, building: true, kind: 'building', bid: d.id || null, level: 0 };
+    u.hp = u.hp * (1 + hpPct / 100);
+    const sp = d.spawn, ui = sp ? m.units.findIndex(x => x.name === sp.unit) : -1;
+    if (ui >= 0) {
+      const { skills, skillDefs, skillsOn, skillsInnate, skillMods, spawn, ...plain } = unitFor(m, side, ui);
+      u.spawn = { unit: E.withTraits({ ...plain, level: 0 }), count: Math.max(1, Math.round(+sp.count || 2)), every: Math.max(0.5, +sp.every || 6), max: Math.max(1, Math.round(+sp.max || 4)), waves: Math.max(0, Math.round(+sp.waves || 0)) };
+    }
+    return E.withTraits(u);
+  }
+  // the bonus a squad standing on (col, row) at the start of the fight gets from its side's buildings' auras
+  function auraFor(m, side, col, row) {
+    let mods = null;
+    for (const b of placedBuildings(m, side)) {
+      const a = (devBuilding(b.id) || {}).aura;
+      if (!a || Math.max(Math.abs(b.col - col), Math.abs(b.row - row)) > Math.max(0, Math.round(+a.tiles || 1))) continue;
+      mods = mods || {};
+      for (const k of [...TRAIT_STATS, 'armor']) if (isFinite(+a[k]) && +a[k]) mods[k] = (mods[k] || 0) + +a[k];
+    }
+    return mods;
+  }
+  // stat changes: hp, hit, aps, range, speed in %, armor flat (spawned units get them too)
+  function modUnit(u, mods) {
+    if (!u || !mods) return u;
+    const o = { ...u };
+    for (const k of TRAIT_STATS) if (isFinite(+mods[k]) && +mods[k]) o[k] = u[k] * (1 + mods[k] / 100);
+    if (isFinite(+mods.armor) && +mods.armor) o.bonusArmor = (u.bonusArmor || 0) + +mods.armor;
+    if (u.spawn && u.spawn.unit) o.spawn = { ...u.spawn, unit: modUnit(u.spawn.unit, mods) };
+    return o;
+  }
+
+  // ---- Powers ----
+  const powersOf = (m, side) => pickedIds(m, side, 'power').map(devPower).filter(Boolean);
+  // a unit with the stat changes of its player's Powers (base: the roster unit, for its faction and name)
+  function withPowers(m, side, u, base) {
+    if (!isDev(m) || !u || side == null) return u;
+    for (const p of powersOf(m, side)) {
+      const who = p.units || 'all';
+      if (!p.mods || (who === 'faction' && !(base && base.faction === p.faction)) || (Array.isArray(who) && !(base && who.includes(base.name)))) continue;
+      u = modUnit(u, p.mods);
+    }
+    return u;
+  }
+  const devDeploys = (m, side) => powersOf(m, side).reduce((s, p) => s + Math.max(0, Math.round(+p.deploys || 0)), 0);
+  // extra gold at the start of a round: the Powers' gold and the buildings' income
+  const devGold = (m, side) => !isDev(m) ? 0 : powersOf(m, side).reduce((s, p) => s + (+p.gold || 0), 0)
+    + placedBuildings(m, side).reduce((s, b) => s + (+(devBuilding(b.id) || {}).income || 0), 0);
+
+  // ---- spells: temporary items on the map, cast for gold ----
+  const spellsOf = (m, side) => [...new Set(powersOf(m, side).map(p => p.spell).filter(id => id && devSpell(id)))];
+  const casts = (m) => (isDev(m) && m.dev.casts) || [];
+  const castRounds = (c) => Math.max(1, Math.round(+(devSpell(c.id) || {}).rounds || 1));
+  const castActive = (m, c) => c.round <= m.round && m.round < c.round + castRounds(c);
+  const activeCasts = (m) => casts(m).filter(c => castActive(m, c));
+  const castNow = (m, side, id) => casts(m).find(c => c.side === side && c.id === id && c.round === m.round) || null;
+  const wallAt = (m, col, row) => activeCasts(m).find(c => (devSpell(c.id) || {}).kind === 'wall' && c.col === col && c.row === row) || null;
+  // where a spell may be cast: place 'own' (own zone), 'front' (own zone or no man's land) or 'any' (default)
+  function castSpotOk(m, side, sp, col, row) {
+    if (!sp || col < 0 || col >= COLS || row < 0 || row >= ROWS) return false;
+    const where = sp.place || 'any';
+    if ((where === 'own' && !inZone(side, row)) || (where === 'front' && !(inZone(side, row) || inNoMans(row)))) return false;
+    return !(sp.kind === 'wall' && (occupied(m, 0, col, row) || occupied(m, 1, col, row)));
+  }
+  const spellCost = (id) => Math.max(0, Math.round(+(devSpell(id) || {}).cost || 0));
+  const canCast = (m, side, id) => spellsOf(m, side).includes(id) && !castNow(m, side, id) && m.gold[side] >= spellCost(id);
+  function castSpell(m, side, id, col, row) {
+    if (!canCast(m, side, id) || !castSpotOk(m, side, devSpell(id), col, row)) return false;
+    m.gold[side] -= spellCost(id);
+    m.dev.casts.push({ side, id, col, row, round: m.round });
+    return true;
+  }
+  function undoCast(m, side, id) {
+    const c = castNow(m, side, id);
+    if (!c) return false;
+    m.dev.casts.splice(m.dev.casts.indexOf(c), 1);
+    m.gold[side] += spellCost(id);
+    return true;
+  }
+  // the tiles a zone spell covers: size by size, from its tile toward higher columns and rows
+  const castTiles = (c) => { const n = Math.max(1, Math.round(+(devSpell(c.id) || {}).size || 1)), out = [];
+    for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) if (c.col + i < COLS && c.row + j < ROWS) out.push({ col: c.col + i, row: c.row + j }); return out; };
+  // what the spells cast add to a fight: zone tiles and timed strikes for the engine
+  function castEffects(m) {
+    const T2 = TILE / 2, tiles = [], strikes = [];
+    for (const c of activeCasts(m)) {
+      const sp = devSpell(c.id) || {};
+      if (sp.kind === 'zone') for (const t of castTiles(c)) {
+        const w = tileToWorld(t.col, t.row);
+        tiles.push({ type: sp.effect || 'burn', side: c.side, dps: +sp.dps || 20, slow: +sp.slow || 40, speed: +sp.speed || 30, x0: w.x - T2, x1: w.x + T2, y0: w.y - T2, y1: w.y + T2 });
+      }
+      if (sp.kind === 'strike') { const w = tileToWorld(c.col, c.row); strikes.push({ t: +sp.at || 2, x: w.x, y: w.y, r: +sp.radius || 6, dmg: +sp.dmg || 100, side: c.side }); }
+    }
+    return { tiles, strikes };
+  }
+
+  // ---- arrows: guide a squad along points drawn from it ----
+  const canGuide = (m, side, sq) => isDev(m) && !!sq && !isRider(sq) && (DEV.guideAll || !!(m.units[sq.unit] || {}).guide);
+  function setGuide(m, side, sqId, pts) {
+    const sq = m.armies[side].find(s => s.id === sqId);
+    if (!canGuide(m, side, sq) || !Array.isArray(pts)) return false;
+    const list = pts.map(p => ({ col: Math.round(+p.col), row: Math.round(+p.row) })).filter(p => p.col >= 0 && p.col < COLS && p.row >= 0 && p.row < ROWS && !(p.col === sq.col && p.row === sq.row)).slice(0, DEV.guidePoints);
+    if (!list.length) return false;
+    sq.guide = list;
+    return true;
+  }
+  function clearGuide(m, side, sqId) {
+    const sq = m.armies[side].find(s => s.id === sqId);
+    if (!sq || !sq.guide) return false;
+    delete sq.guide;
+    return true;
+  }
+
+  // ---- disguise ----
+  // a unit with "disguise": "Unit name" looks like that unit to its opponent: on the board, in its sheet, and in the
+  // fight until its first attack. The unit index viewer is shown for side's unit ui.
+  function shownUnit(m, viewer, side, ui) {
+    const u = m && m.units && m.units[ui];
+    if (side === viewer || !u || !u.disguise) return ui;
+    const k = m.units.findIndex(x => x.name === u.disguise);
+    return k >= 0 ? k : ui;
+  }
+
+  // ---- settling and the AI ----
+  // at the fight: a pick not made is the first on offer, a building not placed goes on a free back tile
+  function settleDev(m) {
+    if (!isDev(m)) return;
+    for (const sd of [0, 1]) {
+      if (needsDevPick(m, sd)) devPick(m, sd, devOffer(m, sd).ids[0]);
+      for (let b; (b = unplacedBuilding(m, sd));) {
+        const spot = buildingSpot(m, sd, b, rng(m.seed + m.round * 37 + b.key));
+        if (!spot) { m.dev.buildings[sd].splice(m.dev.buildings[sd].indexOf(b), 1); continue; } // no room left: it's lost
+        placeBuilding(m, sd, b.key, spot.col, spot.row);
+      }
+    }
+  }
+  // a free tile for a building: the back half of the zone, near the middle, a little random
+  function buildingSpot(m, side, b, r) {
+    const rows = zoneRows(side), def = devBuilding(b.id);
+    let best = null, bc = Infinity;
+    rows.forEach((row, zi) => { for (let col = 0; col < COLS; col++) {
+      if (!buildingSpotOk(m, side, def, col, row, b.key)) continue;
+      const c = Math.abs(zi - (rows.length - 2)) * 1.5 + Math.abs(col - (COLS - 1) / 2) * 0.6 + r() * 2;
+      if (c < bc) { bc = c; best = { col, row }; }
+    } });
+    return best;
+  }
+  // the AI's devtest turn: its pick (seeded, leaning to buildings that fight and Powers with stat changes), its
+  // buildings placed, and sometimes a spell on the enemy's army (or its own front for helpful ones)
+  function aiDev(m, side, r) {
+    if (!isDev(m)) return;
+    const o = needsDevPick(m, side) ? devOffer(m, side) : null;
+    if (o) {
+      const score = (id) => { const d = o.cat === 'building' ? devBuilding(id) : o.cat === 'power' ? devPower(id) : null;
+        return (d && ((d.unit && d.unit.hit > 0) || d.aura || d.mods) ? 1 : 0) + r(); };
+      devPick(m, side, o.ids.slice().sort((a, b) => score(b) - score(a))[0]);
+    }
+    for (let b; (b = unplacedBuilding(m, side));) { const s = buildingSpot(m, side, b, r); if (!s || !placeBuilding(m, side, b.key, s.col, s.row)) break; }
+    const foes = m.armies[1 - side].filter(s => s.round < m.round);
+    for (const id of spellsOf(m, side)) {
+      const sp = devSpell(id);
+      if (!canCast(m, side, id) || m.gold[side] - spellCost(id) < SQUAD_COST * 2 || r() >= 0.4) continue;
+      const harm = sp.kind === 'strike' || (sp.kind === 'zone' && (sp.effect === 'burn' || sp.effect === 'mud'));
+      let col, row;
+      if (harm && foes.length) { col = Math.round(foes.reduce((s, q) => s + q.col, 0) / foes.length); row = Math.round(foes.reduce((s, q) => s + q.row, 0) / foes.length); }
+      else { col = Math.floor(r() * COLS); row = zoneRows(side)[0]; }
+      castSpell(m, side, id, col, row);
+    }
+  }
+
   // ---------- AI ----------
   // Buys units that counter the opponent's army as it stood at the start of the round,
   // using the counter table, with a nudge toward variety and a little randomness.
@@ -1476,6 +1808,7 @@ const Game = (() => {
       const q = rng(m.seed + m.round * 577 + side * 29), g = MAGE_GENERALS[Math.floor(q() * MAGE_GENERALS.length)];
       if (q() < 0.6 && m.gold[side] - g.cost >= SQUAD_COST) buyMageGen(m, side, g.id);
     }
+    aiDev(m, side, rng(m.seed + m.round * 829 + side * 53)); // devtest: pick, buildings, spells (own stream)
     const opp = 1 - side;
     const oppArmy = m.armies[opp].filter(s => s.round < m.round);
     for (const ui of freeLeft(m, side)) { const spot = aiSpot(m, side, ui, oppArmy, r); if (spot) place(m, side, ui, spot.col, spot.row); }
@@ -1609,6 +1942,10 @@ const Game = (() => {
     createDraft, draftTurn, draftOpen, draftAct, draftDone, draftPossible, aiDraftChoice,
     zoneRows, inZone, tileToWorld, squadRange, createMatch, place, unplace, bodiesFor, startBattle, resolve, aiDeploy, occupied,
     GRID, useGrid,
+    DEV, CAT_NAMES, BUILDING_SQ, WALL_SQ, setDevData, devBuilding, devPower, devSpell, isDev, towerUp, pickCat, devOffer, pickNow, needsDevPick, devPick, undoDevPick, devShown,
+    buildingsOf, placedBuildings, unplacedBuilding, buildingAt, buildingSpotOk, placeBuilding, buildingUnit, auraFor, modUnit, powersOf, devGold, devDeploys,
+    spellsOf, casts, activeCasts, castActive, castRounds, castNow, wallAt, castSpotOk, spellCost, canCast, castSpell, undoCast, castTiles, castEffects,
+    canGuide, setGuide, clearGuide, shownUnit, settleDev, aiDev,
   };
   // a call from outside with a match first puts the board on that match's grid
   const isMatch = (x) => x && typeof x === 'object' && Array.isArray(x.armies) && x.map;

@@ -1,4 +1,80 @@
 {
-  "factions": [],
+  "factions": [
+    {
+      "id": "mechites", "name": "Mechites", "color": "#C08A4E",
+      "theme": "PLACEHOLDER until Vilhelm's roster: scrap-built machines that get tougher the longer they stand.",
+      "trait": { "name": "Riveted", "text": "+2 armor on all Mechite units", "armor": 2 },
+      "tower": { "name": "Gear Spire", "text": "A steady turret with a long reach.", "gem": "Powergem: not designed yet.",
+        "unit": { "hp": 700, "hit": 35, "aps": 1, "range": 12 } },
+      "units": [
+        { "name": "Scrap Hounds", "cost": 100, "unlock": 0, "bodies": 8, "hp": 40, "hit": 12, "aps": 1.2, "range": 2, "speed": 8, "splash": 0 },
+        { "name": "Rivet Gunners", "cost": 100, "unlock": 0, "bodies": 4, "hp": 90, "hit": 14, "aps": 1, "range": 16, "speed": 4, "splash": 0, "projSpeed": 40 },
+        { "name": "Boiler Brute", "cost": 200, "unlock": 50, "bodies": 1, "hp": 900, "hit": 60, "aps": 0.7, "range": 3, "speed": 3.5, "splash": 0, "defense": "armor", "defVal": 6 },
+        { "name": "Arc Cannon", "cost": 300, "unlock": 100, "bodies": 1, "hp": 300, "hit": 90, "aps": 0.35, "range": 30, "speed": 2.5, "splash": 3, "projSpeed": 25 },
+        { "name": "Clockwork Colossus", "cost": 500, "unlock": 150, "bodies": 1, "hp": 3000, "hit": 70, "aps": 0.7, "range": 5, "speed": 2.5, "splash": 3, "defense": "armor", "defVal": 8 }
+      ],
+      "buildings": [
+        { "id": "rivet-post", "name": "Rivet Post", "text": "A small turret. If it falls you lose 2 health.",
+          "unit": { "hp": 450, "hit": 14, "aps": 1.2, "range": 14, "projSpeed": 40 }, "onDestroyed": { "hp": 2 } },
+        { "id": "boiler-works", "name": "Boiler Works", "text": "Squads that start next to it get +15% health and +2 armor. If it falls you lose 50 gold.",
+          "unit": { "hp": 500 }, "aura": { "tiles": 1, "hp": 15, "armor": 2 }, "onDestroyed": { "gold": 50 } }
+      ],
+      "powers": [
+        { "id": "overclock", "name": "Overclock", "text": "Mechite units attack 10% faster.", "mods": { "aps": 10 }, "units": "faction" },
+        { "id": "scrap-market", "name": "Scrap market", "text": "+50 gold every round.", "gold": 50 },
+        { "id": "furnace-vents", "name": "Furnace vents", "text": "Unlocks the spell Furnace vent.", "spell": "furnace-vent" }
+      ]
+    },
+    {
+      "id": "sunken", "name": "Sunken Deep", "color": "#3F8FA6",
+      "theme": "PLACEHOLDER until Vilhelm's roster: slow, heavy things from the deep that wear the enemy down.",
+      "trait": { "name": "Pressure-born", "text": "+15% health, -10% speed", "hp": 15, "speed": -10 },
+      "tower": { "name": "Coral Spire", "text": "Lobs heavy globs of brine that splash.", "gem": "Powergem: not designed yet.",
+        "unit": { "hp": 650, "hit": 22, "aps": 0.8, "range": 16, "splash": 2.5, "projSpeed": 28 } },
+      "units": [
+        { "name": "Drowned Swarm", "cost": 100, "unlock": 0, "bodies": 10, "hp": 35, "hit": 10, "aps": 1.1, "range": 2, "speed": 6, "splash": 0 },
+        { "name": "Lure Angler", "cost": 100, "unlock": 0, "bodies": 3, "hp": 220, "hit": 40, "aps": 0.8, "range": 4, "speed": 5, "splash": 0, "disguise": "Drowned Swarm" },
+        { "name": "Tide Caller", "cost": 200, "unlock": 50, "bodies": 1, "hp": 400, "hit": 45, "aps": 0.6, "range": 22, "speed": 3, "splash": 2.5, "projSpeed": 26 },
+        { "name": "Kelp Horror", "cost": 300, "unlock": 100, "bodies": 1, "hp": 1600, "hit": 50, "aps": 0.8, "range": 3, "speed": 3, "splash": 1.5, "defense": "ward", "defVal": 60 },
+        { "name": "Leviathan", "cost": 500, "unlock": 150, "bodies": 1, "hp": 3600, "hit": 120, "aps": 0.5, "range": 6, "speed": 2.2, "splash": 4 }
+      ],
+      "buildings": [
+        { "id": "brine-well", "name": "Brine Well", "text": "Heals the most wounded of your units in range. If it falls you lose 2 health.",
+          "unit": { "hp": 450, "mend": 30, "aps": 0.8, "range": 14 }, "onDestroyed": { "hp": 2 } },
+        { "id": "spawning-pool", "name": "Spawning Pool", "text": "Releases 2 Drowned Swarm every 7 s (up to 6 at once). If it falls you lose 50 gold.",
+          "unit": { "hp": 500 }, "spawn": { "unit": "Drowned Swarm", "count": 2, "every": 7, "max": 6 }, "onDestroyed": { "gold": 50 } }
+      ],
+      "powers": [
+        { "id": "deep-pressure", "name": "Deep pressure", "text": "Sunken Deep units get +10% health.", "mods": { "hp": 10 }, "units": "faction" },
+        { "id": "riptide", "name": "Riptide", "text": "Unlocks the spell Riptide pool.", "spell": "riptide-pool" },
+        { "id": "tidal-surge", "name": "Tidal surge", "text": "Lure Anglers and Drowned Swarm move 20% faster.", "mods": { "speed": 20 }, "units": ["Lure Angler", "Drowned Swarm"] }
+      ]
+    }
+  ],
+  "neutral": {
+    "units": ["Goblin Swarm", "Skeleton Archers", "Brute", "Wisps", "Ent", "Rogue"],
+    "buildings": [
+      { "id": "watchtower", "name": "Watchtower", "text": "A long-range turret. If it falls you lose 1 health.",
+        "unit": { "hp": 400, "hit": 25, "aps": 0.6, "range": 20, "projSpeed": 40 }, "onDestroyed": { "hp": 1 } },
+      { "id": "war-banner", "name": "War banner", "text": "Squads that start next to it deal 15% more damage. If it falls you lose 2 health.",
+        "unit": { "hp": 300 }, "aura": { "tiles": 1, "hit": 15 }, "onDestroyed": { "hp": 2 } },
+      { "id": "trading-post", "name": "Trading post", "text": "+75 gold every round. If it falls you lose 100 gold.",
+        "unit": { "hp": 350 }, "income": 75, "onDestroyed": { "gold": 100 } }
+    ],
+    "powers": [
+      { "id": "field-rations", "name": "Field rations", "text": "All your units get +8% health.", "mods": { "hp": 8 } },
+      { "id": "recruiters", "name": "Recruiters", "text": "+1 deployment every round.", "deploys": 1 },
+      { "id": "fire-pots", "name": "Fire pots", "text": "Unlocks the spell Fire pot.", "spell": "fire-pot" },
+      { "id": "stonemasons", "name": "Stonemasons", "text": "Your buildings and tower get +40% health, and you can raise palisades.", "buildingHp": 40, "spell": "palisade" },
+      { "id": "herbalists", "name": "Herbalists", "text": "Unlocks the spell Healing spring.", "spell": "healing-spring" }
+    ]
+  },
+  "spells": [
+    { "id": "fire-pot", "name": "Fire pot", "text": "3 s into the fight, 160 damage to every enemy within 7 m of the tile.", "cost": 75, "kind": "strike", "at": 3, "radius": 7, "dmg": 160, "place": "any" },
+    { "id": "palisade", "name": "Palisade", "text": "A wooden wall with 700 health, for 2 fights.", "cost": 50, "kind": "wall", "hp": 700, "rounds": 2, "place": "front" },
+    { "id": "healing-spring", "name": "Healing spring", "text": "Your units on these 2×2 tiles heal 25 health a second.", "cost": 50, "kind": "zone", "effect": "mend", "dps": 25, "size": 2, "place": "front" },
+    { "id": "riptide-pool", "name": "Riptide pool", "text": "Enemies on these 2×2 tiles move 45% slower.", "cost": 50, "kind": "zone", "effect": "mud", "slow": 45, "size": 2, "place": "any" },
+    { "id": "furnace-vent", "name": "Furnace vent", "text": "Enemies on these 2×2 tiles burn for 25 damage a second.", "cost": 75, "kind": "zone", "effect": "burn", "dps": 25, "size": 2, "place": "any" }
+  ],
   "skills": []
 }
