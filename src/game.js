@@ -243,6 +243,27 @@ const Game = (() => {
     m.gold[side] -= LOAN.gold;
     return true;
   }
+  // Tower skills bought every round (a faction tower's `rounds`, the Mecha Tower's bots): each works in that round's
+  // fight only and can be bought again the next round. m.tround[side] = { [id]: round bought }; hidden from the
+  // opponent until the fight. See bodiesFor for what each does.
+  const towerRounds = (m, side) => (towerPicked(m, side) && towerType(m, side).rounds) || [];
+  const troundInfo = (m, side, id) => towerRounds(m, side).find(x => x.id === id) || null;
+  const troundOn = (m, side, id) => !!(m && m.tround && m.tround[side] && m.tround[side][id] === m.round && troundInfo(m, side, id));
+  const troundCost = (m, side, id) => Math.max(0, Math.round(+(troundInfo(m, side, id) || {}).cost || 0));
+  const canBuyTround = (m, side, id) => !!troundInfo(m, side, id) && !troundOn(m, side, id) && m.gold[side] >= troundCost(m, side, id);
+  function buyTround(m, side, id) {
+    if (!canBuyTround(m, side, id)) return false;
+    if (!m.tround) m.tround = [{}, {}];
+    m.gold[side] -= troundCost(m, side, id);
+    m.tround[side][id] = m.round;
+    return true;
+  }
+  function undoTround(m, side, id) {
+    if (!troundOn(m, side, id)) return false;
+    delete m.tround[side][id];
+    m.gold[side] += troundCost(m, side, id);
+    return true;
+  }
   // Slime tower: the skills bought for Slime Wizards and Slimeshots work on it too
   const SLIME_UNITS = ['Slime Wizard', 'Slimeshots'];
   // the skills bought for slime units (except unit type skipUi)
@@ -643,8 +664,16 @@ const Game = (() => {
   // no man's land: the rows between the two zones. A unit with the Forward planting skill may be placed there.
   const inNoMans = (row) => row >= ZONE && row < ROWS - ZONE;
   const hasSkillType = (m, side, ui, type) => !!m && ui != null && !!m.units[ui] && E.SLOTS.some(k => hasSkill(m, side, ui, k) && skillDef(m, ui, k).type === type);
-  // ui (optional): the unit being placed, for unit-specific tiles
-  const canPlaceAt = (m, side, col, row, ui) => col >= 0 && col < COLS && !reserved(side, col, row) && !(ui != null && isOff(m, ui, side)) &&
+  // A unit with a footprint (the Altar of Build: 2) takes a block of n x n tiles; its squad's col, row is the block's
+  // first column and row (it stands where the four tiles meet).
+  const footprint = (m, ui) => Math.max(1, Math.round(+((m && m.units && m.units[ui]) || {}).footprint || 1));
+  const blockOf = (m, ui, col, row) => { const n = ui == null ? 1 : footprint(m, ui), out = []; for (let dr = 0; dr < n; dr++) for (let dc = 0; dc < n; dc++) out.push([col + dc, row + dr]); return out; };
+  const covers = (m, s, col, row) => { const n = footprint(m, s.unit); return col >= s.col && col < s.col + n && row >= s.row && row < s.row + n; };
+  // ui (optional): the unit being placed, for unit-specific tiles (all of a footprint's tiles must be allowed)
+  const canPlaceAt = (m, side, col, row, ui) => blockOf(m, ui, col, row).every(([c, r]) => canPlaceTile(m, side, c, r, ui));
+  // no squad, tower or building on any tile the unit would take
+  const spotFree = (m, side, col, row, ui) => blockOf(m, ui, col, row).every(([c, r]) => !occupied(m, side, c, r));
+  const canPlaceTile = (m, side, col, row, ui) => col >= 0 && col < COLS && row >= 0 && row < ROWS && !reserved(side, col, row) && !(ui != null && isOff(m, ui, side)) &&
     !(ui != null && m && m.units[ui] && m.units[ui].noFlank && isFlank(side, col, row)) &&
     (inZone(side, row) || (flankOpen(m) && isFlank(side, col, row)) || (inNoMans(row) && hasSkillType(m, side, ui, 'forward'))) && !enemyHolds(m, side, col, row);
   // ---------- carriers (Just a horse) ----------
@@ -659,11 +688,11 @@ const Game = (() => {
   const riderOf = (m, side, sq) => sq ? m.armies[side].find(s => s.in === sq.id) || null : null;
   const carrierOf = (m, side, sq) => isRider(sq) ? m.armies[side].find(s => s.id === sq.in) || null : null;
   // the squad standing on a tile (a carrier, never its rider)
-  const squadAt = (m, side, col, row) => m.armies[side].find(s => !isRider(s) && s.col === col && s.row === row) || null;
+  const squadAt = (m, side, col, row) => m.armies[side].find(s => !isRider(s) && covers(m, s, col, row)) || null;
   // the carrier on a tile that has room for a squad of unit ui
   function boardable(m, side, col, row, ui) {
     const c = squadAt(m, side, col, row);
-    return c && isCarrier(m, c.unit) && !isCarrier(m, ui) && !riderOf(m, side, c) ? c : null;
+    return c && isCarrier(m, c.unit) && !isCarrier(m, ui) && !(m.units[ui] && m.units[ui].building) && !riderOf(m, side, c) ? c : null;
   }
   // riders follow their carrier's tile
   const syncRiders = (m, side) => { for (const s of m.armies[side]) if (isRider(s)) { const c = carrierOf(m, side, s); if (c) { s.col = c.col; s.row = c.row; } else delete s.in; } };
@@ -793,6 +822,8 @@ const Game = (() => {
       chars: [null, null], // each player's character id (comes with the package)
       buff: [[], []], // Zoe's buff tiles for this round: [{ col, row }, ...]
       zoeUses: [0, 0], // fights each player has used Zoe's buff tiles in (the buff grows with them: zoeBuff)
+      buildings: [[], []], // each player's buildings (the Mechites' Factory), see buyBuilding
+      bskill: [{}, {}], // the building skill each player bought this round, per building (see buyBuildingSkill)
       unlocks: [{}, {}], // units unlocked per player: unlocks[side][unitIdx] = round it was unlocked
       off, // units left out of this match: they can't be unlocked, placed or dealt in a package
       rules, // roster rules for the fights (null = all on)
@@ -804,6 +835,7 @@ const Game = (() => {
       towerSkill: [0, 0], // round each player bought their tower's skill in (0 = not bought)
       towerSkill2: [0, 0], // ...and its second skill (keep, bastion, bank)
       loan: [0, 0], // the round each player last took a bank loan in (Bank tower)
+      tround: [{}, {}], // tower skills bought every round (the Mecha Tower's bots): tround[side][id] = round bought
       mageGen: [null, null], // the mage generals each player called this round: { round, id, tp } (Mage tower)
       mapFree: [{}, {}], // Blixten's discounted map purchase per round (see mapFreeOf)
       factions, // Factions mode: each player's drafted faction ids (null = a normal match)
@@ -857,17 +889,25 @@ const Game = (() => {
     u = withFactionTrait(u, base && base.faction);
     u = withPowers(m, side, u, base);
     if (base && SLIME_UNITS.includes(base.name)) u = { ...u, slime: true }; // poison heals slime units
+    return withCharacter(m, side, u);
+  }
+  // the player's character on one of their units (spawned ones too): Noah cuts health and damage, Cage adds health
+  function withCharacter(m, side, u) {
     if (charOf(m, side) === 'noah') { // Noah: 10% less health and damage, spawned ones too
-      const k = 1 - CHAR.noahCut / 100;
-      u = { ...u, hp: u.hp * k, hit: u.hit * k };
-      if (u.spawn) u.spawn = { ...u.spawn, unit: { ...u.spawn.unit, hp: u.spawn.unit.hp * k, hit: u.spawn.unit.hit * k } };
+      const k = 1 - CHAR.noahCut / 100, cut = (x) => ({ ...x, hp: x.hp * k, hit: x.hit * k });
+      u = withKids(cut(u), cut);
     }
     if (charOf(m, side) === 'cage') { // Frickolas Cage: +10% health for every unit, spawned ones too
-      const k = 1 + CHAR.cageHp / 100;
-      u = { ...u, hp: u.hp * k };
-      if (u.spawn) u.spawn = { ...u.spawn, unit: { ...u.spawn.unit, hp: u.spawn.unit.hp * k } };
+      const k = 1 + CHAR.cageHp / 100, tough = (x) => ({ ...x, hp: x.hp * k });
+      u = withKids(tough(u), tough);
     }
     return u;
+  }
+  // the unit with f applied to the units it brings into a fight: spawns, what it builds, its healbot
+  function withKids(u, f) {
+    let out = u;
+    for (const k of ['spawn', 'build', 'escort']) if (u[k] && u[k].unit) { if (out === u) out = { ...u }; out[k] = { ...u[k], unit: f(u[k].unit) }; }
+    return out;
   }
   // ---------- unlocks (like Mechabellum: some units start unlocked, the rest cost gold once per match) ----------
   // tier 1 = the cheapest price in the roster
@@ -903,15 +943,22 @@ const Game = (() => {
     return true;
   }
 
+  // A unit can make a skill wait for others: skillNeeds[k] = the slots that must be bought first (e.g. [0, 1])
+  const skillNeeds = (m, ui, k) => { const n = m.units[ui] && Array.isArray(m.units[ui].skillNeeds) ? m.units[ui].skillNeeds[k] : null; return Array.isArray(n) ? n.filter(j => j !== k && skillDef(m, ui, j)) : []; };
+  const skillNeedsMissing = (m, side, ui, k) => skillNeeds(m, ui, k).filter(j => !hasSkill(m, side, ui, j));
   function canBuySkill(m, side, ui, k) {
     const d = skillDef(m, ui, k);
     if (!d || hasSkill(m, side, ui, k)) return false;
     if (charOf(m, side) === 'enzo') return false; // Enzo's squads come with their skill instead
     if (!m.armies[side].some(s => s.unit === ui)) return false; // needs a squad of that type on the board
+    if (skillNeedsMissing(m, side, ui, k).length) return false;
     return m.gold[side] >= skillCost(m, ui, k, side);
   }
   function buySkill(m, side, ui, k) {
-    if (!canBuySkill(m, side, ui, k)) return false;
+    if (!canBuySkill(m, side, ui, k) || isBuildingSkill(m, ui, k)) return false; // a building needs its tile: buyBuilding
+    return takeSkill(m, side, ui, k);
+  }
+  function takeSkill(m, side, ui, k) {
     m.gold[side] -= skillCost(m, ui, k, side);
     if (!m.tech) m.tech = [{}, {}];
     const t = m.tech[side][ui] || (m.tech[side][ui] = E.SLOTS.map(() => 0));
@@ -924,9 +971,198 @@ const Game = (() => {
     // Forward planting can't be taken back while a squad of that unit stands in no man's land
     const d = skillDef(m, ui, k);
     if (d && d.type === 'forward' && m.armies[side].some(s => s.unit === ui && inNoMans(s.row))) return false;
+    if (E.SLOTS.some(j => j !== k && hasSkill(m, side, ui, j) && skillNeeds(m, ui, j).includes(k))) return false; // a skill bought on top of it goes first
+    if (isBuildingSkill(m, ui, k)) { // the building placed with it goes too
+      const id = buildingIdOf(m, ui, k);
+      m.buildings[side] = buildingsOf(m, side).filter(b => !(b.id === id && b.round === m.round));
+    }
     m.gold[side] += skillCost(m, ui, k, side); // the refund, worked out while it's still owned
     t[k] = 0;
     return true;
+  }
+
+  // ---------- buildings (the Mechites' Factory and Altar of Build) ----------
+  // A player gets a building in one of two ways:
+  //  - a unit skill of type 'building' (the Cog Builder's Build factory): buying it places the building on a free tile
+  //    of its owner's zone (buyBuilding), one of each kind per player: m.buildings[side] = [{ id, col, row, round
+  //    (placed), progress (0..1), built, xp, level, levels: { round: bought } }];
+  //  - a unit with `building` bought in the shop (the Altar of Build, tier 4): an ordinary squad (it costs a deployment,
+  //    levels, sells, but never moves), with its progress and built on the squad. Its footprint can take several tiles.
+  // Both stay all match. Until built, a building stands in every fight as a site (with its full health): the nearest
+  // builder without a job walks over and builds it (buildSecs seconds of work; Master engineering is faster); a site
+  // nobody builds builds itself at selfBuild times that speed (0 = not at all). The work carries over between fights.
+  // A site is built once the work is done, or (survive) if it is still standing at the end of a fight it was worked on.
+  // A built building destroyed in a fight starts the next round at `rebuild` % and has to be built again.
+  // Once built, each round its owner may buy one of its skills (like a mage general: m.bskill[side][key] = { round,
+  // skill }, swapped for a refund, hidden from the opponent until the fight). A skill makes units (`unit`, or `make`:
+  // [[building, its skill, count], ...]) `time` seconds into the fight, or changes all the player's constructs this
+  // fight (`bless`: Blessing of the Cycle; `awake`: Core Awoken, see buildingEffects). What it makes earns it XP; it
+  // levels up with gold like a squad, and a leveled building and its units are stronger. Kinds come from
+  // src/factions.json's "buildings" (setBuildings).
+  let BUILDINGS = [];
+  function setBuildings(list) { BUILDINGS = (Array.isArray(list) ? list : []).filter(b => b && typeof b.id === 'string' && b.id); return BUILDINGS; }
+  const buildingInfo = (id) => BUILDINGS.find(b => b.id === id) || null;
+  const BUILDING_SQUAD = -300; // buildings from skills in a fight: squad ids -300, -301, ...
+  const isBuildingSkill = (m, ui, k) => { const d = skillDef(m, ui, k); return !!d && d.type === 'building'; };
+  const buildingIdOf = (m, ui, k) => isBuildingSkill(m, ui, k) ? String(E.skillParam(skillDef(m, ui, k), 'building')) : null;
+  const buildingsOf = (m, side) => (m && m.buildings && m.buildings[side]) || [];
+  const buildingOf = (m, side, id) => buildingsOf(m, side).find(b => b.id === id) || null;
+  const buildingAt = (m, side, col, row) => buildingsOf(m, side).find(b => b.col === col && b.row === row) || null;
+  // what a screen may show of a player's building: an opponent's new one only from the fight on
+  const buildingShown = (v, viewer, deploying, side, b) => side === viewer || !deploying || b.round < v.round;
+  const buildingSpotOk = (m, side, col, row) => col >= 0 && col < COLS && inZone(side, row) && !reserved(side, col, row) && !occupied(m, side, col, row);
+  const canBuyBuilding = (m, side, ui, k) => isBuildingSkill(m, ui, k) && !!buildingInfo(buildingIdOf(m, ui, k)) && !buildingOf(m, side, buildingIdOf(m, ui, k)) && canBuySkill(m, side, ui, k);
+  // buy unit ui's building skill k and put the building on (col, row)
+  function buyBuilding(m, side, ui, k, col, row) {
+    if (!canBuyBuilding(m, side, ui, k) || !buildingSpotOk(m, side, col, row)) return false;
+    takeSkill(m, side, ui, k);
+    if (!m.buildings) m.buildings = [[], []];
+    m.buildings[side].push({ id: buildingIdOf(m, ui, k), col, row, round: m.round, progress: 0, built: false, xp: 0, level: 0 });
+    return true;
+  }
+  // every building a player has, both kinds: { key (for its skills), id (its kind), rec (holds progress, built,
+  // level), sq (a bought building's squad, else null), squad (its squad id in fights), col, row (its tile, or the
+  // first tile of its block), size (tiles a side) }
+  function buildingRecords(m, side) {
+    const out = buildingsOf(m, side).map((b, k) => ({ key: b.id, id: b.id, rec: b, sq: null, squad: BUILDING_SQUAD - k, col: b.col, row: b.row, size: 1 }));
+    for (const sq of (m && m.armies && m.armies[side]) || []) {
+      const u = m.units[sq.unit];
+      if (u && u.building && buildingInfo(u.building)) out.push({ key: 'sq' + sq.id, id: u.building, rec: sq, sq, squad: sq.id, col: sq.col, row: sq.row, size: footprint(m, sq.unit) });
+    }
+    return out;
+  }
+  const recordOf = (m, side, key) => buildingRecords(m, side).find(r => r.key === key) || null;
+  // the middle of a building in board metres
+  const recordWorld = (r) => { const a = tileToWorld(r.col, r.row), b = tileToWorld(r.col + r.size - 1, r.row + r.size - 1); return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; };
+  // ---- a building's skills: bought each round ----
+  const buildingSkills = (id) => ((buildingInfo(id) || {}).skills || []);
+  const buildingSkillInfo = (id, sk) => buildingSkills(id).find(x => x.id === sk) || null;
+  const bskillOf = (m, side, key) => {
+    const x = m && m.bskill && m.bskill[side] && m.bskill[side][key], r = x && x.round === m.round ? recordOf(m, side, key) : null;
+    return r && buildingSkillInfo(r.id, x.skill) ? x.skill : null;
+  };
+  const bskillCost = (id, sk) => Math.max(0, Math.round(+(buildingSkillInfo(id, sk) || {}).cost || 0));
+  // the skill already bought this round is swapped out and paid back
+  const canBuyBuildingSkill = (m, side, key, sk) => { const r = recordOf(m, side, key), cur = bskillOf(m, side, key);
+    return !!r && !!r.rec.built && !!buildingSkillInfo(r.id, sk) && cur !== sk && m.gold[side] + (cur ? bskillCost(r.id, cur) : 0) >= bskillCost(r.id, sk); };
+  function buyBuildingSkill(m, side, key, sk) {
+    if (!canBuyBuildingSkill(m, side, key, sk)) return false;
+    const r = recordOf(m, side, key), cur = bskillOf(m, side, key);
+    if (cur) m.gold[side] += bskillCost(r.id, cur);
+    m.gold[side] -= bskillCost(r.id, sk);
+    if (!m.bskill) m.bskill = [{}, {}];
+    m.bskill[side][key] = { round: m.round, skill: sk };
+    return true;
+  }
+  function undoBuildingSkill(m, side, key) {
+    const cur = bskillOf(m, side, key);
+    if (!cur) return false;
+    m.gold[side] += bskillCost(recordOf(m, side, key).id, cur);
+    delete m.bskill[side][key];
+    return true;
+  }
+  // ---- leveling a building from a skill (a bought one levels like any squad) ----
+  const buildingXpNeeded = (id, level) => ((buildingInfo(id) || {}).hp || 1000) * XP_STEPS[level];
+  const buildingLevelCost = (id) => Math.max(0, Math.round(+(buildingInfo(id) || {}).levelCost || 100));
+  const buildingReady = (b) => !!b && b.built && b.level < E.MAX_LEVEL && b.xp >= buildingXpNeeded(b.id, b.level);
+  function levelBuilding(m, side, id) {
+    const b = buildingOf(m, side, id);
+    if (!buildingReady(b) || m.gold[side] < buildingLevelCost(id)) return false;
+    m.gold[side] -= buildingLevelCost(id);
+    b.level++;
+    (b.levels = b.levels || {})[m.round] = (b.levels[m.round] || 0) + 1;
+    return true;
+  }
+  function undoLevelBuilding(m, side, id) {
+    const b = buildingOf(m, side, id);
+    if (!b || !b.levels || !b.levels[m.round]) return false;
+    b.levels[m.round]--; b.level--;
+    m.gold[side] += buildingLevelCost(id);
+    return true;
+  }
+  // what Master engineering and the like (builder skills) give what a player's buildings make: { aps, shield, armor, faster }
+  function constructBuff(m, side) {
+    const out = { aps: 0, shield: 0, armor: 0, faster: 0 };
+    (m.units || []).forEach((u, ui) => {
+      if (!u || !u.build) return;
+      for (const k of E.SLOTS) {
+        const d = skillDef(m, ui, k);
+        if (!d || d.type !== 'builder' || !hasSkill(m, side, ui, k)) continue;
+        const P = (x) => Math.max(0, +E.skillParam(d, x) || 0);
+        out.aps += P('aps'); out.shield += Math.round(P('shield')); out.armor += P('armor'); out.faster = Math.max(out.faster, Math.min(90, P('faster')));
+      }
+    });
+    return out;
+  }
+  // what a player's built buildings' skills do to all their constructs this round: { bless, awake } (null when not)
+  //   bless (Blessing of the Cycle) = { build, hp, speed, aps (all %), regen (% of max health a second) }
+  //   awake (Core Awoken): their buildings become units with their kind's `awake` stats, and what builders build gets
+  //   awake.built (the turrets' wheels and mortar)
+  function buildingEffects(m, side) {
+    const out = { bless: null, awake: null };
+    for (const r of buildingRecords(m, side)) {
+      if (!r.rec.built) continue;
+      const sk = buildingSkillInfo(r.id, bskillOf(m, side, r.key));
+      if (sk && sk.bless) out.bless = sk.bless;
+      if (sk && sk.awake) out.awake = { ...(out.awake || {}), ...sk.awake };
+    }
+    return out;
+  }
+  const blessed = (u, bl) => !bl ? u : { ...u, hp: u.hp * (1 + (bl.hp || 0) / 100), speed: (u.speed || 0) * (1 + (bl.speed || 0) / 100), aps: u.aps * (1 + (bl.aps || 0) / 100), regen: (u.regen || 0) + (bl.regen || 0) };
+  // a unit with what this round's building effects do to its constructs (turrets, healbots) and its building speed
+  function withConstructFx(u, fx) {
+    if (!fx.bless && !fx.awake) return u;
+    let out = u;
+    if (fx.awake && fx.awake.built && out.build) out = { ...out, build: { ...out.build, unit: { ...out.build.unit, ...fx.awake.built, awake: true } } };
+    const bl = fx.bless;
+    if (bl && out.build) out = { ...out, buildSpeed: (out.buildSpeed || 1) * (1 + bl.build / 100), build: { ...out.build, time: out.build.time / (1 + bl.build / 100), unit: blessed(out.build.unit, bl) } };
+    if (bl && out.escort) out = { ...out, escort: { ...out.escort, unit: blessed(out.escort.unit, bl) } };
+    return out;
+  }
+  // a player's buildings as bodies for a fight: a site to build, or a building (that makes this round's units)
+  function buildingBodies(m, side, idx) {
+    const out = [], cb = constructBuff(m, side), fx = buildingEffects(m, side), bl = fx.bless;
+    buildingRecords(m, side).forEach((r, k) => {
+      const info = buildingInfo(r.id);
+      if (!info) return;
+      const w = recordWorld(r), lv = r.rec.level || 0, built = !!r.rec.built;
+      let bu = E.withTraits({ name: info.name, cost: 0, bodies: 1, hp: info.hp, hit: 0, aps: 1, range: 0, speed: 0, splash: 0, shape: 'square', color: info.color || '#B07A3C',
+        building: r.id, size: r.size, idle: true, anchored: true, noCount: true, construct: true, buildSecs: info.buildSecs });
+      if (built && fx.awake && info.awake) bu = { ...bu, ...info.awake, idle: false, noCount: false, awake: true }; // Core Awoken: it becomes a unit
+      if (bl) bu = blessed(bu, bl);
+      const [b] = E.buildSquad(bu, side, w.x, w.y, r.squad, TILE, idx + k, lv);
+      if (!built) b.site = { work: (r.rec.progress || 0) * info.buildSecs, need: info.buildSecs, self: info.selfBuild || 0 };
+      const sk = built ? buildingSkillInfo(r.id, bskillOf(m, side, r.key)) : null;
+      const makes = !sk ? [] : sk.unit ? [[sk.unit, 1]] : (sk.make || []).map(([bid, sid, n]) => [(buildingSkillInfo(bid, sid) || {}).unit, n]);
+      const units = [];
+      for (const [u0, n] of makes) if (u0) for (let j = 0; j < n; j++) {
+        let pu = E.withTraits({ ...u0, level: 0, construct: true });
+        pu = blessed({ ...pu, aps: pu.aps * (1 + cb.aps / 100), shield: (pu.shield || 0) + cb.shield, bonusArmor: (pu.bonusArmor || 0) + cb.armor }, bl);
+        units.push(E.leveled(withCharacter(m, side, withFactionTrait(pu, info.faction)), lv));
+      }
+      if (units.length) b.produce = { units, time: (sk.time || 0) * (1 - cb.faster / 100) / (bl ? 1 + bl.build / 100 : 1) };
+      out.push(b);
+    });
+    return out;
+  }
+  // after a fight: sites built (or the work they kept), buildings destroyed, XP from what they made (a bought
+  // building gets its XP as a squad). Returns what happened, per side: [{ id, built: true } | { id, lost: true } | { id, progress }]
+  function settleBuildings(m, res) {
+    const news = [[], []];
+    for (const side of [0, 1]) buildingRecords(m, side).forEach(r => {
+      const info = buildingInfo(r.id), x = (res.buildings || []).find(y => y.side === side && y.squad === r.squad), b = r.rec;
+      if (!info || !x) return;
+      const q = res.squads && res.squads[side + ':' + r.squad];
+      if (b.built) {
+        if (q && !r.sq) b.xp += q.xp;
+        if (!x.alive) { b.built = false; b.progress = Math.max(0, Math.min(1, (info.rebuild == null ? 50 : info.rebuild) / 100)); news[side].push({ id: r.id, lost: true }); }
+      } else if (x.work != null) {
+        b.progress = Math.max(0, Math.min(1, x.work / info.buildSecs));
+        if (x.work >= info.buildSecs - 1e-9 || (info.survive && x.alive && x.worked)) { b.built = true; b.progress = 1; news[side].push({ id: r.id, built: true }); }
+        else if (x.worked) news[side].push({ id: r.id, progress: b.progress });
+      }
+    });
+    return news;
   }
 
   // ---------- selling ----------
@@ -962,7 +1198,7 @@ const Game = (() => {
   // Squads placed this round can be moved freely. Once per round a player may also move one squad from an
   // earlier round, for CONFIG.moveCost gold. Moving it back to where it was refunds the gold.
   const movedId = (m, side) => (m.moved && m.moved[side] != null) ? m.moved[side] : null;
-  const canMove = (m, side, sq) => !!sq && (sq.round === m.round ||
+  const canMove = (m, side, sq) => !!sq && !(m.units[sq.unit] && m.units[sq.unit].building) && (sq.round === m.round || // a building stays put
     (movedId(m, side) == null ? m.gold[side] >= CONFIG.moveCost : movedId(m, side) === sq.id));
   function moveSquad(m, side, sqId, col, row) {
     const sq = m.armies[side].find(s => s.id === sqId);
@@ -1002,7 +1238,7 @@ const Game = (() => {
   }
 
   const towerAt = (m, side, col, row) => !!(m.towers && m.towers[side] && m.towers[side].col === col && m.towers[side].row === row);
-  const occupied = (m, side, col, row) => towerAt(m, side, col, row) || elfOwnAt(m, side, col, row) || m.armies[side].some(s => s.col === col && s.row === row) || devOccupied(m, side, col, row);
+  const occupied = (m, side, col, row) => towerAt(m, side, col, row) || elfOwnAt(m, side, col, row) || !!buildingAt(m, side, col, row) || m.armies[side].some(s => covers(m, s, col, row)) || devOccupied(m, side, col, row);
   const needsTower = (m, side) => !!(m.towers && !m.towers[side]);
   // the tower can be placed (or moved) during round 1 only
   function placeTower(m, side, col, row) {
@@ -1029,7 +1265,7 @@ const Game = (() => {
     if (needsTower(m, side)) return null; // the tower goes down first
     if (!isUnlocked(m, side, unitIdx)) return null;
     const into = boardable(m, side, col, row, unitIdx); // a carrier with room: the new squad rides inside
-    if (occupied(m, side, col, row) && !into) return null;
+    if (!spotFree(m, side, col, row, unitIdx) && !into) return null;
     const ride = into ? { in: into.id } : {};
     if (freeLeft(m, side).includes(unitIdx)) { // a package squad: no gold, no deployment
       const sq = { id: m.nextId[side]++, unit: unitIdx, col, row, round: m.round, xp: 0, level: 0, cost: 0, free: true, ...ride };
@@ -1070,10 +1306,12 @@ const Game = (() => {
       const ys = zoneRows(side).map(r => tileToWorld(0, r).y);
       return { y0: Math.min(...ys) - TILE / 2, y1: Math.max(...ys) + TILE / 2, armor: TOWER_SKILL.homeArmor, hpPct: TOWER_SKILL.homeHp, on: false };
     })() : null;
+    const fx = buildingEffects(m, side);
     for (const sq of m.armies[side]) {
+      if (m.units[sq.unit].building) continue; // a building: see buildingBodies
       const w = tileToWorld(sq.col, sq.row);
       const ch = charOf(m, side), forward = isFlank(side, sq.col, sq.row) || inNoMans(sq.row);
-      let u = unitFor(m, side, sq.unit, sq);
+      let u = withConstructFx(unitFor(m, side, sq.unit, sq), fx);
       const mp = mapOf(m);
       if (mp && mp.stealthDmg && u.stealth) u = { ...u, hit: u.hit * (1 + mp.stealthDmg / 100) }; // the map favours stealth units
       if (mp && mp.boostHp && (mp.boostUnits || []).includes(m.units[sq.unit].name)) u = { ...u, hp: u.hp * (1 + mp.boostHp / 100) }; // ...or these units by name
@@ -1114,9 +1352,36 @@ const Game = (() => {
       if (towerSkill2On(m, side, 'bastion')) tu = { ...tu, moat: { ...MOAT } };
       if (eagle) tu = { ...tu, range: tu.range + TOWER_SKILL.eagleRange, aps: tu.aps * (1 + TOWER_SKILL.eagleAps / 100) };
       if (airship) tu = { ...tu, hit: tu.hit + AIRSHIP.sniperHit };
+      if (fx.awake && towerType(m, side).awake) tu = { ...tu, ...towerType(m, side).awake, idle: false, awake: true }; // Core Awoken: the Mecha Tower drives
       const w = tileToWorld(t.col, t.row), tb = E.buildSquad(tu, side, w.x, w.y, -2, TILE, idx);
       if (altarBought(m, side, 'walls')) for (const x of tb) x.walls = [ICE.wallHits, ICE.wallHits, ICE.wallHits, ICE.wallHits];
       idx += tb.length; out.push(...tb);
+      // the Mecha Tower's drone: circles the tower and does its shooting
+      if (tu.drone && tu.drone.unit) {
+        const du = E.withTraits({ ...tu.drone.unit, bodies: 1, aloft: true, noCount: true, construct: true, kind: 'drone' });
+        const [d] = E.buildSquad(du, side, w.x + tu.drone.orbit, w.y, -5, TILE, idx);
+        d.orbit = { anchor: tb[0], r: tu.drone.orbit };
+        idx++; out.push(d);
+      }
+      // the Mecha Tower's bots, bought for this round: minebots plant mines in no man's land, repairbots mend buildings
+      towerRounds(m, side).forEach((x, k) => {
+        if (!troundOn(m, side, x.id) || !x.bots || !x.bots.unit) return;
+        const n = Math.max(1, x.bots.count | 0), bu = E.withTraits({ ...x.bots.unit, bodies: 1, noCount: true, construct: true });
+        const bb = E.buildSquad({ ...bu, bodies: n }, side, w.x, w.y + (side === 0 ? 1 : -1) * TILE * 0.6, -6 - k, TILE, idx);
+        if (x.mines) { // each bot plants mines.each mines on tiles of no man's land picked from the match and round (the same on both phones)
+          const q = rng(m.seed + m.round * 811 + side * 53 + k), pool = [];
+          for (let row = 0; row < ROWS; row++) if (inNoMans(row)) for (let col = 0; col < COLS; col++) pool.push([col, row]);
+          const per = Math.max(1, x.mines.each | 0), picks = [];
+          while (picks.length < per * bb.length && pool.length) picks.push(pool.splice(Math.floor(q() * pool.length), 1)[0]);
+          const spots = picks.map(([col, row]) => { const c = tileToWorld(col, row); return { x: c.x + (q() - 0.5) * TILE * 0.6, y: c.y + (q() - 0.5) * TILE * 0.6 }; });
+          bb.forEach((b, j) => {
+            const mine = spots.filter((_, i) => i % bb.length === j);
+            mine.sort((a, c) => Math.abs(a.y - w.y) - Math.abs(c.y - w.y)); // nearest row first
+            b.plant = { spots: mine, mine: { hit: +x.mines.hit || 0, radius: +x.mines.radius || 0 } };
+          });
+        }
+        idx += bb.length; out.push(...bb);
+      });
       // Guards (keep): reskinned Wisps (base stats, no skills) a tile in front of the keep, holding there for a while
       // Brute guards (keep's second skill): Brutes with the skills bought for Brutes instead
       if (towerSkillOn(m, side, 'keep')) {
@@ -1154,6 +1419,9 @@ const Game = (() => {
         idx += wb.length; out.push(...wb);
       });
     }
+    // buildings (the Mechites' Factory)
+    const bb = buildingBodies(m, side, idx);
+    idx += bb.length; out.push(...bb);
     // Snowgres stand on their own tiles in no man's land; squad ids -10, -11, ... (not squads in the army)
     snowgres(m, side).forEach((sg, k) => {
       const w = tileToWorld(sg.col, sg.row), b = E.buildSquad(snowgreUnit(m, sg.strength), side, w.x, w.y, -10 - k, TILE, idx);
@@ -1260,6 +1528,7 @@ const Game = (() => {
       if (s.squad <= -10 && s.squad > YOT_SQUAD) { const sg = snowgres(m, side)[-10 - s.squad]; if (sg) sum += SQUAD_POINTS * GOLEM.cost * sg.strength * s.alive / s.total; continue; } // a Snowgre
       if (s.squad < 0) continue; // spawned bodies don't count
       const sq = m.armies[side].find(q => q.id === s.squad);
+      if (sq && m.units[sq.unit].building) continue; // nor do buildings
       const value = sq ? (m.units[sq.unit].cost || 1) * (TIER_DMG[tierOf(m.units, sq.unit)] || 1) : 1; // pricier squads hit harder, like their price
       sum += SQUAD_POINTS * value * s.alive / s.total;
     }
@@ -1298,6 +1567,7 @@ const Game = (() => {
       if (r) squads[side].push({ id: sq.id, unit: sq.unit, level: sq.level, left: r.alive / r.total, dealt: Math.round(r.dealt || 0) });
     }
     const towerFell = [0, 1].map(sd => { const q = res.squads[sd + ':-2']; return !!(q && q.alive === 0); });
+    const buildingNews = settleBuildings(m, res);
     // Matteo: the squads keep the charisma they ended the fight with; note the ones that became Gentlemen
     const gentlemen = [[], []];
     for (let side = 0; side < 2; side++) {
@@ -1319,13 +1589,14 @@ const Game = (() => {
         if (q.side !== sd) continue;
         const sq = q.squad >= 0 && m.armies[sd].find(x => x.id === q.squad);
         const key = sq ? 'u' + sq.unit : q.squad === -2 ? 'tower' : q.squad === -3 ? 'guards' : q.squad === -4 ? 'airship' : q.squad === YOT_SQUAD ? 'yot'
-          : q.squad === E.CONVERT_SQUAD ? 'won' : q.squad <= -10 && q.squad > YOT_SQUAD ? 'snowgre' : q.squad < 0 ? 'spawn' : null;
+          : q.squad === E.CONVERT_SQUAD ? 'won' : q.squad <= -10 && q.squad > YOT_SQUAD ? 'snowgre'
+          : q.squad <= BUILDING_SQUAD && buildingsOf(m, sd)[BUILDING_SQUAD - q.squad] ? 'b:' + buildingsOf(m, sd)[BUILDING_SQUAD - q.squad].id : q.squad < 0 ? 'spawn' : null;
         if (!key || (!sq && !(q.dealt > 0))) continue; // squads always show; the rest only if they dealt damage
         by[key] = (by[key] || 0) + (q.dealt || 0);
       }
-      return Object.keys(by).map(key => ({ key, dealt: Math.round(by[key]), ...(key === 'tower' ? { name: towerType(m, sd).name } : {}) }));
+      return Object.keys(by).map(key => ({ key, dealt: Math.round(by[key]), ...(key === 'tower' ? { name: towerType(m, sd).name } : key.startsWith('b:') ? { name: (buildingInfo(key.slice(2)) || {}).name || 'Building' } : {}) }));
     });
-    const summary = { round: m.round, winner: roundWinner, timeout: res.timeout, dmg, time: res.time, newlyReady, squads, towerFell, gentlemen, converted: res.converted || [0, 0], dealtBy };
+    const summary = { round: m.round, winner: roundWinner, timeout: res.timeout, dmg, time: res.time, newlyReady, squads, towerFell, gentlemen, converted: res.converted || [0, 0], dealtBy, buildings: buildingNews };
     // devtest: buildings destroyed in the fight cost their owner what their onDestroyed says (health now, gold below)
     if (isDev(m)) {
       summary.devLoss = [0, 1].map(sd => {
@@ -1381,7 +1652,7 @@ const Game = (() => {
   const felixGold = (m, side, round = m.round) => charOf(m, side) !== 'felix' ? 0 : round >= CHAR.felixRound2 ? CHAR.felixGold2 : round >= CHAR.felixRound ? CHAR.felixGold : 0;
 
   // ---------- leveling (manual, costs gold) ----------
-  const isReady = (m, sq) => sq.level < E.MAX_LEVEL && sq.xp >= xpNeeded(m.units[sq.unit], sq.level);
+  const isReady = (m, sq) => sq.level < E.MAX_LEVEL && sq.xp >= xpNeeded(m.units[sq.unit], sq.level) && !(m.units[sq.unit].building && !sq.built); // a building levels once built
 
   function levelUp(m, side, sqId) {
     const sq = m.armies[side].find(s => s.id === sqId);
@@ -1419,6 +1690,7 @@ const Game = (() => {
       if (AI.levelPolicy === 'smart' && u.bodies >= 8) continue;
       while (isReady(m, sq) && levelUp(m, side, sq.id)) done.push({ id: sq.id, unit: sq.unit, level: sq.level });
     }
+    for (const b of buildingsOf(m, side)) while (buildingReady(b) && levelBuilding(m, side, b.id)) done.push({ building: b.id, level: b.level });
     return done;
   }
 
@@ -1433,13 +1705,15 @@ const Game = (() => {
   const FACTION_MODE = { map: 'standard', picks: 2, order: [{ who: 'A', act: 'pick' }, { who: 'B', act: 'pick' }, { who: 'B', act: 'pick' }, { who: 'A', act: 'pick' }] };
   const TRAIT_STATS = ['hp', 'hit', 'aps', 'range', 'speed']; // a trait changes these by a percentage
   let FACTIONS = [];
-  // list: [{ id, name, color, theme, trait: { name, text, hp, hit, ... (percent) }, tower: { name, text, unit: { stats } }, units: [unit names] }]
+  // list: [{ id, name, color, theme, trait: { name, text, hp, hit, ... (percent) }, tower: { name, text, unit: { stats },
+  // awake (its stats under Core Awoken), rounds (skills bought every round, see towerRounds) }, units: [unit names] }]
   function setFactions(list) {
     FACTIONS = (Array.isArray(list) ? list : []).filter(f => f && typeof f.id === 'string' && f.id).map(f => ({
       id: f.id, name: String(f.name || f.id), color: f.color || '#C9B79C', theme: String(f.theme || ''),
       trait: f.trait && typeof f.trait === 'object' ? f.trait : null, units: Array.isArray(f.units) ? f.units.slice() : [],
       tower: { id: 'f-' + f.id, faction: f.id, name: (f.tower && f.tower.name) || f.name + ' tower', text: (f.tower && f.tower.text) || '',
-        unit: { ...TOWER, color: f.color || TOWER.color, ...((f.tower && f.tower.unit) || {}), name: (f.tower && f.tower.name) || f.name + ' Tower', kind: 'f-' + f.id } },
+        unit: { ...TOWER, color: f.color || TOWER.color, ...((f.tower && f.tower.unit) || {}), name: (f.tower && f.tower.name) || f.name + ' Tower', kind: 'f-' + f.id },
+        awake: (f.tower && f.tower.awake) || null, rounds: Array.isArray(f.tower && f.tower.rounds) ? f.tower.rounds.filter(x => x && x.id) : [] },
     }));
     return FACTIONS;
   }
@@ -1456,7 +1730,8 @@ const Game = (() => {
   function withFactionTrait(u, fid) {
     const t = fid && factionInfo(fid) && factionInfo(fid).trait;
     if (!u || !t) return u;
-    return modUnit(u, t);
+    const mul = (x) => { const o = { ...x }; for (const k of TRAIT_STATS) if (isFinite(+t[k]) && +t[k]) o[k] = x[k] * (1 + t[k] / 100); if (isFinite(+t.armor) && +t.armor) o.bonusArmor = (x.bonusArmor || 0) + +t.armor; return o; };
+    return withKids(mul(u), mul);
   }
   // the roster for a match between drafted factions: the faction units of `ids` (in that order) out of the full
   // faction set ({ units, matrix, skills } from faction-units.json), with the counter table cut to match
@@ -1613,7 +1888,7 @@ const Game = (() => {
     const where = (def && def.place) || 'zone';
     const ok = inZone(side, row) || (where === 'front' && inNoMans(row)) || (where === 'flank' && isFlank(side, col, row));
     if (!ok || reserved(side, col, row) || towerAt(m, side, col, row) || elfOwnAt(m, side, col, row) || wallAt(m, col, row)) return false;
-    if (m.armies[side].some(s => s.col === col && s.row === row)) return false;
+    if (m.armies[side].some(s => covers(m, s, col, row)) || buildingAt(m, side, col, row)) return false; // squads (an Altar takes 2x2), the Mechites' buildings
     return !placedLessers(m, side).some(b => b.key !== key && b.col === col && b.row === row);
   }
   // place (or move) a building: any time in the round it was picked, fixed after its first fight
@@ -1654,8 +1929,7 @@ const Game = (() => {
     const o = { ...u };
     for (const k of TRAIT_STATS) if (isFinite(+mods[k]) && +mods[k]) o[k] = u[k] * (1 + mods[k] / 100);
     if (isFinite(+mods.armor) && +mods.armor) o.bonusArmor = (u.bonusArmor || 0) + +mods.armor;
-    if (u.spawn && u.spawn.unit) o.spawn = { ...u.spawn, unit: modUnit(u.spawn.unit, mods) };
-    return o;
+    return withKids(o, (k) => modUnit(k, mods)); // spawned and built units get them too
   }
 
   // ---- Powers ----
@@ -1820,6 +2094,9 @@ const Game = (() => {
     if (canBuyTowerSkill(m, side) && rng(m.seed + m.round * 331 + side * 17)() < 0.5) buyTowerSkill(m, side); // own stream, as above
     if (canBuyTowerSkill2(m, side) && m.gold[side] - towerSkill2Cost(m, side) >= SQUAD_COST && rng(m.seed + m.round * 347 + side * 19)() < 0.35) buyTowerSkill2(m, side);
     if (canTakeLoan(m, side) && m.gold[side] < SQUAD_COST * 3 && rng(m.seed + m.round * 613 + side * 37)() < 0.4) takeLoan(m, side); // short on gold: sometimes a loan
+    for (const x of towerRounds(m, side)) { // the Mecha Tower's bots: some rounds, if they leave gold for a squad
+      if (canBuyTround(m, side, x.id) && m.gold[side] - troundCost(m, side, x.id) >= SQUAD_COST && rng(m.seed + m.round * 619 + side * 41 + x.id.length)() < 0.45) buyTround(m, side, x.id);
+    }
     if (towerPicked(m, side) && towerType(m, side).id === 'mage') { // a mage general most rounds, if it leaves gold for a squad
       const q = rng(m.seed + m.round * 577 + side * 29), g = MAGE_GENERALS[Math.floor(q() * MAGE_GENERALS.length)];
       if (q() < 0.6 && m.gold[side] - g.cost >= SQUAD_COST) buyMageGen(m, side, g.id);
@@ -1867,6 +2144,20 @@ const Game = (() => {
       const sh = shroomAt(m, col, row);
       if (sh && sh.type === 'green' && m.gold[side] - reserve - shroomCost(m, side) >= minCost && r() < 0.4) removeShroom(m, side, col, row);
     }
+    // buildings (a Factory): with a squad of the unit that brings one, sometimes place it on a back tile of its zone; once it
+    // is built, buy one of its units most rounds. Its own random stream, so the rest of the AI rolls the same as before.
+    const rb = rng(m.seed + m.round * 883 + side * 41);
+    m.units.forEach((u, ui) => E.SLOTS.forEach(k => {
+      if (!canBuyBuilding(m, side, ui, k) || m.gold[side] - reserve - skillCost(m, ui, k, side) < minCost || rb() >= 0.6) return;
+      const spots = [];
+      for (const row of zoneRows(side).slice(3)) for (let col = 1; col < COLS - 1; col++) if (buildingSpotOk(m, side, col, row)) spots.push({ col, row });
+      if (spots.length) { const sp = spots[Math.floor(rb() * spots.length)]; buyBuilding(m, side, ui, k, sp.col, sp.row); }
+    }));
+    for (const r of buildingRecords(m, side)) {
+      if (!r.rec.built || bskillOf(m, side, r.key) || rb() >= 0.75) continue;
+      const ok = buildingSkills(r.id).filter(x => m.gold[side] - reserve - bskillCost(r.id, x.id) >= 0);
+      if (ok.length) buyBuildingSkill(m, side, r.key, ok[Math.floor(rb() * ok.length)].id);
+    }
     // skills: for unit types it has 2 or more squads of, sometimes buy a skill if a squad is still affordable after
     if (AI.skills) {
       const types = Object.keys(own).map(Number).filter(ui => own[ui] >= 2).sort((a, b) => own[b] - own[a]);
@@ -1887,6 +2178,7 @@ const Game = (() => {
       let best = -1, bs = -Infinity;
       m.units.forEach((u, i) => {
         if (isOff(m, i, side)) return;
+        if (u.building && ((own[i] || 0) >= 1 || m.round < 3)) return; // a building (Altar of Build): one, from round 3
         const extra = isUnlocked(m, side, i) ? 0 : unlockCost(m, i, side); // a locked unit costs its unlock on top
         if (shopCost(m, side, i) + extra > budget) return;
         let s = 0, tot = 0;
@@ -1912,7 +2204,7 @@ const Game = (() => {
   function aiSpot(m, side, unitIdx, oppArmy, r) {
     const u = E.withTraits(m.units[unitIdx]);
     const rows = zoneRows(side);
-    const band = u.range <= 12 ? [0, 1] : u.range <= 22 ? [1, 2] : u.range <= 30 ? [2, 3] : [3, 4]; // rows counted from the front
+    const band = u.building ? [3, 4] : u.range <= 12 ? [0, 1] : u.range <= 22 ? [1, 2] : u.range <= 30 ? [2, 3] : [3, 4]; // rows counted from the front (a building at the back)
     // aim at the columns of the enemy squads this unit counters
     let wsum = 0, csum = 0;
     for (const s of oppArmy) {
@@ -1930,7 +2222,7 @@ const Game = (() => {
     for (let zi = 0; zi < rows.length; zi++) {
       for (let col = 0; col < COLS; col++) {
         const row = rows[zi];
-        if (occupied(m, side, col, row) || !canPlaceAt(m, side, col, row)) continue;
+        if (!spotFree(m, side, col, row, unitIdx) || !canPlaceAt(m, side, col, row, unitIdx)) continue;
         const rowCost = band.includes(zi) ? 0 : 3 * Math.min(Math.abs(zi - band[0]), Math.abs(zi - band[1]));
         const sh = (shroomAt(m, col, row) || {}).type;
         const c = Math.abs(col - target) + rowCost + r() * 0.8 + (sh === 'purple' ? -1.5 : sh === 'green' ? 4 : 0);
@@ -1947,9 +2239,13 @@ const Game = (() => {
     deploysAllowed, deploysLeft, deployedThisRound, canBuyDeploy, buyDeploy, refundDeploy,
     PACKAGE, allPackages, packOf, needsPack, freeLeft, choosePack, ensurePack,
     unlockCost, tierOf, startLevel, shopCost, mapFreeOf, mapFreeLeft, isUnlocked, unlockVisible, unlock, undoUnlock,
-    skillDef, skillCost, SKILL_STEP, skillsBought, isInnate, hasSkill, skillVisible, unitFor, canBuySkill, buySkill, undoSkill, sellValue, sell,
+    skillDef, skillCost, SKILL_STEP, skillsBought, isInnate, hasSkill, skillVisible, skillNeeds, skillNeedsMissing, unitFor, withCharacter,
+    footprint, blockOf, spotFree, buildingRecords, recordOf, recordWorld, buildingEffects,
+    setBuildings, BUILDINGS: () => BUILDINGS, buildingInfo, BUILDING_SQUAD, isBuildingSkill, buildingIdOf, buildingsOf, buildingOf, buildingAt, buildingShown, buildingSpotOk,
+    canBuyBuilding, buyBuilding, buildingSkills, buildingSkillInfo, bskillOf, bskillCost, canBuyBuildingSkill, buyBuildingSkill, undoBuildingSkill,
+    buildingXpNeeded, buildingLevelCost, buildingReady, levelBuilding, undoLevelBuilding, constructBuff, buildingBodies, canBuySkill, buySkill, undoSkill, sellValue, sell,
     isRider, hiddenFromFoe, isCarrier, riderOf, carrierOf, squadAt, boardable, unplaceSquad,
-    TOWER, TOWER_TYPES, OUTPOST, TOWER_PICK_ROUND, towerType, towerChoices, needsTowerPick, setTowerType, settleTowerPicks, TOWER_SKILL, towerSkillOf, towerSkillVisible, towerPicked, canBuyTowerSkill, buyTowerSkill, undoTowerSkill, towerSkillCost, towerSkill2Of, towerSkill2Visible, towerSkill2Cost, canBuyTowerSkill2, buyTowerSkill2, undoTowerSkill2, towerSkill2On, AIRSHIP, MOAT, INVEST, MAGE_GENERALS, mageGenPrice, MAGE, mageGenInfo, mageGenOf, mageTpOf, isExtraGen, mageGenCost, canBuyMageGen, buyMageGen, undoMageGen, mageTowerUnit, generalUnit, LOAN, loanNow, investNow, bankBusy, canTakeLoan, takeLoan, undoLoan, SLIME_UNITS, slimeTowerUnit, slimeSkillDefs, TOWER_MID, towerColOk, towerAt, needsTower, placeTower, ensureTower,
+    TOWER, TOWER_TYPES, OUTPOST, TOWER_PICK_ROUND, towerType, towerChoices, needsTowerPick, setTowerType, settleTowerPicks, TOWER_SKILL, towerSkillOf, towerSkillVisible, towerPicked, canBuyTowerSkill, buyTowerSkill, undoTowerSkill, towerSkillCost, towerSkill2Of, towerSkill2Visible, towerSkill2Cost, canBuyTowerSkill2, buyTowerSkill2, undoTowerSkill2, towerSkill2On, AIRSHIP, MOAT, INVEST, MAGE_GENERALS, mageGenPrice, MAGE, mageGenInfo, mageGenOf, mageTpOf, isExtraGen, mageGenCost, canBuyMageGen, buyMageGen, undoMageGen, mageTowerUnit, generalUnit, LOAN, loanNow, investNow, bankBusy, investNow, bankBusy, canTakeLoan, takeLoan, undoLoan, towerRounds, troundInfo, troundOn, troundCost, canBuyTround, buyTround, undoTround, SLIME_UNITS, slimeTowerUnit, slimeSkillDefs, TOWER_MID, towerColOk, towerAt, needsTower, placeTower, ensureTower,
     FLANK, flankRows, flankOpen, isFlank, reserved, canPlaceAt, isOff, enemyHolds, inNoMans, hasSkillType,
     STANDARD_PACK, ICE, ALTAR, GOLEM, isIce, hailRound, altarRound, stormShift, stormRows, hailTiles, altarCost, altarRefund, altarCount, pushRoom, altarBought, addAltar, buyAltar, undoAltar, snowgres, snowgreUnit,
     MAPS, ELF_TOWER, SHROOM, SHROOM_SPLIT, shroomAt, shroomTileAt, shroomRemoval, SHROOM_REMOVE, shroomCost, removeShroom, undoRemoveShroom, mapOf, elfSpot, rollMap, BRIBE_COST, bribeList, bribeGold, bribeCount, bribeNow, bribeCost, bribeRefund, ELF_POWER, elfPowered, elfUnit, ELF_OWN, elfOwnCost, elfOwnOf, elfOwnAt, elfOwnUnlocked, elfOwnOffered, canBuyElfOwn, elfOwnSpotOk, buyElfOwn, undoElfOwn, bribeLeader, canBribe, bribe, undoBribe,

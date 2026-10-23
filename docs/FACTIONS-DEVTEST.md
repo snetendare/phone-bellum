@@ -64,6 +64,7 @@ Everything goes in `src/factions.json`. Then run `node tools/counter-table.js` a
 }
 ```
 
+- The Mechites also use the fight mechanics and building system from their branch (rollers, builders, the Factory, the Altar of Build, tower bots): see "Fight mechanics added for factions" in the README. Those buildings are bought with units and skills; the lesser buildings below are the devtest's round picks. Both kinds can stand in one match.
 - Units use the same fields as `default-roster.json`, so anything Counter Lab can make works here. One new field: `"disguise": "Unit name"` (it looks like that unit to the opponent until it first attacks). `unlock` is the gold to unlock it in a match (0 = open from the start).
 - `trait` changes all the faction's units: `hp`, `hit`, `aps`, `range`, `speed` in %, `armor` flat.
 
@@ -138,7 +139,7 @@ Neutral units can be names from the standard roster or full units. Picking one u
 1. Plan (this file). Done.
 2. Devtest mode, round-by-round picks, simple pick card UI. Done.
 3. Buildings and spells: game rules, battle engine, 2D and 3D boards. Done (buildings and walls have simple placeholder 3D models).
-4. Mechites and Sunken Deep: placeholder rosters are in (marked PLACEHOLDER in their theme line), waiting for the real designs.
+4. Mechites: the real faction is in (merged from its own branch on 2026-10-23: Rollers, Cog Builder, Mechite Guards, Altar of Build, the Factory, the Mecha Tower). It has no lesser buildings or Powers for the devtest picks yet, so its picks come from the neutral ones. Sunken Deep: still a placeholder (marked PLACEHOLDER in its theme line), waiting for the real design.
 5. Disguise and the arrow guide. Done. The disguise still shows the real number of bodies.
 6. Awareness research and a prototype, on in the devtest only. Done, see [AWARENESS.md](AWARENESS.md).
 7. Tests, build, push, publish the artifact. Done.

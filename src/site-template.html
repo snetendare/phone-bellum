@@ -96,7 +96,7 @@ a { color: var(--you); }
 /* the unlock button in the unit sheet: big, centred, gold */
 .unlock-cta { display: grid; gap: 8px; justify-items: center; text-align: center; border: 1px solid var(--gold); border-radius: 8px; padding: 12px; background: linear-gradient(180deg, rgba(230, 184, 74, 0.16), rgba(230, 184, 74, 0.05)); }
 .unlock-cta.short { border-color: var(--line); background: none; }
-.unlock-cta .btn { width: min(100%, 300px); display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 14px 18px; font: 700 17px var(--font-display); letter-spacing: 0.02em; }
+.unlock-cta .btn { width: 100%; display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 14px 18px; font: 700 17px var(--font-display); letter-spacing: 0.02em; }
 .unlock-cta .btn svg { width: 15px; height: 16px; }
 .unlock-cta .btn.no { padding: 8px 18px; font-size: 14px; }
 /* role symbols on unit cards and in the info sheet */
@@ -322,6 +322,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
   const FDATA = /*FACTIONS*/; // the Factions gamemode: { factions, units (each with its faction), matrix, skills } (tools/counter-table.js)
   Game.setFactions(FDATA.factions);
   Game.setDevData(FDATA); // the Factions devtest: buildings, Powers, spells
+  Game.setBuildings(FDATA.buildings || []); // the factions' buildings (the Mechites' Factory)
   const ROLES = {
     'Goblin Swarm': 'Fast melee swarm. Soaks shots and overwhelms single-target units.',
     'Skeleton Archers': 'Cheap ranged squad that deals steady damage from behind.',
@@ -816,7 +817,8 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
   const boardView = () => ({ m, me, phase, units, mode, bt, battlePre, fx, selected, moving, drag, hoverTile, rangeOf,
     editable: editable(), placingUnit: placingUnit(), placingElf: placingElf(), placingTower: placingTower(),
     dev: m && m.dev ? { bPlacing, castMode, guideMode, guideId: guideDrag ? guideDrag.id : guideMode !== 'pick' ? guideMode : null, guide: guideDrag ? guideDrag.pts : guideMode != null && guideMode !== 'pick' ? guideDraft : null } : null,
-    battleCam: cam && cam.k > 0 ? { zoom: 1 + (CAM.zoom - 1) * cam.k, x: cam.x, y: cam.y, k: cam.k } : null });
+    battleCam: cam && cam.k > 0 ? { zoom: 1 + (CAM.zoom - 1) * cam.k, x: cam.x, y: cam.y, k: cam.k } : null,
+    placingBuilding: placingBuilding() });
   const board = Render2D(cv, boardView);
   let board3d = null; // the 3D board when it's on (see "the 3D board" below)
   const size = () => (board3d || board).size();
@@ -984,6 +986,9 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
   const placingTower = () => phase === 'deploy' && m && !Game.needsPack(m, me) && Game.needsTower(m, me);
   let elfPlacing = false; // picking the tile for the elf tower this player is buying
   const placingElf = () => elfPlacing && phase === 'deploy' && !!m && Game.canBuyElfOwn(m, me);
+  let buildPlacing = null; // { ui, k }: picking the tile for the building that unit ui's skill k places (the Factory)
+  const placingBuilding = () => buildPlacing && phase === 'deploy' && !!m && Game.canBuyBuilding(m, me, buildPlacing.ui, buildPlacing.k) ? { ...buildPlacing, id: Game.buildingIdOf(m, buildPlacing.ui, buildPlacing.k) } : null;
+  const buildingName = (id) => (Game.buildingInfo(id) || {}).name || 'building';
 
   // ---------- HUD ----------
   function hud() {
@@ -1077,8 +1082,8 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
       items: Game.towerChoices(m, me).map(x => ({
         key: x.id,
         art: `<canvas data-ticon="${x.id}" width="96" height="96" style="width:48px;height:48px" aria-hidden="true"></canvas>`,
-        name: esc(x.name), who: '', sub: `${x.unit.hp} hp · ${x.unit.range} m`,
-        det: mode === 'tutorial' && TUT.towers[x.id] ? `<b>${esc(x.name)}</b> · ${esc(TUT.towers[x.id])}` : `<b>${esc(x.name)}</b> · ${x.unit.hp} hp · hit ${x.unit.hit} × ${x.unit.aps}/s · ${x.unit.range} m${x.unit.splash ? ` · ${x.unit.splash} m splash` : ''}<br>${esc(x.text)}${x.skill ? `<br><span style="color:var(--gold)">Skill, bought separately for ${Game.TOWER_SKILL.cost} gold: ${esc(x.skill.name)}.</span> ${esc(x.skill.text)}` : ''}${x.skill2 ? `<br><span style="color:var(--gold)">Skill, bought separately for ${x.skill2.cost} gold: ${esc(x.skill2.name)}.</span> ${esc(x.skill2.text)}` : ''}${x.loan ? `<br><span style="color:var(--gold)">Loan, every round:</span> ${esc(loanText())}` : ''}${x.passive ? `<br><span style="color:var(--gold)">${esc(x.passive.name)} (always on):</span> ${esc(x.passive.text)}` : ''}${x.generals ? `<br><span style="color:var(--gold)">Mage generals, one per round, for that round's fight:</span> ${Game.MAGE_GENERALS.map(g => `<b>${esc(g.name)}</b> (${g.cost} gold): ${esc(g.text)}`).join(' ')}` : ''}`,
+        name: esc(x.name), who: '', sub: `${x.unit.hp} hp · ${towerAttack(x.unit).range} m`,
+        det: mode === 'tutorial' && TUT.towers[x.id] ? `<b>${esc(x.name)}</b> · ${esc(TUT.towers[x.id])}` : `<b>${esc(x.name)}</b> · ${x.unit.hp} hp · ${(a => `${x.unit.drone ? 'drone ' : ''}hit ${a.hit} × ${a.aps}/s · ${a.range} m${a.splash ? ` · ${a.splash} m splash` : ''}`)(towerAttack(x.unit))}<br>${esc(x.text)}${(x.rounds || []).map(r => `<br><span style="color:var(--gold)">${esc(r.name)}, every round, ${r.cost} gold:</span> ${esc(r.text)}`).join('')}${x.skill ? `<br><span style="color:var(--gold)">Skill, bought separately for ${Game.TOWER_SKILL.cost} gold: ${esc(x.skill.name)}.</span> ${esc(x.skill.text)}` : ''}${x.skill2 ? `<br><span style="color:var(--gold)">Skill, bought separately for ${x.skill2.cost} gold: ${esc(x.skill2.name)}.</span> ${esc(x.skill2.text)}` : ''}${x.loan ? `<br><span style="color:var(--gold)">Loan, every round:</span> ${esc(loanText())}` : ''}${x.passive ? `<br><span style="color:var(--gold)">${esc(x.passive.name)} (always on):</span> ${esc(x.passive.text)}` : ''}${x.generals ? `<br><span style="color:var(--gold)">Mage generals, one per round, for that round's fight:</span> ${Game.MAGE_GENERALS.map(g => `<b>${esc(g.name)}</b> (${g.cost} gold): ${esc(g.text)}`).join(' ')}` : ''}`,
       })),
     };
     return null;
@@ -1335,17 +1340,18 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
       if (castMode) hint = `Tap a tile to cast ${esc((Game.devSpell(castMode) || {}).name || 'the spell')}${(Game.devSpell(castMode) || {}).kind === 'zone' ? ' (its top left corner on your screen)' : ''}. Tap anywhere it can't go to cancel.`;
       if (guideMode === 'pick') hint = 'Tap one of your squads, or drag from it to draw its path.';
       else if (guideMode != null) hint = `Tap tiles for its path (${guideDraft.length} of ${Game.DEV.guidePoints}), or drag from the squad. ✕ when done.`;
+      if (placingBuilding()) hint = `Tap a free tile in your zone to place your ${esc(buildingName(placingBuilding().id))}. Your nearest Cog Builder builds it in the next fight. Tap anywhere else to cancel.`;
       if (placingTower()) hint = 'Next, place your tower: tap a gold tile on the left or right side of your zone. If it falls in a fight, your army is crippled for a few seconds.';
     }
     // Only hints about what the next tap does (or why it can't) stay on the panel; the rest (tips, this round's
     // news) go to the Help sheet, whose button turns gold while there's news not read yet this round.
     const devTask = bPlacing != null || castMode != null || guideMode != null;
-    const inline = !can || placingTower() || placingElf() || choosingTower() || choosingPack() || devPicking() || devTask || moveMode || (charmMode && Game.canGiveCharm(m, me))
+    const inline = !can || placingTower() || placingElf() || placingBuilding() || choosingTower() || choosingPack() || devPicking() || devTask || moveMode || (charmMode && Game.canGiveCharm(m, me))
       || (selected !== null && !canBuy(selected)) ? hint : '';
     helpTip = inline ? '' : hint;
     // phone: the task the next board tap is for, shown over the board while the drawer is down (dock())
     dockTask = !can ? null : placingTower() ? { text: hint, x: false }
-      : selected !== null || moveMode || (charmMode && Game.canGiveCharm(m, me)) || placingElf() || devTask ? { text: hint, x: !(bPlacing != null && Game.unplacedLesser(m, me)) } : null;
+      : selected !== null || moveMode || (charmMode && Game.canGiveCharm(m, me)) || placingElf() || placingBuilding() || devTask ? { text: hint, x: !(bPlacing != null && Game.unplacedLesser(m, me)) } : null;
     const news = can && selected === null && !fresh && !inline && (Game.hailRound(m) || Game.altarRound(m) || m.round === Game.FLANK.round || (tskillOffer() && m.round === Game.TOWER_PICK_ROUND));
     const extraBtns = `<span class="xbtns" style="display:flex;gap:6px;flex-wrap:wrap">
         <button class="btn small" id="buy-deploy" ${can && Game.canBuyDeploy(m, me) ? '' : 'disabled'}>+1 deployment · ${Game.CONFIG.extraDeployCost}</button>
@@ -1612,7 +1618,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
       if (sum.devLoss[foe()].fell.length) lines.push(`You destroyed ${esc(foeName().toLowerCase() === 'enemy' ? 'the enemy’s' : foeName() + '’s')} ${fell(foe())}${sum.devLoss[foe()].hp ? ` (−${sum.devLoss[foe()].hp} health)` : ''}.`);
       if (sum.devLoss[me].fell.length) lines.push(`Your ${fell(me)} ${sum.devLoss[me].fell.length === 1 ? 'was' : 'were'} destroyed${sum.devLoss[me].hp ? ` (−${sum.devLoss[me].hp} health)` : ''}.`);
     }
-    const lv = (list) => list.map(x => `${esc(units[x.unit].name)} (to level ${x.level + 1})`).join(', ');
+    const lv = (list) => list.map(x => `${esc(x.building ? buildingName(x.building) : units[x.unit].name)} (to level ${x.level + 1})`).join(', ');
     const lvLines = [];
     if (solo() && lastAiLevels.length) lvLines.push(`<p><span style="color:var(--gold)">${them} leveled up before the fight:</span> ${lv(lastAiLevels)}.</p>`);
     if (mode === 'claude' && claude.did.length) lvLines.push(`<p><span style="color:var(--gold)">Claude also:</span> ${esc(claude.did.join(', '))}.</p>`);
@@ -1621,6 +1627,8 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
     if (sum.gentlemen && sum.gentlemen[me].length) lvLines.push(`<p><span style="color:${CHARM_COL}">Now Gentlemen (5 Charisma):</span> ${sum.gentlemen[me].map(x => esc(units[x.unit].name)).join(', ')}.</p>`);
     if (sum.converted && (sum.converted[me] || sum.converted[foe()])) lvLines.push(`<p><span style="color:${CHARM_COL}">Won over:</span> ${[sum.converted[me] ? `your Gentlemen charmed ${sum.converted[me]} enemy ${sum.converted[me] === 1 ? 'body' : 'bodies'}` : '', sum.converted[foe()] ? `${sum.converted[foe()]} of yours went over to ${esc(them)}` : ''].filter(Boolean).join('; ')}.</p>`);
     if (sum.newlyReady[me].length) lvLines.push(`<p><span style="color:var(--gold)">Ready to level up:</span> ${lv(sum.newlyReady[me])}.</p>`);
+    for (const x of (sum.buildings && sum.buildings[me]) || []) lvLines.push(`<p><span style="color:var(--gold)">${esc(buildingName(x.id))}:</span> ${x.built ? 'built. From now on you can buy one of its units each round (tap it).' : x.lost ? 'destroyed. It starts the next round half built, and your Cog Builder builds it again.' : `${Math.round(x.progress * 100)}% built; it carries on next fight.`}</p>`);
+    for (const x of (sum.buildings && sum.buildings[foe()]) || []) if (x.built || x.lost) lvLines.push(`<p><span style="color:var(--foe)">${esc(them)}’s ${esc(buildingName(x.id))}</span> ${x.built ? 'is built.' : 'was destroyed.'}</p>`);
     resultShownAt = now();
     if (m.over) {
       const win = m.winner === me, loss = m.winner === foe();
@@ -1746,7 +1754,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
       them: { hpBefore: p.hp[them], gold: p.gold[them], army: armyOf(p, them), skills: skillsOf(p, them), tower: (p.towers && p.towers[them]) || null, unlocked: unlocksOf(p, them), character: Game.charOf(p, them), package: Game.packOf(p, them) ? Game.packOf(p, them).squads.map(ui => units[ui].name) : null },
       result: { winner: sum.winner === you ? 'you' : sum.winner === them ? 'them' : 'draw', timeout: !!sum.timeout, seconds: Math.round(sum.time), damageToYou: sum.dmg[you], damageToThem: sum.dmg[them], yourTowerFell: !!(sum.towerFell && sum.towerFell[you]), theirTowerFell: !!(sum.towerFell && sum.towerFell[them]) },
     };
-    if (mode === 'claude') entry.claude = { said: claude.say || null, alsoDid: claude.did.slice(), leveledUp: lastAiLevels.map(x => `${units[x.unit].name} to level ${x.level + 1}`), botPlayed: !!claude.bot, note: claude.note || null };
+    if (mode === 'claude') entry.claude = { said: claude.say || null, alsoDid: claude.did.slice(), leveledUp: lastAiLevels.map(x => `${x.building ? buildingName(x.building) : units[x.unit].name} to level ${x.level + 1}`), botPlayed: !!claude.bot, note: claude.note || null };
     report.rounds.push(entry);
     report.updated = new Date().toISOString();
     if (m && m.over) { report.over = true; report.winner = m.winner === you ? 'you' : m.winner === them ? 'them' : 'draw'; report.hpLeft = { you: m.hp[you], them: m.hp[them] }; }
@@ -1880,7 +1888,13 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
       if (u.ram) t.push(`NEVER ATTACKS: runs straight at the enemy tower (the nearest enemy once it is down) and rams it once for its hit (${n1(u.hit)}), then is destroyed`);
       if (u.carrier) t.push('CARRIES ONE SQUAD of any other unit, hidden from the opponent until it is destroyed: place a squad on its tile (price and deployment as usual) and it rides inside, then jumps out where the carrier falls');
       if (u.noFlank) t.push('can\'t be placed on flank tiles');
-      const sk = (u.skillDefs || []).map((d, k) => d ? `skill ${k + 1} "${d.name}" (${Game.isInnate(m, i, k) ? 'BUILT IN: always on for both players, free' : `${Game.skillCost(m, i, k, 1)} gold${Game.hasSkill(m, 1, i, k) ? ', YOU OWN IT' : ''}`}): ${Engine.describeSkill(d)}` : null).filter(Boolean);
+      if (u.building) t.push(`A BUILDING (${Game.footprint(m, i)}x${Game.footprint(m, i)} tiles: "col"/"row" in "place" is its first column and row, every tile must be free in your zone; it never moves, never attacks and doesn't count as a unit left standing). See Buildings below for how it is built and its skills`);
+      if (u.roll > 0) t.push(`NEVER STOPS TO ATTACK: rolls at its target from ${Engine.ROLL_START} m/s up to its speed over ${n1(u.roll)} s, hits every enemy body it rolls over for its hit, carries on ${Engine.ROLL_PAST} m past the target, stops and rolls back (the faster it gets going, the more often it hits)`);
+      if (u.build && u.build.unit) { const c = u.build.unit; t.push(`BUILDS once per fight: when an enemy is within ${u.build.range} m it stops for ${n1(u.build.time)} s (faster with other builders next to it) and builds ${u.build.count} ${c.name}${u.build.count > 1 ? 's' : ''} (${n1(c.hp)} health, ${n1(c.hit)} hit, ${n1(c.aps)} attacks/s, ${c.range} m range, never moves, gone after the fight), then fights on`); }
+      if (u.link) t.push('linked health: its bodies share one health pool and fall together');
+      if (u.escort) t.push(`brings a healbot that heals the squad ${n1(u.escort.pct)}% of max health a second`);
+      const need = (k) => Game.skillNeeds(m, i, k).map(j => `"${u.skillDefs[j].name}"`).join(' and ');
+      const sk = (u.skillDefs || []).map((d, k) => d ? `skill ${k + 1} "${d.name}" (${Game.isInnate(m, i, k) ? 'BUILT IN: always on for both players, free' : `${Game.skillCost(m, i, k, 1)} gold${Game.hasSkill(m, 1, i, k) ? ', YOU OWN IT' : need(k) ? `, needs ${need(k)} first` : ''}`}): ${Engine.describeSkill(d)}` : null).filter(Boolean);
       const lock = Game.isUnlocked(m, 1, i) ? (Game.unlockCost(m, i, 1) ? ' [unlocked]' : '') : ` [LOCKED: unlock once for ${Game.unlockCost(m, i, 1)} gold before you can place it]`;
       return `- ${u.name}${lock}: price ${Game.shopCost(m, 1, i)}${Game.startLevel(m, 1) ? ` (squads start at level ${Game.startLevel(m, 1) + 1})` : ''}, ${u.bodies} ${u.bodies === 1 ? 'body' : 'bodies'} x ${n1(u.hp, 0)} hp each, hit ${n1(u.hit)} x ${n1(u.aps, 2)}/s, range ${u.range} m, speed ${u.speed} m/s${t.length ? ', ' + t.join(', ') : ''}. Level-up cost ${Game.levelCost(u)}.${sk.length ? '\n    ' + sk.join('\n    ') : ''}`;
     };
@@ -1964,9 +1978,9 @@ ${theirSkills.length ? 'Their skills: ' + theirSkills.join(', ') : ''}
 TOWERS
 - Each player has one tower. It never moves, is rebuilt every round and doesn't count for winning a round. If a tower falls during a fight, its owner's whole army deals ${Engine.TOWER_DOWN.attack}% less damage, moves ${Engine.TOWER_DOWN.move}% slower and takes ${Engine.TOWER_DOWN.taken}% more damage for ${Engine.TOWER_DOWN.secs} s. Sending a squad down an empty lane to break their tower can turn a fight; guard the lane to yours.
 - Until round ${Game.TOWER_PICK_ROUND} each tower is an Outpost (${Game.OUTPOST.unit.hp} hp, hit ${Game.OUTPOST.unit.hit} x ${Game.OUTPOST.unit.aps}/s, range ${Game.OUTPOST.unit.range} m). In round ${Game.TOWER_PICK_ROUND} each player picks a tower type that stays for the rest of the match: ${Game.towerChoices(m, 1).map(x => `"${x.id}" ${x.name}: ${x.unit.hp} hp, hit ${x.unit.hit} x ${x.unit.aps}/s, range ${x.unit.range} m${x.unit.splash ? `, ${x.unit.splash} m splash` : ''}`).join('; ')}.${Game.needsTowerPick(m, 1) ? ` ROUND ${Game.TOWER_PICK_ROUND}: pick yours now with "towerType" in your reply.` : ''}
-- Tower skills (one per tower type, ${Game.TOWER_SKILL.cost} gold, bought once per match after the pick with "towerSkill": true): ${Game.TOWER_TYPES.filter(x => x.skill).map(x => `${x.name}: "${x.skill.name}", ${x.skill.text}`).join(' ')} Second tower skills (bought once per match, each for its own price, with "towerSkill2": true): ${Game.TOWER_TYPES.filter(x => x.skill2).map(x => `${x.name}: "${x.skill2.name}" (${x.skill2.cost} gold), ${x.skill2.text}`).join(' ')}${Game.towerSkill2Of(m, 1) ? ' You own yours.' : ''} Every round the Bank tower may also take a loan with "loan": true: +${Game.LOAN.gold} gold now, ${Game.LOAN.payback} less gold next round (never below nothing). The bank does one thing a round: a loan or Major investment, never both in the same round.${Game.loanNow(m, 1) ? ' You took one this round.' : ''} The Slime tower has no skill to buy; every skill you buy for Slime Wizards or Slimeshots also works on it. The Mage tower has no such skill; instead, every round you may call ONE mage general with "mageGeneral": "${Game.MAGE_GENERALS.filter(g => !g.extra).map(g => g.id).join('" | "')}", and/or the teleport general on top of it (e.g. "mageGeneral": ["lightning", "teleport"]), for that round's fight only: ${Game.MAGE_GENERALS.map(g => `"${g.id}" ${g.name} (${g.cost} gold): ${g.text}`).join(' ')}${Game.towerSkillOf(m, 1) ? ' You own yours.' : Game.towerPicked(m, 1) || Game.needsTowerPick(m, 1) ? ' You can buy yours this round.' : ''}
+- Tower skills (one per tower type, ${Game.TOWER_SKILL.cost} gold, bought once per match after the pick with "towerSkill": true): ${Game.TOWER_TYPES.filter(x => x.skill).map(x => `${x.name}: "${x.skill.name}", ${x.skill.text}`).join(' ')} Second tower skills (bought once per match, each for its own price, with "towerSkill2": true): ${Game.TOWER_TYPES.filter(x => x.skill2).map(x => `${x.name}: "${x.skill2.name}" (${x.skill2.cost} gold), ${x.skill2.text}`).join(' ')}${Game.towerSkill2Of(m, 1) ? ' You own yours.' : ''} Every round the Bank tower may also take a loan with "loan": true: +${Game.LOAN.gold} gold now, ${Game.LOAN.payback} less gold next round (never below nothing). The bank does one thing a round: a loan or Major investment, never both in the same round.${Game.loanNow(m, 1) ? ' You took one this round.' : ''} The Slime tower has no skill to buy; every skill you buy for Slime Wizards or Slimeshots also works on it. The Mage tower has no such skill; instead, every round you may call ONE mage general with "mageGeneral": "${Game.MAGE_GENERALS.filter(g => !g.extra).map(g => g.id).join('" | "')}", and/or the teleport general on top of it (e.g. "mageGeneral": ["lightning", "teleport"]), for that round's fight only: ${Game.MAGE_GENERALS.map(g => `"${g.id}" ${g.name} (${g.cost} gold): ${g.text}`).join(' ')}${Game.towerSkillOf(m, 1) ? ' You own yours.' : Game.towerPicked(m, 1) || Game.needsTowerPick(m, 1) ? ' You can buy yours this round.' : ''}${Game.towerRounds(m, 1).length ? ` Your ${Game.towerType(m, 1).name} has skills you can buy every round, each for that round's fight only, with "towerRounds": [ids]: ${Game.towerRounds(m, 1).map(x => `"${x.id}" ${x.name} (${x.cost} gold): ${x.text}`).join(' ')}` : ''}
 - Your tower: ${Game.towerType(m, 1).name}, col ${m.towers[1].col}, row ${m.towers[1].row} (fixed; squads can't share its tile).
-- Their tower: ${m.round !== Game.TOWER_PICK_ROUND ? Game.towerType(m, 0).name + (Game.towerSkillVisible(m, 0) && Game.towerType(m, 0).skill ? ` with "${Game.towerType(m, 0).skill.name}"` : '') + (Game.towerSkill2Visible(m, 0) && Game.towerType(m, 0).skill2 ? ` with "${Game.towerType(m, 0).skill2.name}"` : '') + ', ' : 'type hidden until the fight, '}col ${m.towers[0].col}, row ${m.towers[0].row}.
+- Their tower: ${m.round !== Game.TOWER_PICK_ROUND ? Game.towerType(m, 0).name + (Game.towerSkillVisible(m, 0) && Game.towerType(m, 0).skill ? ` with "${Game.towerType(m, 0).skill.name}"` : '') + (Game.towerSkill2Visible(m, 0) && Game.towerType(m, 0).skill2 ? ` with "${Game.towerType(m, 0).skill2.name}"` : '') + ', ' : 'type hidden until the fight, '}col ${m.towers[0].col}, row ${m.towers[0].row}.${buildingsPrompt()}
 
 MAP
 ${(() => { const mp = Game.mapOf(m), e = Game.elfSpot(m); return mp ? `- ${mp.name}: ${mp.text}${e ? ` The elf tower stands in column ${e.col}, on the line between rows ${Game.ROWS / 2 - 1} and ${Game.ROWS / 2}; it hits for ${Game.ELF_TOWER.hit}, ${Game.ELF_TOWER.aps} times a second, range ${Game.ELF_TOWER.range} m, and can't be attacked. Bribe-off: you can bribe any number of times per round ("bribe": number of bribes); the first bribe in a round costs ${Game.BRIBE_COST} gold and each further one that round ${Game.BRIBE_COST} more (${Game.BRIBE_COST}, ${2 * Game.BRIBE_COST}, ${3 * Game.BRIBE_COST}, ...). In every fight the tower sides with whoever has bribed it the most times (count, not gold) over the whole match: it never shoots their units, heals their wounded units near it for ${Game.ELF_TOWER.healHit} (x${mp.healMul || 1} on this map, ${Game.ELF_TOWER.healSplash} m splash) every ${Math.round(10 / Game.ELF_TOWER.healAps) / 10} s, and shoots only the other player's units. With totals level it shoots both sides. Totals are secret; you only see who was ahead after the last fight. ${Game.elfPowered(m) ? `From round ${Game.ELF_POWER.fromRound} on the elves hit and heal twice as hard (now ${Game.elfUnit(m).hit} damage, ${Game.elfUnit(m).healHit} heal).` : `After round ${Game.ELF_POWER.fromRound - 1} the elves hit and heal twice as hard.`} You have bribed ${Game.bribeCount(m, 1)} times (${Game.bribeGold(m, 1)} gold). ${Game.elfOwnOf(m, 1) ? `Your own elf tower stands at col ${Game.elfOwnOf(m, 1).col}, row ${Game.elfOwnOf(m, 1).row}.` : Game.elfOwnOffered(m, 1) ? `The elves now sell you one elf tower of your own for ${Game.elfOwnCost(m, 1)} gold ("elfTower":{"col":5,"row":2}, a free tile of your zone): permanent, can't be attacked, shoots only the opponent's units and heals yours.` : `Once ${Game.ELF_OWN.unlock} bribes have been paid in all (both players), each player who has bribed at least once (in an earlier round) can buy one elf tower of their own for ${Game.elfOwnCost(m, 1)} gold, from the next round on.${Game.elfOwnUnlocked(m) ? ' That point has been reached, but you have never bribed, so the elves sell you none until you do.' : ''}`} ${(() => { const l = Game.bribeLeader(m, true); return l < 0 ? 'After the last fight the bribe-off was level.' : l === 1 ? 'After the last fight you were ahead.' : 'After the last fight your opponent was ahead.'; })()}` : ''}${Game.isIce(m) ? ` Storm band rows now: ${Game.stormRows(m).join(', ')}.${Game.hailRound(m) ? ` Hail tiles this round: ${Game.hailTiles(m).map(h => `col ${h.col}, row ${h.row}`).join('; ')}.` : ''}${Game.altarRound(m) ? ` The altar of ice is up this round. "altar" can list any of: "walls" (${Game.altarCost(m, 1, 'walls')} gold: your tower's 4 walls each block the first ${Game.ICE.wallHits} hits from their side, this fight only), "push" (${Game.altarCost(m, 1, 'push')} gold: storm band moves ${Game.ICE.push} rows toward the opponent from the next hailstorm on; list it more than once to push further), "snowgre" (${Game.altarCost(m, 1, 'snowgre')} gold: a permanent hail-immune Ether Golem at ${Math.round(Game.ICE.snowFirst * Math.pow(2, Game.snowgres(m, 1).length) * 100)}% strength, standing in your half of no man's land each fight).` : ''} Your Snowgres: ${Game.snowgres(m, 1).length}.` : ''}${mp.shrooms ? ` Removing a mushroom tile costs ${Game.shroomCost(m, 1)} gold ("removeTiles":[{"col":3,"row":6}]); it is gone from the next fight on. Mushroom tiles still there: ${(m.map.tiles || []).filter(x => Game.shroomAt(m, x.col, x.row)).map(x => `${x.type} at col ${x.col}, row ${x.row}`).join('; ')}.` : ''}` : '- No special map.'; })()}
@@ -1976,11 +1990,24 @@ CHARACTERS (each package comes with one; its ability lasts the whole match)
 - Theirs: ${m.round > 1 && Game.charOf(m, 0) ? `${Game.charInfo(Game.charOf(m, 0)).name}: ${Game.charInfo(Game.charOf(m, 0)).ability}` : 'hidden until the first fight'}
 
 Reply with only a JSON object in this shape:
-{${Game.needsPack(m, 1) ? '"package":0,' : ''}${Game.needsTowerPick(m, 1) ? '"towerType":"keep",' : ''}${Game.needsTowerPick(m, 1) || (Game.towerPicked(m, 1) && !Game.towerSkillOf(m, 1) && Game.towerType(m, 1).skill) ? '"towerSkill":false,' : ''}${Game.needsTowerPick(m, 1) || (Game.towerPicked(m, 1) && !Game.towerSkill2Of(m, 1) && Game.towerType(m, 1).skill2) ? '"towerSkill2":false,' : ''}${Game.needsTowerPick(m, 1) || (Game.towerPicked(m, 1) && Game.towerType(m, 1).id === 'mage') ? '"mageGeneral":null,' : ''}${Game.needsTowerPick(m, 1) || Game.canTakeLoan(m, 1) ? '"loan":false,' : ''}"unlock":["unit name"],"sell":[squad ids],"levelUp":[squad ids, list one twice to level it twice],"skills":[{"unit":"unit name","slot":1}],"extraDeployments":0,${Game.elfSpot(m) ? '"bribe":0,' : ''}${Game.elfOwnOffered(m, 1) && !Game.elfOwnOf(m, 1) ? '"elfTower":null,' : ''}${(Game.mapOf(m) || {}).shrooms ? '"removeTiles":[],' : ''}${Game.altarRound(m) ? '"altar":[],' : ''}"move":{"id":squad id,"col":5,"row":3} or null,"place":[{"unit":"unit name","col":5,"row":3}],"say":"one short playful line to your opponent, at most 15 words, shown after the fight"}
+{${Game.needsPack(m, 1) ? '"package":0,' : ''}${Game.needsTowerPick(m, 1) ? '"towerType":"keep",' : ''}${Game.needsTowerPick(m, 1) || (Game.towerPicked(m, 1) && !Game.towerSkillOf(m, 1) && Game.towerType(m, 1).skill) ? '"towerSkill":false,' : ''}${Game.needsTowerPick(m, 1) || (Game.towerPicked(m, 1) && !Game.towerSkill2Of(m, 1) && Game.towerType(m, 1).skill2) ? '"towerSkill2":false,' : ''}${Game.needsTowerPick(m, 1) || (Game.towerPicked(m, 1) && Game.towerType(m, 1).id === 'mage') ? '"mageGeneral":null,' : ''}${Game.needsTowerPick(m, 1) || Game.canTakeLoan(m, 1) ? '"loan":false,' : ''}${Game.towerRounds(m, 1).length ? '"towerRounds":[],' : ''}${hasBuildings() ? '"buildingSkills":{},"levelBuilding":[],' : ''}"unlock":["unit name"],"sell":[squad ids],"levelUp":[squad ids, list one twice to level it twice],"skills":[{"unit":"unit name","slot":1}],"extraDeployments":0,${Game.elfSpot(m) ? '"bribe":0,' : ''}${Game.elfOwnOffered(m, 1) && !Game.elfOwnOf(m, 1) ? '"elfTower":null,' : ''}${(Game.mapOf(m) || {}).shrooms ? '"removeTiles":[],' : ''}${Game.altarRound(m) ? '"altar":[],' : ''}"move":{"id":squad id,"col":5,"row":3} or null,"place":[{"unit":"unit name","col":5,"row":3}],"say":"one short playful line to your opponent, at most 15 words, shown after the fight"}
 For "say": make it about what is happening in this match, and never repeat a line.${claude.history.length ? ' Lines you already used:\n' + claude.history.slice(-6).map(x => '- ' + x).join('\n') : ''}
-Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills, ${Game.elfSpot(m) ? 'bribe, ' : ''}${Game.elfOwnOffered(m, 1) && !Game.elfOwnOf(m, 1) ? 'elfTower, ' : ''}${(Game.mapOf(m) || {}).shrooms ? 'removeTiles, ' : ''}${Game.altarRound(m) ? 'altar, ' : ''}extraDeployments, move, place. Anything you can't afford or that breaks a rule is skipped, so keep the total cost within your gold (${m.gold[1]} plus any sales). Use exact unit names. Unspent gold isn't lost, but squads on the board win rounds.`;
+Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills, ${hasBuildings() ? 'levelBuilding, buildingSkills, ' : ''}${Game.elfSpot(m) ? 'bribe, ' : ''}${Game.elfOwnOffered(m, 1) && !Game.elfOwnOf(m, 1) ? 'elfTower, ' : ''}${(Game.mapOf(m) || {}).shrooms ? 'removeTiles, ' : ''}${Game.altarRound(m) ? 'altar, ' : ''}extraDeployments, move, place. Anything you can't afford or that breaks a rule is skipped, so keep the total cost within your gold (${m.gold[1]} plus any sales). Use exact unit names. Unspent gold isn't lost, but squads on the board win rounds.`;
   }
 
+  // the Claude opponent: buildings (the Mechites' Factory), when the match has a unit that places one
+  const hasBuildings = () => units.some((u, ui) => u.building || Engine.SLOTS.some(k => Game.isBuildingSkill(m, ui, k)));
+  function buildingsPrompt() {
+    if (!hasBuildings()) return '';
+    const kinds = Game.BUILDINGS().filter(b => units.some((u, ui) => u.building === b.id || Engine.SLOTS.some(k => Game.buildingIdOf(m, ui, k) === b.id)));
+    const how = (b) => units.some(u => u.building === b.id) ? `bought in the shop like a unit ("place" it; it takes a ${Game.footprint(m, units.findIndex(u => u.building === b.id))}x${Game.footprint(m, units.findIndex(u => u.building === b.id))} block of free tiles of your zone; it levels up like a squad)`
+      : `placed by a unit skill of type building (in "skills" give it a tile too: {"unit":"Cog Builder","slot":1,"col":5,"row":1}, a free tile of your zone; one per player; level it up with "levelBuilding":["${b.id}"], ${Game.buildingLevelCost(b.id)} gold, when it has ${Game.buildingXpNeeded(b.id, 0)} XP, then ${Game.buildingXpNeeded(b.id, 1)})`;
+    const desc = (r) => `"${r.key}": ${Game.buildingInfo(r.id).name} at col ${r.col}, row ${r.row}: ${r.rec.built ? 'built' : `${Math.round((r.rec.progress || 0) * 100)}% built`}, level ${(r.rec.level || 0) + 1}`;
+    const mine = Game.buildingRecords(m, 1), theirs = Game.buildingRecords(m, 0).filter(r => (r.rec.round || 0) < m.round);
+    return `\n- Buildings: ${kinds.map(b => `${b.name}: ${how(b)}, ${b.hp} health, never moves or attacks. Your nearest free builder walks over and builds it during fights (${b.buildSecs} s of work${b.selfBuild > 0 ? `; with no builder it builds itself ${Math.round(1 / b.selfBuild)} times slower` : ''}); ${b.survive ? 'if it is still standing at the end of a fight it was worked on, it is built' : 'the work carries over between fights until it is done'} (if it falls, the work done is kept). Once built, each round you may buy ONE of its skills with "buildingSkills":{"<its key>":"skill id"}, for that fight only: ${b.skills.map(x => `"${x.id}" ${x.name} (${x.cost} gold${x.unit ? `, ${x.unit.hp} health, hit ${x.unit.hit} × ${x.unit.aps}/s, range ${x.unit.range} m` : `: ${x.text || ''}`})`).join(', ')}. What it makes earns it XP; a leveled one and its units get +100% health and damage per level. Destroyed after it was built, it starts the next round ${b.rebuild == null ? 50 : b.rebuild}% built and must be built again.`).join(' ')}
+- Your buildings (by key): ${mine.length ? mine.map(r => desc(r) + (!r.sq ? `, XP ${Math.round(r.rec.xp)}${Game.buildingReady(r.rec) ? ', READY TO LEVEL UP' : ''}` : '')).join('; ') : 'none'}.
+- Their buildings: ${theirs.length ? theirs.map(desc).join('; ') : 'none'}.`;
+  }
   function applyClaudeMove(mv) {
     const list = (x) => Array.isArray(x) ? x.slice(0, 20) : [];
     const int = (x) => Math.round(Number(x));
@@ -1998,6 +2025,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (mv.towerSkill === true && Game.buyTowerSkill(m, 1)) did.push('bought its tower skill');
     if (mv.towerSkill2 === true && Game.buyTowerSkill2(m, 1)) did.push(`bought ${Game.towerType(m, 1).skill2.name}`);
     if (mv.loan === true && Game.takeLoan(m, 1)) did.push('took a bank loan');
+    for (const id of Array.isArray(mv.towerRounds) ? mv.towerRounds.slice(0, 5) : []) if (Game.buyTround(m, 1, String(id))) did.push(`sent out ${Game.troundInfo(m, 1, String(id)).name.toLowerCase()}`);
     for (const id of [].concat(mv.mageGeneral || []).slice(0, 2).map(String)) if (Game.buyMageGen(m, 1, id)) did.push(`called the ${Game.mageGenInfo(id).name}`);
     for (const id of list(mv.sell)) {
       const sq = m.armies[1].find(s => s.id === int(id));
@@ -2014,10 +2042,13 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
         if (!x || x.done) continue;
         const ui = unitIdx(x.unit), k = int(x.slot) - 1;
         if (ui >= 0 && k >= 0 && k < Engine.SKILL_SLOTS && Game.buySkill(m, 1, ui, k)) { x.done = true; did.push(`bought ${units[ui].skillDefs[k].name} for ${units[ui].name}`); }
+        else if (ui >= 0 && Game.isBuildingSkill(m, ui, k) && Game.buyBuilding(m, 1, ui, k, int(x.col), int(x.row))) { x.done = true; did.push(`placed a ${buildingName(Game.buildingIdOf(m, ui, k))} at col ${int(x.col)}, row ${int(x.row)}`); }
       }
     };
     for (const name of list(mv.unlock)) { const ui = unitIdx(name); if (ui >= 0 && Game.unlock(m, 1, ui)) did.push(`unlocked ${units[ui].name}`); }
     trySkills();
+    for (const id of list(mv.levelBuilding)) if (Game.levelBuilding(m, 1, String(id))) levels.push({ building: String(id), level: Game.buildingOf(m, 1, String(id)).level });
+    if (mv.buildingSkills && typeof mv.buildingSkills === 'object') for (const id in mv.buildingSkills) if (Game.buyBuildingSkill(m, 1, id, String(mv.buildingSkills[id]))) { const kind = Game.recordOf(m, 1, id).id; did.push(`bought ${Game.buildingSkillInfo(kind, String(mv.buildingSkills[id])).name} at its ${buildingName(kind)}`); }
     const bribes = Math.max(0, Math.min(20, mv.bribe === true ? 1 : int(mv.bribe) || 0));
     let paid = 0;
     for (let k = 0; k < bribes; k++) if (Game.bribe(m, 1)) paid++;
@@ -2346,7 +2377,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   }
 
   function enterDeploy(ms) {
-    phase = 'deploy'; bt = null; battlePre = null; fx = []; selected = null; rangeOf = null; timeUp = false; resultShownAt = 0; elfPlacing = false;
+    phase = 'deploy'; bt = null; battlePre = null; fx = []; selected = null; rangeOf = null; timeUp = false; resultShownAt = 0; elfPlacing = false; buildPlacing = null;
     ready = [false, false];
     heldMs = ms > 0 && mode !== 'guest' && picksPending() ? ms : 0;
     deadline = ms > 0 && !heldMs ? now() + ms : 0;
@@ -2576,6 +2607,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     }
     if (placingTower()) { if (editable() && Game.placeTower(m, me, t.col, t.row)) changed(); return; }
     if (placingElf()) { if (editable() && Game.buyElfOwn(m, me, t.col, t.row)) { elfPlacing = false; changed(); } else if (!Game.elfOwnSpotOk(m, me, t.col, t.row)) { elfPlacing = false; render(); hud(); panelDeploy(); } return; }
+    if (placingBuilding()) { const p = buildPlacing; buildPlacing = null; if (editable() && Game.buyBuilding(m, me, p.ui, p.k, t.col, t.row)) changed(); else { render(); hud(); panelDeploy(); } return; }
     if (Game.elfOwnAt(m, me, t.col, t.row)) { openMapSheet(); return; }
     if (Game.isDev(m)) { // Factions devtest: placing a building, casting a spell, drawing an arrow; building and spell sheets
       if (bPlacing != null) { if (editable() && Game.placeLesser(m, me, bPlacing, t.col, t.row)) { bPlacing = Game.unplacedLesser(m, me) ? Game.unplacedLesser(m, me).key : null; changed(); } else if (!Game.unplacedLesser(m, me)) { bPlacing = null; panelDeploy(); render(); } return; }
@@ -2596,6 +2628,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       const cs = selected === null && castAt(t.col, t.row);
       if (cs && !Game.squadAt(m, me, t.col, t.row)) { openCastSheet(cs); return; }
     }
+    for (const sd of [me, foe()]) { const b = Game.buildingAt(m, sd, t.col, t.row); if (b && Game.buildingShown(m, me, true, sd, b)) { openBuildingSheet(sd, b.id); return; } }
     if (charmMode && editable() && Game.canGiveCharm(m, me)) { // Matteo: the first Charisma stack goes to the squad tapped
       const own = Game.squadAt(m, me, t.col, t.row);
       if (own && Game.giveCharm(m, me, own.id)) { charmMode = false; changed(); }
@@ -2635,7 +2668,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       else openSheet(own.unit, own, me);
       return;
     }
-    const enemy = m.armies[foe()].find(s => { const p = Game.seenAt(m, s); return !Game.hiddenFromFoe(m, s) && p.col === t.col && p.row === t.row && s.round < m.round; });
+    const enemy = m.armies[foe()].find(s => { const p = Game.seenAt(m, s); return !Game.hiddenFromFoe(m, s) && Game.blockOf(m, s.unit, p.col, p.row).some(([c, r]) => c === t.col && r === t.row) && s.round < m.round; });
     if (enemy) { rangeOf = { side: foe(), id: enemy.id }; openSheet(Game.shownUnit(m, me, foe(), enemy.unit), { ...enemy, unit: Game.shownUnit(m, me, foe(), enemy.unit) }, foe()); return; } // a disguise shows as what it pretends to be
     if (selected !== null && editable() && Game.canPlaceAt(m, me, t.col, t.row, selected)) {
       if (Game.place(m, me, selected, t.col, t.row)) {
@@ -2930,8 +2963,10 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
           act = `<span class="chip" style="color:var(--gold);border:1px solid currentColor;border-radius:99px;padding:1px 8px;font-size:12px">Owned</span>`;
           if (phase === 'deploy' && editable() && m.tech[me][i][k] === m.round) act += ` <button class="btn small" data-unskill="${k}">Undo</button>`;
         } else if (phase === 'deploy') {
-          const why = !m.armies[me].some(q => q.unit === i) ? 'Place a squad first' : m.gold[me] < cost ? `Need ${cost} gold` : '';
-          act = why || !editable() ? `<button class="btn small" disabled>${why || `Buy · ${cost} gold`}</button>` : `<button class="btn small primary" data-skill="${k}">Buy · ${cost} gold</button>`;
+          const needs = Game.skillNeedsMissing(m, me, i, k).map(j => defs[j].name);
+          const why = needs.length ? `Needs ${needs.join(' and ')}` : !m.armies[me].some(q => q.unit === i) ? 'Place a squad first' : m.gold[me] < cost ? `Need ${cost} gold` : '';
+          const place = Game.isBuildingSkill(m, i, k); // a building: buying it picks its tile next
+          act = why || !editable() ? `<button class="btn small" disabled>${why || `${place ? 'Place' : 'Buy'} · ${cost} gold`}</button>` : `<button class="btn small primary" ${place ? 'data-bplace' : 'data-skill'}="${k}">${place ? 'Place' : 'Buy'} · ${cost} gold</button>`;
         } else act = `<span class="hint">${cost} gold</span>`;
       } else {
         act = Game.skillVisible(m, side, i, k) || (phase !== 'deploy' && Game.hasSkill(m, side, i, k))
@@ -2948,7 +2983,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     const D = Engine.TOWER_DOWN, shown = towerTypeVisible(side), tt = Game.towerType(m, side), T = tt.unit;
     $('sheet').innerHTML = `
       <div class="bar"><h3 id="sheet-h">${side === me ? 'Your tower' : `${esc(foeName())}'s tower`}${shown ? ` · ${esc(tt.name)}` : ''}</h3><button class="btn small" id="close">Close</button></div>
-      ${shown && Game.towerPicked(m, side) ? towerSkillBlock(side, tt) + towerSkill2Block(side, tt) + mageGenBlock(side, tt) + loanBlock(side, tt) + passiveBlock(side, tt) : ''}
+      ${shown && Game.towerPicked(m, side) ? towerSkillBlock(side, tt) + towerSkill2Block(side, tt) + mageGenBlock(side, tt) + loanBlock(side, tt) + troundBlock(side, tt) + passiveBlock(side, tt) : ''}
       <p style="margin:0">${(() => { const id = Game.charOf(m, side); return !charVisible(side) ? 'Character: hidden until the first fight.' : id ? `Character: ${charLine(id)}` : 'Character: not picked yet.'; })()}</p>
       <p class="role" style="margin:0">${shown ? (tt.id === 'outpost' ? `A small watchtower. You pick your real tower in round ${Game.TOWER_PICK_ROUND}.` : esc(tt.text)) : `Its type stays hidden until the round ${Game.TOWER_PICK_ROUND} fight.`}</p>
       <p style="margin:0"><span style="color:var(--foe)">If it falls:</span> that army is crippled for ${D.secs} s. ${MORE('fall-more')}</p>
@@ -2964,8 +2999,64 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     $('sheet').querySelectorAll('[data-mgen]').forEach(b => b.addEventListener('click', () => { if (editable() && Game.buyMageGen(m, me, b.dataset.mgen)) { changed(); openTowerSheet(me); } }));
     if ($('tloan')) $('tloan').addEventListener('click', () => { if (editable() && Game.takeLoan(m, me)) { changed(); openTowerSheet(me); } });
     if ($('tloan-undo')) $('tloan-undo').addEventListener('click', () => { if (editable() && Game.undoLoan(m, me)) { changed(); openTowerSheet(me); } });
+    $('sheet').querySelectorAll('[data-tround]').forEach(b => b.addEventListener('click', () => { if (editable() && Game.buyTround(m, me, b.dataset.tround)) { changed(); openTowerSheet(me); } }));
+    $('sheet').querySelectorAll('[data-tround-undo]').forEach(b => b.addEventListener('click', () => { if (editable() && Game.undoTround(m, me, b.dataset.troundUndo)) { changed(); openTowerSheet(me); } }));
     if ($('mgen-undo')) $('mgen-undo').addEventListener('click', () => { if (editable() && Game.undoMageGen(m, me)) { changed(); openTowerSheet(me); } });
     if ($('mtp-undo')) $('mtp-undo').addEventListener('click', () => { if (editable() && Game.undoMageGen(m, me, 'teleport')) { changed(); openTowerSheet(me); } });
+  }
+  // A building's block (the Factory's sheet; the Altar of Build's unit sheet): how far it is built and its skills for
+  // this round (yours; the opponent's choice stays hidden, as it is bought each round). key: see Game.buildingRecords
+  function buildingBlock(side, key) {
+    const r = Game.recordOf(m, side, key), info = r && Game.buildingInfo(r.id);
+    if (!r || !info) return '';
+    const b = r.rec, id = r.id, mine = side === me, live = phase === 'deploy' && editable() && mine, r2 = (v) => Math.round(v * 100) / 100;
+    const chip = (txt, col) => `<span class="chip" style="color:${col};border:1px solid currentColor;border-radius:99px;padding:1px 8px;font-size:12px">${txt}</span>`;
+    const cb = Game.constructBuff(m, side), k = 1 + Engine.LEVEL_BONUS * (b.level || 0), cur = mine ? Game.bskillOf(m, me, key) : null;
+    const made = (u) => { const armor = (u.defense === 'armor' ? u.defVal : 0) + (mine ? cb.armor : 0), shield = (u.shield || 0) + (mine ? cb.shield : 0);
+      return `${r2(u.hp * k)} health${armor ? ` · ${r2(armor)} armor` : ''}${shield ? ` · shield ${shield}` : ''} · hit ${r2(u.hit * k)}${u.turrets > 1 ? ` ×${u.turrets} at once` : ''} × ${r2(u.aps * (1 + (mine ? cb.aps : 0) / 100))}/s${u.spinCap > 1 ? ` (winds up to ${r2(u.aps * u.spinCap)}/s)` : ''} · ${r2(u.range)} m${u.splash ? ` · ${r2(u.splash)} m splash` : ''} · speed ${r2(u.speed)}`; };
+    const rows = Game.buildingSkills(id).map(sk => {
+      let act = '';
+      if (mine && cur === sk.id) act = chip('This round', 'var(--gold)') + (live ? ` <button class="btn small" data-bskill-undo="${esc(key)}">Undo</button>` : '');
+      else if (mine && phase === 'deploy') { const ok = editable() && Game.canBuyBuildingSkill(m, me, key, sk.id); act = `<button class="btn small${ok ? ' either' : ''}" data-bskill="${esc(sk.id)}" data-bkey="${esc(key)}" ${ok ? '' : 'disabled'}>${!b.built ? 'Not built' : cur ? 'Swap' : 'Buy'} · ${Game.bskillCost(id, sk.id)} gold</button>`; }
+      else act = `<span class="hint">${Game.bskillCost(id, sk.id)} gold</span>`;
+      const t = r2((sk.time || 0) * (1 - cb.faster / 100));
+      return abilityRow(sk.name, act, sk.unit ? `${made(sk.unit)}. Ready ${t} s into the fight.` : esc(sk.text || ''));
+    });
+    const status = b.built ? 'Built' : b.progress > 0 ? `${Math.round(b.progress * 100)}% built` : 'Not built yet';
+    const how = info.survive ? 'If it is still standing at the end of that fight, it is built.' : `${info.buildSecs} s of work in all, over as many fights as it takes${info.selfBuild > 0 ? `; with no builder free it builds itself, ${Math.round(1 / info.selfBuild)} times slower` : ''}.`;
+    return `<div style="display:grid;gap:8px">
+      <p style="margin:0"><b>${status}</b>${b.built ? '' : ` · ${mine ? `your nearest free Cog Builder walks over and builds it during fights (faster with Master engineering). ${how} If it falls, the work done is kept.` : 'being built.'}`}</p>
+      ${b.built ? `<p class="hint" style="margin:0">If it is destroyed in a fight, it starts the next round ${info.rebuild == null ? 50 : info.rebuild}% built and has to be built again.</p>` : ''}
+      <h4 style="margin:0;font-size:12px;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted)">${mine ? 'One a round, bought each round, once it is built' : 'Their choice stays hidden until the fight'}</h4>${rows.join('')}</div>`;
+  }
+  function bindBuildingBlock(root, again) {
+    root.querySelectorAll('[data-bskill]').forEach(x => x.addEventListener('click', () => { if (editable() && Game.buyBuildingSkill(m, me, x.dataset.bkey, x.dataset.bskill)) again(); }));
+    root.querySelectorAll('[data-bskill-undo]').forEach(x => x.addEventListener('click', () => { if (editable() && Game.undoBuildingSkill(m, me, x.dataset.bskillUndo)) again(); }));
+  }
+  // a building from a skill's sheet (the Factory): its block, and its level (it levels up from its own sheet)
+  function openBuildingSheet(side, id) {
+    const b = Game.buildingOf(m, side, id), info = Game.buildingInfo(id);
+    if (!b || !info) return;
+    const mine = side === me, live = phase === 'deploy' && editable() && mine;
+    const need = b.level < Engine.MAX_LEVEL ? Game.buildingXpNeeded(id, b.level) : 0, cost = Game.buildingLevelCost(id);
+    let lvl = `<p style="margin:0">Level ${b.level + 1} · ${Math.round(info.hp * (1 + Engine.LEVEL_BONUS * b.level))} health${need ? ` · XP ${Math.round(b.xp)}/${need}` : ' · max level'}</p>`;
+    if (live) {
+      const btns = [];
+      if (Game.buildingReady(b)) btns.push(`<button class="btn small${m.gold[me] >= cost ? ' primary' : ''}" id="blvl" ${m.gold[me] >= cost ? '' : 'disabled'}>Level up · ${cost} gold</button>`);
+      if (b.levels && b.levels[m.round]) btns.push('<button class="btn small" id="blvl-undo">Undo level</button>');
+      if (btns.length) lvl += `<div style="display:flex;gap:8px;flex-wrap:wrap">${btns.join('')}</div>`;
+    }
+    $('sheet').innerHTML = `
+      <div class="bar"><h3 id="sheet-h">${mine ? 'Your' : `${esc(foeName())}’s`} ${esc(info.name)} · ${b.built ? 'Built' : b.progress > 0 ? `${Math.round(b.progress * 100)}% built` : 'Not built yet'}</h3><button class="btn small" id="close">Close</button></div>
+      <p class="role" style="margin:0">${esc(info.text || '')}</p>
+      ${lvl}
+      ${buildingBlock(side, id)}`;
+    $('sheet-back').hidden = false;
+    $('close').addEventListener('click', closeSheet);
+    const again = () => { changed(); openBuildingSheet(side, id); };
+    bindBuildingBlock($('sheet'), again);
+    if ($('blvl')) $('blvl').addEventListener('click', () => { if (editable() && Game.levelBuilding(m, me, id)) again(); });
+    if ($('blvl-undo')) $('blvl-undo').addEventListener('click', () => { if (editable() && Game.undoLevelBuilding(m, me, id)) again(); });
   }
   const abilityRow = (name, act, text) => `<div style="display:grid;gap:4px;border-top:1px solid var(--line);padding-top:8px">
       <div class="bar"><b style="font-family:var(--font-display)">${esc(name)}</b><span>${act}</span></div>
@@ -2981,6 +3072,22 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     else if (phase === 'deploy') act = `<button class="btn small${editable() ? ' primary' : ''}" id="tloan" ${editable() ? '' : 'disabled'}>Take · +${L.gold} gold</button>`;
     else act = '';
     return abilityRow('Loan', act, esc(loanText()) + (side === me && took ? ` Next round: −${L.payback}.` : '') + (side === me && tt.skill2 ? ` The bank does one thing a round: a loan or the ${esc(tt.skill2.name)}, not both.` : ''));
+  }
+  // tower skills bought every round (the Mecha Tower's bots): buy any of them for this round's fight (yours), or the
+  // ones they bought (theirs, once the fight is on)
+  function troundBlock(side, tt) {
+    if (!(tt.rounds || []).length) return '';
+    const chip = (txt, col) => `<span class="chip" style="color:${col};border:1px solid currentColor;border-radius:99px;padding:1px 8px;font-size:12px">${txt}</span>`;
+    const rows = tt.rounds.map(x => {
+      const on = Game.troundOn(m, side, x.id), cost = Game.troundCost(m, side, x.id);
+      let act;
+      if (side !== me) act = on && phase !== 'deploy' ? chip('Sent out', 'var(--foe)') : '';
+      else if (on) act = chip('This round', 'var(--gold)') + (phase === 'deploy' && editable() ? ` <button class="btn small" data-tround-undo="${esc(x.id)}">Undo</button>` : '');
+      else if (phase === 'deploy') { const ok = editable() && Game.canBuyTround(m, me, x.id); act = `<button class="btn small${ok ? ' primary' : ''}" data-tround="${esc(x.id)}" ${ok ? '' : 'disabled'}>Buy · ${cost} gold</button>`; }
+      else act = `<span class="hint">${cost} gold</span>`;
+      return abilityRow(x.name, act, esc(x.text || ''));
+    });
+    return `<div style="display:grid;gap:8px"><h4 style="margin:0;font-size:12px;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted)">${side === me ? 'Every round, for that round’s fight' : phase === 'deploy' ? 'Hidden until the fight' : 'This fight'}</h4>${rows.join('')}</div>`;
   }
   // an always-on tower ability (slime tower: the slime skills it gets)
   function passiveBlock(side, tt) {
@@ -3042,7 +3149,9 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     else act = `<span class="hint">${cost} gold</span>`;
     return abilityRow(sk.name, act, esc(sk.text) + (side === me && !owned ? ' Once per match; your opponent sees it after the next fight.' : ''));
   }
-  const towerStats = (T) => `<div class="stats"><div><span>Health</span><b class="num">${T.hp}</b></div><div><span>Hit</span><b class="num">${T.hit}</b></div><div><span>Attacks/s</span><b class="num">${T.aps}</b></div><div><span>Range</span><b class="num">${T.range} m</b></div>${T.splash ? `<div><span>Splash</span><b class="num">${T.splash} m</b></div>` : ''}</div>`;
+  const towerStats = (T0) => { const T = towerAttack(T0); return `<div class="stats"><div><span>Health</span><b class="num">${T0.hp}</b></div><div><span>${T0.drone ? 'Drone hit' : 'Hit'}</span><b class="num">${T.hit}</b></div><div><span>Attacks/s</span><b class="num">${T.aps}</b></div><div><span>Range</span><b class="num">${T.range} m</b></div>${T.splash ? `<div><span>Splash</span><b class="num">${T.splash} m</b></div>` : ''}</div>`; };
+  // what a tower shoots with: itself, or its drone (the Mecha Tower)
+  const towerAttack = (T) => T.drone && T.drone.unit ? T.drone.unit : T;
   // the mushroom tile on a square and a button to remove it (or keep it, if you removed it this round)
   function shroomBlock(col, row) {
     if (phase !== 'deploy' || !m) return '';
@@ -3203,6 +3312,11 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (u.ram) tr.push(`Runs for the enemy tower and rams it for ${Math.round(u.hit)}`);
     if (u.carrier) tr.push('Carries one squad inside, hidden');
     if (u.noFlank) tr.push('Can’t deploy on flanks');
+    if (u.building) tr.push(`Building · ${Game.footprint(m, i)}×${Game.footprint(m, i)} tiles · never moves or attacks`);
+    if (u.roll > 0) tr.push(`Rolls over enemies: ${Engine.ROLL_START}→${Math.round(u.speed * 100) / 100} m/s in ${Math.round(u.roll * 100) / 100} s`);
+    if (u.build && u.build.unit) tr.push(`Builds ${u.build.count > 1 ? u.build.count + ' ' : 'a '}${esc(u.build.unit.name)}${u.build.count > 1 ? 's' : ''} in ${Math.round(u.build.time * 100) / 100} s (${Math.round(u.build.unit.hp)} health, ${Math.round(u.build.unit.hit)} hit, ${Math.round(u.build.unit.aps * 100) / 100}/s, ${u.build.range} m)`);
+    if (u.link) tr.push('Linked health');
+    if (u.escort) tr.push(`Healbot: ${Math.round(u.escort.pct * 10) / 10}% health a second`);
     if (u.burst > 1) tr.push(`Burst ${u.burst}`);
     if (u.flame > 0) tr.push(`${u.flame >= 180 ? 'Hits all around itself' : `Flame cone ${u.flame}°`}, reaches ${Math.round(u.range * (Game.SETTINGS.flameReach || 1) * 10) / 10} m`);
     else if (u.pellets > 1) tr.push(`Shotgun ${u.pellets}`);
@@ -3230,6 +3344,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       ${sq && m && !compact ? (() => { const q = side === me ? sq : Game.seenAt(m, sq); return shroomBlock(q.col, q.row); })() : ''}
       ${tr.length ? `<div class="traits">${tr.map(x => `<span>${x}</span>`).join('')}</div>` : ''}
       ${skillBlock(i, side, sq)}
+      ${sq && m && units[i].building && (side === me || side === undefined || sq.round < m.round || phase !== 'deploy') ? buildingBlock(side === undefined ? me : side, 'sq' + sq.id) : ''}
       <div class="stats num">
         <div><span>Bodies</span>${u.bodies}</div><div><span>Health</span>${Math.round(u.hp)}</div>
         <div><span>${u.ram ? 'Ram' : 'Hit'}</span>${Math.round(u.hit)}</div>${u.ram ? '' : `<div><span>Attacks/s</span>${u.aps}</div>`}
@@ -3244,12 +3359,14 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   function bindPane(root, i, sq, side, reopen) {
     const on = (act, fn) => { const b = root.querySelector(`[data-act="${act}"]`); if (b) b.addEventListener('click', () => fn(b)); };
     const after = () => { changed(); reopen(); };
+    bindBuildingBlock(root, after);
     on('lvl-up', () => { if (editable() && Game.levelUp(m, me, sq.id)) after(); });
     on('lvl-undo', () => { if (editable() && Game.undoLevel(m, me, sq.id)) after(); });
     on('charm-give', () => { if (editable() && Game.giveCharm(m, me, sq.id)) after(); });
     on('charm-undo', () => { if (editable() && Game.undoCharm(m, me, sq.id)) after(); });
     on('take-back', () => { if (editable() && Game.unplaceSquad(m, me, sq.id)) after(); });
     root.querySelectorAll('[data-skill]').forEach(b => b.addEventListener('click', () => { if (editable() && Game.buySkill(m, me, i, +b.dataset.skill)) after(); }));
+    root.querySelectorAll('[data-bplace]').forEach(b => b.addEventListener('click', () => { if (!editable()) return; buildPlacing = { ui: i, k: +b.dataset.bplace }; closeSheet(); render(); hud(); panelDeploy(); }));
     root.querySelectorAll('[data-unskill]').forEach(b => b.addEventListener('click', () => { if (editable() && Game.undoSkill(m, me, i, +b.dataset.unskill)) after(); }));
     on('move-sq', () => { if (!editable()) return; closeSheet(); moveMode = true; moving = sq.id; selected = null; changed(); });
     on('move-undo', () => { if (editable() && Game.undoMove(m, me)) after(); });
@@ -3372,7 +3489,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     const team = (side) => {
       // the opponent's units that dealt nothing stay out (a squad hidden in a carrier that never got out isn't given away)
       const rows = last.dealtBy[side].filter(r => side === me || r.dealt > 0).map(r => {
-        const u = r.key[0] === 'u' ? units[+r.key.slice(1)] : null, x = STAT_EXTRA[r.key] || ['?', 'circle', '#888'];
+        const u = r.key[0] === 'u' ? units[+r.key.slice(1)] : null, x = STAT_EXTRA[r.key] || (r.key.startsWith('b:') ? [r.name || 'Building', 'square', (Game.buildingInfo(r.key.slice(2)) || {}).color || '#B07A3C'] : ['?', 'circle', '#888']);
         return { name: u ? u.name : r.name || x[0], shape: u ? u.shape : x[1], color: u ? u.color : x[2], dealt: r.dealt };
       }).sort((a, b) => b.dealt - a.dealt);
       const total = rows.reduce((t, r) => t + r.dealt, 0), col = teamCol(side);
@@ -3569,6 +3686,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       if (s.towerSkill2 && s.towerSkill2[0] === m.round) s.towerSkill2[0] = 0; // and a second one
       if (s.mageGen) s.mageGen[0] = null; // and the mage general called this round
       if (s.loan && s.loan[0] === m.round) s.loan[0] = 0; // and a bank loan taken this round
+      if (s.tround) s.tround[0] = {}; // and the Mecha Tower's bots
       if (s.mapFree && s.mapFree[0]) delete s.mapFree[0][m.round]; // and which purchase got Blixten's free slot
       if (s.map && s.map.removed) s.map.removed = s.map.removed.filter(x => !(x.side === 0 && x.round === m.round)); // and mushroom tiles removed this round
       if (s.altar) s.altar = s.altar.filter(x => !(x.side === 0 && x.round === m.round)); // and altar purchases
@@ -3625,6 +3743,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     m.armies[1] = army.filter(s => { const k = Number.isInteger(s.in) ? 'in' + s.in : s.col + ',' + s.row; if (seen.has(k)) return false; seen.add(k); return true; }).map(s => ({
       ...(Number.isInteger(s.in) ? { in: s.in } : {}),
       id: s.id | 0, unit: s.unit, col: s.col, row: s.row, round: s.round | 0, xp: Math.max(0, +s.xp || 0),
+      ...(had.get(s.id | 0) && units[s.unit] && units[s.unit].building ? { progress: had.get(s.id | 0).progress || 0, built: !!had.get(s.id | 0).built } : {}), // a building's progress comes from the fights played here
       level: Math.max(0, Math.min(Engine.MAX_LEVEL, s.level | 0)), cost: Math.max(0, +s.cost || 0), ...(s.free ? { free: true } : {}),
       ...(s.boughtLevels && typeof s.boughtLevels === 'object' ? { boughtLevels: s.boughtLevels } : {}),
       ...(s.from && (s.movedRound | 0) === m.round && (s.round | 0) < m.round && Number.isInteger(s.from.col) && Number.isInteger(s.from.row) ? { from: { col: s.from.col, row: s.from.row, ...(Number.isInteger(s.from.in) ? { in: s.from.in } : {}) }, movedRound: m.round } : {}),
@@ -3675,6 +3794,10 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (!m.loan) m.loan = [0, 0];
     if (!(m.loan[1] > 0 && m.loan[1] < m.round)) m.loan[1] = 0;
     if ((d.loan | 0) === m.round && Game.towerPicked(m, 1) && Game.towerType(m, 1).id === 'bank' && !Game.investNow(m, 1)) m.loan[1] = m.round; // one bank action a round
+    // the guest's Mecha Tower bots for this round (gold was checked on their side)
+    if (!m.tround) m.tround = [{}, {}];
+    m.tround[1] = {};
+    if (Array.isArray(d.tround)) for (const id of d.tround.slice(0, 10)) if (Game.troundInfo(m, 1, String(id))) m.tround[1][String(id)] = m.round;
     // the guest's elf bribes: earlier ones stay, the ones sent for this round are taken (gold was checked on their side)
     if (!m.bribe) m.bribe = [[], []];
     const newBribes = Game.elfSpot(m) ? (Array.isArray(d.bribe) ? d.bribe : [d.bribe]).filter(r => (r | 0) === m.round).slice(0, 200) : [];
@@ -3684,6 +3807,29 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (!(m.elfOwn[1] && m.elfOwn[1].round < m.round)) {
       const e = d.elfOwn;
       m.elfOwn[1] = Game.elfOwnOffered(m, 1) && e && (e.round | 0) === m.round && Game.inZone(1, e.row | 0) && (e.col | 0) >= 0 && (e.col | 0) < Game.COLS ? { col: e.col | 0, row: e.row | 0, round: m.round } : null;
+    }
+    // the guest's buildings (the Factory): earlier ones as they are here (built, progress and XP come from the fights
+    // played here) plus the levels bought for them this round; one placed this round is taken if its tile is free and
+    // the guest owns the skill that places it. Its building skills for this round too (gold was checked on their side)
+    if (!m.buildings) m.buildings = [[], []];
+    const sentB = Array.isArray(d.buildings) ? d.buildings.filter(x => x && typeof x === 'object').slice(0, 10) : [];
+    m.buildings[1] = Game.buildingsOf(m, 1).filter(b => b.round < m.round).map(b => {
+      const sb = sentB.find(x => x.id === b.id), base = b.level - ((b.levels && b.levels[m.round]) | 0);
+      const n = b.built && sb && sb.levels ? Math.max(0, Math.min(Engine.MAX_LEVEL - base, sb.levels[m.round] | 0)) : 0;
+      const levels = { ...(b.levels || {}) }; if (n) levels[m.round] = n; else delete levels[m.round];
+      return { ...b, level: base + n, levels };
+    });
+    for (const sb of sentB) {
+      const id = String(sb.id), col = sb.col | 0, row = sb.row | 0;
+      if ((sb.round | 0) !== m.round || !Game.buildingInfo(id) || Game.buildingOf(m, 1, id) || !Game.buildingSpotOk(m, 1, col, row)) continue;
+      if (!units.some((u, ui) => Engine.SLOTS.some(k => Game.buildingIdOf(m, ui, k) === id && Game.hasSkill(m, 1, ui, k)))) continue;
+      m.buildings[1].push({ id, col, row, round: m.round, progress: 0, built: false, xp: 0, level: 0 });
+    }
+    if (!m.bskill) m.bskill = [{}, {}];
+    m.bskill[1] = {};
+    if (d.bskill && typeof d.bskill === 'object') for (const id in d.bskill) {
+      const x = d.bskill[id], r = Game.recordOf(m, 1, id);
+      if (x && (x.round | 0) === m.round && r && r.rec.built && Game.buildingSkillInfo(r.id, x.skill)) m.bskill[1][id] = { round: m.round, skill: String(x.skill) };
     }
     // the guest's altar purchases this round (gold was checked on their side; Snowgre spots are worked out here)
     if (m.altar) m.altar = m.altar.filter(x => !(x.side === 1 && x.round === m.round));
@@ -3814,7 +3960,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
 
   function sendSide() {
     if (mode !== 'guest' || !m || phase !== 'deploy') return;
-    send({ t: 'side', round: m.round, army: m.armies[1], gold: m.gold[1], extra: m.extraDeploys[1], nextId: m.nextId[1], tech: (m.tech && m.tech[1]) || {}, tower: (m.towers && m.towers[1]) || null, pack: m.pack ? m.pack[1] : null, unlocks: (m.unlocks && m.unlocks[1]) || {}, bribe: Game.bribeList(m, 1), elfOwn: Game.elfOwnOf(m, 1), towerSkill: (m.towerSkill && m.towerSkill[1]) || 0, towerSkill2: (m.towerSkill2 && m.towerSkill2[1]) || 0, mageGen: Game.mageGenOf(m, 1) || Game.mageTpOf(m, 1) ? { id: Game.mageGenOf(m, 1), tp: Game.mageTpOf(m, 1) } : null, loan: Game.loanNow(m, 1) ? m.round : 0, altar: (m.altar || []).filter(x => x.side === 1 && x.round === m.round).map(x => x.type), shrooms: ((m.map && m.map.removed) || []).filter(x => x.side === 1 && x.round === m.round).map(x => ({ col: x.col, row: x.row })), ready: ready[1] || timeUp });
+    send({ t: 'side', round: m.round, army: m.armies[1], gold: m.gold[1], extra: m.extraDeploys[1], nextId: m.nextId[1], tech: (m.tech && m.tech[1]) || {}, tower: (m.towers && m.towers[1]) || null, pack: m.pack ? m.pack[1] : null, unlocks: (m.unlocks && m.unlocks[1]) || {}, bribe: Game.bribeList(m, 1), elfOwn: Game.elfOwnOf(m, 1), towerSkill: (m.towerSkill && m.towerSkill[1]) || 0, towerSkill2: (m.towerSkill2 && m.towerSkill2[1]) || 0, mageGen: Game.mageGenOf(m, 1) || Game.mageTpOf(m, 1) ? { id: Game.mageGenOf(m, 1), tp: Game.mageTpOf(m, 1) } : null, loan: Game.loanNow(m, 1) ? m.round : 0, tround: Game.towerRounds(m, 1).filter(x => Game.troundOn(m, 1, x.id)).map(x => x.id), altar: (m.altar || []).filter(x => x.side === 1 && x.round === m.round).map(x => x.type), shrooms: ((m.map && m.map.removed) || []).filter(x => x.side === 1 && x.round === m.round).map(x => ({ col: x.col, row: x.row })), buildings: Game.buildingsOf(m, 1), bskill: (m.bskill && m.bskill[1]) || {}, ready: ready[1] || timeUp });
   }
 
   function guestRecv(d) {
@@ -3858,7 +4004,12 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
           if (!m.loan) m.loan = [0, 0];
           if (!m.mageGen) m.mageGen = [null, null];
           if (!m.mapFree) m.mapFree = [{}, {}];
-          for (const k of ['armies', 'gold', 'extraDeploys', 'nextId', 'tech', 'towers', 'unlocks', 'pack', 'chars', 'buff', 'bribe', 'towerSkill', 'towerSkill2', 'elfOwn', 'mapFree', 'mageGen', 'loan']) incoming[k][1] = (m[k] || [null, null])[1];
+          if (!incoming.buildings) incoming.buildings = [[], []];
+          if (!m.buildings) m.buildings = [[], []];
+          if (!incoming.bskill) incoming.bskill = [{}, {}];
+          if (!incoming.tround) incoming.tround = [{}, {}];
+          if (!m.bskill) m.bskill = [{}, {}];
+          for (const k of ['armies', 'gold', 'extraDeploys', 'nextId', 'tech', 'towers', 'unlocks', 'pack', 'chars', 'buff', 'bribe', 'towerSkill', 'towerSkill2', 'elfOwn', 'mapFree', 'mageGen', 'loan', 'tround', 'buildings', 'bskill']) incoming[k][1] = (m[k] || [null, null])[1];
           if (incoming.map && m.map) incoming.map.removed = (incoming.map.removed || []).filter(x => !(x.side === 1 && x.round === incoming.round)).concat((m.map.removed || []).filter(x => x.side === 1 && x.round === incoming.round));
           incoming.altar = (incoming.altar || []).filter(x => !(x.side === 1 && x.round === incoming.round)).concat((m.altar || []).filter(x => x.side === 1 && x.round === incoming.round));
           m = incoming; ready[0] = theirReady;

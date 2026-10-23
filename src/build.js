@@ -11,7 +11,8 @@ const ex = JSON.parse(src('r9.json')).units.slice(7).map(u => ({ ...u, cost: Mat
 ex.push({ name: 'Ogre Smasher', cost: 100, bodies: 1, hp: 1100, hit: 260, aps: 0.5, range: 3, speed: 7, splash: 2.5, defense: 'none', defVal: 0, windUp: 1.0, knockback: 4 });
 ex.forEach((u, i) => { ex[i] = withSkills(u); });
 const lab = src('template.html').replace('/*SHAPES*/', () => shapes).replace('/*ENGINE*/', () => eng)
-  .replace('/*SAMPLE*/', () => JSON.stringify(sample)).replace('/*EXAMPLES*/', () => JSON.stringify(ex));
+  .replace('/*SAMPLE*/', () => JSON.stringify(sample)).replace('/*EXAMPLES*/', () => JSON.stringify(ex))
+  .replace('/*FACTIONS*/', () => src('factions.json'));
 const cut = lab.indexOf('</style>') + '</style>'.length;
 const labDoc = `<!doctype html>
 <html lang="en">
@@ -38,6 +39,8 @@ const game = src('site-template.html').replace('/*BASECSS*/', () => src('game.cs
   .replace('/*ART*/', () => src('art.js')).replace('/*RENDER2D*/', () => src('render2d.js')).replace('/*DATA*/', () => src('demo-units.json'))
   .replace('/*FACTIONS*/', () => src('faction-units.json'));
 game.split('<script>').slice(1).map(s => s.split('</script>')[0]).forEach(s => new Function(s));
+// the 3D board's code is loaded on its own when 3D starts: make sure it parses too
+for (const f of ['camera3d.js', 'models3d.js', 'render3d.js']) new Function(src(f));
 fs.writeFileSync('index.html', game);
 // 3D test page
 const lab3d = src('lab3d-template.html').replace('/*BASECSS*/', () => src('game.css'))

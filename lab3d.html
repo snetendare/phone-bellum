@@ -173,7 +173,7 @@ const Shapes = (() => {
     'Boar Riders': '#E07A9B', 'Spinning Golem': '#7FA650', 'Blunderbuss Crew': '#3FD39A', 'Ogre Smasher': '#B08155',
   };
   // a unit's short label on the board: the first three letters of its name
-  const tag = (u) => (u.name.replace(/[^A-Za-z]/g, '').slice(0, 3) || 'UNT').toUpperCase();
+  const tag = (u) => ((typeof u.tag === 'string' && u.tag.replace(/[^A-Za-z]/g, '')) || u.name.replace(/[^A-Za-z]/g, '').slice(0, 3) || 'UNT').slice(0, 3).toUpperCase(); // a unit may pick its own (tag)
   const validColor = (c) => typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c);
 
   // Give every unit a shape and a colour: keep valid ones, else a known default, else the first one not used yet
@@ -337,7 +337,7 @@ const Shapes = (() => {
 
 // ===== Battle engine (shared by headless tests and the page) =====
 const Engine = (() => {
-  const TRAIT_DEFAULTS = { burst: 1, pellets: 1, spinUp: 0, spinHit: 0, pierce: 0, projSpeed: 0, minRange: 0, charge: 1, knockback: 0, windUp: 0, flame: 0, trample: 0, chargeStun: 0, deathBlast: 0, pctHit: 0, ram: 0, noFlank: 0, carrier: 0, noPack: 0 };
+  const TRAIT_DEFAULTS = { burst: 1, pellets: 1, spinUp: 0, spinHit: 0, pierce: 0, projSpeed: 0, minRange: 0, charge: 1, knockback: 0, windUp: 0, flame: 0, trample: 0, chargeStun: 0, deathBlast: 0, pctHit: 0, ram: 0, noFlank: 0, carrier: 0, noPack: 0, roll: 0 };
   const BURST_GAP = 0.15;      // seconds between shots in a burst
   const SHOTGUN_COS = Math.sqrt(3) / 2; // pellets spread 30 degrees to each side of the target (cos 30)
   // Only + - * / and sqrt from here on: those give identical results in every browser,
@@ -350,7 +350,7 @@ const Engine = (() => {
     for (let k = 1; k <= 12; k++) { term = -term * a * a / ((2 * k - 1) * (2 * k)); sum += term; }
     return sum;
   }
-  const SPIN_CAP = 3;          // spin-up tops out at 3x attack speed
+  const SPIN_CAP = 3;          // spin-up tops out at 3x attack speed (a unit's spinCap can set its own top)
   // damage spin-up (spinHit) ramps hit size the same way, also up to SPIN_CAP
   const CHARGE_RUN = 5;        // metres a unit must run before its next attack counts as a charge
   const TRAMPLE_RUN = 8;       // after a charged hit, a trampler keeps running this far past its target
@@ -375,6 +375,51 @@ const Engine = (() => {
   // (see createBattle: bodies with `carrier` set stay out of the fight until that body dies). noFlank: can't be
   // deployed on flank tiles (the game checks it). noPack: never offered in a starting package (the game checks it)
   const RAM_REACH = 2;         // metres from its target at which a ram hits
+  // roll (seconds): the unit never stops to attack. It rolls at its target from ROLL_START m/s up to its move speed
+  // over this many seconds, running over every enemy body within TRAMPLE_WIDTH of its path for its hit (each body once
+  // per pass), carries on ROLL_PAST metres past its target, stops dead and rolls back at it. So how often it hits
+  // comes from how fast it gets going, not from its attack speed.
+  const ROLL_START = 1;
+  const ROLL_PAST = 6;         // a tile
+  // unfold (the Rollers' Unfold skill): once a roller has rolled through its first enemy and stopped past it, it folds
+  // out for the rest of the fight (u.roll 0, u.unfolded): a walking unit that hits one enemy at a time, same stats.
+  // build = { time, range, count, unit }: the unit walks at the enemy until one is within range − 1 m, stands still
+  // for `time` seconds building `count` copies of `unit` (BUILD_GAP metres apart, side by side across the enemy's
+  // direction), then fights on. Once per fight. Builders building within BUILD_COOP metres of each other speed each
+  // other up: 1×, 1.5×, 1.75×, ... What it builds is a construct: it never moves, can't be pushed, doesn't count as
+  // a unit left standing (a side whose units are gone is beaten), levels with its builder and earns its builder XP.
+  const BUILD_GAP = 6;
+  const BUILD_COOP = 7;
+  // Buildings (the game sets these up; see Game's buildings). A body with u.idle never moves or attacks.
+  //   b.site = { work, need }: seconds of building done and needed. At the start of a fight the nearest builder without
+  //   a job walks to it (within SITE_REACH) and builds instead of fighting (u.buildSpeed seconds of work a second) until
+  //   it is done or falls; then the builder carries on like any builder (its turret, then melee).
+  //   A site nobody is assigned to builds itself at site.self seconds of work a second (0 = not at all).
+  //   b.produce = { units: [unit, ...], time }: once built, it makes one body of each after time seconds, side by side a
+  //   little in front of it.
+  // A unit with flee (metres) keeps away from enemies: whenever one is that close it moves straight away from it (it
+  // still shoots). A unit with backline picks the farthest enemy in reach instead of the nearest. A unit with lob fires
+  // shells over the heads of whoever is in the way: they only land where they were aimed.
+  //   What it makes earns it XP (credit). result().buildings tells the game how each building did.
+  const SITE_REACH = 3.5;
+  // The Mechites' Mecha Tower (the game sets these up on bodies):
+  //   b.orbit = { anchor, r }: a drone circling its anchor (the tower) r metres out at its own speed. It is aloft (can't
+  //   be hit) and attacks like any unit; it falls with its anchor.
+  //   u.bot = 'mine' | 'repair': a little bot that never attacks.
+  //     'mine': b.plant = { spots: [{ x, y }], mine: { hit, radius } }: it walks to each spot in turn and leaves a mine
+  //     there. A mine goes off when an enemy body (not aloft) comes within MINE_TRIGGER metres: hit to every enemy
+  //     within radius. Then the bot stands still.
+  //     'repair': it walks to the nearest of its side's buildings or tower that is damaged or not built yet and works on
+  //     it like one builder: a site gets a second of work a second; a damaged one regains its max health /
+  //     (u.buildSecs, or REPAIR_SECS) a second.
+  // u.stay: the unit never walks toward enemies (a flee unit still keeps away from them).
+  const MINE_TRIGGER = 2;
+  const REPAIR_SECS = 20;
+  // link: the bodies of a squad share one health pool. Damage to any of them is split across all that are alive
+  // (by max health), healing is shared the same way, and they all fall together when the pool runs out. Bodies with a
+  // linked squad can't be won over by a Gentleman.
+  // escort = { unit, pct }: at the start of a fight a construct (the healbot) stands behind each squad, follows it,
+  // never attacks, and heals every body of its squad within unit.range by pct % of its max health a second.
   // chain = { jumps, hit, reach }: after each hit the attack jumps on to the nearest enemy body not hit yet within
   // reach metres of the last one, up to jumps times, dealing chain.hit each time (lightning).
   // mend: the body never attacks; each attack heals the most wounded ally in range (not structures) by this much
@@ -447,6 +492,12 @@ const Engine = (() => {
     frenzy:  { label: 'Frenzy', params: [['pct', 'Attack speed per hit (+% of base)', 10, 1], ['cap', 'Most attacks per second', 2, 0.1]] },
     spread:  { label: 'Spread', params: [['min', 'Least distance (m)', 1, 0.5], ['max', 'Most distance (m)', 6, 0.5]] },
     mortar:  { label: 'Mortar', params: [['range', 'Range (+m)', 15, 1], ['min', 'Minimum range (m)', 5, 0.5], ['aps', 'Attack speed (+ attacks per second)', 0.1, 0.05]] },
+    momentum: { label: 'Momentum', params: [['accel', 'Rolling acceleration (+%)', 100, 10]] },
+    unfold:  { label: 'Unfold (rolling units walk instead)', params: [] },
+    link:    { label: 'Linked health', params: [['hp', 'Health (+%)', 15, 5]] },
+    healbot: { label: 'Healbot', params: [['hp', 'Healbot health', 300, 25], ['pct', 'Heals each body (% of max health per second)', 4, 0.5], ['range', 'Heal reach (m)', 8, 1], ['speed', 'Healbot move speed (m/s)', 3, 0.5]] },
+    building: { label: 'Building', params: [['building', 'Building (id)', 'factory', null]] },
+    builder: { label: 'Construct upgrades', params: [['extra', 'More constructs per build', 0, 1], ['faster', 'Build time (−%)', 0, 5], ['aps', 'Construct attack speed (+%)', 0, 5], ['shield', 'Construct shield (hits blocked)', 0, 1], ['armor', 'Construct armor', 0, 1]] },
   };
   const skillParam = (d, k) => {
     const v = d.params && d.params[k];
@@ -486,6 +537,19 @@ const Engine = (() => {
       case 'spread': return `At the start of a fight the bodies scatter in all directions, ${n('min')} to ${n('max')} m from where they stand (some stay on the tile), then charge. Splash catches fewer of them.`;
       case 'mortar': return `+${n('range')} m range and +${n('aps')} attacks per second, but it can’t attack enemies ${n('min')} m away or closer.`;
       case 'shield': return `Each body fully blocks the first ${n('hits')} ${+P('hits') === 1 ? 'hit' : 'hits'} it takes in a fight, however big. Poison already on it still ticks.`;
+      case 'building': return `Pick a free tile in your zone for a ${String(P('building'))}. Your nearest builder builds it during fights; once built it stays all match, and each round you can buy one of its own skills.`;
+      case 'momentum': return `Gets up to full rolling speed ${n('accel')}% faster, so it rolls over its targets more often.`;
+      case 'unfold': return 'Rolls in as usual, but once it has rolled through its first enemy it folds out into a walking unit: from then on it walks up to its target and hits it in melee, one enemy at a time. Same health and stats.';
+      case 'link': return `+${n('hp')}% health, and the bodies of a squad share one health pool: damage to any of them is shared by all, and they fall together.`;
+      case 'healbot': return `Each squad brings a healbot (${n('hp')} health) that follows it, never attacks, and heals every body of the squad within ${n('range')} m for ${n('pct')}% of its max health every second.`;
+      case 'builder': {
+        const parts = [];
+        if (+P('extra') > 0) parts.push(`builds ${+P('extra') === 1 ? 'one more construct' : `${n('extra')} more constructs`} at once, ${BUILD_GAP} m apart`);
+        if (+P('faster') > 0) parts.push(`builds ${n('faster')}% faster, its buildings too`);
+        const c = [+P('aps') > 0 && `+${n('aps')}% attack speed`, +P('shield') > 0 && `a shield that blocks ${n('shield')} ${+P('shield') === 1 ? 'hit' : 'hits'}`, +P('armor') > 0 && `+${n('armor')} armor`].filter(Boolean);
+        if (c.length) parts.push(`its constructs and what its buildings make get ${c.join(', ')}`);
+        return parts.length ? parts.join('; ').replace(/^./, s => s.toUpperCase()) + '.' : 'No change.';
+      }
     }
     return '';
   }
@@ -552,6 +616,25 @@ const Engine = (() => {
           u.range = Math.max(0.5, u.range * (1 - Math.min(90, P('range')) / 100));
           u.hit = u.hit * (1 - Math.min(90, P('hit')) / 100);
           break;
+        case 'momentum': if (u.roll > 0) u.roll = u.roll / (1 + Math.max(0, P('accel')) / 100); break;
+        case 'unfold': if (u.roll > 0) u.unfold = true; break;
+        case 'link': u.link = true; u.hp = u.hp * (1 + P('hp') / 100); break;
+        case 'healbot':
+          u.escort = { pct: Math.max(0, P('pct')), unit: withTraits({ name: 'Healbot', cost: 0, bodies: 1, hp: Math.max(1, P('hp')), hit: 0, aps: 1, range: Math.max(1, P('range')),
+            speed: Math.max(0.5, P('speed')), splash: 0, shape: 'diamond', color: '#8FD6A0', construct: true, noCount: true, follow: true }) };
+          break;
+        case 'builder': {
+          // buildings go up faster too, and what its buildings make gets the same upgrades (see the game's constructBuff)
+          const fast = Math.min(90, Math.max(0, P('faster')));
+          if (fast > 0) u.buildSpeed = (u.buildSpeed || 1) / (1 - fast / 100);
+          if (u.build && u.build.unit) {
+            const c = u.build.unit;
+            u.build = { ...u.build, count: Math.max(1, Math.round(u.build.count || 1) + Math.max(0, Math.round(P('extra')))),
+              time: (u.build.time || 0) * (1 - Math.min(90, Math.max(0, P('faster'))) / 100),
+              unit: { ...c, aps: c.aps * (1 + Math.max(0, P('aps')) / 100), shield: (c.shield || 0) + Math.max(0, Math.round(P('shield'))), bonusArmor: (c.bonusArmor || 0) + Math.max(0, P('armor')) } };
+          }
+          break;
+        }
       }
     }
     return u;
@@ -641,7 +724,7 @@ const Engine = (() => {
       cd: ((i * 7) % 11) / 11 * interval, // deterministic stagger
       moved: 0, firing: -1, burstLeft: 0, burstTimer: 0, burstDir: [0, 1], windTarget: null, windT: 0, setUp: false,
       hidden: !!u.stealth || !!u.aloft, poison: null, shrinkM: 0, shrinkT: 0, slowT: 0, slowMove: 0, slowAtk: 0,
-      spawnT: u.spawn ? u.spawn.every : 0, kids: null,
+      spawnT: u.spawn ? u.spawn.every : 0, kids: null, orbit: null, plant: null,
       shield: u.shield || 0, // hits left that the Shield skill blocks completely
       frenzy: 0, // hits landed so far (Frenzy skill)
       stunT: 0, lastAtk: 0, // seconds of stun left (chargeStun); fight time of its last attack (stealth returns)
@@ -687,11 +770,34 @@ const Engine = (() => {
 
   // A steppable battle between two lists of bodies (side 0 and side 1)
   function createBattle(A, B, g, opts = {}) {
+    // linked squads and squads with a healbot: their bodies, in squads of u.bodies (a Counter Lab army puts all its
+    // squads under one id; a game squad has exactly u.bodies of them)
+    const groups = [];
+    for (const list of [A, B]) {
+      const open = {};
+      for (const b of list) {
+        if (!b.u.link && !b.u.escort) continue;
+        const k = b.squad + ':' + b.u.name;
+        if (!open[k] || open[k].length >= Math.max(1, Math.round(b.u.bodies))) groups.push(open[k] = []);
+        open[k].push(b);
+      }
+    }
+    for (const grp of groups) if (grp[0].u.link) for (const b of grp) b.link = grp;
+    // a healbot behind each squad that brings one (it levels with its squad)
+    let escortIdx = A.length + B.length;
+    for (const grp of groups) {
+      const lead = grp[0], e = lead.u.escort;
+      if (!e) continue;
+      const hb = newBody(leveled(e.unit, lead.level), lead.side, lead.x, lead.y - (lead.side === 0 ? 1 : -1) * 2.5, escortIdx++, -1);
+      hb.follow = grp; hb.healPct = e.pct; hb.credit = lead;
+      (lead.side === 0 ? A : B).push(hb);
+    }
     const all = A.concat(B);
     const sides = [A, B];
+    const counts = (b) => !(b.u.structure || b.u.aloft || b.u.noCount); // what makes up a side's army (towers, airships and constructs don't)
     const stats = [
-      { dealt: 0, wasted: 0, blocked: 0, missed: 0, windLost: 0, winds: 0, totalHp: A.reduce((s, b) => s + (b.u.structure || b.u.aloft ? 0 : b.u.hp), 0) },
-      { dealt: 0, wasted: 0, blocked: 0, missed: 0, windLost: 0, winds: 0, totalHp: B.reduce((s, b) => s + (b.u.structure || b.u.aloft ? 0 : b.u.hp), 0) },
+      { dealt: 0, wasted: 0, blocked: 0, missed: 0, windLost: 0, winds: 0, totalHp: A.reduce((s, b) => s + (counts(b) ? b.u.hp : 0), 0) },
+      { dealt: 0, wasted: 0, blocked: 0, missed: 0, windLost: 0, winds: 0, totalHp: B.reduce((s, b) => s + (counts(b) ? b.u.hp : 0), 0) },
     ];
     const dt = g.dt;
     const stealthOn = ruleOn(g, 'stealth'), stealthBack = ruleOn(g, 'stealthBack'), knockOn = ruleOn(g, 'knockback');
@@ -753,7 +859,7 @@ const Engine = (() => {
     function finishing(owner, v) {
       const c = charm[owner.side];
       if (!c || v.side === owner.side || v.u.structure || !(c[owner.squad] > 0)) return false;
-      if (c[owner.squad] >= CHARM_MAX && !charmUsed[owner.side][owner.squad] && !v.u.carrier && !v.convert) {
+      if (c[owner.squad] >= CHARM_MAX && !charmUsed[owner.side][owner.squad] && !v.u.carrier && !v.convert && !v.link && !v.u.construct) {
         charmUsed[owner.side][owner.squad] = true;
         v.hp = v.u.hp * CONVERT_HP / 100; v.turning = true; v.poison = null;
         turning.push(v);
@@ -805,25 +911,42 @@ const Engine = (() => {
       b.spreadTo.y = Math.max(g.bounds.y0, Math.min(g.bounds.y1, b.spreadTo.y));
     }
     const SPAWN_SPOTS = [[0.7, 0.7], [-0.7, 0.7], [0, 1], [1, 0], [-1, 0], [0.7, -0.7], [-0.7, -0.7], [0, -1]]; // (side, forward): front first
+    // the health a body has to lose: its own, or its linked squad's
+    const poolHp = (v) => { if (!v.link) return v.hp; let s = 0; for (const x of v.link) if (x.alive) s += x.hp; return s; };
+    // take health off a body; a linked squad shares it out by max health
+    function loseHp(v, dmg) {
+      if (!v.link) { v.hp -= dmg; return; }
+      let max = 0;
+      for (const x of v.link) if (x.alive) max += x.u.hp;
+      for (const x of v.link) if (x.alive) x.hp -= dmg * x.u.hp / max;
+    }
+    // v ran out of health: it falls (a linked squad all together). owner (or null): who gets the bounty for leveled bodies
+    function kill(owner, v) {
+      for (const x of v.link ? v.link.filter(x => x.alive) : [v]) {
+        x.hp = 0; x.alive = false; x.diedTick = tick;
+        if (owner) owner.xp += x.u.hp * x.level;
+        fell(x);
+      }
+    }
     // damage that skips armor and ward (poison)
     function direct(owner, v, amount) {
       if (v.turning || v.u.aloft) return;
-      const applied = Math.min(amount, v.hp);
+      const applied = Math.min(amount, poolHp(v));
       if (applied <= 0) return;
       stats[owner.side].dealt += applied;
       owner.dealt = (owner.dealt || 0) + applied;
       owner.xp += applied;
       v.xp += applied * (g.absorbXp == null ? 0.5 : g.absorbXp);
-      v.hp -= applied;
-      if (v.hp <= 1e-9 && finishing(owner, v)) return;
-      if (v.hp <= 1e-9) { v.hp = 0; v.alive = false; v.diedTick = tick; owner.xp += v.u.hp * v.level; fell(v); }
+      loseHp(v, applied);
+      if (poolHp(v) <= 1e-9 && finishing(owner, v)) return;
+      if (poolHp(v) <= 1e-9) kill(owner, v);
     }
     // damage from the map itself (elf tower, toxic tiles): counts for neither side, earns no experience
     function neutralDamage(v, dmg) {
       if (v.turning || v.u.aloft) return;
       if (cripple[v.side] > 0) dmg = dmg * (1 + towerDown.taken / 100);
-      v.hp -= dmg;
-      if (v.hp <= 1e-9) { v.hp = 0; v.alive = false; v.diedTick = tick; fell(v); }
+      loseHp(v, dmg);
+      if (poolHp(v) <= 1e-9) kill(null, v);
     }
     // a unit is on a map tile: its effect, once per unit and tile type
     function onTile(b, tl) {
@@ -852,7 +975,7 @@ const Engine = (() => {
       }
     }
     // structures (towers) and airships don't count: a side is beaten when its units are gone
-    const aliveCount = (arr) => { let c = 0; for (const b of arr) if (b.alive && !b.u.structure && !b.u.aloft) c++; return c; };
+    const aliveCount = (arr) => { let c = 0; for (const b of arr) if (b.alive && counts(b)) c++; return c; };
 
     function hurt(owner, v, hit, fromX, fromY) {
       if (v.turning) return; // being won over: nothing hurts it until it has switched sides
@@ -883,7 +1006,7 @@ const Engine = (() => {
       }
       if (cripple[v.side] > 0) dmg = dmg * (1 + towerDown.taken / 100);
       st.blocked += hit - dmg;
-      const applied = Math.min(dmg, v.hp);
+      const applied = Math.min(dmg, poolHp(v));
       st.dealt += applied;
       owner.dealt = (owner.dealt || 0) + applied;
       if (owner.u.lifesteal > 0 && owner.alive) owner.hp = Math.min(owner.u.hp, owner.hp + applied * owner.u.lifesteal / 100);
@@ -891,9 +1014,9 @@ const Engine = (() => {
       // experience: damage dealt, half of damage absorbed, and a bounty for killing leveled bodies
       owner.xp += applied;
       v.xp += applied * (g.absorbXp == null ? 0.5 : g.absorbXp);
-      v.hp -= dmg;
-      if (v.hp <= 0 && finishing(owner, v)) return;
-      if (v.hp <= 0) { v.hp = 0; v.alive = false; v.diedTick = tick; owner.xp += v.u.hp * v.level; fell(v); return; }
+      loseHp(v, dmg);
+      if (poolHp(v) <= 0 && finishing(owner, v)) return;
+      if (poolHp(v) <= 0) { kill(owner, v); return; }
       if (owner.u.poisonPct > 0) {
         // poison: a share of the hit, spread over its duration. Each attacker keeps one dose on the target;
         // its next hit refreshes that dose. Doses from different attackers add up.
@@ -913,7 +1036,7 @@ const Engine = (() => {
         v.shrinkM = v.shrinkT > 0 ? Math.max(v.shrinkM, owner.u.shrinkM) : owner.u.shrinkM;
         v.shrinkT = Math.max(v.shrinkT, owner.u.shrinkDur);
       }
-      if (owner.u.knockback > 0 && knockOn && !v.u.structure) {
+      if (owner.u.knockback > 0 && knockOn && !v.u.structure && !v.u.anchored) {
         // big hits on small bodies push the full distance; on big bodies barely at all
         const push = owner.u.knockback * Math.min(1, hit / v.u.hp);
         const dx = v.x - fromX, dy = v.y - fromY, d = hyp(dx, dy) || 1;
@@ -961,7 +1084,7 @@ const Engine = (() => {
         const d = dist(f, b);
         if (d <= reachOf(b) + 0.01 && d >= b.u.minRange) valid.push([d, f]);
       }
-      valid.sort((p, q) => p[0] - q[0]);
+      valid.sort((p, q) => b.u.backline ? q[0] - p[0] : p[0] - q[0]);
       return valid.map(v => v[1]);
     }
 
@@ -1143,6 +1266,160 @@ const Engine = (() => {
       if (b.alive) { b.hp = 0; b.alive = false; b.diedTick = tick; fell(b); }
     }
 
+    // share of its move speed a body walks at right now (slowed, or crippled by its fallen tower)
+    const moveMul = (b) => (b.slowT > 0 ? 1 - b.slowMove / 100 : 1) * (cripple[b.side] > 0 ? 1 - towerDown.move / 100 : 1);
+
+    // a roller's turn (see ROLL_START): marches like any unit until it spots an enemy, then rolls at its target
+    // gathering speed, runs over every enemy body in its path (each once per pass), carries on ROLL_PAST metres past
+    // the target, stops dead and rolls back
+    function roll(b, foes) {
+      const top = b.u.speed, start = Math.min(ROLL_START, top);
+      if (b.rollV == null) b.rollV = start;
+      if (!(b.rollPast > 0)) {
+        let near = null, nd = Infinity;
+        for (const f of foes) { if (!f.alive || f.hidden) continue; const d = dist(f, b); if (d < nd) { nd = d; near = f; } }
+        if (!near) return;
+        b.near = near;
+        const [mx, my] = b.march || [0, b.side === 0 ? 1 : -1];
+        if (!b.engaged) {
+          let spotted = nd <= Math.max(R(b) + sight, minSight);
+          if (!spotted) { // nothing left ahead to march toward: go for the nearest
+            spotted = true;
+            for (const f of foes) if (f.alive && !f.hidden && (f.x - b.x) * mx + (f.y - b.y) * my > 0) { spotted = false; break; }
+          }
+          if (spotted) b.engaged = true;
+        }
+        // once engaged it stays on its target until that dies or hides, like any unit
+        const tgt = b.engaged ? (b.lock && b.lock.alive && !b.lock.hidden ? b.lock : (b.lock = near)) : null;
+        let wx = mx, wy = my;
+        if (tgt) { const d = dist(tgt, b) || 1; wx = (tgt.x - b.x) / d; wy = (tgt.y - b.y) / d; }
+        // standing still it can set off any way; rolling, it swings round like a walking body
+        if (b.hx === undefined || b.rollV <= start) { b.hx = wx; b.hy = wy; }
+        else {
+          const k = Math.min(1, TURN * dt);
+          let hx = b.hx + (wx - b.hx) * k, hy = b.hy + (wy - b.hy) * k, hl = hyp(hx, hy);
+          if (hl < 1e-6) { hx = wx; hy = wy; hl = 1; }
+          b.hx = hx / hl; b.hy = hy / hl;
+        }
+        // about to reach the target: from here it runs straight on, through it and past it
+        if (tgt) {
+          const d = dist(tgt, b);
+          if (d <= b.rollV * dt + TRAMPLE_WIDTH) { b.rollDir = d > 1e-6 ? [(tgt.x - b.x) / d, (tgt.y - b.y) / d] : [b.hx, b.hy]; b.rollPast = d + ROLL_PAST; }
+        }
+      }
+      b.rollV = Math.min(top, b.rollV + (top - start) / b.u.roll * dt);
+      if (b.rollPast > 0) { b.hx = b.rollDir[0]; b.hy = b.rollDir[1]; }
+      const mv = b.rollV * moveMul(b) * dt;
+      b.x += b.hx * mv; b.y += b.hy * mv; b.moved += mv;
+      let stop = false;
+      if (b.rollPast > 0) { b.rollPast -= mv; if (b.rollPast <= 1e-9) stop = true; }
+      if (g.bounds) { // the edge of the board stops it too
+        const x = Math.max(g.bounds.x0, Math.min(g.bounds.x1, b.x)), y = Math.max(g.bounds.y0, Math.min(g.bounds.y1, b.y));
+        if (x !== b.x || y !== b.y) { b.x = x; b.y = y; stop = true; }
+      }
+      const seen = b.rolled || (b.rolled = []);
+      for (const f of foes) {
+        if (!f.alive || seen.includes(f) || hyp(f.x - b.x, f.y - b.y) > TRAMPLE_WIDTH) continue;
+        seen.push(f);
+        if (opts.record) shots.push([b.x, b.y, f.x, f.y, b.side, 1, 1, 0, 0]);
+        hurt(b, f, b.u.hit, b.x, b.y);
+      }
+      if (stop && b.u.unfold && b.rolled && b.rolled.length) { b.u = { ...b.u, roll: 0, unfolded: true }; b.engaged = true; } // through its first enemy: it folds out
+      if (stop) { b.rollPast = 0; b.rollV = start; b.rolled = null; }
+    }
+
+    // a healbot keeps close behind its squad (the middle of its bodies still standing); with the squad gone it stays put
+    function escortMove(b) {
+      let sx = 0, sy = 0, n = 0;
+      for (const a of b.follow) if (a.alive) { sx += a.x; sy += a.y; n++; }
+      if (!n) return;
+      const dx = sx / n - b.x, dy = sy / n - b.y, d = hyp(dx, dy), keep = 2.5;
+      if (d <= keep) return;
+      const mv = Math.min(d - keep, b.u.speed * moveMul(b) * dt);
+      b.hx = dx / d; b.hy = dy / d;
+      b.x += b.hx * mv; b.y += b.hy * mv; b.moved += mv;
+    }
+
+    // a builder is done: its constructs stand where it worked, side by side across the direction of the enemy it saw
+    function finishBuild(b) {
+      b.buildT = 0; b.built = true;
+      const bd = b.u.build, n = Math.max(1, Math.round(bd.count || 1)), [dx, dy] = b.buildDir;
+      // a construct stands where it was built, unless it was made to move (Core Awoken)
+      const cu = leveled(withTraits({ ...bd.unit, bodies: 1, construct: true, noCount: true, ...(bd.unit.speed > 0 ? {} : { speed: 0, anchored: true }) }), b.level);
+      for (let k = 0; k < n; k++) {
+        const off = (k - (n - 1) / 2) * BUILD_GAP;
+        let x = b.x - dy * off, y = b.y + dx * off;
+        if (g.bounds) { x = Math.max(g.bounds.x0, Math.min(g.bounds.x1, x)); y = Math.max(g.bounds.y0, Math.min(g.bounds.y1, y)); }
+        const kid = newBody(cu, b.side, x, y, spawnIdx++, -1);
+        kid.credit = b; // its XP and damage count for its builder's squad
+        pendingKids.push(kid);
+      }
+    }
+
+    // each unfinished building site gets the nearest builder that has no job yet
+    for (const s of all) {
+      if (!s.site || !s.alive) continue;
+      s.site.start = s.site.work;
+      if (s.site.work >= s.site.need) continue;
+      let best = null, bd = Infinity;
+      for (const b of sides[s.side]) if (b.u.build && !b.siteJob && b.alive) { const d = dist(b, s); if (d < bd) { bd = d; best = b; } }
+      if (best) best.siteJob = s;
+    }
+    // a builder's turn while it has a site to build: walk there, then stand and build (see the builders in step())
+    function siteWork(b) {
+      const s = b.siteJob;
+      if (!s.alive || s.site.work >= s.site.need) { b.siteJob = null; b.siteAt = false; return false; }
+      const d = dist(s, b);
+      b.siteAt = d <= SITE_REACH;
+      if (b.siteAt) return true;
+      const mv = Math.min(d - SITE_REACH * 0.8, b.u.speed * moveMul(b) * dt);
+      b.hx = (s.x - b.x) / d; b.hy = (s.y - b.y) / d;
+      b.x += b.hx * mv; b.y += b.hy * mv; b.moved += mv;
+      return true;
+    }
+
+    // a drone circles its anchor (it falls with it): the offset turns by speed / r radians a tick, kept at r metres
+    function orbitMove(b) {
+      const o = b.orbit, a = o.anchor;
+      if (!a.alive) { kill(null, b); return; }
+      let ox = b.x - a.x, oy = b.y - a.y, d = hyp(ox, oy);
+      if (d < 1e-6) { ox = o.r; oy = 0; d = o.r; }
+      ox = ox / d * o.r; oy = oy / d * o.r;
+      const c = cosDeg(Math.min(90, b.u.speed * moveMul(b) * dt / o.r * 57.29577951308232)), sn = Math.sqrt(Math.max(0, 1 - c * c));
+      const nx = ox * c - oy * sn, ny = ox * sn + oy * c;
+      b.hx = -ny / o.r; b.hy = nx / o.r;
+      b.x = a.x + nx; b.y = a.y + ny;
+    }
+    // walk toward (x, y), stopping `stop` metres short; true once there
+    function walkTo(b, x, y, stop) {
+      const dx = x - b.x, dy = y - b.y, d = hyp(dx, dy);
+      if (d <= stop + 1e-6) return true;
+      const mv = Math.min(d - stop, b.u.speed * moveMul(b) * dt);
+      b.hx = dx / d; b.hy = dy / d;
+      b.x += b.hx * mv; b.y += b.hy * mv; b.moved += mv;
+      return d - mv <= stop + 1e-6;
+    }
+    const mines = []; // { x, y, side, owner, hit, radius }
+    // what a repairbot works on: the nearest of its side's buildings or tower that is damaged or not built yet
+    const needsRepair = (v) => v.alive && (v.u.building || v.u.structure) && ((v.site && v.site.work < v.site.need) || v.hp < v.u.hp - 1e-9);
+    function botMove(b) {
+      if (b.u.bot === 'mine' && b.plant) {
+        const sp = b.plant.spots[0];
+        if (!sp) { b.plant = null; return; }
+        if (walkTo(b, sp.x, sp.y, 0.1)) {
+          const mn = b.plant.mine;
+          mines.push({ x: sp.x, y: sp.y, side: b.side, owner: b, hit: mn.hit, radius: mn.radius });
+          b.plant.spots.shift();
+        }
+        return;
+      }
+      if (b.u.bot === 'repair') {
+        let best = null, bd = Infinity;
+        for (const v of sides[b.side]) if (needsRepair(v)) { const d = dist(v, b); if (d < bd) { bd = d; best = v; } }
+        b.repairing = best && walkTo(b, best.x, best.y, SITE_REACH * 0.8) ? best : null;
+      }
+    }
+
     function step() {
       if (over) return false;
       if (t >= g.timeCap || !aliveCount(A) || !aliveCount(B)) { over = true; return false; }
@@ -1204,7 +1481,13 @@ const Engine = (() => {
           if (b.trampleLeft <= 1e-9) { b.trampleLeft = 0; b.trampled = null; if (b.u.chargeStun > 0) b.stunT = b.u.chargeStun; }
           continue;
         }
+        if (b.u.idle) continue; // a building
+        if (b.orbit) { orbitMove(b); continue; }
+        if (b.u.bot) { botMove(b); continue; }
+        if (b.siteJob && siteWork(b)) continue;
         if (b.u.ram) { ram(b, foes); continue; }
+        if (b.u.roll > 0) { roll(b, foes); continue; }
+        if (b.follow) { escortMove(b); continue; }
         if (b.spreadTo) { // Spread: run out to its own spot first
           const sx = b.spreadTo.x - b.x, sy = b.spreadTo.y - b.y, sd = hyp(sx, sy);
           const mv = Math.min(sd, b.u.speed * (b.slowT > 0 ? 1 - b.slowMove / 100 : 1) * dt);
@@ -1223,6 +1506,23 @@ const Engine = (() => {
           if (d < nd) { nd = d; near = f; }
         }
         b.near = near;
+        if (b.u.flee > 0 && near && nd < b.u.flee) { // keeping away from the enemy
+          const mv = b.u.speed * moveMul(b) * dt;
+          b.hx = -(near.x - b.x) / (nd || 1); b.hy = -(near.y - b.y) / (nd || 1);
+          b.x += b.hx * mv; b.y += b.hy * mv; b.moved += mv;
+          if (g.bounds) { b.x = Math.max(g.bounds.x0, Math.min(g.bounds.x1, b.x)); b.y = Math.max(g.bounds.y0, Math.min(g.bounds.y1, b.y)); }
+          continue;
+        }
+        if (b.u.stay) continue; // keeps its ground: it only ever moves away
+        // a builder that hasn't built yet stops to build once an enemy is within its constructs' range (see the builders below)
+        if (b.u.build && !b.built) {
+          if (b.buildT > 0) continue;
+          if (near && nd <= b.u.build.range - 1) {
+            b.buildT = b.buildFull = Math.max(dt, b.u.build.time || 0);
+            b.buildDir = nd > 1e-6 ? [(near.x - b.x) / nd, (near.y - b.y) / nd] : [0, b.side === 0 ? 1 : -1];
+            continue;
+          }
+        }
         const rg = b.u.hover > 0 ? Math.min(R(b), b.u.hover) : R(b); // hover: an airship flies in closer than its range
         // an arrow drawn by the player (Factions devtest): b.guide = [{ x, y }, ...]. The body walks the points in turn,
         // standing to fight only enemies already in its own range, then fights as usual from the last point on.
@@ -1288,6 +1588,46 @@ const Engine = (() => {
           }
         }
       }
+      // builders at work: each builder building within BUILD_COOP of others speeds them up (1x, 1.5x, 1.75x, ...)
+      const builders = all.filter(b => b.alive && b.buildT > 0);
+      if (builders.length) {
+        const rate = builders.map(b => {
+          let mul = 1, add = 0.5;
+          for (const c of builders) if (c !== b && c.side === b.side && dist(c, b) <= BUILD_COOP) { mul += add; add *= 0.5; }
+          return mul;
+        });
+        builders.forEach((b, k) => { b.buildT -= dt * rate[k]; if (b.buildT <= 1e-9) finishBuild(b); });
+      }
+      // ...and at building sites (a site without a builder builds itself, slowly, if it can)
+      const manned = new Set();
+      for (const b of all) {
+        if (!b.alive || !b.siteJob) continue;
+        manned.add(b.siteJob);
+        if (!b.siteAt) continue;
+        const s = b.siteJob.site;
+        s.work = Math.min(s.need, s.work + dt * (b.u.buildSpeed || 1));
+        if (s.work >= s.need) { b.siteJob = null; b.siteAt = false; }
+      }
+      for (const b of all) if (b.alive && b.site && b.site.self > 0 && b.site.work < b.site.need && !manned.has(b)) b.site.work = Math.min(b.site.need, b.site.work + dt * b.site.self);
+      // repairbots at work (one builder each)
+      for (const b of all) {
+        const v = b.repairing;
+        if (!b.alive || !v || !needsRepair(v)) continue;
+        if (v.site && v.site.work < v.site.need) v.site.work = Math.min(v.site.need, v.site.work + dt);
+        else v.hp = Math.min(v.u.hp, v.hp + v.u.hp / (v.u.buildSecs > 0 ? v.u.buildSecs : REPAIR_SECS) * dt);
+        b.healFx = (b.healFx || 0) - dt;
+        if (b.healFx <= 0) { b.healFx = 1; if (opts.record) shots.push([b.x, b.y, v.x, v.y, b.side, 0, 0, 1]); }
+      }
+      // mines: an enemy body close by sets one off
+      for (let i = mines.length - 1; i >= 0; i--) {
+        const mn = mines[i];
+        let hitBy = null;
+        for (const f of sides[1 - mn.side]) if (f.alive && !f.u.aloft && hyp(f.x - mn.x, f.y - mn.y) <= MINE_TRIGGER) { hitBy = f; break; }
+        if (!hitBy) continue;
+        mines.splice(i, 1);
+        if (opts.record) shots.push([mn.x, mn.y, mn.x, mn.y, mn.side, mn.radius, 1, 0, 0]);
+        for (const f of sides[1 - mn.side]) if (f.alive && hyp(f.x - mn.x, f.y - mn.y) <= mn.radius) hurt(mn.owner, f, mn.hit, mn.x, mn.y);
+      }
       // separation between allies
       const minSep = g.spacing * 0.7;
       for (let s = 0; s < 2; s++) {
@@ -1299,7 +1639,7 @@ const Engine = (() => {
             const dx = c.x - a.x, dy = c.y - a.y;
             const d = hyp(dx, dy);
             // structures and bodies still waiting to start (flank squads) don't budge: the other body moves the whole way
-            const fa = a.u.structure || a.delay > 0, fc = c.u.structure || c.delay > 0;
+            const fa = a.u.structure || a.u.anchored || a.delay > 0, fc = c.u.structure || c.u.anchored || c.delay > 0;
             if (fa && fc) continue;
             const ka = fa ? 0 : fc ? 2 : 1, kc = fc ? 0 : fa ? 2 : 1;
             if (d < minSep && (a.u.structure || c.u.structure)) {
@@ -1363,6 +1703,28 @@ const Engine = (() => {
           }
         }
         if (b.u.regen > 0 && b.hp < b.u.hp) b.hp = Math.min(b.u.hp, b.hp + b.u.hp * b.u.regen / 100 * healMul * dt);
+        if (b.produce && !b.produced && !(b.site && b.site.work < b.site.need)) { // a building makes its unit
+          b.prodT = (b.prodT == null ? b.produce.time : b.prodT) - dt;
+          if (b.prodT <= 1e-9) {
+            b.produced = true;
+            const list = b.produce.units || [], gap = g.spacing;
+            let y = b.y + (b.side === 0 ? 1 : -1) * BUILD_GAP * 0.7;
+            if (g.bounds) y = Math.max(g.bounds.y0, Math.min(g.bounds.y1, y));
+            list.forEach((pu, k) => {
+              let x = b.x + (k - (list.length - 1) / 2) * gap;
+              if (g.bounds) x = Math.max(g.bounds.x0, Math.min(g.bounds.x1, x));
+              const kid = newBody(pu, b.side, x, y, spawnIdx++, -1);
+              kid.credit = b;
+              pendingKids.push(kid);
+            });
+          }
+        }
+        if (b.follow && b.healPct > 0) { // a healbot mends the bodies of its squad within reach
+          let to = null;
+          for (const a of b.follow) if (a.alive && a.hp < a.u.hp && dist(a, b) <= b.u.range + 0.01) { a.hp = Math.min(a.u.hp, a.hp + a.u.hp * b.healPct / 100 * healMul * dt); to = to || a; }
+          b.healFx = (b.healFx || 0) - dt;
+          if (to && b.healFx <= 0) { b.healFx = 1; if (opts.record) shots.push([b.x, b.y, to.x, to.y, b.side, 0, 0, 1]); }
+        }
         if (b.shrinkT > 0) { b.shrinkT -= dt; if (b.shrinkT <= 0) { b.shrinkT = 0; b.shrinkM = 0; } }
         if (b.slowT > 0) { b.slowT -= dt; if (b.slowT <= 0) { b.slowT = 0; b.slowMove = 0; b.slowAtk = 0; } }
         if (b.u.spawn) {
@@ -1387,6 +1749,7 @@ const Engine = (() => {
       // wins a trade just by being processed first (side 0 used to win one-shot duels like Sniper vs Sniper)
       for (const b of all) {
         if ((!b.alive && b.diedTick !== tick) || b.delay > 0 || b.u.ram || b.boarded || b.turning) continue;
+        if (b.u.roll > 0 || b.follow || b.buildT > 0 || b.siteJob || b.u.idle || b.u.bot) continue; // rollers hit by rolling; healbots, bots and buildings never attack; builders at work don't
         b.cd -= dt * (b.slowT > 0 ? 1 - b.slowAtk / 100 : 1); // slowed units reload slower
         if (b.firing >= 0) b.firing += dt;
         if (b.stunT > 0) continue; // stunned after a charge
@@ -1469,7 +1832,7 @@ const Engine = (() => {
           b.aims[0] = primary;
         }
         if (b.firing < 0) b.firing = 0;
-        const spin = b.u.spinUp > 0 ? Math.min(SPIN_CAP, 1 + b.u.spinUp / 100 * b.firing) : 1;
+        const spin = b.u.spinUp > 0 ? Math.min(b.u.spinCap > 0 ? b.u.spinCap : SPIN_CAP, 1 + b.u.spinUp / 100 * b.firing) : 1;
         b.spin = spin;
         // reload doesn't stack up while the unit has nothing to shoot: keep at most one step of carry-over
         b.cd = Math.max(b.cd, -dt) + 1 / Math.max(0.01, apsOf(b) * spin);
@@ -1540,7 +1903,7 @@ const Engine = (() => {
           while (mv > 0 && !done) {
             const sub = Math.min(0.5, mv, p.left);
             p.x += p.dirX * sub; p.y += p.dirY * sub; p.left -= sub; mv -= sub;
-            for (const f of foes) {
+            if (!p.owner.u.lob) for (const f of foes) {
               if (f.alive && hyp(f.x - p.x, f.y - p.y) <= PROJ_HIT_RADIUS) {
                 impact(p.owner, p.x, p.y, null, p.hit, p.dirX, p.dirY, p.fx, p.fy);
                 done = true; break;
@@ -1572,8 +1935,15 @@ const Engine = (() => {
       }
       turning.length = 0;
       // bodies spawned by deaths this tick join the fight
-      for (const kid of pendingKids) { all.push(kid); sides[kid.side].push(kid); stats[kid.side].totalHp += kid.u.hp; }
+      for (const kid of pendingKids) { all.push(kid); sides[kid.side].push(kid); if (counts(kid)) stats[kid.side].totalHp += kid.u.hp; }
       pendingKids.length = 0;
+      // a linked squad shares its health: whatever healed one of its bodies is shared by all
+      for (const grp of groups) {
+        if (!grp[0].link) continue;
+        let s = 0, mx = 0;
+        for (const x of grp) if (x.alive) { s += x.hp; mx += x.u.hp; }
+        if (mx > 0) for (const x of grp) if (x.alive) x.hp = x.u.hp * s / mx;
+      }
       t += dt;
       return true;
     }
@@ -1588,7 +1958,7 @@ const Engine = (() => {
 
     function result() {
       const inside = (b) => b.boarded && b.carrier && b.carrier.alive; // still riding in a carrier that made it
-      const remHp = sides.map(arr => arr.reduce((s, b) => s + ((b.alive || inside(b)) && !b.u.structure && !b.u.aloft ? b.hp : 0), 0));
+      const remHp = sides.map(arr => arr.reduce((s, b) => s + ((b.alive || inside(b)) && counts(b) ? b.hp : 0), 0));
       const frac = [remHp[0] / stats[0].totalHp, remHp[1] / stats[1].totalHp];
       const aliveA = aliveCount(A), aliveB = aliveCount(B);
       let winner = -1, timeout = false;
@@ -1598,6 +1968,12 @@ const Engine = (() => {
       // survivors per squad: { squadId: { side, total, alive } }
       const squads = {};
       for (const b of all) {
+        if (b.credit) { // a construct: its XP and damage go to the squad that built (or brought) it
+          const o = b.credit.convert || b.credit, k = o.side + ':' + o.squad;
+          const s = squads[k] || (squads[k] = { side: o.side, squad: o.squad, total: 0, alive: 0, xp: 0, dealt: 0 });
+          s.xp += b.xp; s.dealt += b.dealt || 0;
+          continue;
+        }
         if (b.convert) { // a body won over still counts, as lost, for the squad it came from
           const k = b.convert.side + ':' + b.convert.squad;
           const s = squads[k] || (squads[k] = { side: b.convert.side, squad: b.convert.squad, total: 0, alive: 0, xp: 0, dealt: 0 });
@@ -1615,10 +1991,12 @@ const Engine = (() => {
         stats, squads,
         charm, // charisma stacks after the fight, by side and squad id (null for a side without)
         converted: [0, 1].map(k => all.filter(b => b.convert && b.side === k).length), // bodies each side won over
+        // each building: still standing, seconds of building done at the end (null when it was already built), whether any was done this fight
+        buildings: all.filter(b => b.u.building).map(b => ({ side: b.side, squad: b.squad, alive: b.alive, work: b.site ? b.site.work : null, worked: !!(b.site && b.site.work > b.site.start) })),
       };
     }
 
-    return { step, frame, result, bodies: all, neutrals, isOver: () => over, time: () => t, lastShots: () => shots, projectiles: () => projectiles, crippled: (side) => cripple[side], charm: (side, squad) => (charm[side] && charm[side][squad]) || 0 };
+    return { step, frame, result, bodies: all, neutrals, mines: () => mines, isOver: () => over, time: () => t, lastShots: () => shots, projectiles: () => projectiles, crippled: (side) => cripple[side], charm: (side, squad) => (charm[side] && charm[side][squad]) || 0 };
   }
 
   function matrix(units, g) {
@@ -1639,7 +2017,7 @@ const Engine = (() => {
     return m;
   }
 
-  return { TOWER_DOWN, RULES, ruleOn, STEALTH_BACK, SKILL_SLOTS, SLOTS, SKILL_TYPES, skillParam, describeSkill, applySkills, innateUnit, fairBudget, battle, makeArmy, matrix, createBattle, buildSquad, rawStrength, squadsFor, withTraits, leveled, TRAIT_DEFAULTS, SPIN_CAP, CHARGE_RUN, TRAMPLE_RUN, BLAST_RADIUS, RAM_REACH, LEVEL_BONUS, MAX_LEVEL, CHARM_MAX, CONVERT_HP, CONVERT_SQUAD };
+  return { TOWER_DOWN, RULES, ruleOn, STEALTH_BACK, SKILL_SLOTS, SLOTS, SKILL_TYPES, skillParam, describeSkill, applySkills, innateUnit, fairBudget, battle, makeArmy, matrix, createBattle, buildSquad, rawStrength, squadsFor, withTraits, leveled, TRAIT_DEFAULTS, SPIN_CAP, CHARGE_RUN, TRAMPLE_RUN, BLAST_RADIUS, RAM_REACH, ROLL_START, ROLL_PAST, BUILD_GAP, BUILD_COOP, SITE_REACH, MINE_TRIGGER, REPAIR_SECS, LEVEL_BONUS, MAX_LEVEL, CHARM_MAX, CONVERT_HP, CONVERT_SQUAD };
 })();
 if (typeof module !== 'undefined') module.exports = Engine;
 
@@ -1888,6 +2266,27 @@ const Game = (() => {
     if (!loanNow(m, side) || m.gold[side] < LOAN.gold) return false;
     m.loan[side] = 0;
     m.gold[side] -= LOAN.gold;
+    return true;
+  }
+  // Tower skills bought every round (a faction tower's `rounds`, the Mecha Tower's bots): each works in that round's
+  // fight only and can be bought again the next round. m.tround[side] = { [id]: round bought }; hidden from the
+  // opponent until the fight. See bodiesFor for what each does.
+  const towerRounds = (m, side) => (towerPicked(m, side) && towerType(m, side).rounds) || [];
+  const troundInfo = (m, side, id) => towerRounds(m, side).find(x => x.id === id) || null;
+  const troundOn = (m, side, id) => !!(m && m.tround && m.tround[side] && m.tround[side][id] === m.round && troundInfo(m, side, id));
+  const troundCost = (m, side, id) => Math.max(0, Math.round(+(troundInfo(m, side, id) || {}).cost || 0));
+  const canBuyTround = (m, side, id) => !!troundInfo(m, side, id) && !troundOn(m, side, id) && m.gold[side] >= troundCost(m, side, id);
+  function buyTround(m, side, id) {
+    if (!canBuyTround(m, side, id)) return false;
+    if (!m.tround) m.tround = [{}, {}];
+    m.gold[side] -= troundCost(m, side, id);
+    m.tround[side][id] = m.round;
+    return true;
+  }
+  function undoTround(m, side, id) {
+    if (!troundOn(m, side, id)) return false;
+    delete m.tround[side][id];
+    m.gold[side] += troundCost(m, side, id);
     return true;
   }
   // Slime tower: the skills bought for Slime Wizards and Slimeshots work on it too
@@ -2290,8 +2689,16 @@ const Game = (() => {
   // no man's land: the rows between the two zones. A unit with the Forward planting skill may be placed there.
   const inNoMans = (row) => row >= ZONE && row < ROWS - ZONE;
   const hasSkillType = (m, side, ui, type) => !!m && ui != null && !!m.units[ui] && E.SLOTS.some(k => hasSkill(m, side, ui, k) && skillDef(m, ui, k).type === type);
-  // ui (optional): the unit being placed, for unit-specific tiles
-  const canPlaceAt = (m, side, col, row, ui) => col >= 0 && col < COLS && !reserved(side, col, row) && !(ui != null && isOff(m, ui, side)) &&
+  // A unit with a footprint (the Altar of Build: 2) takes a block of n x n tiles; its squad's col, row is the block's
+  // first column and row (it stands where the four tiles meet).
+  const footprint = (m, ui) => Math.max(1, Math.round(+((m && m.units && m.units[ui]) || {}).footprint || 1));
+  const blockOf = (m, ui, col, row) => { const n = ui == null ? 1 : footprint(m, ui), out = []; for (let dr = 0; dr < n; dr++) for (let dc = 0; dc < n; dc++) out.push([col + dc, row + dr]); return out; };
+  const covers = (m, s, col, row) => { const n = footprint(m, s.unit); return col >= s.col && col < s.col + n && row >= s.row && row < s.row + n; };
+  // ui (optional): the unit being placed, for unit-specific tiles (all of a footprint's tiles must be allowed)
+  const canPlaceAt = (m, side, col, row, ui) => blockOf(m, ui, col, row).every(([c, r]) => canPlaceTile(m, side, c, r, ui));
+  // no squad, tower or building on any tile the unit would take
+  const spotFree = (m, side, col, row, ui) => blockOf(m, ui, col, row).every(([c, r]) => !occupied(m, side, c, r));
+  const canPlaceTile = (m, side, col, row, ui) => col >= 0 && col < COLS && row >= 0 && row < ROWS && !reserved(side, col, row) && !(ui != null && isOff(m, ui, side)) &&
     !(ui != null && m && m.units[ui] && m.units[ui].noFlank && isFlank(side, col, row)) &&
     (inZone(side, row) || (flankOpen(m) && isFlank(side, col, row)) || (inNoMans(row) && hasSkillType(m, side, ui, 'forward'))) && !enemyHolds(m, side, col, row);
   // ---------- carriers (Just a horse) ----------
@@ -2306,11 +2713,11 @@ const Game = (() => {
   const riderOf = (m, side, sq) => sq ? m.armies[side].find(s => s.in === sq.id) || null : null;
   const carrierOf = (m, side, sq) => isRider(sq) ? m.armies[side].find(s => s.id === sq.in) || null : null;
   // the squad standing on a tile (a carrier, never its rider)
-  const squadAt = (m, side, col, row) => m.armies[side].find(s => !isRider(s) && s.col === col && s.row === row) || null;
+  const squadAt = (m, side, col, row) => m.armies[side].find(s => !isRider(s) && covers(m, s, col, row)) || null;
   // the carrier on a tile that has room for a squad of unit ui
   function boardable(m, side, col, row, ui) {
     const c = squadAt(m, side, col, row);
-    return c && isCarrier(m, c.unit) && !isCarrier(m, ui) && !riderOf(m, side, c) ? c : null;
+    return c && isCarrier(m, c.unit) && !isCarrier(m, ui) && !(m.units[ui] && m.units[ui].building) && !riderOf(m, side, c) ? c : null;
   }
   // riders follow their carrier's tile
   const syncRiders = (m, side) => { for (const s of m.armies[side]) if (isRider(s)) { const c = carrierOf(m, side, s); if (c) { s.col = c.col; s.row = c.row; } else delete s.in; } };
@@ -2440,6 +2847,8 @@ const Game = (() => {
       chars: [null, null], // each player's character id (comes with the package)
       buff: [[], []], // Zoe's buff tiles for this round: [{ col, row }, ...]
       zoeUses: [0, 0], // fights each player has used Zoe's buff tiles in (the buff grows with them: zoeBuff)
+      buildings: [[], []], // each player's buildings (the Mechites' Factory), see buyBuilding
+      bskill: [{}, {}], // the building skill each player bought this round, per building (see buyBuildingSkill)
       unlocks: [{}, {}], // units unlocked per player: unlocks[side][unitIdx] = round it was unlocked
       off, // units left out of this match: they can't be unlocked, placed or dealt in a package
       rules, // roster rules for the fights (null = all on)
@@ -2451,6 +2860,7 @@ const Game = (() => {
       towerSkill: [0, 0], // round each player bought their tower's skill in (0 = not bought)
       towerSkill2: [0, 0], // ...and its second skill (keep, bastion, bank)
       loan: [0, 0], // the round each player last took a bank loan in (Bank tower)
+      tround: [{}, {}], // tower skills bought every round (the Mecha Tower's bots): tround[side][id] = round bought
       mageGen: [null, null], // the mage generals each player called this round: { round, id, tp } (Mage tower)
       mapFree: [{}, {}], // Blixten's discounted map purchase per round (see mapFreeOf)
       factions, // Factions mode: each player's drafted faction ids (null = a normal match)
@@ -2504,17 +2914,25 @@ const Game = (() => {
     u = withFactionTrait(u, base && base.faction);
     u = withPowers(m, side, u, base);
     if (base && SLIME_UNITS.includes(base.name)) u = { ...u, slime: true }; // poison heals slime units
+    return withCharacter(m, side, u);
+  }
+  // the player's character on one of their units (spawned ones too): Noah cuts health and damage, Cage adds health
+  function withCharacter(m, side, u) {
     if (charOf(m, side) === 'noah') { // Noah: 10% less health and damage, spawned ones too
-      const k = 1 - CHAR.noahCut / 100;
-      u = { ...u, hp: u.hp * k, hit: u.hit * k };
-      if (u.spawn) u.spawn = { ...u.spawn, unit: { ...u.spawn.unit, hp: u.spawn.unit.hp * k, hit: u.spawn.unit.hit * k } };
+      const k = 1 - CHAR.noahCut / 100, cut = (x) => ({ ...x, hp: x.hp * k, hit: x.hit * k });
+      u = withKids(cut(u), cut);
     }
     if (charOf(m, side) === 'cage') { // Frickolas Cage: +10% health for every unit, spawned ones too
-      const k = 1 + CHAR.cageHp / 100;
-      u = { ...u, hp: u.hp * k };
-      if (u.spawn) u.spawn = { ...u.spawn, unit: { ...u.spawn.unit, hp: u.spawn.unit.hp * k } };
+      const k = 1 + CHAR.cageHp / 100, tough = (x) => ({ ...x, hp: x.hp * k });
+      u = withKids(tough(u), tough);
     }
     return u;
+  }
+  // the unit with f applied to the units it brings into a fight: spawns, what it builds, its healbot
+  function withKids(u, f) {
+    let out = u;
+    for (const k of ['spawn', 'build', 'escort']) if (u[k] && u[k].unit) { if (out === u) out = { ...u }; out[k] = { ...u[k], unit: f(u[k].unit) }; }
+    return out;
   }
   // ---------- unlocks (like Mechabellum: some units start unlocked, the rest cost gold once per match) ----------
   // tier 1 = the cheapest price in the roster
@@ -2550,15 +2968,22 @@ const Game = (() => {
     return true;
   }
 
+  // A unit can make a skill wait for others: skillNeeds[k] = the slots that must be bought first (e.g. [0, 1])
+  const skillNeeds = (m, ui, k) => { const n = m.units[ui] && Array.isArray(m.units[ui].skillNeeds) ? m.units[ui].skillNeeds[k] : null; return Array.isArray(n) ? n.filter(j => j !== k && skillDef(m, ui, j)) : []; };
+  const skillNeedsMissing = (m, side, ui, k) => skillNeeds(m, ui, k).filter(j => !hasSkill(m, side, ui, j));
   function canBuySkill(m, side, ui, k) {
     const d = skillDef(m, ui, k);
     if (!d || hasSkill(m, side, ui, k)) return false;
     if (charOf(m, side) === 'enzo') return false; // Enzo's squads come with their skill instead
     if (!m.armies[side].some(s => s.unit === ui)) return false; // needs a squad of that type on the board
+    if (skillNeedsMissing(m, side, ui, k).length) return false;
     return m.gold[side] >= skillCost(m, ui, k, side);
   }
   function buySkill(m, side, ui, k) {
-    if (!canBuySkill(m, side, ui, k)) return false;
+    if (!canBuySkill(m, side, ui, k) || isBuildingSkill(m, ui, k)) return false; // a building needs its tile: buyBuilding
+    return takeSkill(m, side, ui, k);
+  }
+  function takeSkill(m, side, ui, k) {
     m.gold[side] -= skillCost(m, ui, k, side);
     if (!m.tech) m.tech = [{}, {}];
     const t = m.tech[side][ui] || (m.tech[side][ui] = E.SLOTS.map(() => 0));
@@ -2571,9 +2996,198 @@ const Game = (() => {
     // Forward planting can't be taken back while a squad of that unit stands in no man's land
     const d = skillDef(m, ui, k);
     if (d && d.type === 'forward' && m.armies[side].some(s => s.unit === ui && inNoMans(s.row))) return false;
+    if (E.SLOTS.some(j => j !== k && hasSkill(m, side, ui, j) && skillNeeds(m, ui, j).includes(k))) return false; // a skill bought on top of it goes first
+    if (isBuildingSkill(m, ui, k)) { // the building placed with it goes too
+      const id = buildingIdOf(m, ui, k);
+      m.buildings[side] = buildingsOf(m, side).filter(b => !(b.id === id && b.round === m.round));
+    }
     m.gold[side] += skillCost(m, ui, k, side); // the refund, worked out while it's still owned
     t[k] = 0;
     return true;
+  }
+
+  // ---------- buildings (the Mechites' Factory and Altar of Build) ----------
+  // A player gets a building in one of two ways:
+  //  - a unit skill of type 'building' (the Cog Builder's Build factory): buying it places the building on a free tile
+  //    of its owner's zone (buyBuilding), one of each kind per player: m.buildings[side] = [{ id, col, row, round
+  //    (placed), progress (0..1), built, xp, level, levels: { round: bought } }];
+  //  - a unit with `building` bought in the shop (the Altar of Build, tier 4): an ordinary squad (it costs a deployment,
+  //    levels, sells, but never moves), with its progress and built on the squad. Its footprint can take several tiles.
+  // Both stay all match. Until built, a building stands in every fight as a site (with its full health): the nearest
+  // builder without a job walks over and builds it (buildSecs seconds of work; Master engineering is faster); a site
+  // nobody builds builds itself at selfBuild times that speed (0 = not at all). The work carries over between fights.
+  // A site is built once the work is done, or (survive) if it is still standing at the end of a fight it was worked on.
+  // A built building destroyed in a fight starts the next round at `rebuild` % and has to be built again.
+  // Once built, each round its owner may buy one of its skills (like a mage general: m.bskill[side][key] = { round,
+  // skill }, swapped for a refund, hidden from the opponent until the fight). A skill makes units (`unit`, or `make`:
+  // [[building, its skill, count], ...]) `time` seconds into the fight, or changes all the player's constructs this
+  // fight (`bless`: Blessing of the Cycle; `awake`: Core Awoken, see buildingEffects). What it makes earns it XP; it
+  // levels up with gold like a squad, and a leveled building and its units are stronger. Kinds come from
+  // src/factions.json's "buildings" (setBuildings).
+  let BUILDINGS = [];
+  function setBuildings(list) { BUILDINGS = (Array.isArray(list) ? list : []).filter(b => b && typeof b.id === 'string' && b.id); return BUILDINGS; }
+  const buildingInfo = (id) => BUILDINGS.find(b => b.id === id) || null;
+  const BUILDING_SQUAD = -300; // buildings from skills in a fight: squad ids -300, -301, ...
+  const isBuildingSkill = (m, ui, k) => { const d = skillDef(m, ui, k); return !!d && d.type === 'building'; };
+  const buildingIdOf = (m, ui, k) => isBuildingSkill(m, ui, k) ? String(E.skillParam(skillDef(m, ui, k), 'building')) : null;
+  const buildingsOf = (m, side) => (m && m.buildings && m.buildings[side]) || [];
+  const buildingOf = (m, side, id) => buildingsOf(m, side).find(b => b.id === id) || null;
+  const buildingAt = (m, side, col, row) => buildingsOf(m, side).find(b => b.col === col && b.row === row) || null;
+  // what a screen may show of a player's building: an opponent's new one only from the fight on
+  const buildingShown = (v, viewer, deploying, side, b) => side === viewer || !deploying || b.round < v.round;
+  const buildingSpotOk = (m, side, col, row) => col >= 0 && col < COLS && inZone(side, row) && !reserved(side, col, row) && !occupied(m, side, col, row);
+  const canBuyBuilding = (m, side, ui, k) => isBuildingSkill(m, ui, k) && !!buildingInfo(buildingIdOf(m, ui, k)) && !buildingOf(m, side, buildingIdOf(m, ui, k)) && canBuySkill(m, side, ui, k);
+  // buy unit ui's building skill k and put the building on (col, row)
+  function buyBuilding(m, side, ui, k, col, row) {
+    if (!canBuyBuilding(m, side, ui, k) || !buildingSpotOk(m, side, col, row)) return false;
+    takeSkill(m, side, ui, k);
+    if (!m.buildings) m.buildings = [[], []];
+    m.buildings[side].push({ id: buildingIdOf(m, ui, k), col, row, round: m.round, progress: 0, built: false, xp: 0, level: 0 });
+    return true;
+  }
+  // every building a player has, both kinds: { key (for its skills), id (its kind), rec (holds progress, built,
+  // level), sq (a bought building's squad, else null), squad (its squad id in fights), col, row (its tile, or the
+  // first tile of its block), size (tiles a side) }
+  function buildingRecords(m, side) {
+    const out = buildingsOf(m, side).map((b, k) => ({ key: b.id, id: b.id, rec: b, sq: null, squad: BUILDING_SQUAD - k, col: b.col, row: b.row, size: 1 }));
+    for (const sq of (m && m.armies && m.armies[side]) || []) {
+      const u = m.units[sq.unit];
+      if (u && u.building && buildingInfo(u.building)) out.push({ key: 'sq' + sq.id, id: u.building, rec: sq, sq, squad: sq.id, col: sq.col, row: sq.row, size: footprint(m, sq.unit) });
+    }
+    return out;
+  }
+  const recordOf = (m, side, key) => buildingRecords(m, side).find(r => r.key === key) || null;
+  // the middle of a building in board metres
+  const recordWorld = (r) => { const a = tileToWorld(r.col, r.row), b = tileToWorld(r.col + r.size - 1, r.row + r.size - 1); return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; };
+  // ---- a building's skills: bought each round ----
+  const buildingSkills = (id) => ((buildingInfo(id) || {}).skills || []);
+  const buildingSkillInfo = (id, sk) => buildingSkills(id).find(x => x.id === sk) || null;
+  const bskillOf = (m, side, key) => {
+    const x = m && m.bskill && m.bskill[side] && m.bskill[side][key], r = x && x.round === m.round ? recordOf(m, side, key) : null;
+    return r && buildingSkillInfo(r.id, x.skill) ? x.skill : null;
+  };
+  const bskillCost = (id, sk) => Math.max(0, Math.round(+(buildingSkillInfo(id, sk) || {}).cost || 0));
+  // the skill already bought this round is swapped out and paid back
+  const canBuyBuildingSkill = (m, side, key, sk) => { const r = recordOf(m, side, key), cur = bskillOf(m, side, key);
+    return !!r && !!r.rec.built && !!buildingSkillInfo(r.id, sk) && cur !== sk && m.gold[side] + (cur ? bskillCost(r.id, cur) : 0) >= bskillCost(r.id, sk); };
+  function buyBuildingSkill(m, side, key, sk) {
+    if (!canBuyBuildingSkill(m, side, key, sk)) return false;
+    const r = recordOf(m, side, key), cur = bskillOf(m, side, key);
+    if (cur) m.gold[side] += bskillCost(r.id, cur);
+    m.gold[side] -= bskillCost(r.id, sk);
+    if (!m.bskill) m.bskill = [{}, {}];
+    m.bskill[side][key] = { round: m.round, skill: sk };
+    return true;
+  }
+  function undoBuildingSkill(m, side, key) {
+    const cur = bskillOf(m, side, key);
+    if (!cur) return false;
+    m.gold[side] += bskillCost(recordOf(m, side, key).id, cur);
+    delete m.bskill[side][key];
+    return true;
+  }
+  // ---- leveling a building from a skill (a bought one levels like any squad) ----
+  const buildingXpNeeded = (id, level) => ((buildingInfo(id) || {}).hp || 1000) * XP_STEPS[level];
+  const buildingLevelCost = (id) => Math.max(0, Math.round(+(buildingInfo(id) || {}).levelCost || 100));
+  const buildingReady = (b) => !!b && b.built && b.level < E.MAX_LEVEL && b.xp >= buildingXpNeeded(b.id, b.level);
+  function levelBuilding(m, side, id) {
+    const b = buildingOf(m, side, id);
+    if (!buildingReady(b) || m.gold[side] < buildingLevelCost(id)) return false;
+    m.gold[side] -= buildingLevelCost(id);
+    b.level++;
+    (b.levels = b.levels || {})[m.round] = (b.levels[m.round] || 0) + 1;
+    return true;
+  }
+  function undoLevelBuilding(m, side, id) {
+    const b = buildingOf(m, side, id);
+    if (!b || !b.levels || !b.levels[m.round]) return false;
+    b.levels[m.round]--; b.level--;
+    m.gold[side] += buildingLevelCost(id);
+    return true;
+  }
+  // what Master engineering and the like (builder skills) give what a player's buildings make: { aps, shield, armor, faster }
+  function constructBuff(m, side) {
+    const out = { aps: 0, shield: 0, armor: 0, faster: 0 };
+    (m.units || []).forEach((u, ui) => {
+      if (!u || !u.build) return;
+      for (const k of E.SLOTS) {
+        const d = skillDef(m, ui, k);
+        if (!d || d.type !== 'builder' || !hasSkill(m, side, ui, k)) continue;
+        const P = (x) => Math.max(0, +E.skillParam(d, x) || 0);
+        out.aps += P('aps'); out.shield += Math.round(P('shield')); out.armor += P('armor'); out.faster = Math.max(out.faster, Math.min(90, P('faster')));
+      }
+    });
+    return out;
+  }
+  // what a player's built buildings' skills do to all their constructs this round: { bless, awake } (null when not)
+  //   bless (Blessing of the Cycle) = { build, hp, speed, aps (all %), regen (% of max health a second) }
+  //   awake (Core Awoken): their buildings become units with their kind's `awake` stats, and what builders build gets
+  //   awake.built (the turrets' wheels and mortar)
+  function buildingEffects(m, side) {
+    const out = { bless: null, awake: null };
+    for (const r of buildingRecords(m, side)) {
+      if (!r.rec.built) continue;
+      const sk = buildingSkillInfo(r.id, bskillOf(m, side, r.key));
+      if (sk && sk.bless) out.bless = sk.bless;
+      if (sk && sk.awake) out.awake = { ...(out.awake || {}), ...sk.awake };
+    }
+    return out;
+  }
+  const blessed = (u, bl) => !bl ? u : { ...u, hp: u.hp * (1 + (bl.hp || 0) / 100), speed: (u.speed || 0) * (1 + (bl.speed || 0) / 100), aps: u.aps * (1 + (bl.aps || 0) / 100), regen: (u.regen || 0) + (bl.regen || 0) };
+  // a unit with what this round's building effects do to its constructs (turrets, healbots) and its building speed
+  function withConstructFx(u, fx) {
+    if (!fx.bless && !fx.awake) return u;
+    let out = u;
+    if (fx.awake && fx.awake.built && out.build) out = { ...out, build: { ...out.build, unit: { ...out.build.unit, ...fx.awake.built, awake: true } } };
+    const bl = fx.bless;
+    if (bl && out.build) out = { ...out, buildSpeed: (out.buildSpeed || 1) * (1 + bl.build / 100), build: { ...out.build, time: out.build.time / (1 + bl.build / 100), unit: blessed(out.build.unit, bl) } };
+    if (bl && out.escort) out = { ...out, escort: { ...out.escort, unit: blessed(out.escort.unit, bl) } };
+    return out;
+  }
+  // a player's buildings as bodies for a fight: a site to build, or a building (that makes this round's units)
+  function buildingBodies(m, side, idx) {
+    const out = [], cb = constructBuff(m, side), fx = buildingEffects(m, side), bl = fx.bless;
+    buildingRecords(m, side).forEach((r, k) => {
+      const info = buildingInfo(r.id);
+      if (!info) return;
+      const w = recordWorld(r), lv = r.rec.level || 0, built = !!r.rec.built;
+      let bu = E.withTraits({ name: info.name, cost: 0, bodies: 1, hp: info.hp, hit: 0, aps: 1, range: 0, speed: 0, splash: 0, shape: 'square', color: info.color || '#B07A3C',
+        building: r.id, size: r.size, idle: true, anchored: true, noCount: true, construct: true, buildSecs: info.buildSecs });
+      if (built && fx.awake && info.awake) bu = { ...bu, ...info.awake, idle: false, noCount: false, awake: true }; // Core Awoken: it becomes a unit
+      if (bl) bu = blessed(bu, bl);
+      const [b] = E.buildSquad(bu, side, w.x, w.y, r.squad, TILE, idx + k, lv);
+      if (!built) b.site = { work: (r.rec.progress || 0) * info.buildSecs, need: info.buildSecs, self: info.selfBuild || 0 };
+      const sk = built ? buildingSkillInfo(r.id, bskillOf(m, side, r.key)) : null;
+      const makes = !sk ? [] : sk.unit ? [[sk.unit, 1]] : (sk.make || []).map(([bid, sid, n]) => [(buildingSkillInfo(bid, sid) || {}).unit, n]);
+      const units = [];
+      for (const [u0, n] of makes) if (u0) for (let j = 0; j < n; j++) {
+        let pu = E.withTraits({ ...u0, level: 0, construct: true });
+        pu = blessed({ ...pu, aps: pu.aps * (1 + cb.aps / 100), shield: (pu.shield || 0) + cb.shield, bonusArmor: (pu.bonusArmor || 0) + cb.armor }, bl);
+        units.push(E.leveled(withCharacter(m, side, withFactionTrait(pu, info.faction)), lv));
+      }
+      if (units.length) b.produce = { units, time: (sk.time || 0) * (1 - cb.faster / 100) / (bl ? 1 + bl.build / 100 : 1) };
+      out.push(b);
+    });
+    return out;
+  }
+  // after a fight: sites built (or the work they kept), buildings destroyed, XP from what they made (a bought
+  // building gets its XP as a squad). Returns what happened, per side: [{ id, built: true } | { id, lost: true } | { id, progress }]
+  function settleBuildings(m, res) {
+    const news = [[], []];
+    for (const side of [0, 1]) buildingRecords(m, side).forEach(r => {
+      const info = buildingInfo(r.id), x = (res.buildings || []).find(y => y.side === side && y.squad === r.squad), b = r.rec;
+      if (!info || !x) return;
+      const q = res.squads && res.squads[side + ':' + r.squad];
+      if (b.built) {
+        if (q && !r.sq) b.xp += q.xp;
+        if (!x.alive) { b.built = false; b.progress = Math.max(0, Math.min(1, (info.rebuild == null ? 50 : info.rebuild) / 100)); news[side].push({ id: r.id, lost: true }); }
+      } else if (x.work != null) {
+        b.progress = Math.max(0, Math.min(1, x.work / info.buildSecs));
+        if (x.work >= info.buildSecs - 1e-9 || (info.survive && x.alive && x.worked)) { b.built = true; b.progress = 1; news[side].push({ id: r.id, built: true }); }
+        else if (x.worked) news[side].push({ id: r.id, progress: b.progress });
+      }
+    });
+    return news;
   }
 
   // ---------- selling ----------
@@ -2609,7 +3223,7 @@ const Game = (() => {
   // Squads placed this round can be moved freely. Once per round a player may also move one squad from an
   // earlier round, for CONFIG.moveCost gold. Moving it back to where it was refunds the gold.
   const movedId = (m, side) => (m.moved && m.moved[side] != null) ? m.moved[side] : null;
-  const canMove = (m, side, sq) => !!sq && (sq.round === m.round ||
+  const canMove = (m, side, sq) => !!sq && !(m.units[sq.unit] && m.units[sq.unit].building) && (sq.round === m.round || // a building stays put
     (movedId(m, side) == null ? m.gold[side] >= CONFIG.moveCost : movedId(m, side) === sq.id));
   function moveSquad(m, side, sqId, col, row) {
     const sq = m.armies[side].find(s => s.id === sqId);
@@ -2649,7 +3263,7 @@ const Game = (() => {
   }
 
   const towerAt = (m, side, col, row) => !!(m.towers && m.towers[side] && m.towers[side].col === col && m.towers[side].row === row);
-  const occupied = (m, side, col, row) => towerAt(m, side, col, row) || elfOwnAt(m, side, col, row) || m.armies[side].some(s => s.col === col && s.row === row) || devOccupied(m, side, col, row);
+  const occupied = (m, side, col, row) => towerAt(m, side, col, row) || elfOwnAt(m, side, col, row) || !!buildingAt(m, side, col, row) || m.armies[side].some(s => covers(m, s, col, row)) || devOccupied(m, side, col, row);
   const needsTower = (m, side) => !!(m.towers && !m.towers[side]);
   // the tower can be placed (or moved) during round 1 only
   function placeTower(m, side, col, row) {
@@ -2676,7 +3290,7 @@ const Game = (() => {
     if (needsTower(m, side)) return null; // the tower goes down first
     if (!isUnlocked(m, side, unitIdx)) return null;
     const into = boardable(m, side, col, row, unitIdx); // a carrier with room: the new squad rides inside
-    if (occupied(m, side, col, row) && !into) return null;
+    if (!spotFree(m, side, col, row, unitIdx) && !into) return null;
     const ride = into ? { in: into.id } : {};
     if (freeLeft(m, side).includes(unitIdx)) { // a package squad: no gold, no deployment
       const sq = { id: m.nextId[side]++, unit: unitIdx, col, row, round: m.round, xp: 0, level: 0, cost: 0, free: true, ...ride };
@@ -2717,10 +3331,12 @@ const Game = (() => {
       const ys = zoneRows(side).map(r => tileToWorld(0, r).y);
       return { y0: Math.min(...ys) - TILE / 2, y1: Math.max(...ys) + TILE / 2, armor: TOWER_SKILL.homeArmor, hpPct: TOWER_SKILL.homeHp, on: false };
     })() : null;
+    const fx = buildingEffects(m, side);
     for (const sq of m.armies[side]) {
+      if (m.units[sq.unit].building) continue; // a building: see buildingBodies
       const w = tileToWorld(sq.col, sq.row);
       const ch = charOf(m, side), forward = isFlank(side, sq.col, sq.row) || inNoMans(sq.row);
-      let u = unitFor(m, side, sq.unit, sq);
+      let u = withConstructFx(unitFor(m, side, sq.unit, sq), fx);
       const mp = mapOf(m);
       if (mp && mp.stealthDmg && u.stealth) u = { ...u, hit: u.hit * (1 + mp.stealthDmg / 100) }; // the map favours stealth units
       if (mp && mp.boostHp && (mp.boostUnits || []).includes(m.units[sq.unit].name)) u = { ...u, hp: u.hp * (1 + mp.boostHp / 100) }; // ...or these units by name
@@ -2761,9 +3377,36 @@ const Game = (() => {
       if (towerSkill2On(m, side, 'bastion')) tu = { ...tu, moat: { ...MOAT } };
       if (eagle) tu = { ...tu, range: tu.range + TOWER_SKILL.eagleRange, aps: tu.aps * (1 + TOWER_SKILL.eagleAps / 100) };
       if (airship) tu = { ...tu, hit: tu.hit + AIRSHIP.sniperHit };
+      if (fx.awake && towerType(m, side).awake) tu = { ...tu, ...towerType(m, side).awake, idle: false, awake: true }; // Core Awoken: the Mecha Tower drives
       const w = tileToWorld(t.col, t.row), tb = E.buildSquad(tu, side, w.x, w.y, -2, TILE, idx);
       if (altarBought(m, side, 'walls')) for (const x of tb) x.walls = [ICE.wallHits, ICE.wallHits, ICE.wallHits, ICE.wallHits];
       idx += tb.length; out.push(...tb);
+      // the Mecha Tower's drone: circles the tower and does its shooting
+      if (tu.drone && tu.drone.unit) {
+        const du = E.withTraits({ ...tu.drone.unit, bodies: 1, aloft: true, noCount: true, construct: true, kind: 'drone' });
+        const [d] = E.buildSquad(du, side, w.x + tu.drone.orbit, w.y, -5, TILE, idx);
+        d.orbit = { anchor: tb[0], r: tu.drone.orbit };
+        idx++; out.push(d);
+      }
+      // the Mecha Tower's bots, bought for this round: minebots plant mines in no man's land, repairbots mend buildings
+      towerRounds(m, side).forEach((x, k) => {
+        if (!troundOn(m, side, x.id) || !x.bots || !x.bots.unit) return;
+        const n = Math.max(1, x.bots.count | 0), bu = E.withTraits({ ...x.bots.unit, bodies: 1, noCount: true, construct: true });
+        const bb = E.buildSquad({ ...bu, bodies: n }, side, w.x, w.y + (side === 0 ? 1 : -1) * TILE * 0.6, -6 - k, TILE, idx);
+        if (x.mines) { // each bot plants mines.each mines on tiles of no man's land picked from the match and round (the same on both phones)
+          const q = rng(m.seed + m.round * 811 + side * 53 + k), pool = [];
+          for (let row = 0; row < ROWS; row++) if (inNoMans(row)) for (let col = 0; col < COLS; col++) pool.push([col, row]);
+          const per = Math.max(1, x.mines.each | 0), picks = [];
+          while (picks.length < per * bb.length && pool.length) picks.push(pool.splice(Math.floor(q() * pool.length), 1)[0]);
+          const spots = picks.map(([col, row]) => { const c = tileToWorld(col, row); return { x: c.x + (q() - 0.5) * TILE * 0.6, y: c.y + (q() - 0.5) * TILE * 0.6 }; });
+          bb.forEach((b, j) => {
+            const mine = spots.filter((_, i) => i % bb.length === j);
+            mine.sort((a, c) => Math.abs(a.y - w.y) - Math.abs(c.y - w.y)); // nearest row first
+            b.plant = { spots: mine, mine: { hit: +x.mines.hit || 0, radius: +x.mines.radius || 0 } };
+          });
+        }
+        idx += bb.length; out.push(...bb);
+      });
       // Guards (keep): reskinned Wisps (base stats, no skills) a tile in front of the keep, holding there for a while
       // Brute guards (keep's second skill): Brutes with the skills bought for Brutes instead
       if (towerSkillOn(m, side, 'keep')) {
@@ -2801,6 +3444,9 @@ const Game = (() => {
         idx += wb.length; out.push(...wb);
       });
     }
+    // buildings (the Mechites' Factory)
+    const bb = buildingBodies(m, side, idx);
+    idx += bb.length; out.push(...bb);
     // Snowgres stand on their own tiles in no man's land; squad ids -10, -11, ... (not squads in the army)
     snowgres(m, side).forEach((sg, k) => {
       const w = tileToWorld(sg.col, sg.row), b = E.buildSquad(snowgreUnit(m, sg.strength), side, w.x, w.y, -10 - k, TILE, idx);
@@ -2907,6 +3553,7 @@ const Game = (() => {
       if (s.squad <= -10 && s.squad > YOT_SQUAD) { const sg = snowgres(m, side)[-10 - s.squad]; if (sg) sum += SQUAD_POINTS * GOLEM.cost * sg.strength * s.alive / s.total; continue; } // a Snowgre
       if (s.squad < 0) continue; // spawned bodies don't count
       const sq = m.armies[side].find(q => q.id === s.squad);
+      if (sq && m.units[sq.unit].building) continue; // nor do buildings
       const value = sq ? (m.units[sq.unit].cost || 1) * (TIER_DMG[tierOf(m.units, sq.unit)] || 1) : 1; // pricier squads hit harder, like their price
       sum += SQUAD_POINTS * value * s.alive / s.total;
     }
@@ -2945,6 +3592,7 @@ const Game = (() => {
       if (r) squads[side].push({ id: sq.id, unit: sq.unit, level: sq.level, left: r.alive / r.total, dealt: Math.round(r.dealt || 0) });
     }
     const towerFell = [0, 1].map(sd => { const q = res.squads[sd + ':-2']; return !!(q && q.alive === 0); });
+    const buildingNews = settleBuildings(m, res);
     // Matteo: the squads keep the charisma they ended the fight with; note the ones that became Gentlemen
     const gentlemen = [[], []];
     for (let side = 0; side < 2; side++) {
@@ -2966,13 +3614,14 @@ const Game = (() => {
         if (q.side !== sd) continue;
         const sq = q.squad >= 0 && m.armies[sd].find(x => x.id === q.squad);
         const key = sq ? 'u' + sq.unit : q.squad === -2 ? 'tower' : q.squad === -3 ? 'guards' : q.squad === -4 ? 'airship' : q.squad === YOT_SQUAD ? 'yot'
-          : q.squad === E.CONVERT_SQUAD ? 'won' : q.squad <= -10 && q.squad > YOT_SQUAD ? 'snowgre' : q.squad < 0 ? 'spawn' : null;
+          : q.squad === E.CONVERT_SQUAD ? 'won' : q.squad <= -10 && q.squad > YOT_SQUAD ? 'snowgre'
+          : q.squad <= BUILDING_SQUAD && buildingsOf(m, sd)[BUILDING_SQUAD - q.squad] ? 'b:' + buildingsOf(m, sd)[BUILDING_SQUAD - q.squad].id : q.squad < 0 ? 'spawn' : null;
         if (!key || (!sq && !(q.dealt > 0))) continue; // squads always show; the rest only if they dealt damage
         by[key] = (by[key] || 0) + (q.dealt || 0);
       }
-      return Object.keys(by).map(key => ({ key, dealt: Math.round(by[key]), ...(key === 'tower' ? { name: towerType(m, sd).name } : {}) }));
+      return Object.keys(by).map(key => ({ key, dealt: Math.round(by[key]), ...(key === 'tower' ? { name: towerType(m, sd).name } : key.startsWith('b:') ? { name: (buildingInfo(key.slice(2)) || {}).name || 'Building' } : {}) }));
     });
-    const summary = { round: m.round, winner: roundWinner, timeout: res.timeout, dmg, time: res.time, newlyReady, squads, towerFell, gentlemen, converted: res.converted || [0, 0], dealtBy };
+    const summary = { round: m.round, winner: roundWinner, timeout: res.timeout, dmg, time: res.time, newlyReady, squads, towerFell, gentlemen, converted: res.converted || [0, 0], dealtBy, buildings: buildingNews };
     // devtest: buildings destroyed in the fight cost their owner what their onDestroyed says (health now, gold below)
     if (isDev(m)) {
       summary.devLoss = [0, 1].map(sd => {
@@ -3028,7 +3677,7 @@ const Game = (() => {
   const felixGold = (m, side, round = m.round) => charOf(m, side) !== 'felix' ? 0 : round >= CHAR.felixRound2 ? CHAR.felixGold2 : round >= CHAR.felixRound ? CHAR.felixGold : 0;
 
   // ---------- leveling (manual, costs gold) ----------
-  const isReady = (m, sq) => sq.level < E.MAX_LEVEL && sq.xp >= xpNeeded(m.units[sq.unit], sq.level);
+  const isReady = (m, sq) => sq.level < E.MAX_LEVEL && sq.xp >= xpNeeded(m.units[sq.unit], sq.level) && !(m.units[sq.unit].building && !sq.built); // a building levels once built
 
   function levelUp(m, side, sqId) {
     const sq = m.armies[side].find(s => s.id === sqId);
@@ -3066,6 +3715,7 @@ const Game = (() => {
       if (AI.levelPolicy === 'smart' && u.bodies >= 8) continue;
       while (isReady(m, sq) && levelUp(m, side, sq.id)) done.push({ id: sq.id, unit: sq.unit, level: sq.level });
     }
+    for (const b of buildingsOf(m, side)) while (buildingReady(b) && levelBuilding(m, side, b.id)) done.push({ building: b.id, level: b.level });
     return done;
   }
 
@@ -3080,13 +3730,15 @@ const Game = (() => {
   const FACTION_MODE = { map: 'standard', picks: 2, order: [{ who: 'A', act: 'pick' }, { who: 'B', act: 'pick' }, { who: 'B', act: 'pick' }, { who: 'A', act: 'pick' }] };
   const TRAIT_STATS = ['hp', 'hit', 'aps', 'range', 'speed']; // a trait changes these by a percentage
   let FACTIONS = [];
-  // list: [{ id, name, color, theme, trait: { name, text, hp, hit, ... (percent) }, tower: { name, text, unit: { stats } }, units: [unit names] }]
+  // list: [{ id, name, color, theme, trait: { name, text, hp, hit, ... (percent) }, tower: { name, text, unit: { stats },
+  // awake (its stats under Core Awoken), rounds (skills bought every round, see towerRounds) }, units: [unit names] }]
   function setFactions(list) {
     FACTIONS = (Array.isArray(list) ? list : []).filter(f => f && typeof f.id === 'string' && f.id).map(f => ({
       id: f.id, name: String(f.name || f.id), color: f.color || '#C9B79C', theme: String(f.theme || ''),
       trait: f.trait && typeof f.trait === 'object' ? f.trait : null, units: Array.isArray(f.units) ? f.units.slice() : [],
       tower: { id: 'f-' + f.id, faction: f.id, name: (f.tower && f.tower.name) || f.name + ' tower', text: (f.tower && f.tower.text) || '',
-        unit: { ...TOWER, color: f.color || TOWER.color, ...((f.tower && f.tower.unit) || {}), name: (f.tower && f.tower.name) || f.name + ' Tower', kind: 'f-' + f.id } },
+        unit: { ...TOWER, color: f.color || TOWER.color, ...((f.tower && f.tower.unit) || {}), name: (f.tower && f.tower.name) || f.name + ' Tower', kind: 'f-' + f.id },
+        awake: (f.tower && f.tower.awake) || null, rounds: Array.isArray(f.tower && f.tower.rounds) ? f.tower.rounds.filter(x => x && x.id) : [] },
     }));
     return FACTIONS;
   }
@@ -3103,7 +3755,8 @@ const Game = (() => {
   function withFactionTrait(u, fid) {
     const t = fid && factionInfo(fid) && factionInfo(fid).trait;
     if (!u || !t) return u;
-    return modUnit(u, t);
+    const mul = (x) => { const o = { ...x }; for (const k of TRAIT_STATS) if (isFinite(+t[k]) && +t[k]) o[k] = x[k] * (1 + t[k] / 100); if (isFinite(+t.armor) && +t.armor) o.bonusArmor = (x.bonusArmor || 0) + +t.armor; return o; };
+    return withKids(mul(u), mul);
   }
   // the roster for a match between drafted factions: the faction units of `ids` (in that order) out of the full
   // faction set ({ units, matrix, skills } from faction-units.json), with the counter table cut to match
@@ -3260,7 +3913,7 @@ const Game = (() => {
     const where = (def && def.place) || 'zone';
     const ok = inZone(side, row) || (where === 'front' && inNoMans(row)) || (where === 'flank' && isFlank(side, col, row));
     if (!ok || reserved(side, col, row) || towerAt(m, side, col, row) || elfOwnAt(m, side, col, row) || wallAt(m, col, row)) return false;
-    if (m.armies[side].some(s => s.col === col && s.row === row)) return false;
+    if (m.armies[side].some(s => covers(m, s, col, row)) || buildingAt(m, side, col, row)) return false; // squads (an Altar takes 2x2), the Mechites' buildings
     return !placedLessers(m, side).some(b => b.key !== key && b.col === col && b.row === row);
   }
   // place (or move) a building: any time in the round it was picked, fixed after its first fight
@@ -3301,8 +3954,7 @@ const Game = (() => {
     const o = { ...u };
     for (const k of TRAIT_STATS) if (isFinite(+mods[k]) && +mods[k]) o[k] = u[k] * (1 + mods[k] / 100);
     if (isFinite(+mods.armor) && +mods.armor) o.bonusArmor = (u.bonusArmor || 0) + +mods.armor;
-    if (u.spawn && u.spawn.unit) o.spawn = { ...u.spawn, unit: modUnit(u.spawn.unit, mods) };
-    return o;
+    return withKids(o, (k) => modUnit(k, mods)); // spawned and built units get them too
   }
 
   // ---- Powers ----
@@ -3467,6 +4119,9 @@ const Game = (() => {
     if (canBuyTowerSkill(m, side) && rng(m.seed + m.round * 331 + side * 17)() < 0.5) buyTowerSkill(m, side); // own stream, as above
     if (canBuyTowerSkill2(m, side) && m.gold[side] - towerSkill2Cost(m, side) >= SQUAD_COST && rng(m.seed + m.round * 347 + side * 19)() < 0.35) buyTowerSkill2(m, side);
     if (canTakeLoan(m, side) && m.gold[side] < SQUAD_COST * 3 && rng(m.seed + m.round * 613 + side * 37)() < 0.4) takeLoan(m, side); // short on gold: sometimes a loan
+    for (const x of towerRounds(m, side)) { // the Mecha Tower's bots: some rounds, if they leave gold for a squad
+      if (canBuyTround(m, side, x.id) && m.gold[side] - troundCost(m, side, x.id) >= SQUAD_COST && rng(m.seed + m.round * 619 + side * 41 + x.id.length)() < 0.45) buyTround(m, side, x.id);
+    }
     if (towerPicked(m, side) && towerType(m, side).id === 'mage') { // a mage general most rounds, if it leaves gold for a squad
       const q = rng(m.seed + m.round * 577 + side * 29), g = MAGE_GENERALS[Math.floor(q() * MAGE_GENERALS.length)];
       if (q() < 0.6 && m.gold[side] - g.cost >= SQUAD_COST) buyMageGen(m, side, g.id);
@@ -3514,6 +4169,20 @@ const Game = (() => {
       const sh = shroomAt(m, col, row);
       if (sh && sh.type === 'green' && m.gold[side] - reserve - shroomCost(m, side) >= minCost && r() < 0.4) removeShroom(m, side, col, row);
     }
+    // buildings (a Factory): with a squad of the unit that brings one, sometimes place it on a back tile of its zone; once it
+    // is built, buy one of its units most rounds. Its own random stream, so the rest of the AI rolls the same as before.
+    const rb = rng(m.seed + m.round * 883 + side * 41);
+    m.units.forEach((u, ui) => E.SLOTS.forEach(k => {
+      if (!canBuyBuilding(m, side, ui, k) || m.gold[side] - reserve - skillCost(m, ui, k, side) < minCost || rb() >= 0.6) return;
+      const spots = [];
+      for (const row of zoneRows(side).slice(3)) for (let col = 1; col < COLS - 1; col++) if (buildingSpotOk(m, side, col, row)) spots.push({ col, row });
+      if (spots.length) { const sp = spots[Math.floor(rb() * spots.length)]; buyBuilding(m, side, ui, k, sp.col, sp.row); }
+    }));
+    for (const r of buildingRecords(m, side)) {
+      if (!r.rec.built || bskillOf(m, side, r.key) || rb() >= 0.75) continue;
+      const ok = buildingSkills(r.id).filter(x => m.gold[side] - reserve - bskillCost(r.id, x.id) >= 0);
+      if (ok.length) buyBuildingSkill(m, side, r.key, ok[Math.floor(rb() * ok.length)].id);
+    }
     // skills: for unit types it has 2 or more squads of, sometimes buy a skill if a squad is still affordable after
     if (AI.skills) {
       const types = Object.keys(own).map(Number).filter(ui => own[ui] >= 2).sort((a, b) => own[b] - own[a]);
@@ -3534,6 +4203,7 @@ const Game = (() => {
       let best = -1, bs = -Infinity;
       m.units.forEach((u, i) => {
         if (isOff(m, i, side)) return;
+        if (u.building && ((own[i] || 0) >= 1 || m.round < 3)) return; // a building (Altar of Build): one, from round 3
         const extra = isUnlocked(m, side, i) ? 0 : unlockCost(m, i, side); // a locked unit costs its unlock on top
         if (shopCost(m, side, i) + extra > budget) return;
         let s = 0, tot = 0;
@@ -3559,7 +4229,7 @@ const Game = (() => {
   function aiSpot(m, side, unitIdx, oppArmy, r) {
     const u = E.withTraits(m.units[unitIdx]);
     const rows = zoneRows(side);
-    const band = u.range <= 12 ? [0, 1] : u.range <= 22 ? [1, 2] : u.range <= 30 ? [2, 3] : [3, 4]; // rows counted from the front
+    const band = u.building ? [3, 4] : u.range <= 12 ? [0, 1] : u.range <= 22 ? [1, 2] : u.range <= 30 ? [2, 3] : [3, 4]; // rows counted from the front (a building at the back)
     // aim at the columns of the enemy squads this unit counters
     let wsum = 0, csum = 0;
     for (const s of oppArmy) {
@@ -3577,7 +4247,7 @@ const Game = (() => {
     for (let zi = 0; zi < rows.length; zi++) {
       for (let col = 0; col < COLS; col++) {
         const row = rows[zi];
-        if (occupied(m, side, col, row) || !canPlaceAt(m, side, col, row)) continue;
+        if (!spotFree(m, side, col, row, unitIdx) || !canPlaceAt(m, side, col, row, unitIdx)) continue;
         const rowCost = band.includes(zi) ? 0 : 3 * Math.min(Math.abs(zi - band[0]), Math.abs(zi - band[1]));
         const sh = (shroomAt(m, col, row) || {}).type;
         const c = Math.abs(col - target) + rowCost + r() * 0.8 + (sh === 'purple' ? -1.5 : sh === 'green' ? 4 : 0);
@@ -3594,9 +4264,13 @@ const Game = (() => {
     deploysAllowed, deploysLeft, deployedThisRound, canBuyDeploy, buyDeploy, refundDeploy,
     PACKAGE, allPackages, packOf, needsPack, freeLeft, choosePack, ensurePack,
     unlockCost, tierOf, startLevel, shopCost, mapFreeOf, mapFreeLeft, isUnlocked, unlockVisible, unlock, undoUnlock,
-    skillDef, skillCost, SKILL_STEP, skillsBought, isInnate, hasSkill, skillVisible, unitFor, canBuySkill, buySkill, undoSkill, sellValue, sell,
+    skillDef, skillCost, SKILL_STEP, skillsBought, isInnate, hasSkill, skillVisible, skillNeeds, skillNeedsMissing, unitFor, withCharacter,
+    footprint, blockOf, spotFree, buildingRecords, recordOf, recordWorld, buildingEffects,
+    setBuildings, BUILDINGS: () => BUILDINGS, buildingInfo, BUILDING_SQUAD, isBuildingSkill, buildingIdOf, buildingsOf, buildingOf, buildingAt, buildingShown, buildingSpotOk,
+    canBuyBuilding, buyBuilding, buildingSkills, buildingSkillInfo, bskillOf, bskillCost, canBuyBuildingSkill, buyBuildingSkill, undoBuildingSkill,
+    buildingXpNeeded, buildingLevelCost, buildingReady, levelBuilding, undoLevelBuilding, constructBuff, buildingBodies, canBuySkill, buySkill, undoSkill, sellValue, sell,
     isRider, hiddenFromFoe, isCarrier, riderOf, carrierOf, squadAt, boardable, unplaceSquad,
-    TOWER, TOWER_TYPES, OUTPOST, TOWER_PICK_ROUND, towerType, towerChoices, needsTowerPick, setTowerType, settleTowerPicks, TOWER_SKILL, towerSkillOf, towerSkillVisible, towerPicked, canBuyTowerSkill, buyTowerSkill, undoTowerSkill, towerSkillCost, towerSkill2Of, towerSkill2Visible, towerSkill2Cost, canBuyTowerSkill2, buyTowerSkill2, undoTowerSkill2, towerSkill2On, AIRSHIP, MOAT, INVEST, MAGE_GENERALS, mageGenPrice, MAGE, mageGenInfo, mageGenOf, mageTpOf, isExtraGen, mageGenCost, canBuyMageGen, buyMageGen, undoMageGen, mageTowerUnit, generalUnit, LOAN, loanNow, investNow, bankBusy, canTakeLoan, takeLoan, undoLoan, SLIME_UNITS, slimeTowerUnit, slimeSkillDefs, TOWER_MID, towerColOk, towerAt, needsTower, placeTower, ensureTower,
+    TOWER, TOWER_TYPES, OUTPOST, TOWER_PICK_ROUND, towerType, towerChoices, needsTowerPick, setTowerType, settleTowerPicks, TOWER_SKILL, towerSkillOf, towerSkillVisible, towerPicked, canBuyTowerSkill, buyTowerSkill, undoTowerSkill, towerSkillCost, towerSkill2Of, towerSkill2Visible, towerSkill2Cost, canBuyTowerSkill2, buyTowerSkill2, undoTowerSkill2, towerSkill2On, AIRSHIP, MOAT, INVEST, MAGE_GENERALS, mageGenPrice, MAGE, mageGenInfo, mageGenOf, mageTpOf, isExtraGen, mageGenCost, canBuyMageGen, buyMageGen, undoMageGen, mageTowerUnit, generalUnit, LOAN, loanNow, investNow, bankBusy, investNow, bankBusy, canTakeLoan, takeLoan, undoLoan, towerRounds, troundInfo, troundOn, troundCost, canBuyTround, buyTround, undoTround, SLIME_UNITS, slimeTowerUnit, slimeSkillDefs, TOWER_MID, towerColOk, towerAt, needsTower, placeTower, ensureTower,
     FLANK, flankRows, flankOpen, isFlank, reserved, canPlaceAt, isOff, enemyHolds, inNoMans, hasSkillType,
     STANDARD_PACK, ICE, ALTAR, GOLEM, isIce, hailRound, altarRound, stormShift, stormRows, hailTiles, altarCost, altarRefund, altarCount, pushRoom, altarBought, addAltar, buyAltar, undoAltar, snowgres, snowgreUnit,
     MAPS, ELF_TOWER, SHROOM, SHROOM_SPLIT, shroomAt, shroomTileAt, shroomRemoval, SHROOM_REMOVE, shroomCost, removeShroom, undoRemoveShroom, mapOf, elfSpot, rollMap, BRIBE_COST, bribeList, bribeGold, bribeCount, bribeNow, bribeCost, bribeRefund, ELF_POWER, elfPowered, elfUnit, ELF_OWN, elfOwnCost, elfOwnOf, elfOwnAt, elfOwnUnlocked, elfOwnOffered, canBuyElfOwn, elfOwnSpotOk, buyElfOwn, undoElfOwn, bribeLeader, canBribe, bribe, undoBribe,
@@ -3748,7 +4422,7 @@ const Art = (() => {
 // It sees the game only through view(), which it calls at the start of every draw and which returns what this
 // screen shows right now:
 //   { m, me, phase, units, mode, bt, battlePre, fx, selected, moving, drag, hoverTile, rangeOf,
-//     editable, placingUnit, placingElf, placingTower, battleCam, dev }
+//     editable, placingUnit, placingElf, placingTower, placingBuilding, battleCam, dev }
 // dev (Factions devtest only): { bPlacing, castMode, guideMode, guideId, guide }: the building being placed, the spell being
 // cast, and the arrow being drawn (guide: its points so far, for squad guideId).
 // fx: short-lived battle effects as plain data (shots, flames, bolts, heals, deaths), in board metres.
@@ -3762,8 +4436,8 @@ const Art = (() => {
 const Render2D = (cv, view) => {
   let ctx = cv.getContext('2d'); // swapped for a moment while drawing map thumbnails (thumb)
   let m = null, me = 0, phase = 'start', units = [], mode = 'ai', bt = null, battlePre = null, fx = [], battleCam = null;
-  let selected = null, moving = null, drag = null, hoverTile = null, rangeOf = null, editable = false, placingUnit = null, placingElf = false, placingTower = false, dev = null;
-  const pull = () => { ({ m, me, phase, units, mode, bt, battlePre, fx, selected, moving, drag, hoverTile, rangeOf, editable, placingUnit, placingElf, placingTower, battleCam, dev } = view()); };
+  let selected = null, moving = null, drag = null, hoverTile = null, rangeOf = null, editable = false, placingUnit = null, placingElf = false, placingTower = false, dev = null, placingBuilding = null;
+  const pull = () => { ({ m, me, phase, units, mode, bt, battlePre, fx, selected, moving, drag, hoverTile, rangeOf, editable, placingUnit, placingElf, placingTower, placingBuilding, battleCam, dev } = view()); };
   const foe = () => 1 - me;
   const css = Art.css, tag = Shapes.tag;
   const { ELF_COL, SHROOM_COL, CHARM_COL } = Art;
@@ -4180,6 +4854,22 @@ const Render2D = (cv, view) => {
 
   function drawSquad(sq, side, fresh) {
     const u = units[sq.unit];
+    if (u.building) { // a building bought in the shop (the Altar of Build): drawn in the middle of its block
+      const n = Game.footprint(m, sq.unit), w = Game.recordWorld({ col: sq.col, row: sq.row, size: n }), t = tilePx();
+      if (fresh) { // a dashed outline round its whole block
+        const cs = [sq.col, sq.col + n - 1].map(scol), rs = [sq.row, sq.row + n - 1].map(srow);
+        ctx.strokeStyle = teamCol(side); ctx.setLineDash([3, 3]); ctx.lineWidth = 1;
+        ctx.strokeRect(Math.min(...cs) * t + 1.5, Math.min(...rs) * t + 1.5, n * t - 3, n * t - 3); ctx.setLineDash([]);
+      }
+      drawBuilding(u.building, PX(w.x), PY(w.y), t, side, u.color, { built: !!sq.built, progress: sq.progress || 0, level: sq.level });
+      if (side === me && phase === 'deploy' && Game.isReady(m, sq)) {
+        const br = Math.max(5, t * 0.17), bx = PX(w.x) + t * 0.75, by = PY(w.y) - t * 0.75;
+        ctx.fillStyle = css('--gold'); ctx.beginPath(); ctx.arc(bx, by, br, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = css('--bg'); ctx.lineWidth = Math.max(1.5, br * 0.3);
+        ctx.beginPath(); ctx.moveTo(bx - br * 0.5, by); ctx.lineTo(bx + br * 0.5, by); ctx.moveTo(bx, by - br * 0.5); ctx.lineTo(bx, by + br * 0.5); ctx.stroke();
+      }
+      return;
+    }
     const w = Game.tileToWorld(sq.col, sq.row);
     const bodies = Engine.buildSquad(u, side, w.x, w.y, sq.id, Game.TILE);
     const col = teamCol(side);
@@ -4234,6 +4924,17 @@ const Render2D = (cv, view) => {
     ctx.globalAlpha = 0.8; ctx.stroke();
     ctx.fillStyle = '#1B2326'; ctx.fillRect(-L * 0.25, H * 0.75, L * 0.5, H * 0.45); // gondola
     ctx.restore(); ctx.globalAlpha = 1;
+  }
+  // the Mecha Tower's drone: a little quadcopter in the team colour, rotors spinning (t: tile size in px)
+  function drawDrone(b, t) {
+    const x = PX(b.x), y = PY(b.y), c = teamCol(b.side), s = t * 0.16, spin = (bt ? bt.time() : 0) * 30;
+    ctx.save(); ctx.translate(x, y); ctx.rotate(Math.PI / 4);
+    ctx.strokeStyle = '#2B2F33'; ctx.lineWidth = Math.max(1, s * 0.25);
+    ctx.beginPath(); ctx.moveTo(-s * 1.4, 0); ctx.lineTo(s * 1.4, 0); ctx.moveTo(0, -s * 1.4); ctx.lineTo(0, s * 1.4); ctx.stroke();
+    ctx.globalAlpha = 0.55; ctx.fillStyle = '#C9D3D6';
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { ctx.beginPath(); ctx.ellipse(dx * s * 1.4, dy * s * 1.4, s * 0.6, s * 0.6 * Math.abs(Math.sin(spin + dx + dy * 2)), 0, 0, Math.PI * 2); ctx.fill(); }
+    ctx.globalAlpha = 1; ctx.fillStyle = c; ctx.fillRect(-s * 0.55, -s * 0.55, s * 1.1, s * 1.1);
+    ctx.restore();
   }
   // A small picture of a match's board for the map picker: the board at the start of a match, with both towers
   // (and the elf tower). Drawn with the board's own drawing code, by pointing it at a small canvas for a moment.
@@ -4308,9 +5009,100 @@ const Render2D = (cv, view) => {
     ctx.beginPath(); ctx.moveTo(x, py - s * 0.28); ctx.lineTo(x + s * 0.2, py - s * 0.23); ctx.lineTo(x, py - s * 0.18); ctx.closePath(); ctx.fill();
   }
 
+  // a building (the Mechites' Factory) at (x, y), s = tile size in px: a brick workshop with a sawtooth roof, a chimney
+  // and a cog on its front. Not built yet: a faint scaffold with a gold arc for how far along it is. o: { built,
+  // progress, level, hpr (health ring in fights), time (fight time: smoke rises from a built one) }
+  const smokeCol = '#8E8A86';
+  // kind: the building's kind (factory, altar); o.awake (Core Awoken): it walks, on tracks or spider legs
+  function drawBuilding(kind, x, y, s, side, color, o) {
+    if (o.awake) { // tracks under the factory, four legs under the altar
+      ctx.strokeStyle = '#2B2F33'; ctx.fillStyle = '#2B2F33'; ctx.lineWidth = Math.max(1.5, s * 0.06);
+      if (kind === 'altar') for (const [dx, dy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) { const sw = Math.sin((o.time || 0) * 6 + dx * 2 + dy) * s * 0.05; ctx.beginPath(); ctx.moveTo(x + dx * s * 0.3, y + dy * s * 0.3); ctx.lineTo(x + dx * s * 0.62 + sw, y + dy * s * 0.4); ctx.lineTo(x + dx * s * 0.7 + sw, y + dy * s * 0.7); ctx.stroke(); }
+      else { ctx.fillRect(x - s * 0.44, y + s * 0.12, s * 0.88, s * 0.14); ctx.fillRect(x - s * 0.44, y - s * 0.42, s * 0.88, s * 0.1); }
+    }
+    if (kind === 'altar') return drawAltarOfBuild(x, y, s, side, color, o);
+    return drawFactory(x, y, s, side, color, o);
+  }
+  // the Altar of Build where four tiles meet: a stone ring with four pillars, and the Cog Spire in its middle
+  function drawAltarOfBuild(x, y, s, side, color, o) {
+    const R = s * 0.62, team = teamCol(side);
+    ctx.globalAlpha = 0.3; ctx.fillStyle = '#000'; ctx.beginPath(); ctx.ellipse(x, y + R * 0.15, R * 1.05, R * 0.9, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = o.built ? 1 : 0.5;
+    ctx.fillStyle = color; ctx.strokeStyle = team; ctx.lineWidth = Math.max(1, s * 0.04);
+    ctx.beginPath(); ctx.arc(x, y, R, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#5F574C'; ctx.beginPath(); ctx.arc(x, y, R * 0.72, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#D6B26A'; ctx.strokeStyle = '#3A3330'; ctx.lineWidth = 1;
+    for (const [dx, dy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) { ctx.beginPath(); ctx.arc(x + dx * R * 0.62, y + dy * R * 0.62, R * 0.13, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); } // pillars
+    const turn = (o.time || 0) * 0.8, cr = R * 0.38; // the Cog Spire: a turning cog with a spire on top
+    ctx.fillStyle = '#C9A24A';
+    ctx.beginPath(); for (let k = 0; k < 20; k++) { const a = turn + k * Math.PI / 10, r = k % 2 ? cr : cr * 1.25; ctx.lineTo(x + Math.cos(a) * r, y + Math.sin(a) * r); } ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#8FE3FF'; ctx.beginPath(); ctx.moveTo(x, y - cr * 1.5); ctx.lineTo(x + cr * 0.35, y + cr * 0.2); ctx.lineTo(x - cr * 0.35, y + cr * 0.2); ctx.closePath(); ctx.fill();
+    ctx.globalAlpha = 1;
+    if (!o.built) {
+      ctx.strokeStyle = '#C8A46A'; ctx.lineWidth = 1; ctx.setLineDash([2, 2]); ctx.beginPath(); ctx.arc(x, y, R * 1.08, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
+      ctx.strokeStyle = css('--gold'); ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc(x, y, R * 1.2, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.max(0, Math.min(1, o.progress || 0))); ctx.stroke();
+    }
+    if (o.hpr != null) { ctx.strokeStyle = team; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, R * 1.32, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.max(0, o.hpr)); ctx.stroke(); }
+    if (o.level > 0) { ctx.fillStyle = css('--gold'); const pr = Math.max(2, s * 0.07); for (let k = 0; k < o.level; k++) { ctx.beginPath(); ctx.arc(x - R + pr + k * pr * 2.6, y - R - pr, pr, 0, Math.PI * 2); ctx.fill(); } }
+  }
+  function drawFactory(x, y, s, side, color, o) {
+    const w = s * 0.74, h = s * 0.42, x0 = x - w / 2, y0 = y - h * 0.25, team = teamCol(side);
+    ctx.globalAlpha = 0.3; ctx.fillStyle = '#000'; ctx.beginPath(); ctx.ellipse(x, y0 + h + s * 0.02, w * 0.55, s * 0.07, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = o.built ? 1 : 0.5;
+    ctx.fillStyle = '#3A3330'; ctx.fillRect(x0 + w * 0.7, y0 - h * 0.85, w * 0.13, h * 0.85); // chimney
+    ctx.fillStyle = color; ctx.strokeStyle = team; ctx.lineWidth = Math.max(1, s * 0.035);
+    ctx.beginPath(); ctx.rect(x0, y0, w, h); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#5B4A3A'; // sawtooth roof
+    for (let k = 0; k < 3; k++) { ctx.beginPath(); ctx.moveTo(x0 + k * w / 3, y0); ctx.lineTo(x0 + (k + 1) * w / 3, y0 - h * 0.38); ctx.lineTo(x0 + (k + 1) * w / 3, y0); ctx.closePath(); ctx.fill(); ctx.stroke(); }
+    const cr = h * 0.27, cx = x0 + w * 0.3, cy = y0 + h * 0.5, turn = (o.time || 0) * 1.5; // the cog turns while it works
+    ctx.fillStyle = '#D6B26A';
+    ctx.beginPath(); for (let k = 0; k < 16; k++) { const a = turn + k * Math.PI / 8, r = k % 2 ? cr : cr * 1.3; ctx.lineTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r); } ctx.closePath(); ctx.fill();
+    ctx.fillStyle = color; ctx.beginPath(); ctx.arc(cx, cy, cr * 0.4, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#231E1B'; ctx.fillRect(x0 + w * 0.58, y0 + h * 0.35, w * 0.22, h * 0.65); // door
+    ctx.globalAlpha = 1;
+    if (!o.built) { // scaffold poles and how far along it is
+      ctx.strokeStyle = '#C8A46A'; ctx.lineWidth = 1; ctx.setLineDash([2, 2]);
+      ctx.strokeRect(x0 - s * 0.05, y0 - h * 0.45, w + s * 0.1, h * 1.45); ctx.setLineDash([]);
+      ctx.strokeStyle = css('--gold'); ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.arc(x, y, s * 0.46, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.max(0, Math.min(1, o.progress || 0))); ctx.stroke();
+    } else if (o.time != null) puffs(x0 + w * 0.765, y0 - h * 0.85, s * 0.07, o.time, x * 0.37);
+    if (o.hpr != null) { ctx.strokeStyle = team; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, s * 0.52, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.max(0, o.hpr)); ctx.stroke(); }
+    if (o.level > 0) { ctx.fillStyle = css('--gold'); const pr = Math.max(2, s * 0.07); for (let k = 0; k < o.level; k++) { ctx.beginPath(); ctx.arc(x - s / 2 + pr + 3 + k * pr * 2.6, y - s / 2 + pr + 3, pr, 0, Math.PI * 2); ctx.fill(); } }
+  }
+  // grey smoke puffs rising from (x, y): Mechite constructs and buildings rattle and smoke
+  function puffs(x, y, r, time, seed) {
+    ctx.fillStyle = smokeCol;
+    for (let k = 0; k < 3; k++) {
+      const p = ((time * 0.8 + k / 3 + seed) % 1 + 1) % 1; // seed may be negative (it comes from a position)
+      ctx.globalAlpha = 0.45 * (1 - p);
+      ctx.beginPath(); ctx.arc(x + Math.sin((p + k) * 5) * r * 0.8, y - p * r * 6, r * (0.6 + p * 1.2), 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+  // the buildings on the board while deploying (an opponent's new one only from the fight on)
+  function drawBuildings() {
+    const t = tilePx();
+    for (const side of [me, foe()]) for (const b of Game.buildingsOf(m, side)) {
+      if (!Game.buildingShown(m, me, deploying(), side, b)) continue;
+      const info = Game.buildingInfo(b.id) || {};
+      drawBuilding(b.id, (scol(b.col) + 0.5) * t, (srow(b.row) + 0.5) * t, t, side, info.color || '#B07A3C', { built: b.built, progress: b.progress, level: b.level });
+      if (side === me && deploying() && Game.buildingReady(b)) { // ready to level up: the gold plus badge, as on a squad
+        const br = Math.max(5, t * 0.17), bx = (scol(b.col) + 1) * t - br - 2, by = srow(b.row) * t + br + 2;
+        ctx.fillStyle = css('--gold'); ctx.beginPath(); ctx.arc(bx, by, br, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = css('--bg'); ctx.lineWidth = Math.max(1.5, br * 0.3);
+        ctx.beginPath(); ctx.moveTo(bx - br * 0.5, by); ctx.lineTo(bx + br * 0.5, by); ctx.moveTo(bx, by - br * 0.5); ctx.lineTo(bx, by + br * 0.5); ctx.stroke();
+      }
+    }
+  }
+
   function drawDeploy() {
     drawBoard();
     const t = tilePx();
+    if (placingBuilding && editable) { // where the building may go: any free tile of your zone
+      ctx.strokeStyle = css('--gold'); ctx.globalAlpha = 0.6; ctx.lineWidth = 1.5; ctx.setLineDash([4, 3]);
+      for (const row of Game.zoneRows(me)) for (let c = 0; c < Game.COLS; c++) if (Game.buildingSpotOk(m, me, c, row)) ctx.strokeRect(scol(c) * t + 3, srow(row) * t + 3, t - 6, t - 6);
+      ctx.setLineDash([]); ctx.globalAlpha = 1;
+    }
     if (placingElf && editable) { // where the elf tower may go: any free tile of your zone
       ctx.strokeStyle = ELF_COL; ctx.globalAlpha = 0.6; ctx.lineWidth = 1.5;
       for (const row of Game.zoneRows(me)) for (let c = 0; c < Game.COLS; c++) if (Game.elfOwnSpotOk(m, me, c, row)) ctx.strokeRect(scol(c) * t + 3, srow(row) * t + 3, t - 6, t - 6);
@@ -4327,16 +5119,17 @@ const Render2D = (cv, view) => {
       ctx.strokeStyle = css('--you'); ctx.globalAlpha = 0.25; ctx.lineWidth = 1;
       const pu = placingUnit;
       for (let row = 0; row < Game.ROWS; row++) for (let c = 0; c < Game.COLS; c++) {
-        if (Game.canPlaceAt(m, me, c, row, pu) && !Game.occupied(m, me, c, row)) ctx.strokeRect(scol(c) * t + 3, srow(row) * t + 3, t - 6, t - 6);
+        if (Game.canPlaceAt(m, me, c, row, pu) && Game.spotFree(m, me, c, row, pu)) ctx.strokeRect(scol(c) * t + 3, srow(row) * t + 3, t - 6, t - 6);
       }
       // your carriers with room for this unit
       ctx.strokeStyle = css('--gold'); ctx.globalAlpha = 0.8; ctx.lineWidth = 1.5;
       if (pu != null) for (const sq of m.armies[me]) if (Game.boardable(m, me, sq.col, sq.row, pu) && !(drag && drag.id === sq.id)) ctx.strokeRect(scol(sq.col) * t + 2, srow(sq.row) * t + 2, t - 4, t - 4);
       ctx.globalAlpha = 1;
     }
-    if (hoverTile && (selected !== null || moving != null) && Game.canPlaceAt(m, me, hoverTile.col, hoverTile.row, placingUnit) && (!Game.occupied(m, me, hoverTile.col, hoverTile.row) || (placingUnit != null && Game.boardable(m, me, hoverTile.col, hoverTile.row, placingUnit)))) {
+    if (hoverTile && (selected !== null || moving != null) && Game.canPlaceAt(m, me, hoverTile.col, hoverTile.row, placingUnit) && (Game.spotFree(m, me, hoverTile.col, hoverTile.row, placingUnit) || (placingUnit != null && Game.boardable(m, me, hoverTile.col, hoverTile.row, placingUnit)))) {
       ctx.fillStyle = css('--you'); ctx.globalAlpha = 0.18;
-      ctx.fillRect(scol(hoverTile.col) * t, srow(hoverTile.row) * t, t, t); ctx.globalAlpha = 1;
+      for (const [c, r] of Game.blockOf(m, placingUnit, hoverTile.col, hoverTile.row)) ctx.fillRect(scol(c) * t, srow(r) * t, t, t); // a building's whole block
+      ctx.globalAlpha = 1;
     }
     // the opponent's squads from this round stay hidden until the fight
     // a squad they moved this round still shows on its old tile
@@ -4367,6 +5160,7 @@ const Render2D = (cv, view) => {
     }
     for (const side of [me, foe()]) if (towerVisible(side) && Game.towerUp(m, side)) drawTowerTile(side);
     if (Game.isDev(m)) drawLessers();
+    drawBuildings();
     // the squad tapped last: its range as a dotted ring round its tile (theirs as you can know it)
     const rs = rangeOf && phase === 'deploy' && m.armies[rangeOf.side].find(s => s.id === rangeOf.id);
     if (rs) {
@@ -4419,14 +5213,36 @@ const Render2D = (cv, view) => {
       const hpr = b.hp / b.u.hp, t = tilePx();
       if (b.u.kind === 'wall') { drawWallBlock(PX(b.x), PY(b.y), t, b.side, hpr); continue; }
       if (b.u.lesser) { drawLesser(PX(b.x), PY(b.y), t, b.side, b.u, hpr, false); continue; }
+      if (b.u.awake) { ctx.fillStyle = '#2B2F33'; for (const [dx, dy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) { ctx.beginPath(); ctx.arc(PX(b.x) + dx * t * 0.36, PY(b.y) + dy * t * 0.3, t * 0.12, 0, Math.PI * 2); ctx.fill(); } } // Core Awoken: the Mecha Tower on wheels
       drawKeep(PX(b.x), PY(b.y), t, b.side, hpr, b.u.kind, null, Game.charOf(battlePre || m, b.side));
       ctx.strokeStyle = teamCol(b.side); ctx.lineWidth = 2;
       ctx.beginPath(); ctx.arc(PX(b.x), PY(b.y), t * 0.5, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * hpr); ctx.stroke();
       if (b.walls) drawWalls(b.x, b.y, b.walls);
     }
     drawElfTower(battlePre || m, false);
+    for (const b of bt.bodies) { // buildings (the Factory): a site with its progress, or a workshop that smokes and makes its unit
+      if (!b.alive || !b.u.building) continue;
+      const info = Game.buildingInfo(b.u.building) || {}, t = tilePx();
+      drawBuilding(b.u.building, PX(b.x), PY(b.y), t, b.side, info.color || b.u.color, { built: !b.site || b.site.work >= b.site.need, progress: b.site ? b.site.work / b.site.need : 1, level: b.level, hpr: b.hp / b.u.hp, time: bt.time(), awake: b.u.awake });
+      if (b.produce && !b.produced && b.prodT != null) { ctx.strokeStyle = css('--gold'); ctx.lineWidth = 2.5; ctx.setLineDash([2, 2]); ctx.beginPath(); ctx.arc(PX(b.x), PY(b.y), t * 0.38, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * (1 - b.prodT / b.produce.time)); ctx.stroke(); ctx.setLineDash([]); }
+    }
+    // the Mecha Tower's mines: a small dark disc ringed in the team colour (the opponent's fainter)
+    for (const mn of bt.mines ? bt.mines() : []) {
+      const r = Math.max(2, tilePx() * 0.09);
+      ctx.fillStyle = '#2B2F33'; ctx.beginPath(); ctx.arc(PX(mn.x), PY(mn.y), r, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = teamCol(mn.side); ctx.globalAlpha = mn.side === me ? 0.9 : 0.5; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(PX(mn.x), PY(mn.y), r + 1.5, 0, Math.PI * 2); ctx.stroke(); ctx.globalAlpha = 1;
+    }
+    // a linked squad: a faint line joins its bodies (they share one health pool)
     for (const b of bt.bodies) {
-      if (!b.alive || b.u.structure || b.u.aloft) continue;
+      if (!b.alive || !b.link || b.hidden) continue;
+      const nx = b.link[(b.link.indexOf(b) + 1) % b.link.length];
+      if (nx === b || !nx.alive) continue;
+      ctx.strokeStyle = teamCol(b.side); ctx.globalAlpha = 0.35; ctx.lineWidth = 1; ctx.setLineDash([3, 3]);
+      ctx.beginPath(); ctx.moveTo(PX(b.x), PY(b.y)); ctx.lineTo(PX(nx.x), PY(nx.y)); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1;
+    }
+    for (const b of bt.bodies) {
+      if (!b.alive || b.u.structure || b.u.aloft || b.u.building) continue;
       const c = teamCol(b.side), r = radius(b.u), hpr = b.hp / b.u.hp;
       if (b.hidden) { // stealthed: a dashed ghost while hidden (fainter for the enemy's)
         ctx.globalAlpha = b.side === me ? 0.6 : 0.3; ctx.strokeStyle = c; ctx.lineWidth = 1.5; ctx.setLineDash([2, 2]);
@@ -4434,8 +5250,20 @@ const Render2D = (cv, view) => {
         ctx.setLineDash([]); ctx.globalAlpha = 1;
         continue;
       }
+      // what Mechites build rattles as it goes (the Mechites themselves move smoothly)
+      const rattle = b.u.construct ? Math.sin(bt.time() * 47 + b.x * 3.1) * r * 0.08 : 0;
       const lk = b.mask && b.side !== me && !b.revealed ? b.mask : b.u; // a disguise, until its first attack (devtest)
-      Shapes.body(ctx, lk.shape, PX(b.x), PY(b.y), r, upOf(b.side), lk.color, c, (0.35 + 0.65 * hpr) * (b.delay > 0 ? 0.45 : 1));
+      Shapes.body(ctx, lk.shape, PX(b.x) + rattle, PY(b.y), r, upOf(b.side), lk.color, c, (0.35 + 0.65 * hpr) * (b.delay > 0 ? 0.45 : 1));
+      if (b.u.unfolded) { ctx.fillStyle = 'rgba(30,24,20,0.75)'; for (const o of [-1, 1]) ctx.fillRect(PX(b.x) + o * r * 0.45 - r * 0.15, PY(b.y) + r * 0.75, r * 0.3, r * 0.45); } // an unfolded roller: two stumpy legs
+      if (b.u.roll > 0) { // a roller: a seam across the ball turns as it rolls
+        const a = (b.moved || 0) / Math.max(0.3, r / S);
+        ctx.strokeStyle = 'rgba(30,24,20,0.75)'; ctx.lineWidth = Math.max(1, r * 0.18);
+        ctx.beginPath(); ctx.moveTo(PX(b.x) + Math.cos(a) * r * 0.85, PY(b.y) + Math.sin(a) * r * 0.85); ctx.lineTo(PX(b.x) - Math.cos(a) * r * 0.85, PY(b.y) - Math.sin(a) * r * 0.85); ctx.stroke();
+      }
+      if (b.u.bot === 'repair') { ctx.fillStyle = '#6FD08C'; ctx.fillRect(PX(b.x) - r * 0.45, PY(b.y) - r * 0.12, r * 0.9, r * 0.24); ctx.fillRect(PX(b.x) - r * 0.12, PY(b.y) - r * 0.45, r * 0.24, r * 0.9); } // a repairbot: a green cross
+      if (b.u.bot === 'mine' && b.plant && b.plant.spots.length) { ctx.fillStyle = '#2B2F33'; ctx.beginPath(); ctx.arc(PX(b.x), PY(b.y), r * 0.4, 0, Math.PI * 2); ctx.fill(); } // a minebot still carrying mines
+      if (b.u.construct) puffs(PX(b.x) + r * 0.4, PY(b.y) - r * 0.8, Math.max(1.2, r * 0.22), bt.time(), b.x * 0.13 + b.y * 0.07);
+      if (b.u.awake) { ctx.fillStyle = '#2B2F33'; for (const o of [-1, 1]) { ctx.beginPath(); ctx.arc(PX(b.x) + o * r * 0.8, PY(b.y) + r * 0.8, Math.max(1.5, r * 0.35), 0, Math.PI * 2); ctx.fill(); } } // Core Awoken: wheels
       if (b.delay > 0) { // flank squads arrive a few seconds late: a shrinking ring shows the wait
         ctx.strokeStyle = css('--gold'); ctx.lineWidth = 1.5;
         ctx.beginPath(); ctx.arc(PX(b.x), PY(b.y), r + 3, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * b.delay / Game.FLANK.delay); ctx.stroke();
@@ -4453,6 +5281,10 @@ const Render2D = (cv, view) => {
       if (b.windTarget && b.u.windUp > 0) {
         ctx.strokeStyle = c; ctx.lineWidth = 2.5;
         ctx.beginPath(); ctx.arc(PX(b.x), PY(b.y), r + 4, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * (1 - b.windT / b.u.windUp)); ctx.stroke();
+      }
+      if (b.buildT > 0 && b.buildFull > 0) { // a builder at work: a gold ring fills as it builds
+        ctx.strokeStyle = gold; ctx.lineWidth = 2.5; ctx.setLineDash([2, 2]);
+        ctx.beginPath(); ctx.arc(PX(b.x), PY(b.y), r + 4, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * (1 - b.buildT / b.buildFull)); ctx.stroke(); ctx.setLineDash([]);
       }
       const ch = bt.charm ? bt.charm(b.side, b.squad) : 0;
       if (ch >= Engine.CHARM_MAX) drawHat(PX(b.x), PY(b.y) - r * 0.8, Math.max(6, r * 1.3)); // a Gentleman
@@ -4491,7 +5323,7 @@ const Render2D = (cv, view) => {
         ctx.globalAlpha = 1;
       }
     }
-    for (const b of bt.bodies) if (b.alive && b.u.aloft) drawAirship(b, tilePx()); // airships fly over everything
+    for (const b of bt.bodies) if (b.alive && b.u.aloft) (b.u.kind === 'drone' ? drawDrone : drawAirship)(b, tilePx()); // airships and drones fly over everything
     for (const e of fx) {
       const a = 1 - e.age / e.life;
       if (e.kind === 'heal') {
@@ -4896,6 +5728,7 @@ import * as THREE from './vendor/three.module.min.js';
 // Sizes are for a body of radius 1 metre standing on y = 0 and facing -z; the renderer scales them like the 2D board.
 const Models3D = (THREE) => {
   const SKIN = '#D9A27A', DARK = '#2B2F33', METAL = '#B8C0C8', WOOD = '#8A5A32', BONE = '#E9E3CF', GLOW = '#FFE9A8';
+  const BRASS = '#C9A24A', IRON = '#55595E', PAPER = '#E8DFC4', HEAL = '#6FD08C';
   const STONE = '#6E6A64', ETHER = '#8FE3FF', SUN = '#F7D154', FIRE = '#FF8A3D', EMBER = '#FFD27A', ROCK = '#5A4A42', GHOST = '#7CFF6B';
   const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), v = new THREE.Vector3(), s = new THREE.Vector3(1, 1, 1);
   const box = (w, h, d) => new THREE.BoxGeometry(w, h, d);
@@ -5142,6 +5975,108 @@ const Models3D = (THREE) => {
       P(cyl(0.035, 0.035, 2.4, 5), WOOD, [0, 1.5, 0.38], [0, 0, 0.7]),
       P(cone(0.08, 0.36, 4), METAL, [-0.89, 2.56, 0.38], [0, 0, 0.7]),
       P(cyl(0.35, 0.35, 0.07, 8), 'team', [-0.5, 1.25, -0.1], [0, 0, Math.PI / 2])],
+    // ---------- the Mechites (NAMED): rock elementals with clockwork in them, and the rattling machines they build ----------
+    // a cog: a disc with teeth, lying in the x-y plane (turn it to face where it should)
+    // Rollers: a ball of rock with a brass cog band and a band in the team colour. Built around its middle (ROLL_AT
+    // metres up), so the renderer can roll it.
+    roller: () => [
+      P(ball(0.9), 'tint', [0, 0.9, 0], [0.3, 0.5, 0]),
+      P(new THREE.TorusGeometry(0.88, 0.09, 4, 14), BRASS, [0, 0.9, 0], [0, Math.PI / 2, 0]),
+      ...[...Array(10)].map((_, k) => { const a = k * Math.PI / 5; return P(box(0.12, 0.2, 0.2), BRASS, [0, 0.9 + Math.cos(a) * 0.98, Math.sin(a) * 0.98], [a, 0, 0]); }),
+      P(new THREE.TorusGeometry(0.8, 0.07, 4, 14), 'team', [0, 0.9, 0], [0, 0, 0])],
+    // Rollers, unfolded (the Unfold skill): the ball opens into a rock elemental on two stumpy legs, the cog band
+    // round its waist, big boulder fists
+    'roller:unfolded': () => [
+      P(box(0.4, 0.75, 0.42), 'tint', [-0.32, 0.38, 0]), P(box(0.4, 0.75, 0.42), 'tint', [0.32, 0.38, 0]),
+      P(ball(0.72), 'tint', [0, 1.4, 0], [0.3, 0.5, 0], [1.1, 0.95, 0.9]),
+      P(new THREE.TorusGeometry(0.74, 0.08, 4, 14), BRASS, [0, 1.15, 0], [Math.PI / 2, 0, 0]),
+      P(new THREE.TorusGeometry(0.66, 0.06, 4, 14), 'team', [0, 1.6, 0], [Math.PI / 2, 0, 0]),
+      P(ball(0.38), 'tint', [-0.95, 1.05, -0.2]), P(ball(0.38), 'tint', [0.95, 1.05, -0.2]),
+      P(box(0.26, 0.06, 0.04), ETHER, [0, 1.75, -0.66])],
+    // Cog Builder: a squat rock elemental with a backpack full of scrolls and a brass gadget for a right hand
+    cogBuilder: () => [
+      P(box(0.34, 0.6, 0.34), STONE, [-0.22, 0.3, 0]), P(box(0.34, 0.6, 0.34), STONE, [0.22, 0.3, 0]),
+      P(ball(0.62), 'tint', [0, 1.1, 0], [0.2, 0.4, 0], [1.05, 0.95, 0.9]),
+      P(box(1.0, 0.12, 0.7), 'team', [0, 0.85, 0]),
+      P(ball(0.3), 'tint', [0, 1.8, -0.05], [0.4, 0, 0]),
+      P(box(0.22, 0.05, 0.04), ETHER, [0, 1.85, -0.3]),
+      P(box(0.7, 0.75, 0.4), WOOD, [0, 1.2, 0.6]),
+      ...[-0.2, 0, 0.2].map((x, k) => P(cyl(0.07, 0.07, 0.6 + k * 0.1, 6), PAPER, [x, 1.75, 0.6], [0.2 * (k - 1), 0, 0.2 * (k - 1)])),
+      P(ball(0.24), 'tint', [-0.6, 1.0, -0.1]),
+      P(cyl(0.12, 0.16, 0.6, 6), BRASS, [0.62, 1.05, -0.2], [-1.2, 0, 0]),
+      P(cone(0.12, 0.35, 6), METAL, [0.62, 1.2, -0.62], [-1.2 - Math.PI, 0, 0]),
+      P(new THREE.TorusGeometry(0.16, 0.05, 3, 8), BRASS, [0.62, 1.08, -0.15])],
+    // Mechite Guards: a heavy rock body under iron plates, a brass shoulder, a short shotgun
+    mechGuard: () => [
+      P(box(0.36, 0.65, 0.36), STONE, [-0.25, 0.33, 0]), P(box(0.36, 0.65, 0.36), STONE, [0.25, 0.33, 0]),
+      P(ball(0.6), 'tint', [0, 1.15, 0], [0, 0.3, 0], [1.1, 1, 0.9]),
+      P(box(0.9, 0.55, 0.2), IRON, [0, 1.2, -0.48]),
+      P(box(0.5, 0.25, 0.06), 'team', [0, 1.25, -0.6]),
+      P(ball(0.34), BRASS, [-0.62, 1.5, 0]), P(ball(0.3), IRON, [0.62, 1.5, 0]),
+      P(ball(0.28), 'tint', [0, 1.85, -0.05], [0.4, 0.2, 0]),
+      P(box(0.26, 0.06, 0.04), ETHER, [0, 1.88, -0.3]),
+      P(cyl(0.09, 0.09, 0.9, 6), DARK, [0.5, 1.1, -0.55], [Math.PI / 2, 0, 0]),
+      P(cyl(0.09, 0.09, 0.9, 6), DARK, [0.32, 1.1, -0.55], [Math.PI / 2, 0, 0]),
+      P(box(0.35, 0.25, 0.45), WOOD, [0.41, 1.0, 0.0])],
+    // Cog Turret: a rattling gun on a tripod, an exhaust pipe at the back
+    cogTurret: () => [
+      ...[0, 2.1, 4.2].map(a => P(cyl(0.06, 0.08, 1.0, 4), IRON, [Math.sin(a) * 0.35, 0.45, Math.cos(a) * 0.35], [Math.cos(a) * 0.45, 0, -Math.sin(a) * 0.45])),
+      P(box(0.8, 0.5, 0.7), 'tint', [0, 1.05, 0]),
+      P(box(0.84, 0.12, 0.74), 'team', [0, 0.85, 0]),
+      P(cyl(0.1, 0.1, 0.9, 6), DARK, [0, 1.1, -0.75], [Math.PI / 2, 0, 0]),
+      P(cyl(0.07, 0.07, 0.5, 5), IRON, [0.25, 1.5, 0.3]),
+      P(new THREE.TorusGeometry(0.2, 0.05, 3, 8), BRASS, [-0.41, 1.05, 0], [0, Math.PI / 2, 0])],
+    // Mecha Drone: a little quadcopter, a body in the team colour, four rotors on crossed arms, a gun underneath
+    drone: () => [
+      P(box(0.9, 0.35, 0.9), 'team', [0, 1.4, 0]),
+      P(box(2.4, 0.08, 0.16), IRON, [0, 1.5, 0], [0, Math.PI / 4, 0]), P(box(2.4, 0.08, 0.16), IRON, [0, 1.5, 0], [0, -Math.PI / 4, 0]),
+      ...[[-1, -1], [1, -1], [-1, 1], [1, 1]].map(([x, z]) => P(cyl(0.45, 0.45, 0.05, 8), DARK, [x * 0.85, 1.58, z * 0.85])),
+      P(cyl(0.07, 0.07, 0.6, 5), DARK, [0, 1.12, -0.35], [Math.PI / 2, 0, 0])],
+    // Minebot: a squat crawler carrying a stack of mines, a red lamp on top
+    minebot: () => [
+      P(box(0.8, 0.4, 0.95), 'tint', [0, 0.45, 0]), P(box(0.84, 0.1, 0.99), 'team', [0, 0.3, 0]),
+      P(cyl(0.3, 0.3, 0.12, 8), DARK, [0, 0.72, 0.1]), P(cyl(0.3, 0.3, 0.12, 8), DARK, [0, 0.86, 0.1]),
+      P(ball(0.09), '#E2513B', [0, 1.0, -0.3]),
+      ...[-1, 1].map(x => P(box(0.14, 0.3, 1.0), DARK, [x * 0.46, 0.18, 0]))],
+    // Repairbot: a hovering box with a wrench arm and a rotor, like a healbot in work colours
+    repairbot: () => [
+      P(box(0.7, 0.5, 0.7), 'tint', [0, 1.2, 0]), P(box(0.74, 0.1, 0.74), 'team', [0, 0.97, 0]),
+      P(box(0.08, 0.08, 0.7), IRON, [0.3, 1.1, -0.55]), P(new THREE.TorusGeometry(0.12, 0.04, 3, 6, 4.5), IRON, [0.3, 1.1, -0.92], [Math.PI / 2, 0, 0]),
+      P(cyl(0.04, 0.04, 0.3, 4), IRON, [0, 1.6, 0]), P(box(1.2, 0.04, 0.12), IRON, [0, 1.76, 0])],
+    // Healbot: a little hovering box with a green cross and a spinning rotor on top
+    healbot: () => [
+      P(box(0.7, 0.55, 0.7), 'tint', [0, 1.2, 0]),
+      P(box(0.74, 0.1, 0.74), 'team', [0, 0.95, 0]),
+      P(box(0.42, 0.12, 0.04), HEAL, [0, 1.22, -0.37]), P(box(0.12, 0.42, 0.04), HEAL, [0, 1.22, -0.37]),
+      P(cyl(0.04, 0.04, 0.3, 4), IRON, [0, 1.6, 0]),
+      P(box(1.2, 0.04, 0.12), IRON, [0, 1.76, 0]),
+      P(cone(0.12, 0.3, 4), IRON, [0, 0.82, 0], [Math.PI, 0, 0])],
+    // Cogbot Fighter: a boxy riveted brawler with huge fists
+    cogFighter: () => [
+      P(box(0.32, 0.7, 0.32), IRON, [-0.3, 0.35, 0]), P(box(0.32, 0.7, 0.32), IRON, [0.3, 0.35, 0]),
+      P(box(1.2, 1.0, 0.8), 'tint', [0, 1.25, 0]),
+      P(box(0.7, 0.35, 0.06), 'team', [0, 1.3, -0.42]),
+      P(box(0.5, 0.4, 0.5), 'tint', [0, 1.95, -0.05]),
+      P(box(0.34, 0.07, 0.04), '#FF8A3D', [0, 1.98, -0.31]),
+      ...[-1, 1].flatMap(sd => [P(cyl(0.12, 0.12, 0.7, 5), IRON, [sd * 0.75, 1.25, -0.1], [0.4, 0, 0]), P(box(0.45, 0.45, 0.45), BRASS, [sd * 0.78, 0.95, -0.4])]),
+      P(cyl(0.08, 0.08, 0.5, 5), DARK, [0.4, 2.0, 0.35])],
+    // Cogbot Machinegunner: a walker carrying a rotary gun of three barrels
+    cogGunner: () => [
+      P(box(0.26, 0.8, 0.26), IRON, [-0.28, 0.4, 0]), P(box(0.26, 0.8, 0.26), IRON, [0.28, 0.4, 0]),
+      P(box(0.9, 0.7, 0.7), 'tint', [0, 1.15, 0]),
+      P(box(0.92, 0.14, 0.72), 'team', [0, 0.85, 0]),
+      P(ball(0.25), DARK, [0, 1.7, -0.05]),
+      P(cyl(0.22, 0.22, 0.3, 8), BRASS, [0.25, 1.2, -0.45], [Math.PI / 2, 0, 0]),
+      ...[0, 2.1, 4.2].map(a => P(cyl(0.05, 0.05, 1.1, 4), DARK, [0.25 + Math.sin(a) * 0.12, 1.2 + Math.cos(a) * 0.12, -1.05], [Math.PI / 2, 0, 0])),
+      P(cyl(0.07, 0.07, 0.5, 5), IRON, [-0.3, 1.6, 0.3])],
+    // CogMech: a tall two-legged mech with a cockpit and a cannon on each arm (it fires both at once)
+    cogMech: () => [
+      ...[-1, 1].flatMap(sd => [P(box(0.3, 0.9, 0.35), IRON, [sd * 0.4, 0.45, 0.1]), P(box(0.34, 0.7, 0.34), 'tint', [sd * 0.4, 1.2, -0.05], [0.25, 0, 0])]),
+      P(box(1.3, 0.9, 1.0), 'tint', [0, 1.95, 0]),
+      P(box(1.34, 0.18, 1.04), 'team', [0, 1.55, 0]),
+      P(box(0.6, 0.35, 0.1), ETHER, [0, 2.1, -0.52]),
+      ...[-1, 1].flatMap(sd => [P(box(0.35, 0.35, 0.8), BRASS, [sd * 0.88, 1.9, -0.1]), P(cyl(0.11, 0.11, 0.9, 6), DARK, [sd * 0.88, 1.9, -0.85], [Math.PI / 2, 0, 0])]),
+      P(cyl(0.08, 0.08, 0.6, 5), IRON, [0.35, 2.65, 0.35]), P(cyl(0.08, 0.08, 0.6, 5), IRON, [-0.35, 2.65, 0.35])],
     // a thrown spear, flying toward -z: the shaft takes the unit's colour
     spear: () => [P(cyl(0.06, 0.06, 2.4, 4), 'tint', [0, 0, 0.3], [Math.PI / 2, 0, 0]), P(cone(0.14, 0.5, 4), METAL, [0, 0, -1.1], [-Math.PI / 2, 0, 0])],
     // a neutral elf spire: pale stone, a roof in its own colour (green, gilded once the elves grow strong), a flag
@@ -5157,6 +6092,15 @@ const Models3D = (THREE) => {
   const crown = (r, y, n = 8) => [...Array(n)].map((_, k) => P(box(r * 0.3, 0.55, 0.45), 'tint', [Math.sin((k + 0.5) * Math.PI * 2 / n) * r, y, Math.cos((k + 0.5) * Math.PI * 2 / n) * r], [0, (k + 0.5) * Math.PI * 2 / n, 0]));
   const door = (z, w = 0.9, h = 1.2) => P(box(w, h, 0.2), DARK, [0, h / 2, z]);
   const flagOn = (y) => [P(cyl(0.05, 0.05, 1.6, 4), WOOD, [0, y + 0.8, 0]), P(box(0.05, 0.5, 0.9), 'team', [0, y + 1.3, 0.45])];
+  const mechaTower = (y0 = 0) => lifted([
+    P(cyl(2.2, 2.5, 3.2, 10), 'tint', [0, 1.6, 0]),
+    P(new THREE.TorusGeometry(2.3, 0.22, 4, 14), BRASS, [0, 2.2, 0], [Math.PI / 2, 0, 0]),
+    ...[...Array(10)].map((_, k) => { const a = k * Math.PI / 5; return P(box(0.35, 0.4, 0.35), BRASS, [Math.cos(a) * 2.55, 2.2, Math.sin(a) * 2.55]); }),
+    P(cyl(2.4, 2.4, 0.3, 10), IRON, [0, 3.35, 0]),
+    P(cyl(1.4, 1.4, 0.08, 10), 'team', [0, 3.55, 0]),
+    P(cyl(0.08, 0.08, 1.8, 4), IRON, [1.6, 4.3, 0]), P(ball(0.18), '#F2C94C', [1.6, 5.25, 0]),
+    P(cyl(0.3, 0.35, 1.6, 6), DARK, [-1.2, 4.0, 1.4]), P(cyl(0.25, 0.3, 1.2, 6), DARK, [-0.5, 3.8, 1.8]),
+    door(-2.3, 0.9, 1.3)], y0);
   const TOWERS = {
     keep: () => [P(cyl(1.9, 2.3, 4.6, 8), 'tint', [0, 2.3, 0]), P(cyl(2.3, 2.1, 0.6, 8), 'tint', [0, 4.9, 0]), ...crown(2.05, 5.5),
       P(cone(1.7, 2.2, 8), 'team', [0, 6.3, 0]), ...flagOn(7.1), door(-2.05)],
@@ -5173,6 +6117,9 @@ const Models3D = (THREE) => {
     slime: () => [P(cyl(1.8, 2.2, 4.4, 7), 'tint', [0, 2.2, 0]), P(cyl(2.2, 2.0, 0.6, 7), 'tint', [0, 4.7, 0]), ...crown(1.95, 5.25, 7),
       ...[...Array(7)].map((_, k) => P(cone(0.35, 1.2, 5), '#3FA81E', [Math.sin(k * 0.9) * 2.15, 3.9 - (k % 2) * 0.4, Math.cos(k * 0.9) * 2.15], [Math.PI, 0, 0])),
       P(ball(0.85), '#3FA81E', [0, 5.6, 0]), P(cyl(0.65, 0.65, 0.2, 8), 'team', [0, 0.65, -2.0], [Math.PI / 2, 0, 0]), ...flagOn(5.4)],
+    // the Mechites' Mecha Tower: a squat riveted drum in the faction's colour, a brass cog band, a landing pad for its
+    // drone on top with a mast and a lamp, exhaust stacks at the back
+    'f-mechites': () => mechaTower(),
     // a faction's tower: a stone hall, a tall round tower and spire in the faction's colour, banners in the team colour
     faction: () => [P(box(3.4, 3.4, 3.4), STONE, [0, 1.7, 0]), ...crown(2.0, 3.65, 8).map(p => ({ g: p.g, col: STONE })),
       P(cyl(1.3, 1.5, 3.2, 8), 'tint', [0, 5.0, 0]), P(cone(1.7, 2.4, 8), 'tint', [0, 7.8, 0]),
@@ -5186,17 +6133,63 @@ const Models3D = (THREE) => {
     P(box(0.7, 1.1, 0.15), DARK, [0, 0.55, -1.32]), P(cyl(0.25, 0.25, 1.2, 6), STONE, [0.9, 3.0, 0.5]), ...flagOn(3.4)];
   BUILD.wall = () => [...[-1.5, -0.75, 0, 0.75, 1.5].map((x, k) => P(cyl(0.32, 0.32, 2.2 + (k % 2) * 0.3, 6), WOOD, [x, 1.1 + (k % 2) * 0.15, 0])),
     ...[-1.5, -0.75, 0, 0.75, 1.5].map((x, k) => P(cone(0.32, 0.6, 6), '#B79A6E', [x, 2.5 + (k % 2) * 0.3, 0])), P(box(3.6, 0.25, 0.2), 'team', [0, 1.4, -0.3])];
+  // Core Awoken: the Mecha Tower on four big wheels
+  BUILD['tower:f-mechites:awake'] = () => [...mechaTower(1.0),
+    ...[[-1, -1], [1, -1], [-1, 1], [1, 1]].map(([x, z]) => P(cyl(0.95, 0.95, 0.55, 10), DARK, [x * 2.05, 0.95, z * 1.5], [0, 0, Math.PI / 2])),
+    P(cyl(0.12, 0.12, 2.0, 6), IRON, [0, 4.4, 0.6], [-0.9, 0, 0])]; // and a mortar barrel
+  // buildings (drawn at their real size, like towers): the Mechites' Factory, a brick workshop in the building's colour
+  // with a sawtooth roof, a smoking chimney, a big brass cog on its front and banners in the team colour
+  const lifted = (list, y0) => { if (!y0) return list; for (const p of list) p.g.translate(0, y0, 0); return list; };
+  const factory = (y0 = 0) => lifted([
+    P(box(4.0, 2.4, 3.2), 'tint', [0, 1.2, 0]),
+    ...[-1.33, 0, 1.33].flatMap(x => [P(box(1.45, 0.12, 3.3), '#5B4A3A', [x - 0.05, 2.75, 0], [0, 0, 0.45]), P(box(0.08, 0.62, 3.3), '#9FC7D9', [x + 0.62, 2.7, 0])]),
+    P(cyl(0.35, 0.42, 3.6, 6), DARK, [1.3, 3.6, 0.9]),
+    P(cyl(0.45, 0.45, 0.25, 6), BRASS, [1.3, 4.6, 0.9]),
+    P(cyl(0.95, 0.95, 0.2, 14), BRASS, [-0.9, 1.4, -1.65], [Math.PI / 2, 0, 0]),
+    ...[...Array(10)].map((_, k) => { const a = k * Math.PI / 5; return P(box(0.28, 0.28, 0.2), BRASS, [-0.9 + Math.cos(a) * 1.05, 1.4 + Math.sin(a) * 1.05, -1.65], [0, 0, a]); }),
+    P(box(1.0, 1.5, 0.15), DARK, [0.9, 0.75, -1.63]),
+    P(box(0.15, 1.3, 0.9), 'team', [-2.05, 1.6, 0.5]), P(box(0.15, 1.3, 0.9), 'team', [2.05, 1.6, -0.5])], y0);
+  BUILD['building:factory'] = () => factory();
+  // Core Awoken: the factory on caterpillar tracks with a big tank gun on its roof
+  BUILD['building:factory:awake'] = () => [...factory(0.7),
+    ...[-1, 1].flatMap(sd => [P(box(0.9, 0.8, 3.8), DARK, [sd * 1.75, 0.4, 0]), ...[-1.4, -0.45, 0.45, 1.4].map(z => P(cyl(0.32, 0.32, 0.95, 8), IRON, [sd * 1.75, 0.4, z], [0, 0, Math.PI / 2]))]),
+    P(box(1.4, 0.6, 1.4), IRON, [-0.6, 3.75, 0.3]), P(cyl(0.18, 0.2, 3.0, 8), DARK, [-0.6, 3.8, -1.4], [Math.PI / 2, 0, 0])];
+  // the Altar of Build: a stone ring where four tiles meet, four pillars with brass caps and banners, and the Cog Spire
+  // in its middle: a tall spire ringed by a standing brass cog, an ether crystal on top
+  const altar = (y0 = 0) => lifted([
+    P(cyl(3.8, 4.0, 0.45, 16), 'tint', [0, 0.22, 0]),
+    P(cyl(2.9, 2.9, 0.5, 16), STONE, [0, 0.3, 0]),
+    ...[[-1, -1], [1, -1], [-1, 1], [1, 1]].flatMap(([x, z]) => [P(cyl(0.38, 0.45, 2.4, 6), STONE, [x * 2.6, 1.6, z * 2.6]), P(cyl(0.5, 0.5, 0.25, 6), BRASS, [x * 2.6, 2.9, z * 2.6]),
+      P(box(0.06, 0.9, 0.55), 'team', [x * 2.6 - x * 0.42, 1.9, z * 2.6])]),
+    P(cone(0.9, 5.2, 8), 'tint', [0, 3.0, 0]),
+    P(new THREE.TorusGeometry(1.4, 0.18, 4, 16), BRASS, [0, 2.4, 0]),
+    ...[...Array(12)].map((_, k) => { const a = k * Math.PI / 6; return P(box(0.3, 0.32, 0.3), BRASS, [Math.cos(a) * 1.62, 2.4 + Math.sin(a) * 1.62, 0], [0, 0, a]); }),
+    P(ball(0.5), ETHER, [0, 5.9, 0])], y0);
+  BUILD['building:altar'] = () => altar();
+  // Core Awoken: the altar rises on four spider legs
+  BUILD['building:altar:awake'] = () => [...altar(1.6),
+    ...[[-1, -1], [1, -1], [-1, 1], [1, 1]].flatMap(([x, z]) => [P(box(0.3, 2.6, 0.3), IRON, [x * 3.0, 2.0, z * 3.0], [z * 0.5, 0, -x * 0.5]), P(box(0.28, 2.2, 0.28), IRON, [x * 4.1, 0.9, z * 4.1], [-z * 0.25, 0, x * 0.25])])];
+  // Core Awoken: a turret on wheels
+  BUILD['cogTurret:awake'] = () => [
+    P(box(0.8, 0.5, 0.7), 'tint', [0, 0.85, 0]), P(box(0.84, 0.12, 0.74), 'team', [0, 0.65, 0]),
+    P(cyl(0.12, 0.12, 0.9, 6), DARK, [0, 1.15, -0.55], [Math.PI / 2 - 0.6, 0, 0]),
+    ...[[-1, -1], [1, -1], [-1, 1], [1, 1]].map(([x, z]) => P(cyl(0.28, 0.28, 0.16, 8), DARK, [x * 0.5, 0.28, z * 0.32], [0, 0, Math.PI / 2])),
+    P(cyl(0.07, 0.07, 0.5, 5), IRON, [0.25, 1.3, 0.3])];
+  BUILD.building = BUILD['building:factory']; // any other building, until it has a model of its own
 
   const NAMED = { 'Ether Golem': 'golem', 'Sun Priest': 'sunPriest', 'Meteor Caller': 'meteor', 'War Mammoth': 'mammoth', 'Necromancer': 'necro', 'Truespear': 'truespear',
     'Ent': 'ent', 'Rogue': 'rogue', 'Sniper': 'sniper', 'Slimeshots': 'slimeshot', 'Skeleton Archers': 'skeleton',
+    'Rollers': 'roller', 'Cog Builder': 'cogBuilder', 'Mechite Guards': 'mechGuard', 'Cog Turret': 'cogTurret', 'Healbot': 'healbot',
+    'Minebot': 'minebot', 'Repairbot': 'repairbot', 'Cogbot Fighter': 'cogFighter', 'Cogbot Machinegunner': 'cogGunner', 'CogMech': 'cogMech',
     'Fire Mage': 'wizard:fire', 'Flame Wizard': 'wizard:flame', 'Leaf Wizard': 'wizard:leaf', 'Earth Wizard': 'wizard:earth', 'Steel Wizard': 'wizard:steel', 'Slime Wizard': 'wizard:slime' };
   const RANGED = 12; // metres: from this range on, a unit is drawn as an archer or a caster
   function kindOf(u) {
     if (u.spire) return 'spire';
     if (u.structure && (u.kind === 'lesser' || u.kind === 'wall')) return u.kind;
-    if (u.structure) return TOWERS[u.kind] ? 'tower:' + u.kind : /^f-/.test(u.kind || '') ? 'tower:faction' : 'tower:keep';
-    if (u.aloft) return 'airship';
-    if (NAMED[u.name]) return NAMED[u.name];
+    if (u.building) { const k = 'building:' + u.building; return u.awake && BUILD[k + ':awake'] ? k + ':awake' : BUILD[k] ? k : 'building'; } // Core Awoken: its walking version
+    if (u.structure) { const k = TOWERS[u.kind] ? 'tower:' + u.kind : /^f-/.test(u.kind || '') ? 'tower:faction' : 'tower:keep'; return u.awake && BUILD[k + ':awake'] ? k + ':awake' : k; } // Core Awoken: the Mecha Tower on wheels
+    if (u.aloft) return u.kind === 'drone' ? 'drone' : 'airship';
+    if (NAMED[u.name]) { const k = NAMED[u.name]; return u.awake && BUILD[k + ':awake'] ? k + ':awake' : u.unfolded && BUILD[k + ':unfolded'] ? k + ':unfolded' : k; } // Core Awoken, Unfold: their own versions
     if (u.shape === 'horse') return 'horse';
     if (u.shape === 'spider') return 'spider';
     if (u.shape === 'imp' || u.shape === 'ring') return 'flier';
@@ -5225,14 +6218,16 @@ const Models3D = (THREE) => {
     }
     return tops[kind];
   }
-  return { kindOf, parts, height, KINDS: Object.keys(BUILD) };
+  // models that roll (a roller's ball): the height of their middle, for a body of radius 1
+  const ROLL_AT = { roller: 0.9 };
+  return { kindOf, parts, height, ROLL_AT, KINDS: Object.keys(BUILD) };
 };
 
 // ===== 3D board renderer: draws the board, the squads and the battles with three.js =====
 // Render3D(THREE, el, view, opts) puts a WebGL canvas in el and offers the same calls as Render2D, reading the game
 // only through the same view():
 //   { m, me, phase, units, mode, bt, battlePre, fx, selected, moving, drag, hoverTile, rangeOf,
-//     editable, placingUnit, placingElf, placingTower, battleCam }
+//     editable, placingUnit, placingElf, placingTower, placingBuilding, battleCam, dev }
 // battleCam ({ zoom, x, y, k }, the final seconds of a fight): from the strategic or tilted view the camera moves in, lower and onto
 // the action (Camera3D's focus); a player who went into a closer view keeps it.
 // Calls: size() after el changes size, draw() once per frame, tileAt(clientX, clientY) -> { col, row } or null,
@@ -5312,7 +6307,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
     const key = [idOf(v.m), idOf(v.battlePre), v.m.round, v.me, v.phase, uiOff, v.dev ? JSON.stringify([v.dev, v.editable, v.m.dev.casts.length, v.m.armies[v.me].map(q => q.guide || 0)]) : ''].join('|'); // devtest: arrows, spells and placing show at once
     if (key === floorKey && !(v.phase === 'deploy' && floorAge > 0.5)) return;
     floorKey = key; floorAge = 0;
-    floorView = { ...v, bt: v.phase === 'battle' ? null : v.bt, fx: [], selected: null, moving: null, drag: null, hoverTile: null, placingElf: false, placingTower: false };
+    floorView = { ...v, bt: v.phase === 'battle' ? null : v.bt, fx: [], selected: null, moving: null, drag: null, hoverTile: null, placingElf: false, placingTower: false, placingBuilding: null };
     floor2d.size(); floor2d.floor(uiOff); // the ground view gets the land alone, no zones or grid
     // a texture can't grow in place: when the canvas changed size (the first floor, or after a resize), start a new one
     const dims = floorCv.width + 'x' + floorCv.height;
@@ -5356,6 +6351,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
   const teamColor = (side, me) => color(Art.teamCol(side, me));
   const tmpM = new THREE.Matrix4(), tmpQ = new THREE.Quaternion(), tmpP = new THREE.Vector3(), tmpS = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0), tmpC = new THREE.Color();
   const zAxis = new THREE.Vector3(0, 0, 1), tmpD = new THREE.Vector3(), camRight = new THREE.Vector3(), camDown = new THREE.Vector3();
+  const xAxis = new THREE.Vector3(1, 0, 0), tmpQ2 = new THREE.Quaternion();
 
   // ---------- sprites: every small marker, in one draw call ----------
   // Each is a quad: an icon or a bar facing the camera, or a ring arc, disc or tile square lying on the ground.
@@ -5599,12 +6595,24 @@ const Render3D = (THREE, el, view, opts = {}) => {
       if (!b.alive) { if (!b.boarded) { const [wx, wz] = world(f, b.x, b.y); scene_(() => disc(wx, wz, Math.max(0.3, size(b.u) * 0.45), muted, 0.18)); } continue; }
       if (b.boarded) continue;
       const p = glide(b, dt);
-      const look = b.u.aloft ? 'glass' : b.hidden ? (b.side === me ? 'ghost' : 'ghostFoe') : b.delay > 0 ? 'ghost' : 'solid';
+      const look = b.u.aloft || (b.site && b.site.work < b.site.need) ? 'glass' : b.hidden ? (b.side === me ? 'ghost' : 'ghostFoe') : b.delay > 0 ? 'ghost' : 'solid'; // a building site is a see-through scaffold
       const crest = b.u.structure ? Game.charOf(src, b.side) : null;
       const u = b.mask && b.side !== me && !b.revealed ? { ...b.u, ...b.mask } : b.u; // a disguise, until its first attack (devtest)
-      const tag = b.u.structure || b.u.aloft || (b.hidden && b.side !== me) ? null : `${b.side}|${b.squad}|${u.name}`;
+      const tag = b.u.structure || b.u.aloft || b.u.noCount || (b.hidden && b.side !== me) ? null : `${b.side}|${b.squad}|${u.name}`;
       bodies.push({ u, side: b.side, x: p.x, y: p.y, hx: b.hx, hy: b.hy, look, moving: p.moving, phase: p.phase, b, crest, edge: Art.teamCol(b.side, me), tag });
       if (b.u.structure && b.walls) addWalls(f, b.x, b.y, b.walls);
+    }
+    // the Mecha Tower's mines: a dark disc ringed in the team colour (the opponent's fainter)
+    for (const mn of bt.mines ? bt.mines() : []) {
+      const [wx, wz] = world(f, mn.x, mn.y), team = teamColor(mn.side, me);
+      scene_(() => { disc(wx, wz, 0.55, color('#2B2F33'), 0.9); arc(wx, wz, 0.8, team, mn.side === me ? 0.9 : 0.5, 1, 0.14); });
+    }
+    // a linked squad: a faint line joins its bodies (they share one health pool)
+    for (const b of bt.bodies) {
+      if (!b.alive || !b.link || b.hidden || uiOff) continue;
+      const nx = b.link[(b.link.indexOf(b) + 1) % b.link.length], p = shown.get(b), q = nx && shown.get(nx);
+      if (nx === b || !nx.alive || !p || !q) continue;
+      beam(p.x * f, 0.5, -p.y * f, q.x * f, 0.5, -q.y * f, 0.08 * fxWide(), teamColor(b.side, me), 0.35);
     }
     addSpires(v, src, false, f);
   }
@@ -5615,6 +6623,15 @@ const Render3D = (THREE, el, view, opts = {}) => {
     const deploying = phase === 'deploy';
     const you = color(css('--you') || '#5CC6DF'), gold = color(css('--gold') || '#E6B84A');
     const squad = (sq, side, fresh) => {
+      if (units[sq.unit].building) { // a building bought in the shop (the Altar of Build): in the middle of its block
+        const u = units[sq.unit], n = Game.footprint(m, sq.unit), w = Game.recordWorld({ col: sq.col, row: sq.row, size: n }), [wx, wz] = world(f, w.x, w.y);
+        bodies.push({ u: { ...u, size: n }, side, x: w.x, y: w.y, look: sq.built ? 'solid' : 'glass' });
+        if (!sq.built) arc(wx, wz, 2.6 * n, gold, 0.95, sq.progress || 0, 0.05);
+        if (fresh) for (const [c, r] of Game.blockOf(m, sq.unit, sq.col, sq.row)) { const st = tileCenter(v, c, r); tileSq(st.c, st.r, teamColor(side, me), 0.8, 0.05, 14); }
+        if (sq.level > 0) iconRow([...Array(sq.level)].map(() => 'dot'), wx, 7.2, wz, 0.5, gold);
+        if (side === me && deploying && Game.isReady(m, sq)) icon('plus', wx + camRight.x * 4, 5, wz + camRight.z * 4, 1.1);
+        return [wx, wz];
+      }
       const u = units[sq.unit], w = Game.tileToWorld(sq.col, sq.row), st = tileCenter(v, sq.col, sq.row);
       const list = Engine.buildSquad(u, side, w.x, w.y, sq.id, T);
       squadTiles.add(sq.col + ',' + sq.row);
@@ -5660,12 +6677,12 @@ const Render3D = (THREE, el, view, opts = {}) => {
     // where things may go
     if ((selected !== null || (drag && drag.moved) || moving != null) && deploying) {
       for (let row = 0; row < Game.ROWS; row++) for (let c = 0; c < Game.COLS; c++) {
-        if (Game.canPlaceAt(m, me, c, row, placingUnit) && !Game.occupied(m, me, c, row)) { const s = tileCenter(v, c, row); tileSq(s.c, s.r, you, 0.3, 0.05); }
+        if (Game.canPlaceAt(m, me, c, row, placingUnit) && Game.spotFree(m, me, c, row, placingUnit)) { const s = tileCenter(v, c, row); tileSq(s.c, s.r, you, 0.3, 0.05); }
       }
       if (placingUnit != null) for (const sq of m.armies[me]) if (Game.boardable(m, me, sq.col, sq.row, placingUnit) && !(drag && drag.id === sq.id)) { const s = tileCenter(v, sq.col, sq.row); tileSq(s.c, s.r, gold, 0.85, 0.07, 0, 0.03); }
     }
-    if (hoverTile && (selected !== null || moving != null) && Game.canPlaceAt(m, me, hoverTile.col, hoverTile.row, placingUnit) && (!Game.occupied(m, me, hoverTile.col, hoverTile.row) || (placingUnit != null && Game.boardable(m, me, hoverTile.col, hoverTile.row, placingUnit)))) {
-      const s = tileCenter(v, hoverTile.col, hoverTile.row); tileSq(s.c, s.r, you, 0.2, 1, 0, 0);
+    if (hoverTile && (selected !== null || moving != null) && Game.canPlaceAt(m, me, hoverTile.col, hoverTile.row, placingUnit) && (Game.spotFree(m, me, hoverTile.col, hoverTile.row, placingUnit) || (placingUnit != null && Game.boardable(m, me, hoverTile.col, hoverTile.row, placingUnit)))) {
+      for (const [c, r] of Game.blockOf(m, placingUnit, hoverTile.col, hoverTile.row)) { const s = tileCenter(v, c, r); tileSq(s.c, s.r, you, 0.2, 1, 0, 0); } // a building's whole block
     }
     if (v.placingElf && editable) for (const row of Game.zoneRows(me)) for (let c = 0; c < Game.COLS; c++) if (Game.elfOwnSpotOk(m, me, c, row)) { const s = tileCenter(v, c, row); tileSq(s.c, s.r, color(ELF_COL), 0.6, 0.06); }
     if (v.placingTower && editable) for (const row of Game.zoneRows(me)) for (let c = 0; c < Game.COLS; c++) {
@@ -5691,6 +6708,16 @@ const Render3D = (THREE, el, view, opts = {}) => {
       bodies.push({ u: towerUnit(m, side, Game.towerTypeShown(m, me, deploying, side)), side, x: w.x, y: w.y, look: 'solid', crest, edge: Art.teamCol(side, me) });
     }
     addSpires(v, m, deploying, f);
+    // buildings (the Mechites' Factory): a see-through scaffold with a gold arc until it is built (an opponent's new one only from the fight on)
+    for (const side of [me, foe]) for (const bl of Game.buildingsOf(m, side)) {
+      if (!Game.buildingShown(m, me, deploying, side, bl)) continue;
+      const info = Game.buildingInfo(bl.id) || {}, w = Game.tileToWorld(bl.col, bl.row), [wx, wz] = world(f, w.x, w.y);
+      bodies.push({ u: { name: info.name, building: bl.id, color: info.color || '#B07A3C', hp: info.hp || 1000 }, side, x: w.x, y: w.y, look: bl.built ? 'solid' : 'glass' });
+      if (!bl.built) arc(wx, wz, 3.2, gold, 0.95, bl.progress || 0, 0.07);
+      if (bl.level > 0) iconRow([...Array(bl.level)].map(() => 'dot'), wx, 5.6, wz, 0.5, gold);
+      if (side === me && deploying && Game.buildingReady(bl)) icon('plus', wx + camRight.x * 2.4, 4.2, wz + camRight.z * 2.4, 1.0);
+    }
+    if (v.placingBuilding && editable) for (const row of Game.zoneRows(me)) for (let c = 0; c < Game.COLS; c++) if (Game.buildingSpotOk(m, me, c, row)) { const s = tileCenter(v, c, row); tileSq(s.c, s.r, gold, 0.6, 0.06, 12); }
     if (Game.isIce(m)) for (const side of [me, foe]) {
       // Snowgres on their tiles in no man's land (an opponent's new one shows up at the fight), and walls bought this round
       const buys = (m.altar || []).filter(b => b.side === side && b.type === 'snowgre');
@@ -5709,14 +6736,22 @@ const Render3D = (THREE, el, view, opts = {}) => {
     const b = s.b, team = teamColor(s.side, me), u = s.u;
     const hpr = Math.max(0, b.hp / u.hp);
     let y = top + 0.45;
-    if (u.structure || (u.hp >= 500 && hpr < 1)) {
+    const big = u.structure || u.building;
+    if (big || (u.hp >= 500 && hpr < 1)) {
       if (viewMode === 'strategic') { // a ring around it, as on the 2D board (dark where the health is gone)
-        const rr = u.structure ? 3.1 : r * 1.42, th = u.structure ? 0.11 : 0.1;
+        const rr = big ? 3.1 * (u.size > 1 ? 1.5 : 1) : r * 1.42, th = big ? 0.11 : 0.1;
         arc(wx, wz, rr, color('#0B0F11'), 0.6, 1, th, 0, 0, 0.065); arc(wx, wz, rr, team, 1, hpr, th);
-      } else { const w = u.structure ? 4.2 : Math.max(1.6, r * 1.5); bar(wx, y, wz, w, u.structure ? 0.42 : 0.3, hpr, team); y += 0.55; }
+      } else { const w = big ? 4.2 : Math.max(1.6, r * 1.5); bar(wx, y, wz, w, big ? 0.42 : 0.3, hpr, team); y += 0.55; }
+    }
+    if (u.building) { // how far the site is built, and the unit it is making
+      const gold = color(css('--gold') || '#E6B84A');
+      if (b.site && b.site.work < b.site.need) arc(wx, wz, 3.5 * (u.size > 1 ? 1.5 : 1), gold, 1, b.site.work / b.site.need, 0.08);
+      if (b.produce && !b.produced && b.prodT != null) arc(wx, wz, 2.5, gold, 0.95, 1 - b.prodT / b.produce.time, 0.1, 24);
+      return;
     }
     if (u.structure) return;
     if (b.windTarget && u.windUp > 0) arc(wx, wz, r * 1.58, team, 0.95, 1 - b.windT / u.windUp, 0.1);
+    if (b.buildT > 0 && b.buildFull > 0) arc(wx, wz, r * 1.58, color(css('--gold') || '#E6B84A'), 1, 1 - b.buildT / b.buildFull, 0.12, 24); // a builder at work
     if (b.delay > 0) arc(wx, wz, r * 1.58, color(css('--gold') || '#E6B84A'), 1, b.delay / Game.FLANK.delay, 0.1);
     if (b.level > 0) for (let k = 0; k < b.level; k++) arc(wx, wz, r * (1.8 + k * 0.24), color(css('--gold') || '#E6B84A'), 0.9, 1, 0.12);
     if (b.convert) arc(wx, wz, r * 1.66, color(CHARM_COL), 0.9, 1, 0.07, 16);
@@ -5733,6 +6768,11 @@ const Render3D = (THREE, el, view, opts = {}) => {
       const hx = (b.hx || 0) * f, hz = -(b.hy || 0) * f;
       for (const o of [-0.4, 0.4]) beam(wx - hx * r * 1.2 - hz * r * o, 0.6 * r, wz - hz * r * 1.2 + hx * r * o, wx - hx * r * 2.4 - hz * r * o, 0.6 * r, wz - hz * r * 2.4 + hx * r * o, 0.06, color(SHROOM_COL.yellow), 0.6);
     }
+  }
+  // grey puffs rising from (x, y, z), part of the scene (shown in every view)
+  const smokeCol = color('#8E8A86');
+  function smoke(x, y, z, s, seed) {
+    scene_(() => { for (let k = 0; k < 3; k++) { const p = ((clock * 0.6 + k / 3 + seed * 0.17) % 1 + 1) % 1; icon('dot', x + Math.sin((p + k) * 5) * s * 0.5, y + p * s * 4, z, s * (0.6 + p * 1.4), smokeCol, 0.5 * (1 - p)); } });
   }
   // what belongs to the scene itself, shown in every view: stun, mushroom spores, Zoe's stars
   function sceneMarkers(b, wx, wz, r, top, t) {
@@ -5765,14 +6805,24 @@ const Render3D = (THREE, el, view, opts = {}) => {
       const [kind, look] = key.split('#'), parts = models.parts(kind), top = models.height(kind);
       const gs = [['tint', tintMat], ['team', teamMat], ['fixed', fixedMat]].filter(([p]) => parts[p])
         .map(([p, mat]) => [p, group(key + ':' + p, parts[p], look === 'solid' ? mat : LOOKS[look], list.length)]);
+      const rollAt = models.ROLL_AT[kind];
       list.forEach((s, i) => {
-        const r = s.u.structure ? (s.scale || 1) : size(s.u) * MODEL_SCALE, sc = r * (s.look === 'ghost' || s.look === 'ghostFoe' ? 0.85 : 1);
+        // towers and buildings are drawn at their own size and face their own side (a walking building faces where it goes)
+        const fixed = (s.u.structure || s.u.building) && !s.u.awake;
+        const r = s.u.structure || s.u.building ? (s.scale || 1) : size(s.u) * MODEL_SCALE, sc = r * (s.look === 'ghost' || s.look === 'ghostFoe' ? 0.85 : 1);
         const hx = s.hx || 0, hy = s.hy == null ? (s.side === 1 ? -1 : 1) : s.hy;
-        const lift = s.u.aloft ? 6 + Math.sin(clock * 1.5 + (s.phase || 0)) * 0.3 : 0;
-        const bob = s.moving ? Math.abs(Math.sin(clock * 9 + s.phase)) * 0.12 * r * s.moving : 0;
+        const lift = s.u.aloft ? (s.u.kind === 'drone' ? 4 : 6) + Math.sin(clock * 1.5 + (s.phase || 0)) * 0.3 : 0; // a drone flies lower than an airship
+        // Mechites glide (smooth); a roller rolls instead of bobbing
+        const bob = s.moving && !s.u.smooth && !rollAt ? Math.abs(Math.sin(clock * 9 + s.phase)) * 0.12 * r * s.moving : 0;
         const [wx, wz] = world(f, s.x, s.y);
-        tmpQ.setFromAxisAngle(up, s.u.structure ? (s.side === me ? Math.PI : 0) : Math.atan2(-hx * f, hy * f)); // a model's front is its -z side; a tower's door faces its own side
+        tmpQ.setFromAxisAngle(up, fixed ? (s.side === me ? Math.PI : 0) : Math.atan2(-hx * f, hy * f)); // a model's front is its -z side; a tower's door faces its own side
         tmpP.set(wx, lift + bob, wz); tmpS.setScalar(sc);
+        if (rollAt && s.b) { // turn the ball around its middle by how far it has rolled
+          tmpQ.multiply(tmpQ2.setFromAxisAngle(xAxis, -(s.b.moved || 0) / (rollAt * sc)));
+          const c = rollAt * sc; tmpD.set(0, -c, 0).applyQuaternion(tmpQ); tmpP.x += tmpD.x; tmpP.y += c + tmpD.y; tmpP.z += tmpD.z;
+        }
+        // what the Mechites build rattles (in fights)
+        if (s.b && (s.u.construct || s.u.building) && s.look === 'solid') { tmpP.x += Math.sin(clock * 47 + (s.phase || 0) * 13) * 0.04 * sc; tmpP.z += Math.cos(clock * 53 + (s.phase || 0) * 7) * 0.04 * sc; }
         tmpM.compose(tmpP, tmpQ, tmpS);
         const team = s.flag || teamColor(s.side, me);
         for (const [p, g] of gs) {
@@ -5783,10 +6833,16 @@ const Render3D = (THREE, el, view, opts = {}) => {
         // a stealthed body is only its see-through model, as the dashed ghost on the 2D board: no markers, and no
         // ring under the opponent's
         const ghost = !!(s.b && s.b.hidden && !s.u.aloft);
-        if (!s.u.spire && !uiOff && !(ghost && s.side !== me)) rings.push([wx, wz, r * (s.u.structure ? 2.6 : 1), s.side]);
+        if (!s.u.spire && !uiOff && !(ghost && s.side !== me)) rings.push([wx, wz, r * (s.u.structure || s.u.building ? 2.6 * (s.u.size > 1 ? 1.6 : 1) : 1), s.side]);
         const h = top * sc + lift;
         if (s.crest) icon(`arms|${s.crest}|${s.edge}`, wx, h + 1.2, wz, 1.5);
         if (s.b && !ghost) { bodyMarkers(s, f, me, wx, wz, r, h, clock); s.marked = true; }
+        // smoke from constructs, and from a working building's chimney (in fights)
+        if (s.b && s.look === 'solid' && (s.u.construct || s.u.building)) {
+          if (s.u.building === 'factory') { tmpD.set(1.3, s.u.awake ? 5.5 : 4.8, 0.9).applyQuaternion(tmpQ); smoke(wx + tmpD.x, tmpD.y, wz + tmpD.z, 0.9, s.phase || 0); }
+          else if (s.u.building) { /* the altar doesn't smoke */ }
+          else smoke(wx, h, wz, 0.35 * r, s.phase || 0);
+        }
         if (s.tag) { const l = labels.get(s.tag) || { u: s.u, pts: [] }; l.pts.push([wx, wz, r]); labels.set(s.tag, l); }
         if (s.tile) models_.push([wx, wz, r, h, s.tile.col, s.tile.row]);
       });
@@ -5968,7 +7024,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
   // for checks: what the last frame drew of each body (its unit's name, kind, shape and colour, side, look, coat of
   // arms and its edge, whether it got markers)
   const drawn = () => bodies.map(s => ({ name: s.u.name || null, kind: s.u.kind || null, shape: s.u.shape || null, color: s.u.color || null,
-    side: s.side, look: s.look, crest: s.crest || null, edge: s.edge || null, structure: !!s.u.structure, spire: !!s.u.spire, aloft: !!s.u.aloft, marked: !!s.marked }));
+    side: s.side, look: s.look, crest: s.crest || null, edge: s.edge || null, structure: !!s.u.structure, building: s.u.building || null, spire: !!s.u.spire, aloft: !!s.u.aloft, marked: !!s.marked }));
   function dispose() {
     cam.dispose();
     renderer.dispose();

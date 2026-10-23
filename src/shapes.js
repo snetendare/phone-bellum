@@ -16,7 +16,7 @@ const Shapes = (() => {
     'Boar Riders': '#E07A9B', 'Spinning Golem': '#7FA650', 'Blunderbuss Crew': '#3FD39A', 'Ogre Smasher': '#B08155',
   };
   // a unit's short label on the board: the first three letters of its name
-  const tag = (u) => (u.name.replace(/[^A-Za-z]/g, '').slice(0, 3) || 'UNT').toUpperCase();
+  const tag = (u) => ((typeof u.tag === 'string' && u.tag.replace(/[^A-Za-z]/g, '')) || u.name.replace(/[^A-Za-z]/g, '').slice(0, 3) || 'UNT').slice(0, 3).toUpperCase(); // a unit may pick its own (tag)
   const validColor = (c) => typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c);
 
   // Give every unit a shape and a colour: keep valid ones, else a known default, else the first one not used yet

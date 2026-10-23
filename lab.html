@@ -410,7 +410,7 @@ const Shapes = (() => {
     'Boar Riders': '#E07A9B', 'Spinning Golem': '#7FA650', 'Blunderbuss Crew': '#3FD39A', 'Ogre Smasher': '#B08155',
   };
   // a unit's short label on the board: the first three letters of its name
-  const tag = (u) => (u.name.replace(/[^A-Za-z]/g, '').slice(0, 3) || 'UNT').toUpperCase();
+  const tag = (u) => ((typeof u.tag === 'string' && u.tag.replace(/[^A-Za-z]/g, '')) || u.name.replace(/[^A-Za-z]/g, '').slice(0, 3) || 'UNT').slice(0, 3).toUpperCase(); // a unit may pick its own (tag)
   const validColor = (c) => typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c);
 
   // Give every unit a shape and a colour: keep valid ones, else a known default, else the first one not used yet
@@ -574,7 +574,7 @@ const Shapes = (() => {
 
 // ===== Battle engine (shared by headless tests and the page) =====
 const Engine = (() => {
-  const TRAIT_DEFAULTS = { burst: 1, pellets: 1, spinUp: 0, spinHit: 0, pierce: 0, projSpeed: 0, minRange: 0, charge: 1, knockback: 0, windUp: 0, flame: 0, trample: 0, chargeStun: 0, deathBlast: 0, pctHit: 0, ram: 0, noFlank: 0, carrier: 0, noPack: 0 };
+  const TRAIT_DEFAULTS = { burst: 1, pellets: 1, spinUp: 0, spinHit: 0, pierce: 0, projSpeed: 0, minRange: 0, charge: 1, knockback: 0, windUp: 0, flame: 0, trample: 0, chargeStun: 0, deathBlast: 0, pctHit: 0, ram: 0, noFlank: 0, carrier: 0, noPack: 0, roll: 0 };
   const BURST_GAP = 0.15;      // seconds between shots in a burst
   const SHOTGUN_COS = Math.sqrt(3) / 2; // pellets spread 30 degrees to each side of the target (cos 30)
   // Only + - * / and sqrt from here on: those give identical results in every browser,
@@ -587,7 +587,7 @@ const Engine = (() => {
     for (let k = 1; k <= 12; k++) { term = -term * a * a / ((2 * k - 1) * (2 * k)); sum += term; }
     return sum;
   }
-  const SPIN_CAP = 3;          // spin-up tops out at 3x attack speed
+  const SPIN_CAP = 3;          // spin-up tops out at 3x attack speed (a unit's spinCap can set its own top)
   // damage spin-up (spinHit) ramps hit size the same way, also up to SPIN_CAP
   const CHARGE_RUN = 5;        // metres a unit must run before its next attack counts as a charge
   const TRAMPLE_RUN = 8;       // after a charged hit, a trampler keeps running this far past its target
@@ -612,6 +612,51 @@ const Engine = (() => {
   // (see createBattle: bodies with `carrier` set stay out of the fight until that body dies). noFlank: can't be
   // deployed on flank tiles (the game checks it). noPack: never offered in a starting package (the game checks it)
   const RAM_REACH = 2;         // metres from its target at which a ram hits
+  // roll (seconds): the unit never stops to attack. It rolls at its target from ROLL_START m/s up to its move speed
+  // over this many seconds, running over every enemy body within TRAMPLE_WIDTH of its path for its hit (each body once
+  // per pass), carries on ROLL_PAST metres past its target, stops dead and rolls back at it. So how often it hits
+  // comes from how fast it gets going, not from its attack speed.
+  const ROLL_START = 1;
+  const ROLL_PAST = 6;         // a tile
+  // unfold (the Rollers' Unfold skill): once a roller has rolled through its first enemy and stopped past it, it folds
+  // out for the rest of the fight (u.roll 0, u.unfolded): a walking unit that hits one enemy at a time, same stats.
+  // build = { time, range, count, unit }: the unit walks at the enemy until one is within range − 1 m, stands still
+  // for `time` seconds building `count` copies of `unit` (BUILD_GAP metres apart, side by side across the enemy's
+  // direction), then fights on. Once per fight. Builders building within BUILD_COOP metres of each other speed each
+  // other up: 1×, 1.5×, 1.75×, ... What it builds is a construct: it never moves, can't be pushed, doesn't count as
+  // a unit left standing (a side whose units are gone is beaten), levels with its builder and earns its builder XP.
+  const BUILD_GAP = 6;
+  const BUILD_COOP = 7;
+  // Buildings (the game sets these up; see Game's buildings). A body with u.idle never moves or attacks.
+  //   b.site = { work, need }: seconds of building done and needed. At the start of a fight the nearest builder without
+  //   a job walks to it (within SITE_REACH) and builds instead of fighting (u.buildSpeed seconds of work a second) until
+  //   it is done or falls; then the builder carries on like any builder (its turret, then melee).
+  //   A site nobody is assigned to builds itself at site.self seconds of work a second (0 = not at all).
+  //   b.produce = { units: [unit, ...], time }: once built, it makes one body of each after time seconds, side by side a
+  //   little in front of it.
+  // A unit with flee (metres) keeps away from enemies: whenever one is that close it moves straight away from it (it
+  // still shoots). A unit with backline picks the farthest enemy in reach instead of the nearest. A unit with lob fires
+  // shells over the heads of whoever is in the way: they only land where they were aimed.
+  //   What it makes earns it XP (credit). result().buildings tells the game how each building did.
+  const SITE_REACH = 3.5;
+  // The Mechites' Mecha Tower (the game sets these up on bodies):
+  //   b.orbit = { anchor, r }: a drone circling its anchor (the tower) r metres out at its own speed. It is aloft (can't
+  //   be hit) and attacks like any unit; it falls with its anchor.
+  //   u.bot = 'mine' | 'repair': a little bot that never attacks.
+  //     'mine': b.plant = { spots: [{ x, y }], mine: { hit, radius } }: it walks to each spot in turn and leaves a mine
+  //     there. A mine goes off when an enemy body (not aloft) comes within MINE_TRIGGER metres: hit to every enemy
+  //     within radius. Then the bot stands still.
+  //     'repair': it walks to the nearest of its side's buildings or tower that is damaged or not built yet and works on
+  //     it like one builder: a site gets a second of work a second; a damaged one regains its max health /
+  //     (u.buildSecs, or REPAIR_SECS) a second.
+  // u.stay: the unit never walks toward enemies (a flee unit still keeps away from them).
+  const MINE_TRIGGER = 2;
+  const REPAIR_SECS = 20;
+  // link: the bodies of a squad share one health pool. Damage to any of them is split across all that are alive
+  // (by max health), healing is shared the same way, and they all fall together when the pool runs out. Bodies with a
+  // linked squad can't be won over by a Gentleman.
+  // escort = { unit, pct }: at the start of a fight a construct (the healbot) stands behind each squad, follows it,
+  // never attacks, and heals every body of its squad within unit.range by pct % of its max health a second.
   // chain = { jumps, hit, reach }: after each hit the attack jumps on to the nearest enemy body not hit yet within
   // reach metres of the last one, up to jumps times, dealing chain.hit each time (lightning).
   // mend: the body never attacks; each attack heals the most wounded ally in range (not structures) by this much
@@ -684,6 +729,12 @@ const Engine = (() => {
     frenzy:  { label: 'Frenzy', params: [['pct', 'Attack speed per hit (+% of base)', 10, 1], ['cap', 'Most attacks per second', 2, 0.1]] },
     spread:  { label: 'Spread', params: [['min', 'Least distance (m)', 1, 0.5], ['max', 'Most distance (m)', 6, 0.5]] },
     mortar:  { label: 'Mortar', params: [['range', 'Range (+m)', 15, 1], ['min', 'Minimum range (m)', 5, 0.5], ['aps', 'Attack speed (+ attacks per second)', 0.1, 0.05]] },
+    momentum: { label: 'Momentum', params: [['accel', 'Rolling acceleration (+%)', 100, 10]] },
+    unfold:  { label: 'Unfold (rolling units walk instead)', params: [] },
+    link:    { label: 'Linked health', params: [['hp', 'Health (+%)', 15, 5]] },
+    healbot: { label: 'Healbot', params: [['hp', 'Healbot health', 300, 25], ['pct', 'Heals each body (% of max health per second)', 4, 0.5], ['range', 'Heal reach (m)', 8, 1], ['speed', 'Healbot move speed (m/s)', 3, 0.5]] },
+    building: { label: 'Building', params: [['building', 'Building (id)', 'factory', null]] },
+    builder: { label: 'Construct upgrades', params: [['extra', 'More constructs per build', 0, 1], ['faster', 'Build time (−%)', 0, 5], ['aps', 'Construct attack speed (+%)', 0, 5], ['shield', 'Construct shield (hits blocked)', 0, 1], ['armor', 'Construct armor', 0, 1]] },
   };
   const skillParam = (d, k) => {
     const v = d.params && d.params[k];
@@ -723,6 +774,19 @@ const Engine = (() => {
       case 'spread': return `At the start of a fight the bodies scatter in all directions, ${n('min')} to ${n('max')} m from where they stand (some stay on the tile), then charge. Splash catches fewer of them.`;
       case 'mortar': return `+${n('range')} m range and +${n('aps')} attacks per second, but it can’t attack enemies ${n('min')} m away or closer.`;
       case 'shield': return `Each body fully blocks the first ${n('hits')} ${+P('hits') === 1 ? 'hit' : 'hits'} it takes in a fight, however big. Poison already on it still ticks.`;
+      case 'building': return `Pick a free tile in your zone for a ${String(P('building'))}. Your nearest builder builds it during fights; once built it stays all match, and each round you can buy one of its own skills.`;
+      case 'momentum': return `Gets up to full rolling speed ${n('accel')}% faster, so it rolls over its targets more often.`;
+      case 'unfold': return 'Rolls in as usual, but once it has rolled through its first enemy it folds out into a walking unit: from then on it walks up to its target and hits it in melee, one enemy at a time. Same health and stats.';
+      case 'link': return `+${n('hp')}% health, and the bodies of a squad share one health pool: damage to any of them is shared by all, and they fall together.`;
+      case 'healbot': return `Each squad brings a healbot (${n('hp')} health) that follows it, never attacks, and heals every body of the squad within ${n('range')} m for ${n('pct')}% of its max health every second.`;
+      case 'builder': {
+        const parts = [];
+        if (+P('extra') > 0) parts.push(`builds ${+P('extra') === 1 ? 'one more construct' : `${n('extra')} more constructs`} at once, ${BUILD_GAP} m apart`);
+        if (+P('faster') > 0) parts.push(`builds ${n('faster')}% faster, its buildings too`);
+        const c = [+P('aps') > 0 && `+${n('aps')}% attack speed`, +P('shield') > 0 && `a shield that blocks ${n('shield')} ${+P('shield') === 1 ? 'hit' : 'hits'}`, +P('armor') > 0 && `+${n('armor')} armor`].filter(Boolean);
+        if (c.length) parts.push(`its constructs and what its buildings make get ${c.join(', ')}`);
+        return parts.length ? parts.join('; ').replace(/^./, s => s.toUpperCase()) + '.' : 'No change.';
+      }
     }
     return '';
   }
@@ -789,6 +853,25 @@ const Engine = (() => {
           u.range = Math.max(0.5, u.range * (1 - Math.min(90, P('range')) / 100));
           u.hit = u.hit * (1 - Math.min(90, P('hit')) / 100);
           break;
+        case 'momentum': if (u.roll > 0) u.roll = u.roll / (1 + Math.max(0, P('accel')) / 100); break;
+        case 'unfold': if (u.roll > 0) u.unfold = true; break;
+        case 'link': u.link = true; u.hp = u.hp * (1 + P('hp') / 100); break;
+        case 'healbot':
+          u.escort = { pct: Math.max(0, P('pct')), unit: withTraits({ name: 'Healbot', cost: 0, bodies: 1, hp: Math.max(1, P('hp')), hit: 0, aps: 1, range: Math.max(1, P('range')),
+            speed: Math.max(0.5, P('speed')), splash: 0, shape: 'diamond', color: '#8FD6A0', construct: true, noCount: true, follow: true }) };
+          break;
+        case 'builder': {
+          // buildings go up faster too, and what its buildings make gets the same upgrades (see the game's constructBuff)
+          const fast = Math.min(90, Math.max(0, P('faster')));
+          if (fast > 0) u.buildSpeed = (u.buildSpeed || 1) / (1 - fast / 100);
+          if (u.build && u.build.unit) {
+            const c = u.build.unit;
+            u.build = { ...u.build, count: Math.max(1, Math.round(u.build.count || 1) + Math.max(0, Math.round(P('extra')))),
+              time: (u.build.time || 0) * (1 - Math.min(90, Math.max(0, P('faster'))) / 100),
+              unit: { ...c, aps: c.aps * (1 + Math.max(0, P('aps')) / 100), shield: (c.shield || 0) + Math.max(0, Math.round(P('shield'))), bonusArmor: (c.bonusArmor || 0) + Math.max(0, P('armor')) } };
+          }
+          break;
+        }
       }
     }
     return u;
@@ -878,7 +961,7 @@ const Engine = (() => {
       cd: ((i * 7) % 11) / 11 * interval, // deterministic stagger
       moved: 0, firing: -1, burstLeft: 0, burstTimer: 0, burstDir: [0, 1], windTarget: null, windT: 0, setUp: false,
       hidden: !!u.stealth || !!u.aloft, poison: null, shrinkM: 0, shrinkT: 0, slowT: 0, slowMove: 0, slowAtk: 0,
-      spawnT: u.spawn ? u.spawn.every : 0, kids: null,
+      spawnT: u.spawn ? u.spawn.every : 0, kids: null, orbit: null, plant: null,
       shield: u.shield || 0, // hits left that the Shield skill blocks completely
       frenzy: 0, // hits landed so far (Frenzy skill)
       stunT: 0, lastAtk: 0, // seconds of stun left (chargeStun); fight time of its last attack (stealth returns)
@@ -924,11 +1007,34 @@ const Engine = (() => {
 
   // A steppable battle between two lists of bodies (side 0 and side 1)
   function createBattle(A, B, g, opts = {}) {
+    // linked squads and squads with a healbot: their bodies, in squads of u.bodies (a Counter Lab army puts all its
+    // squads under one id; a game squad has exactly u.bodies of them)
+    const groups = [];
+    for (const list of [A, B]) {
+      const open = {};
+      for (const b of list) {
+        if (!b.u.link && !b.u.escort) continue;
+        const k = b.squad + ':' + b.u.name;
+        if (!open[k] || open[k].length >= Math.max(1, Math.round(b.u.bodies))) groups.push(open[k] = []);
+        open[k].push(b);
+      }
+    }
+    for (const grp of groups) if (grp[0].u.link) for (const b of grp) b.link = grp;
+    // a healbot behind each squad that brings one (it levels with its squad)
+    let escortIdx = A.length + B.length;
+    for (const grp of groups) {
+      const lead = grp[0], e = lead.u.escort;
+      if (!e) continue;
+      const hb = newBody(leveled(e.unit, lead.level), lead.side, lead.x, lead.y - (lead.side === 0 ? 1 : -1) * 2.5, escortIdx++, -1);
+      hb.follow = grp; hb.healPct = e.pct; hb.credit = lead;
+      (lead.side === 0 ? A : B).push(hb);
+    }
     const all = A.concat(B);
     const sides = [A, B];
+    const counts = (b) => !(b.u.structure || b.u.aloft || b.u.noCount); // what makes up a side's army (towers, airships and constructs don't)
     const stats = [
-      { dealt: 0, wasted: 0, blocked: 0, missed: 0, windLost: 0, winds: 0, totalHp: A.reduce((s, b) => s + (b.u.structure || b.u.aloft ? 0 : b.u.hp), 0) },
-      { dealt: 0, wasted: 0, blocked: 0, missed: 0, windLost: 0, winds: 0, totalHp: B.reduce((s, b) => s + (b.u.structure || b.u.aloft ? 0 : b.u.hp), 0) },
+      { dealt: 0, wasted: 0, blocked: 0, missed: 0, windLost: 0, winds: 0, totalHp: A.reduce((s, b) => s + (counts(b) ? b.u.hp : 0), 0) },
+      { dealt: 0, wasted: 0, blocked: 0, missed: 0, windLost: 0, winds: 0, totalHp: B.reduce((s, b) => s + (counts(b) ? b.u.hp : 0), 0) },
     ];
     const dt = g.dt;
     const stealthOn = ruleOn(g, 'stealth'), stealthBack = ruleOn(g, 'stealthBack'), knockOn = ruleOn(g, 'knockback');
@@ -990,7 +1096,7 @@ const Engine = (() => {
     function finishing(owner, v) {
       const c = charm[owner.side];
       if (!c || v.side === owner.side || v.u.structure || !(c[owner.squad] > 0)) return false;
-      if (c[owner.squad] >= CHARM_MAX && !charmUsed[owner.side][owner.squad] && !v.u.carrier && !v.convert) {
+      if (c[owner.squad] >= CHARM_MAX && !charmUsed[owner.side][owner.squad] && !v.u.carrier && !v.convert && !v.link && !v.u.construct) {
         charmUsed[owner.side][owner.squad] = true;
         v.hp = v.u.hp * CONVERT_HP / 100; v.turning = true; v.poison = null;
         turning.push(v);
@@ -1042,25 +1148,42 @@ const Engine = (() => {
       b.spreadTo.y = Math.max(g.bounds.y0, Math.min(g.bounds.y1, b.spreadTo.y));
     }
     const SPAWN_SPOTS = [[0.7, 0.7], [-0.7, 0.7], [0, 1], [1, 0], [-1, 0], [0.7, -0.7], [-0.7, -0.7], [0, -1]]; // (side, forward): front first
+    // the health a body has to lose: its own, or its linked squad's
+    const poolHp = (v) => { if (!v.link) return v.hp; let s = 0; for (const x of v.link) if (x.alive) s += x.hp; return s; };
+    // take health off a body; a linked squad shares it out by max health
+    function loseHp(v, dmg) {
+      if (!v.link) { v.hp -= dmg; return; }
+      let max = 0;
+      for (const x of v.link) if (x.alive) max += x.u.hp;
+      for (const x of v.link) if (x.alive) x.hp -= dmg * x.u.hp / max;
+    }
+    // v ran out of health: it falls (a linked squad all together). owner (or null): who gets the bounty for leveled bodies
+    function kill(owner, v) {
+      for (const x of v.link ? v.link.filter(x => x.alive) : [v]) {
+        x.hp = 0; x.alive = false; x.diedTick = tick;
+        if (owner) owner.xp += x.u.hp * x.level;
+        fell(x);
+      }
+    }
     // damage that skips armor and ward (poison)
     function direct(owner, v, amount) {
       if (v.turning || v.u.aloft) return;
-      const applied = Math.min(amount, v.hp);
+      const applied = Math.min(amount, poolHp(v));
       if (applied <= 0) return;
       stats[owner.side].dealt += applied;
       owner.dealt = (owner.dealt || 0) + applied;
       owner.xp += applied;
       v.xp += applied * (g.absorbXp == null ? 0.5 : g.absorbXp);
-      v.hp -= applied;
-      if (v.hp <= 1e-9 && finishing(owner, v)) return;
-      if (v.hp <= 1e-9) { v.hp = 0; v.alive = false; v.diedTick = tick; owner.xp += v.u.hp * v.level; fell(v); }
+      loseHp(v, applied);
+      if (poolHp(v) <= 1e-9 && finishing(owner, v)) return;
+      if (poolHp(v) <= 1e-9) kill(owner, v);
     }
     // damage from the map itself (elf tower, toxic tiles): counts for neither side, earns no experience
     function neutralDamage(v, dmg) {
       if (v.turning || v.u.aloft) return;
       if (cripple[v.side] > 0) dmg = dmg * (1 + towerDown.taken / 100);
-      v.hp -= dmg;
-      if (v.hp <= 1e-9) { v.hp = 0; v.alive = false; v.diedTick = tick; fell(v); }
+      loseHp(v, dmg);
+      if (poolHp(v) <= 1e-9) kill(null, v);
     }
     // a unit is on a map tile: its effect, once per unit and tile type
     function onTile(b, tl) {
@@ -1089,7 +1212,7 @@ const Engine = (() => {
       }
     }
     // structures (towers) and airships don't count: a side is beaten when its units are gone
-    const aliveCount = (arr) => { let c = 0; for (const b of arr) if (b.alive && !b.u.structure && !b.u.aloft) c++; return c; };
+    const aliveCount = (arr) => { let c = 0; for (const b of arr) if (b.alive && counts(b)) c++; return c; };
 
     function hurt(owner, v, hit, fromX, fromY) {
       if (v.turning) return; // being won over: nothing hurts it until it has switched sides
@@ -1120,7 +1243,7 @@ const Engine = (() => {
       }
       if (cripple[v.side] > 0) dmg = dmg * (1 + towerDown.taken / 100);
       st.blocked += hit - dmg;
-      const applied = Math.min(dmg, v.hp);
+      const applied = Math.min(dmg, poolHp(v));
       st.dealt += applied;
       owner.dealt = (owner.dealt || 0) + applied;
       if (owner.u.lifesteal > 0 && owner.alive) owner.hp = Math.min(owner.u.hp, owner.hp + applied * owner.u.lifesteal / 100);
@@ -1128,9 +1251,9 @@ const Engine = (() => {
       // experience: damage dealt, half of damage absorbed, and a bounty for killing leveled bodies
       owner.xp += applied;
       v.xp += applied * (g.absorbXp == null ? 0.5 : g.absorbXp);
-      v.hp -= dmg;
-      if (v.hp <= 0 && finishing(owner, v)) return;
-      if (v.hp <= 0) { v.hp = 0; v.alive = false; v.diedTick = tick; owner.xp += v.u.hp * v.level; fell(v); return; }
+      loseHp(v, dmg);
+      if (poolHp(v) <= 0 && finishing(owner, v)) return;
+      if (poolHp(v) <= 0) { kill(owner, v); return; }
       if (owner.u.poisonPct > 0) {
         // poison: a share of the hit, spread over its duration. Each attacker keeps one dose on the target;
         // its next hit refreshes that dose. Doses from different attackers add up.
@@ -1150,7 +1273,7 @@ const Engine = (() => {
         v.shrinkM = v.shrinkT > 0 ? Math.max(v.shrinkM, owner.u.shrinkM) : owner.u.shrinkM;
         v.shrinkT = Math.max(v.shrinkT, owner.u.shrinkDur);
       }
-      if (owner.u.knockback > 0 && knockOn && !v.u.structure) {
+      if (owner.u.knockback > 0 && knockOn && !v.u.structure && !v.u.anchored) {
         // big hits on small bodies push the full distance; on big bodies barely at all
         const push = owner.u.knockback * Math.min(1, hit / v.u.hp);
         const dx = v.x - fromX, dy = v.y - fromY, d = hyp(dx, dy) || 1;
@@ -1198,7 +1321,7 @@ const Engine = (() => {
         const d = dist(f, b);
         if (d <= reachOf(b) + 0.01 && d >= b.u.minRange) valid.push([d, f]);
       }
-      valid.sort((p, q) => p[0] - q[0]);
+      valid.sort((p, q) => b.u.backline ? q[0] - p[0] : p[0] - q[0]);
       return valid.map(v => v[1]);
     }
 
@@ -1380,6 +1503,160 @@ const Engine = (() => {
       if (b.alive) { b.hp = 0; b.alive = false; b.diedTick = tick; fell(b); }
     }
 
+    // share of its move speed a body walks at right now (slowed, or crippled by its fallen tower)
+    const moveMul = (b) => (b.slowT > 0 ? 1 - b.slowMove / 100 : 1) * (cripple[b.side] > 0 ? 1 - towerDown.move / 100 : 1);
+
+    // a roller's turn (see ROLL_START): marches like any unit until it spots an enemy, then rolls at its target
+    // gathering speed, runs over every enemy body in its path (each once per pass), carries on ROLL_PAST metres past
+    // the target, stops dead and rolls back
+    function roll(b, foes) {
+      const top = b.u.speed, start = Math.min(ROLL_START, top);
+      if (b.rollV == null) b.rollV = start;
+      if (!(b.rollPast > 0)) {
+        let near = null, nd = Infinity;
+        for (const f of foes) { if (!f.alive || f.hidden) continue; const d = dist(f, b); if (d < nd) { nd = d; near = f; } }
+        if (!near) return;
+        b.near = near;
+        const [mx, my] = b.march || [0, b.side === 0 ? 1 : -1];
+        if (!b.engaged) {
+          let spotted = nd <= Math.max(R(b) + sight, minSight);
+          if (!spotted) { // nothing left ahead to march toward: go for the nearest
+            spotted = true;
+            for (const f of foes) if (f.alive && !f.hidden && (f.x - b.x) * mx + (f.y - b.y) * my > 0) { spotted = false; break; }
+          }
+          if (spotted) b.engaged = true;
+        }
+        // once engaged it stays on its target until that dies or hides, like any unit
+        const tgt = b.engaged ? (b.lock && b.lock.alive && !b.lock.hidden ? b.lock : (b.lock = near)) : null;
+        let wx = mx, wy = my;
+        if (tgt) { const d = dist(tgt, b) || 1; wx = (tgt.x - b.x) / d; wy = (tgt.y - b.y) / d; }
+        // standing still it can set off any way; rolling, it swings round like a walking body
+        if (b.hx === undefined || b.rollV <= start) { b.hx = wx; b.hy = wy; }
+        else {
+          const k = Math.min(1, TURN * dt);
+          let hx = b.hx + (wx - b.hx) * k, hy = b.hy + (wy - b.hy) * k, hl = hyp(hx, hy);
+          if (hl < 1e-6) { hx = wx; hy = wy; hl = 1; }
+          b.hx = hx / hl; b.hy = hy / hl;
+        }
+        // about to reach the target: from here it runs straight on, through it and past it
+        if (tgt) {
+          const d = dist(tgt, b);
+          if (d <= b.rollV * dt + TRAMPLE_WIDTH) { b.rollDir = d > 1e-6 ? [(tgt.x - b.x) / d, (tgt.y - b.y) / d] : [b.hx, b.hy]; b.rollPast = d + ROLL_PAST; }
+        }
+      }
+      b.rollV = Math.min(top, b.rollV + (top - start) / b.u.roll * dt);
+      if (b.rollPast > 0) { b.hx = b.rollDir[0]; b.hy = b.rollDir[1]; }
+      const mv = b.rollV * moveMul(b) * dt;
+      b.x += b.hx * mv; b.y += b.hy * mv; b.moved += mv;
+      let stop = false;
+      if (b.rollPast > 0) { b.rollPast -= mv; if (b.rollPast <= 1e-9) stop = true; }
+      if (g.bounds) { // the edge of the board stops it too
+        const x = Math.max(g.bounds.x0, Math.min(g.bounds.x1, b.x)), y = Math.max(g.bounds.y0, Math.min(g.bounds.y1, b.y));
+        if (x !== b.x || y !== b.y) { b.x = x; b.y = y; stop = true; }
+      }
+      const seen = b.rolled || (b.rolled = []);
+      for (const f of foes) {
+        if (!f.alive || seen.includes(f) || hyp(f.x - b.x, f.y - b.y) > TRAMPLE_WIDTH) continue;
+        seen.push(f);
+        if (opts.record) shots.push([b.x, b.y, f.x, f.y, b.side, 1, 1, 0, 0]);
+        hurt(b, f, b.u.hit, b.x, b.y);
+      }
+      if (stop && b.u.unfold && b.rolled && b.rolled.length) { b.u = { ...b.u, roll: 0, unfolded: true }; b.engaged = true; } // through its first enemy: it folds out
+      if (stop) { b.rollPast = 0; b.rollV = start; b.rolled = null; }
+    }
+
+    // a healbot keeps close behind its squad (the middle of its bodies still standing); with the squad gone it stays put
+    function escortMove(b) {
+      let sx = 0, sy = 0, n = 0;
+      for (const a of b.follow) if (a.alive) { sx += a.x; sy += a.y; n++; }
+      if (!n) return;
+      const dx = sx / n - b.x, dy = sy / n - b.y, d = hyp(dx, dy), keep = 2.5;
+      if (d <= keep) return;
+      const mv = Math.min(d - keep, b.u.speed * moveMul(b) * dt);
+      b.hx = dx / d; b.hy = dy / d;
+      b.x += b.hx * mv; b.y += b.hy * mv; b.moved += mv;
+    }
+
+    // a builder is done: its constructs stand where it worked, side by side across the direction of the enemy it saw
+    function finishBuild(b) {
+      b.buildT = 0; b.built = true;
+      const bd = b.u.build, n = Math.max(1, Math.round(bd.count || 1)), [dx, dy] = b.buildDir;
+      // a construct stands where it was built, unless it was made to move (Core Awoken)
+      const cu = leveled(withTraits({ ...bd.unit, bodies: 1, construct: true, noCount: true, ...(bd.unit.speed > 0 ? {} : { speed: 0, anchored: true }) }), b.level);
+      for (let k = 0; k < n; k++) {
+        const off = (k - (n - 1) / 2) * BUILD_GAP;
+        let x = b.x - dy * off, y = b.y + dx * off;
+        if (g.bounds) { x = Math.max(g.bounds.x0, Math.min(g.bounds.x1, x)); y = Math.max(g.bounds.y0, Math.min(g.bounds.y1, y)); }
+        const kid = newBody(cu, b.side, x, y, spawnIdx++, -1);
+        kid.credit = b; // its XP and damage count for its builder's squad
+        pendingKids.push(kid);
+      }
+    }
+
+    // each unfinished building site gets the nearest builder that has no job yet
+    for (const s of all) {
+      if (!s.site || !s.alive) continue;
+      s.site.start = s.site.work;
+      if (s.site.work >= s.site.need) continue;
+      let best = null, bd = Infinity;
+      for (const b of sides[s.side]) if (b.u.build && !b.siteJob && b.alive) { const d = dist(b, s); if (d < bd) { bd = d; best = b; } }
+      if (best) best.siteJob = s;
+    }
+    // a builder's turn while it has a site to build: walk there, then stand and build (see the builders in step())
+    function siteWork(b) {
+      const s = b.siteJob;
+      if (!s.alive || s.site.work >= s.site.need) { b.siteJob = null; b.siteAt = false; return false; }
+      const d = dist(s, b);
+      b.siteAt = d <= SITE_REACH;
+      if (b.siteAt) return true;
+      const mv = Math.min(d - SITE_REACH * 0.8, b.u.speed * moveMul(b) * dt);
+      b.hx = (s.x - b.x) / d; b.hy = (s.y - b.y) / d;
+      b.x += b.hx * mv; b.y += b.hy * mv; b.moved += mv;
+      return true;
+    }
+
+    // a drone circles its anchor (it falls with it): the offset turns by speed / r radians a tick, kept at r metres
+    function orbitMove(b) {
+      const o = b.orbit, a = o.anchor;
+      if (!a.alive) { kill(null, b); return; }
+      let ox = b.x - a.x, oy = b.y - a.y, d = hyp(ox, oy);
+      if (d < 1e-6) { ox = o.r; oy = 0; d = o.r; }
+      ox = ox / d * o.r; oy = oy / d * o.r;
+      const c = cosDeg(Math.min(90, b.u.speed * moveMul(b) * dt / o.r * 57.29577951308232)), sn = Math.sqrt(Math.max(0, 1 - c * c));
+      const nx = ox * c - oy * sn, ny = ox * sn + oy * c;
+      b.hx = -ny / o.r; b.hy = nx / o.r;
+      b.x = a.x + nx; b.y = a.y + ny;
+    }
+    // walk toward (x, y), stopping `stop` metres short; true once there
+    function walkTo(b, x, y, stop) {
+      const dx = x - b.x, dy = y - b.y, d = hyp(dx, dy);
+      if (d <= stop + 1e-6) return true;
+      const mv = Math.min(d - stop, b.u.speed * moveMul(b) * dt);
+      b.hx = dx / d; b.hy = dy / d;
+      b.x += b.hx * mv; b.y += b.hy * mv; b.moved += mv;
+      return d - mv <= stop + 1e-6;
+    }
+    const mines = []; // { x, y, side, owner, hit, radius }
+    // what a repairbot works on: the nearest of its side's buildings or tower that is damaged or not built yet
+    const needsRepair = (v) => v.alive && (v.u.building || v.u.structure) && ((v.site && v.site.work < v.site.need) || v.hp < v.u.hp - 1e-9);
+    function botMove(b) {
+      if (b.u.bot === 'mine' && b.plant) {
+        const sp = b.plant.spots[0];
+        if (!sp) { b.plant = null; return; }
+        if (walkTo(b, sp.x, sp.y, 0.1)) {
+          const mn = b.plant.mine;
+          mines.push({ x: sp.x, y: sp.y, side: b.side, owner: b, hit: mn.hit, radius: mn.radius });
+          b.plant.spots.shift();
+        }
+        return;
+      }
+      if (b.u.bot === 'repair') {
+        let best = null, bd = Infinity;
+        for (const v of sides[b.side]) if (needsRepair(v)) { const d = dist(v, b); if (d < bd) { bd = d; best = v; } }
+        b.repairing = best && walkTo(b, best.x, best.y, SITE_REACH * 0.8) ? best : null;
+      }
+    }
+
     function step() {
       if (over) return false;
       if (t >= g.timeCap || !aliveCount(A) || !aliveCount(B)) { over = true; return false; }
@@ -1441,7 +1718,13 @@ const Engine = (() => {
           if (b.trampleLeft <= 1e-9) { b.trampleLeft = 0; b.trampled = null; if (b.u.chargeStun > 0) b.stunT = b.u.chargeStun; }
           continue;
         }
+        if (b.u.idle) continue; // a building
+        if (b.orbit) { orbitMove(b); continue; }
+        if (b.u.bot) { botMove(b); continue; }
+        if (b.siteJob && siteWork(b)) continue;
         if (b.u.ram) { ram(b, foes); continue; }
+        if (b.u.roll > 0) { roll(b, foes); continue; }
+        if (b.follow) { escortMove(b); continue; }
         if (b.spreadTo) { // Spread: run out to its own spot first
           const sx = b.spreadTo.x - b.x, sy = b.spreadTo.y - b.y, sd = hyp(sx, sy);
           const mv = Math.min(sd, b.u.speed * (b.slowT > 0 ? 1 - b.slowMove / 100 : 1) * dt);
@@ -1460,6 +1743,23 @@ const Engine = (() => {
           if (d < nd) { nd = d; near = f; }
         }
         b.near = near;
+        if (b.u.flee > 0 && near && nd < b.u.flee) { // keeping away from the enemy
+          const mv = b.u.speed * moveMul(b) * dt;
+          b.hx = -(near.x - b.x) / (nd || 1); b.hy = -(near.y - b.y) / (nd || 1);
+          b.x += b.hx * mv; b.y += b.hy * mv; b.moved += mv;
+          if (g.bounds) { b.x = Math.max(g.bounds.x0, Math.min(g.bounds.x1, b.x)); b.y = Math.max(g.bounds.y0, Math.min(g.bounds.y1, b.y)); }
+          continue;
+        }
+        if (b.u.stay) continue; // keeps its ground: it only ever moves away
+        // a builder that hasn't built yet stops to build once an enemy is within its constructs' range (see the builders below)
+        if (b.u.build && !b.built) {
+          if (b.buildT > 0) continue;
+          if (near && nd <= b.u.build.range - 1) {
+            b.buildT = b.buildFull = Math.max(dt, b.u.build.time || 0);
+            b.buildDir = nd > 1e-6 ? [(near.x - b.x) / nd, (near.y - b.y) / nd] : [0, b.side === 0 ? 1 : -1];
+            continue;
+          }
+        }
         const rg = b.u.hover > 0 ? Math.min(R(b), b.u.hover) : R(b); // hover: an airship flies in closer than its range
         // an arrow drawn by the player (Factions devtest): b.guide = [{ x, y }, ...]. The body walks the points in turn,
         // standing to fight only enemies already in its own range, then fights as usual from the last point on.
@@ -1525,6 +1825,46 @@ const Engine = (() => {
           }
         }
       }
+      // builders at work: each builder building within BUILD_COOP of others speeds them up (1x, 1.5x, 1.75x, ...)
+      const builders = all.filter(b => b.alive && b.buildT > 0);
+      if (builders.length) {
+        const rate = builders.map(b => {
+          let mul = 1, add = 0.5;
+          for (const c of builders) if (c !== b && c.side === b.side && dist(c, b) <= BUILD_COOP) { mul += add; add *= 0.5; }
+          return mul;
+        });
+        builders.forEach((b, k) => { b.buildT -= dt * rate[k]; if (b.buildT <= 1e-9) finishBuild(b); });
+      }
+      // ...and at building sites (a site without a builder builds itself, slowly, if it can)
+      const manned = new Set();
+      for (const b of all) {
+        if (!b.alive || !b.siteJob) continue;
+        manned.add(b.siteJob);
+        if (!b.siteAt) continue;
+        const s = b.siteJob.site;
+        s.work = Math.min(s.need, s.work + dt * (b.u.buildSpeed || 1));
+        if (s.work >= s.need) { b.siteJob = null; b.siteAt = false; }
+      }
+      for (const b of all) if (b.alive && b.site && b.site.self > 0 && b.site.work < b.site.need && !manned.has(b)) b.site.work = Math.min(b.site.need, b.site.work + dt * b.site.self);
+      // repairbots at work (one builder each)
+      for (const b of all) {
+        const v = b.repairing;
+        if (!b.alive || !v || !needsRepair(v)) continue;
+        if (v.site && v.site.work < v.site.need) v.site.work = Math.min(v.site.need, v.site.work + dt);
+        else v.hp = Math.min(v.u.hp, v.hp + v.u.hp / (v.u.buildSecs > 0 ? v.u.buildSecs : REPAIR_SECS) * dt);
+        b.healFx = (b.healFx || 0) - dt;
+        if (b.healFx <= 0) { b.healFx = 1; if (opts.record) shots.push([b.x, b.y, v.x, v.y, b.side, 0, 0, 1]); }
+      }
+      // mines: an enemy body close by sets one off
+      for (let i = mines.length - 1; i >= 0; i--) {
+        const mn = mines[i];
+        let hitBy = null;
+        for (const f of sides[1 - mn.side]) if (f.alive && !f.u.aloft && hyp(f.x - mn.x, f.y - mn.y) <= MINE_TRIGGER) { hitBy = f; break; }
+        if (!hitBy) continue;
+        mines.splice(i, 1);
+        if (opts.record) shots.push([mn.x, mn.y, mn.x, mn.y, mn.side, mn.radius, 1, 0, 0]);
+        for (const f of sides[1 - mn.side]) if (f.alive && hyp(f.x - mn.x, f.y - mn.y) <= mn.radius) hurt(mn.owner, f, mn.hit, mn.x, mn.y);
+      }
       // separation between allies
       const minSep = g.spacing * 0.7;
       for (let s = 0; s < 2; s++) {
@@ -1536,7 +1876,7 @@ const Engine = (() => {
             const dx = c.x - a.x, dy = c.y - a.y;
             const d = hyp(dx, dy);
             // structures and bodies still waiting to start (flank squads) don't budge: the other body moves the whole way
-            const fa = a.u.structure || a.delay > 0, fc = c.u.structure || c.delay > 0;
+            const fa = a.u.structure || a.u.anchored || a.delay > 0, fc = c.u.structure || c.u.anchored || c.delay > 0;
             if (fa && fc) continue;
             const ka = fa ? 0 : fc ? 2 : 1, kc = fc ? 0 : fa ? 2 : 1;
             if (d < minSep && (a.u.structure || c.u.structure)) {
@@ -1600,6 +1940,28 @@ const Engine = (() => {
           }
         }
         if (b.u.regen > 0 && b.hp < b.u.hp) b.hp = Math.min(b.u.hp, b.hp + b.u.hp * b.u.regen / 100 * healMul * dt);
+        if (b.produce && !b.produced && !(b.site && b.site.work < b.site.need)) { // a building makes its unit
+          b.prodT = (b.prodT == null ? b.produce.time : b.prodT) - dt;
+          if (b.prodT <= 1e-9) {
+            b.produced = true;
+            const list = b.produce.units || [], gap = g.spacing;
+            let y = b.y + (b.side === 0 ? 1 : -1) * BUILD_GAP * 0.7;
+            if (g.bounds) y = Math.max(g.bounds.y0, Math.min(g.bounds.y1, y));
+            list.forEach((pu, k) => {
+              let x = b.x + (k - (list.length - 1) / 2) * gap;
+              if (g.bounds) x = Math.max(g.bounds.x0, Math.min(g.bounds.x1, x));
+              const kid = newBody(pu, b.side, x, y, spawnIdx++, -1);
+              kid.credit = b;
+              pendingKids.push(kid);
+            });
+          }
+        }
+        if (b.follow && b.healPct > 0) { // a healbot mends the bodies of its squad within reach
+          let to = null;
+          for (const a of b.follow) if (a.alive && a.hp < a.u.hp && dist(a, b) <= b.u.range + 0.01) { a.hp = Math.min(a.u.hp, a.hp + a.u.hp * b.healPct / 100 * healMul * dt); to = to || a; }
+          b.healFx = (b.healFx || 0) - dt;
+          if (to && b.healFx <= 0) { b.healFx = 1; if (opts.record) shots.push([b.x, b.y, to.x, to.y, b.side, 0, 0, 1]); }
+        }
         if (b.shrinkT > 0) { b.shrinkT -= dt; if (b.shrinkT <= 0) { b.shrinkT = 0; b.shrinkM = 0; } }
         if (b.slowT > 0) { b.slowT -= dt; if (b.slowT <= 0) { b.slowT = 0; b.slowMove = 0; b.slowAtk = 0; } }
         if (b.u.spawn) {
@@ -1624,6 +1986,7 @@ const Engine = (() => {
       // wins a trade just by being processed first (side 0 used to win one-shot duels like Sniper vs Sniper)
       for (const b of all) {
         if ((!b.alive && b.diedTick !== tick) || b.delay > 0 || b.u.ram || b.boarded || b.turning) continue;
+        if (b.u.roll > 0 || b.follow || b.buildT > 0 || b.siteJob || b.u.idle || b.u.bot) continue; // rollers hit by rolling; healbots, bots and buildings never attack; builders at work don't
         b.cd -= dt * (b.slowT > 0 ? 1 - b.slowAtk / 100 : 1); // slowed units reload slower
         if (b.firing >= 0) b.firing += dt;
         if (b.stunT > 0) continue; // stunned after a charge
@@ -1706,7 +2069,7 @@ const Engine = (() => {
           b.aims[0] = primary;
         }
         if (b.firing < 0) b.firing = 0;
-        const spin = b.u.spinUp > 0 ? Math.min(SPIN_CAP, 1 + b.u.spinUp / 100 * b.firing) : 1;
+        const spin = b.u.spinUp > 0 ? Math.min(b.u.spinCap > 0 ? b.u.spinCap : SPIN_CAP, 1 + b.u.spinUp / 100 * b.firing) : 1;
         b.spin = spin;
         // reload doesn't stack up while the unit has nothing to shoot: keep at most one step of carry-over
         b.cd = Math.max(b.cd, -dt) + 1 / Math.max(0.01, apsOf(b) * spin);
@@ -1777,7 +2140,7 @@ const Engine = (() => {
           while (mv > 0 && !done) {
             const sub = Math.min(0.5, mv, p.left);
             p.x += p.dirX * sub; p.y += p.dirY * sub; p.left -= sub; mv -= sub;
-            for (const f of foes) {
+            if (!p.owner.u.lob) for (const f of foes) {
               if (f.alive && hyp(f.x - p.x, f.y - p.y) <= PROJ_HIT_RADIUS) {
                 impact(p.owner, p.x, p.y, null, p.hit, p.dirX, p.dirY, p.fx, p.fy);
                 done = true; break;
@@ -1809,8 +2172,15 @@ const Engine = (() => {
       }
       turning.length = 0;
       // bodies spawned by deaths this tick join the fight
-      for (const kid of pendingKids) { all.push(kid); sides[kid.side].push(kid); stats[kid.side].totalHp += kid.u.hp; }
+      for (const kid of pendingKids) { all.push(kid); sides[kid.side].push(kid); if (counts(kid)) stats[kid.side].totalHp += kid.u.hp; }
       pendingKids.length = 0;
+      // a linked squad shares its health: whatever healed one of its bodies is shared by all
+      for (const grp of groups) {
+        if (!grp[0].link) continue;
+        let s = 0, mx = 0;
+        for (const x of grp) if (x.alive) { s += x.hp; mx += x.u.hp; }
+        if (mx > 0) for (const x of grp) if (x.alive) x.hp = x.u.hp * s / mx;
+      }
       t += dt;
       return true;
     }
@@ -1825,7 +2195,7 @@ const Engine = (() => {
 
     function result() {
       const inside = (b) => b.boarded && b.carrier && b.carrier.alive; // still riding in a carrier that made it
-      const remHp = sides.map(arr => arr.reduce((s, b) => s + ((b.alive || inside(b)) && !b.u.structure && !b.u.aloft ? b.hp : 0), 0));
+      const remHp = sides.map(arr => arr.reduce((s, b) => s + ((b.alive || inside(b)) && counts(b) ? b.hp : 0), 0));
       const frac = [remHp[0] / stats[0].totalHp, remHp[1] / stats[1].totalHp];
       const aliveA = aliveCount(A), aliveB = aliveCount(B);
       let winner = -1, timeout = false;
@@ -1835,6 +2205,12 @@ const Engine = (() => {
       // survivors per squad: { squadId: { side, total, alive } }
       const squads = {};
       for (const b of all) {
+        if (b.credit) { // a construct: its XP and damage go to the squad that built (or brought) it
+          const o = b.credit.convert || b.credit, k = o.side + ':' + o.squad;
+          const s = squads[k] || (squads[k] = { side: o.side, squad: o.squad, total: 0, alive: 0, xp: 0, dealt: 0 });
+          s.xp += b.xp; s.dealt += b.dealt || 0;
+          continue;
+        }
         if (b.convert) { // a body won over still counts, as lost, for the squad it came from
           const k = b.convert.side + ':' + b.convert.squad;
           const s = squads[k] || (squads[k] = { side: b.convert.side, squad: b.convert.squad, total: 0, alive: 0, xp: 0, dealt: 0 });
@@ -1852,10 +2228,12 @@ const Engine = (() => {
         stats, squads,
         charm, // charisma stacks after the fight, by side and squad id (null for a side without)
         converted: [0, 1].map(k => all.filter(b => b.convert && b.side === k).length), // bodies each side won over
+        // each building: still standing, seconds of building done at the end (null when it was already built), whether any was done this fight
+        buildings: all.filter(b => b.u.building).map(b => ({ side: b.side, squad: b.squad, alive: b.alive, work: b.site ? b.site.work : null, worked: !!(b.site && b.site.work > b.site.start) })),
       };
     }
 
-    return { step, frame, result, bodies: all, neutrals, isOver: () => over, time: () => t, lastShots: () => shots, projectiles: () => projectiles, crippled: (side) => cripple[side], charm: (side, squad) => (charm[side] && charm[side][squad]) || 0 };
+    return { step, frame, result, bodies: all, neutrals, mines: () => mines, isOver: () => over, time: () => t, lastShots: () => shots, projectiles: () => projectiles, crippled: (side) => cripple[side], charm: (side, squad) => (charm[side] && charm[side][squad]) || 0 };
   }
 
   function matrix(units, g) {
@@ -1876,7 +2254,7 @@ const Engine = (() => {
     return m;
   }
 
-  return { TOWER_DOWN, RULES, ruleOn, STEALTH_BACK, SKILL_SLOTS, SLOTS, SKILL_TYPES, skillParam, describeSkill, applySkills, innateUnit, fairBudget, battle, makeArmy, matrix, createBattle, buildSquad, rawStrength, squadsFor, withTraits, leveled, TRAIT_DEFAULTS, SPIN_CAP, CHARGE_RUN, TRAMPLE_RUN, BLAST_RADIUS, RAM_REACH, LEVEL_BONUS, MAX_LEVEL, CHARM_MAX, CONVERT_HP, CONVERT_SQUAD };
+  return { TOWER_DOWN, RULES, ruleOn, STEALTH_BACK, SKILL_SLOTS, SLOTS, SKILL_TYPES, skillParam, describeSkill, applySkills, innateUnit, fairBudget, battle, makeArmy, matrix, createBattle, buildSquad, rawStrength, squadsFor, withTraits, leveled, TRAIT_DEFAULTS, SPIN_CAP, CHARGE_RUN, TRAMPLE_RUN, BLAST_RADIUS, RAM_REACH, ROLL_START, ROLL_PAST, BUILD_GAP, BUILD_COOP, SITE_REACH, MINE_TRIGGER, REPAIR_SECS, LEVEL_BONUS, MAX_LEVEL, CHARM_MAX, CONVERT_HP, CONVERT_SQUAD };
 })();
 if (typeof module !== 'undefined') module.exports = Engine;
 
@@ -1884,6 +2262,775 @@ if (typeof module !== 'undefined') module.exports = Engine;
 (() => {
   const SAMPLE = {"goldCosts":true,"settings":{"sight":15,"minSight":18,"drift":15,"budget":100,"distance":40,"spacing":3.5,"minDmgPct":15,"timeCap":60,"dt":0.05,"flameReach":1.2},"skills":[{"id":"regen","type":"regen","name":"Regeneration","cost":100,"params":{}},{"id":"poison","type":"poison","name":"Poison shot","cost":100,"params":{"pct":150,"duration":6}},{"id":"stealth","type":"stealth","name":"Stealth","cost":100,"params":{}},{"id":"armorHp","type":"armorHp","name":"Armor and health","cost":200,"params":{}},{"id":"spawn","type":"spawn","name":"Spawn goblins","cost":200,"params":{"every":7}},{"id":"rapid","type":"rapid","name":"Rapid fire","cost":100,"params":{}},{"id":"swift","type":"swift","name":"Swift strikes","cost":100,"params":{}},{"id":"heavy","type":"heavy","name":"Heavy shot","cost":100,"params":{}},{"id":"healer","type":"healer","name":"Healing touch","cost":200,"params":{}},{"id":"range","type":"range","name":"Long reach","cost":200,"params":{}},{"id":"shrink","type":"shrink","name":"Shortsight","cost":100,"params":{"m":6,"duration":4}},{"id":"skmv5oxj501","type":"ward","name":"Ward","cost":100,"params":{}},{"id":"skmv5oxpgk2","type":"slow","name":"Slow","cost":100,"params":{}},{"id":"raiseDead","type":"spawn","name":"Raise dead","cost":0,"params":{"unit":"Skeleton Archers","count":3,"every":2,"max":12}},{"id":"spiderlings","type":"deathSpawn","name":"Spiderlings","cost":200,"params":{"unit":"Spiders","count":2,"strength":50}},{"id":"split","type":"split","name":"Split beam","cost":100,"params":{}},{"id":"forward","type":"forward","name":"Forward planting","cost":100,"params":{}},{"id":"gallop","type":"swift","name":"Gallop","cost":200,"params":{"speed":25,"hit":0}},{"id":"deathBurst","type":"blast","name":"Death burst","cost":200,"params":{"radius":7,"pct":100}},{"id":"dualFlame","type":"turret","name":"Dual Flame","cost":200,"params":{"turrets":2}},{"id":"lifesteal","type":"lifesteal","name":"Lifesteal","cost":150,"params":{"pct":10}},{"id":"dualSpear","type":"turret","name":"Dual Spear","cost":300,"params":{"turrets":2}},{"id":"frenzy","type":"frenzy","name":"Frenzy","cost":250,"params":{"pct":10,"cap":2}},{"id":"spread","type":"spread","name":"Spread","cost":300,"params":{"min":1,"max":6}},{"id":"boneShield","type":"shield","name":"Bone shield","cost":200,"params":{"hits":1}},{"id":"emberMortar","type":"mortar","name":"Ember Mortar","cost":300,"params":{"range":15,"min":5,"aps":0.1}},{"id":"explode","type":"explode","name":"Explode on death","cost":200,"params":{"pct":30,"radius":5}},{"id":"dodge","type":"dodge","name":"Dodge","cost":200,"params":{"pct":33}},{"id":"steelPlating","type":"armorHp","name":"Steel plating","cost":300,"params":{"armor":16,"hp":0}}],"units":[{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Goblin Swarm","cost":100,"bodies":12,"hp":26,"hit":19,"aps":1.2,"range":2,"speed":7.5,"splash":0,"shape":"triangle","color":"#9BD35A","skills":["swift","shrink","spread"],"skillsOn":[false,false,false],"skillMods":[null,{"params":{},"cost":50},null],"skillsInnate":[false,false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Skeleton Archers","cost":100,"bodies":8,"hp":32,"hit":14,"aps":0.75,"range":19,"speed":2.1,"splash":0,"shape":"triangle","color":"#E9E3CF","skills":["range","rapid","boneShield"],"skillsOn":[false,false,false],"skillMods":[null,null,null],"skillsInnate":[false,false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Ember Imps","cost":100,"bodies":4,"hp":110,"hit":20,"aps":0.8,"range":10,"speed":4,"splash":3,"shape":"imp","color":"#FFA94D","skills":["swift","heavy","emberMortar"],"skillsOn":[false,false,false],"skillMods":[null,null,null],"skillsInnate":[false,false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":35,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Fire Mage","cost":100,"bodies":1,"hp":155,"hit":33,"aps":0.75,"range":20,"speed":3,"splash":4,"shape":"hexagon","color":"#fb0022","skills":["range","armorHp","dualFlame"],"skillsOn":[false,false,false],"skillMods":[null,null,null],"skillsInnate":[false,false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":1,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Sniper","cost":100,"bodies":1,"hp":140,"hit":210,"aps":0.25,"range":29,"speed":2,"splash":0,"shape":"cross","color":"#F7D154","skills":["rapid","spawn","range"],"skillsOn":[false,false,false],"skillMods":[{"params":{"range":0,"aps":15},"cost":150},{"params":{"waves":3,"every":8.5}},null],"skillsInnate":[false,false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"armor","defVal":3,"level":0,"unlock":50,"name":"Brute","cost":200,"bodies":1,"hp":1100,"hit":98,"aps":1.1,"range":2,"speed":5,"splash":0,"shape":"square","color":"#8D99AE","skills":["armorHp","swift"],"skillsOn":[false,false],"skillMods":[null,null],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":20,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":40,"level":0,"unlock":50,"name":"Wisps","cost":100,"bodies":2,"hp":80,"hit":75,"aps":0.8,"range":19,"speed":4,"splash":0,"shape":"ring","color":"#ff90ff","skills":["stealth","skmv5oxj501"],"skillsOn":[false,false],"skillMods":[null,{"params":{},"cost":200}],"skillsInnate":[false,false]},{"burst":6,"pellets":2,"spinUp":0,"pierce":0,"projSpeed":35,"minRange":0,"charge":1,"knockback":0,"windUp":0.2,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Leaf Wizard","cost":200,"bodies":1,"hp":240,"hit":21,"aps":0.45,"range":27,"speed":5,"splash":0,"shape":"hexagon","color":"#00d200","skills":["rapid","range","dodge"],"skillsOn":[false,false,false],"skillMods":[null,null,null],"skillsInnate":[false,false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":5,"projSpeed":35,"minRange":0,"charge":1,"knockback":0,"windUp":0.5,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Earth Wizard","cost":200,"bodies":1,"hp":650,"hit":440,"aps":0.2,"range":24,"speed":3,"splash":2,"shape":"circle","color":"#24590d","skills":["regen","range","heavy"],"skillsOn":[false,false,false],"skillMods":[null,null,{"params":{"hit":20,"slow":30},"cost":150}],"skillsInnate":[false,false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":30,"defense":"none","defVal":0,"level":0,"unlock":100,"name":"Flame Wizard","cost":300,"bodies":1,"hp":2000,"hit":12,"aps":4,"range":15,"speed":2,"splash":0,"shape":"flame","color":"#b95018","skills":["armorHp","range"],"skillsOn":[false,false],"skillMods":[null,null],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":100,"name":"Steel Wizard","cost":300,"bodies":1,"hp":1900,"hit":150,"aps":0.9,"range":15,"speed":2,"splash":2,"shape":"bar","color":"#57535a","skills":["range","heavy","steelPlating"],"skillsOn":[false,false,false],"skillMods":[null,{"params":{"slow":20,"hit":20}},null],"skillsInnate":[false,false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":40,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":100,"name":"Slime Wizard","cost":300,"bodies":1,"hp":700,"hit":480,"aps":0.2,"range":22,"speed":2.5,"splash":6,"shape":"ring","color":"#81f038","skills":["skmv5oxpgk2","range"],"skillsOn":[false,false],"skillMods":[null,null],"skillsInnate":[false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"armor","defVal":6,"level":0,"unlock":150,"splash":3,"skillsOn":[false,false],"skillsInnate":[false,false],"skillMods":[null,null],"name":"Ether Golem","cost":500,"bodies":1,"hp":3450,"hit":69,"aps":0.6,"range":5,"speed":2.5,"shape":"square","color":"#51005c","skills":["regen","armorHp"]},{"burst":1,"pellets":1,"spinUp":50,"spinHit":50,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":150,"splash":0,"skillsOn":[false,false],"skillsInnate":[false,false],"skillMods":[null,null],"name":"Sun Priest","cost":500,"bodies":1,"hp":2800,"hit":38,"aps":2,"range":18,"speed":3,"shape":"sun","color":"#FFD23F","skills":["split","shrink"]},{"burst":3,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":22,"minRange":12,"charge":1,"knockback":0,"windUp":2,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":150,"splash":6,"skillsOn":[false,false],"skillsInnate":[false,false],"skillMods":[null,null],"name":"Meteor Caller","cost":500,"bodies":1,"hp":400,"hit":114,"aps":0.3,"range":50,"speed":2,"shape":"diamond","color":"#FF6B35","skills":["range","skmv5oxpgk2"]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":3,"knockback":4,"windUp":0,"flame":0,"defense":"armor","defVal":6,"level":0,"unlock":150,"splash":3,"skillsOn":[false,false],"skillsInnate":[false,false],"skillMods":[null,null],"name":"War Mammoth","cost":500,"bodies":1,"hp":2450,"hit":169,"aps":0.5,"range":3,"speed":8,"shape":"pentagon","color":"#A0785A","skills":["swift","armorHp"],"trample":50,"chargeStun":1.5},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":150,"splash":0,"skillsOn":[false,false],"skillsInnate":[true,false],"skillMods":[null,null],"name":"Necromancer","cost":500,"bodies":1,"hp":2300,"hit":56,"aps":1,"range":20,"speed":2.2,"shape":"hexagon","color":"#9D4EDD","skills":["raiseDead","healer"]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":180,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Ent","cost":100,"bodies":2,"hp":400,"hit":25,"aps":1.1,"range":4,"speed":2.2,"splash":0,"shape":"square","color":"#0d3000","skills":["armorHp","forward","explode"],"skillsOn":[false,false,false],"skillsInnate":[false,false,false],"skillMods":[{"params":{"armor":4,"hp":20}},null,null],"deathBlast":0},{"burst":1,"pellets":1,"spinUp":0.1,"pierce":0,"projSpeed":30,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"name":"Slimeshots","cost":200,"unlock":100,"bodies":10,"hp":95,"hit":7,"aps":0.8,"range":21,"speed":6,"splash":3,"shape":"diamond","color":"#20d300","skills":["range","heavy"],"skillsOn":[false,false],"skillsInnate":[false,false],"skillMods":[{"params":{"m":3},"cost":150},{"params":{"hit":25,"slow":0,"instant":0},"cost":150}]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Just a horse","cost":200,"bodies":1,"hp":500,"hit":200,"aps":1,"range":1,"speed":6,"splash":0,"shape":"horse","color":"#C8A27A","ram":1,"noFlank":1,"carrier":1,"noPack":1,"skills":["gallop","armorHp","deathBurst"],"skillsOn":[false,false,false],"skillMods":[null,{"params":{"armor":4,"hp":20},"cost":150},null],"skillsInnate":[false,false,false]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":30,"minRange":0,"charge":4,"knockback":0,"windUp":0,"flame":0,"trample":0,"deathBlast":0,"defense":"none","defVal":0,"level":0,"unlock":100,"name":"Rogue","cost":300,"bodies":2,"hp":310,"hit":80,"aps":1.1,"range":4,"speed":6,"splash":0,"shape":"triangle","color":"#460000","skills":["stealth","skmv5oxj501","frenzy"],"skillsOn":[false,false,false],"skillsInnate":[true,false,false],"skillMods":[null,{"params":{"cap":200},"cost":150},null]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":0,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"trample":0,"deathBlast":0,"defense":"none","defVal":0,"level":0,"unlock":50,"name":"Spiders","cost":200,"bodies":5,"hp":185,"hit":20,"aps":0.8,"range":2,"speed":6,"splash":0,"shape":"spider","color":"#000000","skills":["spiderlings","poison","stealth"],"skillsOn":[false,false,false],"skillsInnate":[false,false,false],"skillMods":[null,null,{"params":{},"cost":200}]},{"burst":1,"pellets":1,"spinUp":0,"pierce":0,"projSpeed":35,"minRange":0,"charge":1,"knockback":0,"windUp":0,"flame":0,"trample":0,"deathBlast":0,"pctHit":20,"defense":"none","defVal":0,"level":0,"unlock":150,"name":"Truespear","cost":500,"bodies":1,"hp":750,"hit":60,"aps":0.8,"range":25,"speed":3,"splash":0,"shape":"spear","color":"#C9D1D9","skills":["lifesteal","armorHp","dualSpear"],"skillsOn":[false,false,false],"skillMods":[null,null,null],"skillsInnate":[false,false,false]}]};
   const EXAMPLES = [{"name":"Crossbow Volley","cost":100,"bodies":2,"hp":300,"hit":52,"aps":0.35,"range":30,"speed":4,"splash":0,"defense":"none","defVal":0,"burst":4,"skills":["rapid","heavy"],"skillsOn":[false,false,false]},{"name":"Ballista","cost":100,"bodies":1,"hp":750,"hit":220,"aps":0.6,"range":40,"speed":3,"splash":0,"defense":"none","defVal":0,"pierce":3,"minRange":6,"projSpeed":45,"skills":["heavy","range"],"skillsOn":[false,false,false]},{"name":"Spinning Golem","cost":100,"bodies":1,"hp":1300,"hit":22,"aps":1.2,"range":12,"speed":4,"splash":0,"defense":"none","defVal":0,"spinUp":25,"skills":["armorHp","regen"],"skillsOn":[false,false,false]},{"name":"Boar Riders","cost":100,"bodies":3,"hp":310,"hit":30,"aps":0.8,"range":2,"speed":11,"splash":0,"defense":"none","defVal":0,"charge":2.5,"knockback":3,"skills":["armorHp","swift"],"skillsOn":[false,false,false]},{"name":"Blunderbuss Crew","cost":100,"bodies":2,"hp":380,"hit":18,"aps":0.6,"range":12,"speed":5,"splash":0,"defense":"none","defVal":0,"pellets":6,"skills":["swift","poison"],"skillsOn":[false,false,false]},{"name":"Ogre Smasher","cost":100,"bodies":1,"hp":1100,"hit":260,"aps":0.5,"range":3,"speed":7,"splash":2.5,"defense":"none","defVal":0,"windUp":1,"knockback":4,"skills":["spawn","armorHp"],"skillsOn":[false,false,false]}];
+  const FACTIONS = {
+  "factions": [
+    {
+      "id": "mechites",
+      "name": "Mechites",
+      "color": "#C2873F",
+      "theme": "Rock elementals with clockwork hearts. They move smooth as magic; the machines they build rattle and smoke.",
+      "tower": {
+        "name": "Mecha Tower",
+        "text": "A squat clockwork tower that doesn't shoot itself: its drone circles it and shoots any enemy it sees, a Keep's shots at a faster rate. Every round it can send out minebots or repairbots for that round's fight.",
+        "unit": {
+          "hp": 700,
+          "hit": 0,
+          "aps": 1,
+          "range": 0,
+          "idle": true,
+          "drone": {
+            "orbit": 5,
+            "unit": {
+              "name": "Mecha Drone",
+              "cost": 0,
+              "hp": 1,
+              "hit": 30,
+              "aps": 2,
+              "range": 9,
+              "speed": 4,
+              "splash": 0,
+              "shape": "diamond",
+              "color": "#C2873F",
+              "tag": "DRN"
+            }
+          }
+        },
+        "awake": {
+          "speed": 5,
+          "flee": 14,
+          "stay": true,
+          "backline": true,
+          "hit": 40,
+          "aps": 0.6,
+          "range": 35,
+          "minRange": 8,
+          "splash": 3,
+          "projSpeed": 22,
+          "lob": true
+        },
+        "rounds": [
+          {
+            "id": "minebots",
+            "name": "Minebots",
+            "cost": 100,
+            "text": "This round the tower sends out 2 minebots (100 health each). Each walks out into no man's land and plants 3 mines. Only enemies set them off: 200 damage to every enemy within 7 m.",
+            "bots": {
+              "count": 2,
+              "unit": {
+                "name": "Minebot",
+                "cost": 0,
+                "hp": 100,
+                "hit": 0,
+                "aps": 1,
+                "range": 0,
+                "speed": 5,
+                "splash": 0,
+                "bot": "mine",
+                "shape": "circle",
+                "color": "#8F7B5E",
+                "tag": "MNB"
+              }
+            },
+            "mines": {
+              "each": 3,
+              "hit": 200,
+              "radius": 7
+            }
+          },
+          {
+            "id": "repairbots",
+            "name": "Repairbots",
+            "cost": 50,
+            "text": "This round the tower sends out 2 repairbots (100 health each). Each goes to your nearest damaged or unfinished building (the tower too) and works on it like one builder.",
+            "bots": {
+              "count": 2,
+              "unit": {
+                "name": "Repairbot",
+                "cost": 0,
+                "hp": 100,
+                "hit": 0,
+                "aps": 1,
+                "range": 0,
+                "speed": 4,
+                "splash": 0,
+                "bot": "repair",
+                "shape": "circle",
+                "color": "#7FA37A",
+                "tag": "RPB"
+              }
+            }
+          }
+        ]
+      },
+      "units": [
+        {
+          "name": "Rollers",
+          "cost": 100,
+          "unlock": 50,
+          "bodies": 2,
+          "hp": 400,
+          "hit": 30,
+          "aps": 0.4,
+          "range": 1.5,
+          "speed": 7,
+          "splash": 0,
+          "roll": 2,
+          "shape": "circle",
+          "color": "#9A8B76",
+          "skills": [
+            "rollerMomentum",
+            "rollerPlating",
+            "rollerUnfold"
+          ],
+          "smooth": true,
+          "tag": "ROL"
+        },
+        {
+          "name": "Cog Builder",
+          "cost": 200,
+          "unlock": 50,
+          "bodies": 1,
+          "hp": 350,
+          "hit": 30,
+          "aps": 1,
+          "range": 2,
+          "speed": 4,
+          "splash": 0,
+          "shape": "pentagon",
+          "color": "#B98B5A",
+          "build": {
+            "time": 1.5,
+            "range": 25,
+            "count": 1,
+            "unit": {
+              "name": "Cog Turret",
+              "cost": 0,
+              "bodies": 1,
+              "hp": 100,
+              "hit": 14,
+              "aps": 1.5,
+              "range": 25,
+              "speed": 0,
+              "splash": 0,
+              "shape": "square",
+              "color": "#A8A296",
+              "tag": "TUR"
+            }
+          },
+          "skills": [
+            "buildFactory",
+            "twinTurrets",
+            "masterEngineering"
+          ],
+          "skillNeeds": [
+            null,
+            null,
+            [
+              0,
+              1
+            ]
+          ],
+          "smooth": true,
+          "tag": "BLD"
+        },
+        {
+          "name": "Mechite Guards",
+          "cost": 200,
+          "unlock": 50,
+          "bodies": 3,
+          "hp": 340,
+          "hit": 32,
+          "pellets": 5,
+          "aps": 0.3,
+          "range": 10,
+          "speed": 2,
+          "splash": 0,
+          "knockback": 4,
+          "defense": "armor",
+          "defVal": 2,
+          "shape": "hexagon",
+          "color": "#7E8A8F",
+          "skills": [
+            "guardRapid",
+            "guardLink",
+            "guardHealbot"
+          ],
+          "smooth": true,
+          "tag": "GRD"
+        },
+        {
+          "name": "Altar of Build",
+          "cost": 500,
+          "unlock": 150,
+          "bodies": 1,
+          "hp": 4000,
+          "hit": 0,
+          "aps": 1,
+          "range": 0,
+          "speed": 0,
+          "splash": 0,
+          "building": "altar",
+          "footprint": 2,
+          "idle": true,
+          "noCount": true,
+          "anchored": true,
+          "noPack": true,
+          "noFlank": true,
+          "shape": "star",
+          "color": "#9C8B6E",
+          "tag": "ALT",
+          "skills": [
+            null,
+            null,
+            null
+          ]
+        }
+      ]
+    },
+    {
+      "id": "sunken",
+      "name": "Sunken Deep",
+      "color": "#3F8FA6",
+      "theme": "PLACEHOLDER until Vilhelm's roster: slow, heavy things from the deep that wear the enemy down.",
+      "trait": {
+        "name": "Pressure-born",
+        "text": "+15% health, -10% speed",
+        "hp": 15,
+        "speed": -10
+      },
+      "tower": {
+        "name": "Coral Spire",
+        "text": "Lobs heavy globs of brine that splash.",
+        "gem": "Powergem: not designed yet.",
+        "unit": {
+          "hp": 650,
+          "hit": 22,
+          "aps": 0.8,
+          "range": 16,
+          "splash": 2.5,
+          "projSpeed": 28
+        }
+      },
+      "units": [
+        {
+          "name": "Drowned Swarm",
+          "cost": 100,
+          "unlock": 0,
+          "bodies": 10,
+          "hp": 35,
+          "hit": 10,
+          "aps": 1.1,
+          "range": 2,
+          "speed": 6,
+          "splash": 0
+        },
+        {
+          "name": "Lure Angler",
+          "cost": 100,
+          "unlock": 0,
+          "bodies": 3,
+          "hp": 220,
+          "hit": 40,
+          "aps": 0.8,
+          "range": 4,
+          "speed": 5,
+          "splash": 0,
+          "disguise": "Drowned Swarm"
+        },
+        {
+          "name": "Tide Caller",
+          "cost": 200,
+          "unlock": 50,
+          "bodies": 1,
+          "hp": 400,
+          "hit": 45,
+          "aps": 0.6,
+          "range": 22,
+          "speed": 3,
+          "splash": 2.5,
+          "projSpeed": 26
+        },
+        {
+          "name": "Kelp Horror",
+          "cost": 300,
+          "unlock": 100,
+          "bodies": 1,
+          "hp": 1600,
+          "hit": 50,
+          "aps": 0.8,
+          "range": 3,
+          "speed": 3,
+          "splash": 1.5,
+          "defense": "ward",
+          "defVal": 60
+        },
+        {
+          "name": "Leviathan",
+          "cost": 500,
+          "unlock": 150,
+          "bodies": 1,
+          "hp": 3600,
+          "hit": 120,
+          "aps": 0.5,
+          "range": 6,
+          "speed": 2.2,
+          "splash": 4
+        }
+      ],
+      "buildings": [
+        {
+          "id": "brine-well",
+          "name": "Brine Well",
+          "text": "Heals the most wounded of your units in range. If it falls you lose 2 health.",
+          "unit": {
+            "hp": 450,
+            "mend": 30,
+            "aps": 0.8,
+            "range": 14
+          },
+          "onDestroyed": {
+            "hp": 2
+          }
+        },
+        {
+          "id": "spawning-pool",
+          "name": "Spawning Pool",
+          "text": "Releases 2 Drowned Swarm every 7 s (up to 6 at once). If it falls you lose 50 gold.",
+          "unit": {
+            "hp": 500
+          },
+          "spawn": {
+            "unit": "Drowned Swarm",
+            "count": 2,
+            "every": 7,
+            "max": 6
+          },
+          "onDestroyed": {
+            "gold": 50
+          }
+        }
+      ],
+      "powers": [
+        {
+          "id": "deep-pressure",
+          "name": "Deep pressure",
+          "text": "Sunken Deep units get +10% health.",
+          "mods": {
+            "hp": 10
+          },
+          "units": "faction"
+        },
+        {
+          "id": "riptide",
+          "name": "Riptide",
+          "text": "Unlocks the spell Riptide pool.",
+          "spell": "riptide-pool"
+        },
+        {
+          "id": "tidal-surge",
+          "name": "Tidal surge",
+          "text": "Lure Anglers and Drowned Swarm move 20% faster.",
+          "mods": {
+            "speed": 20
+          },
+          "units": [
+            "Lure Angler",
+            "Drowned Swarm"
+          ]
+        }
+      ]
+    }
+  ],
+  "neutral": {
+    "units": [
+      "Goblin Swarm",
+      "Skeleton Archers",
+      "Brute",
+      "Wisps",
+      "Ent",
+      "Rogue"
+    ],
+    "buildings": [
+      {
+        "id": "watchtower",
+        "name": "Watchtower",
+        "text": "A long-range turret. If it falls you lose 1 health.",
+        "unit": {
+          "hp": 400,
+          "hit": 25,
+          "aps": 0.6,
+          "range": 20,
+          "projSpeed": 40
+        },
+        "onDestroyed": {
+          "hp": 1
+        }
+      },
+      {
+        "id": "war-banner",
+        "name": "War banner",
+        "text": "Squads that start next to it deal 15% more damage. If it falls you lose 2 health.",
+        "unit": {
+          "hp": 300
+        },
+        "aura": {
+          "tiles": 1,
+          "hit": 15
+        },
+        "onDestroyed": {
+          "hp": 2
+        }
+      },
+      {
+        "id": "trading-post",
+        "name": "Trading post",
+        "text": "+75 gold every round. If it falls you lose 100 gold.",
+        "unit": {
+          "hp": 350
+        },
+        "income": 75,
+        "onDestroyed": {
+          "gold": 100
+        }
+      }
+    ],
+    "powers": [
+      {
+        "id": "field-rations",
+        "name": "Field rations",
+        "text": "All your units get +8% health.",
+        "mods": {
+          "hp": 8
+        }
+      },
+      {
+        "id": "recruiters",
+        "name": "Recruiters",
+        "text": "+1 deployment every round.",
+        "deploys": 1
+      },
+      {
+        "id": "fire-pots",
+        "name": "Fire pots",
+        "text": "Unlocks the spell Fire pot.",
+        "spell": "fire-pot"
+      },
+      {
+        "id": "stonemasons",
+        "name": "Stonemasons",
+        "text": "Your buildings and tower get +40% health, and you can raise palisades.",
+        "buildingHp": 40,
+        "spell": "palisade"
+      },
+      {
+        "id": "herbalists",
+        "name": "Herbalists",
+        "text": "Unlocks the spell Healing spring.",
+        "spell": "healing-spring"
+      }
+    ]
+  },
+  "spells": [
+    {
+      "id": "fire-pot",
+      "name": "Fire pot",
+      "text": "3 s into the fight, 160 damage to every enemy within 7 m of the tile.",
+      "cost": 75,
+      "kind": "strike",
+      "at": 3,
+      "radius": 7,
+      "dmg": 160,
+      "place": "any"
+    },
+    {
+      "id": "palisade",
+      "name": "Palisade",
+      "text": "A wooden wall with 700 health, for 2 fights.",
+      "cost": 50,
+      "kind": "wall",
+      "hp": 700,
+      "rounds": 2,
+      "place": "front"
+    },
+    {
+      "id": "healing-spring",
+      "name": "Healing spring",
+      "text": "Your units on these 2×2 tiles heal 25 health a second.",
+      "cost": 50,
+      "kind": "zone",
+      "effect": "mend",
+      "dps": 25,
+      "size": 2,
+      "place": "front"
+    },
+    {
+      "id": "riptide-pool",
+      "name": "Riptide pool",
+      "text": "Enemies on these 2×2 tiles move 45% slower.",
+      "cost": 50,
+      "kind": "zone",
+      "effect": "mud",
+      "slow": 45,
+      "size": 2,
+      "place": "any"
+    }
+  ],
+  "skills": [
+    {
+      "id": "rollerMomentum",
+      "type": "momentum",
+      "name": "Momentum",
+      "cost": 100,
+      "params": {
+        "accel": 100
+      }
+    },
+    {
+      "id": "rollerPlating",
+      "type": "armorHp",
+      "name": "Stone plating",
+      "cost": 150,
+      "params": {
+        "armor": 4,
+        "hp": 15
+      }
+    },
+    {
+      "id": "rollerUnfold",
+      "type": "unfold",
+      "name": "Unfold",
+      "cost": 100
+    },
+    {
+      "id": "buildFactory",
+      "type": "building",
+      "name": "Build factory",
+      "cost": 200,
+      "params": {
+        "building": "factory"
+      }
+    },
+    {
+      "id": "twinTurrets",
+      "type": "builder",
+      "name": "Twin turrets",
+      "cost": 200,
+      "params": {
+        "extra": 1
+      }
+    },
+    {
+      "id": "masterEngineering",
+      "type": "builder",
+      "name": "Master engineering",
+      "cost": 400,
+      "params": {
+        "faster": 50,
+        "aps": 20,
+        "shield": 2,
+        "armor": 2
+      }
+    },
+    {
+      "id": "guardRapid",
+      "type": "rapid",
+      "name": "Oiled pumps",
+      "cost": 100,
+      "params": {
+        "aps": 25,
+        "range": 0
+      }
+    },
+    {
+      "id": "guardLink",
+      "type": "link",
+      "name": "Linked cores",
+      "cost": 150,
+      "params": {
+        "hp": 15
+      }
+    },
+    {
+      "id": "guardHealbot",
+      "type": "healbot",
+      "name": "Healbot",
+      "cost": 200,
+      "params": {
+        "hp": 300,
+        "pct": 4,
+        "range": 8,
+        "speed": 3
+      }
+    }
+  ],
+  "buildings": [
+    {
+      "id": "factory",
+      "name": "Factory",
+      "faction": "mechites",
+      "hp": 1000,
+      "buildSecs": 20,
+      "rebuild": 50,
+      "levelCost": 100,
+      "color": "#B07A3C",
+      "text": "A small, smoking workshop. Your nearest Cog Builder builds it during fights; once built, buy one of its constructs each round.",
+      "skills": [
+        {
+          "id": "fighter",
+          "name": "Cogbot Fighter",
+          "cost": 100,
+          "time": 2,
+          "unit": {
+            "name": "Cogbot Fighter",
+            "cost": 1,
+            "bodies": 1,
+            "hp": 1500,
+            "hit": 300,
+            "aps": 0.5,
+            "range": 2,
+            "speed": 3,
+            "splash": 0,
+            "defense": "armor",
+            "defVal": 4,
+            "shield": 2,
+            "shape": "square",
+            "color": "#A88452",
+            "tag": "FGT"
+          }
+        },
+        {
+          "id": "gunner",
+          "name": "Cogbot Machinegunner",
+          "cost": 100,
+          "time": 2,
+          "unit": {
+            "name": "Cogbot Machinegunner",
+            "cost": 1,
+            "bodies": 1,
+            "hp": 500,
+            "hit": 50,
+            "aps": 0.3,
+            "spinUp": 225,
+            "spinCap": 10,
+            "range": 22,
+            "speed": 3,
+            "splash": 0,
+            "shape": "triangle",
+            "color": "#9C8F7A",
+            "tag": "MGN"
+          }
+        },
+        {
+          "id": "cogmech",
+          "name": "CogMech",
+          "cost": 300,
+          "time": 4,
+          "unit": {
+            "name": "CogMech",
+            "cost": 1,
+            "bodies": 1,
+            "hp": 2000,
+            "hit": 200,
+            "aps": 1,
+            "range": 18,
+            "speed": 2.5,
+            "splash": 2,
+            "defense": "armor",
+            "defVal": 4,
+            "shield": 3,
+            "turrets": 2,
+            "shape": "hexagon",
+            "color": "#B5895A",
+            "tag": "MCH"
+          }
+        }
+      ],
+      "survive": true,
+      "awake": {
+        "speed": 2,
+        "hit": 220,
+        "aps": 0.4,
+        "range": 22,
+        "splash": 3,
+        "projSpeed": 30
+      }
+    },
+    {
+      "id": "altar",
+      "name": "Altar of Build",
+      "faction": "mechites",
+      "hp": 4000,
+      "buildSecs": 30,
+      "selfBuild": 0.2,
+      "rebuild": 50,
+      "color": "#9C8B6E",
+      "text": "A stone ring with the Cog Spire in its middle, standing where four tiles meet. Your nearest free Cog Builder builds it during fights (with none free it builds itself, five times slower); once built, buy one of its blessings each round.",
+      "awake": {
+        "speed": 2.5,
+        "hit": 38,
+        "aps": 2,
+        "range": 18,
+        "spinUp": 50,
+        "spinHit": 50,
+        "beams": 6
+      },
+      "skills": [
+        {
+          "id": "blessing",
+          "name": "Blessing of the Cycle",
+          "cost": 200,
+          "text": "This round all your constructs (turrets, healbots, buildings and what they make) get +25% construct speed, +25% health, +15% move speed, +15% fire rate and regain 2% of their health every second.",
+          "bless": {
+            "build": 25,
+            "hp": 25,
+            "speed": 15,
+            "aps": 15,
+            "regen": 2
+          }
+        },
+        {
+          "id": "defense",
+          "name": "Cogbot Defensive Force",
+          "cost": 500,
+          "time": 4,
+          "text": "Four seconds into this round's fight the altar makes 2 Cogbot Fighters and 2 Cogbot Machinegunners.",
+          "make": [
+            [
+              "factory",
+              "fighter",
+              2
+            ],
+            [
+              "factory",
+              "gunner",
+              2
+            ]
+          ]
+        },
+        {
+          "id": "awoken",
+          "name": "Core Awoken",
+          "cost": 800,
+          "text": "This round your construct buildings become units when the fight starts: the Factory rolls out on caterpillar tracks with a big tank gun, the altar rises on four spider legs and its Cog Spire fires 6 beams like a Sun Priest, your turrets get wheels: they keep away from enemies at 4 m/s while lobbing mortar shells at the enemy's back line, and the Mecha Tower drives on wheels at 5 m/s, keeping away from enemies while it lobs mortar shells at their back line (its drone keeps circling it).",
+          "awake": {
+            "built": {
+              "speed": 4,
+              "flee": 14,
+              "backline": true,
+              "hit": 28,
+              "aps": 0.75,
+              "range": 35,
+              "minRange": 8,
+              "splash": 3,
+              "projSpeed": 22,
+              "lob": true
+            }
+          }
+        }
+      ]
+    }
+  ]
+}; // src/factions.json: { factions: [{ id, name, units, ... }], skills }
   const KEY = 'counterlab.v1'; // the saved version of the roster open here (the game's Load units falls back to it)
   const BOOK_KEY = 'counterlab.rosters.v1'; // every roster: { active, rosters: [{ id, name, saved, draft }] }
   const TRAITS = [
@@ -1902,6 +3049,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
     ['pctHit', 'Health cut (% of target max health)', 5, 'Every hit also deals this share of the target’s max health (leveled targets have more), on top of the hit. Not against towers. Armor doesn’t stop this part (it still stops the hit); a ward caps the whole hit. 0 = off.'],
     ['flame', 'Flame cone (°)', 5, 'Sprays fire this many degrees to each side, hitting every enemy inside the cone at once, out to the flame reach (Battle settings). Pellets, splash, pierce and projectile speed are ignored. 0 = off.'],
     ['windUp', 'Wind-up (s)', 0.1, 'Sets up this long when an enemy first comes in range, then fires normally. Has to set up again after moving.'],
+    ['roll', 'Rolling (s to top speed)', 0.5, 'Never stops to attack: rolls at its target from 1 m/s up to its move speed over this many seconds, hitting every enemy body it rolls over for its hit, carries on a tile past the target, stops and rolls back. Attacks per second and range are ignored. 0 = off.'],
   ];
   // on/off rules for how the game offers the unit (not part of the fight)
   const FLAGS = [
@@ -2944,7 +4092,11 @@ if (typeof module !== 'undefined') module.exports = Engine;
   }
 
   // ---------- import units from the sample roster or another roster ----------
-  const importSources = () => [{ id: '', name: 'Sample roster', data: SAMPLE }, ...book.rosters.filter(r => r !== cur()).map(r => ({ id: r.id, name: r.name, data: toGold(r.draft || r.saved) }))];
+  // the Factions gamemode's factions (src/factions.json) can be imported too, to try their units here and, through
+  // Load units, in the game before there are enough factions for a draft
+  const importSources = () => [{ id: '', name: 'Sample roster', data: SAMPLE },
+    ...(FACTIONS.factions || []).map(f => ({ id: 'faction:' + f.id, name: `${f.name} (faction)`, data: { units: f.units || [], skills: (FACTIONS.skills || []).concat(SAMPLE.skills) } })),
+    ...book.rosters.filter(r => r !== cur()).map(r => ({ id: r.id, name: r.name, data: toGold(r.draft || r.saved) }))];
   function renderImport() {
     const srcs = importSources(), pick = $('imp-from').value;
     $('imp-from').innerHTML = srcs.map(x => `<option value="${esc(x.id)}" ${x.id === pick ? 'selected' : ''}>From ${esc(x.name)}</option>`).join('');
