@@ -47,7 +47,7 @@ A separate mode, so the normal game and the normal Factions mode don't change wh
 
 ## Data formats
 
-Everything goes in `src/factions.json`. Then run `node tools/counter-table.js` and `node src/build.js`. A field left out uses the default.
+Everything goes in `src/factions.json`. Then run `node tools/counter-table.js` and `node src/build.js`. A field left out uses the default. Keywords for the Miro factions board live in `src/keywords.json`; the board redraws itself on push (see [MIRO-SYNC.md](MIRO-SYNC.md)).
 
 ### A faction
 

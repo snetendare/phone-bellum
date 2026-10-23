@@ -1,0 +1,93 @@
+{
+  "_about": "Keyword library for the factions board in Miro. tools/miro-sync.js reads this, src/factions.json and src/default-roster.json, tags every item with keywords (rules in the script, skill types below, extras in items) and redraws the board. See docs/MIRO-SYNC.md.",
+  "board": {
+    "miro": "uXjVEWUxwoE=",
+    "left": "mechites",
+    "right": "neutral"
+  },
+  "families": [
+    { "name": "Production", "color": "#ffcf99", "keywords": [
+      { "name": "Builder", "text": "a unit that builds turrets and building sites during fights" },
+      { "name": "Construct", "text": "built bodies: turrets, healbots, cogbots and built buildings" },
+      { "name": "Built building", "text": "a site a builder finishes over fights (Factory, Altar)" },
+      { "name": "Lesser building", "text": "a round-pick building: stands still, may have aura, income or spawn" },
+      { "name": "Spawn", "text": "new bodies made during the fight" } ] },
+    { "name": "Supportive", "color": "#b5e3b0", "keywords": [
+      { "name": "Heal and repair", "text": "health back to units, buildings or the tower" },
+      { "name": "Aura", "text": "squads that start next to it get a bonus" } ] },
+    { "name": "Disruptive", "color": "#f3b3e0", "keywords": [
+      { "name": "Displace", "text": "knockback and pushes" },
+      { "name": "Slow", "text": "enemies move and attack slower" },
+      { "name": "Shortsight", "text": "cuts the range of enemies it hits" } ] },
+    { "name": "Zone", "color": "#cfcfcf", "keywords": [
+      { "name": "Mines", "text": "hidden damage on the ground" },
+      { "name": "Tile spells", "text": "zones and strikes cast on a tile for gold" },
+      { "name": "Walls", "text": "blocks enemies have to go around or break" } ] },
+    { "name": "Economy", "color": "#e8d3a6", "keywords": [
+      { "name": "Income", "text": "extra gold every round" },
+      { "name": "Extra deploys", "text": "more deployments every round" },
+      { "name": "When destroyed", "text": "you lose health or gold if it falls" } ] },
+    { "name": "Defensive", "color": "#a9ccf0", "keywords": [
+      { "name": "Armor", "text": "flat damage off every hit" },
+      { "name": "Shield", "text": "blocks a number of whole hits" },
+      { "name": "Ward", "text": "no single hit can deal more than a cap" },
+      { "name": "Health boost", "text": "more max health" },
+      { "name": "Linked health", "text": "a squad's bodies share one health pool" } ] },
+    { "name": "Offensive", "color": "#f4a6a0", "keywords": [
+      { "name": "Attack speed", "text": "attacks more often, including spin-up, frenzy and extra turrets" },
+      { "name": "Damage boost", "text": "hits harder" },
+      { "name": "Splash", "text": "hits several enemies at once (splash, split beams)" },
+      { "name": "Range boost", "text": "reaches farther" },
+      { "name": "Run-through", "text": "rolls or tramples through bodies, hitting each one" } ] },
+    { "name": "Mobile", "color": "#fff08a", "keywords": [
+      { "name": "Move speed", "text": "moves, or gets up to speed, faster" },
+      { "name": "Kite", "text": "keeps away from enemies while shelling their back line" } ] },
+    { "name": "Unique", "color": "#cdb8f2", "keywords": [
+      { "name": "Transform", "text": "changes form mid-fight or mid-match" },
+      { "name": "Death effects", "text": "something happens when a body dies" } ] },
+    { "name": "Deception", "color": "#9fdde0", "keywords": [
+      { "name": "Stealth", "text": "can't be targeted until it attacks" },
+      { "name": "Disguise", "text": "looks like another unit until its first attack" } ] },
+    { "name": "Affliction", "color": "#c2e08a", "keywords": [
+      { "name": "Burn", "text": "damage over time from fire" },
+      { "name": "Poison", "text": "damage over time that ignores armor" } ] }
+  ],
+  "skillTypes": {
+    "_about": "What each skill type gives the unit that buys it. has = the unit has or gives it, makes = puts it on the board for others, feeds = gets a payoff from it.",
+    "regen": { "has": ["Heal and repair", "Health boost"] },
+    "poison": { "makes": ["Poison"] },
+    "stealth": { "has": ["Stealth"] },
+    "armorHp": { "has": ["Armor", "Health boost"] },
+    "spawn": { "makes": ["Spawn"] },
+    "rapid": { "has": ["Attack speed"] },
+    "swift": { "has": ["Move speed", "Damage boost"] },
+    "heavy": { "has": ["Damage boost"] },
+    "healer": { "makes": ["Heal and repair"] },
+    "range": { "has": ["Range boost"] },
+    "shrink": { "makes": ["Shortsight"] },
+    "ward": { "has": ["Ward"] },
+    "slow": { "makes": ["Slow"] },
+    "forward": { "has": [] },
+    "split": { "has": ["Splash"] },
+    "deathSpawn": { "has": ["Death effects"], "makes": ["Spawn"] },
+    "shield": { "has": ["Shield"] },
+    "blast": { "has": ["Death effects"] },
+    "explode": { "has": ["Death effects"] },
+    "dodge": { "has": [] },
+    "lifesteal": { "has": ["Heal and repair"] },
+    "turret": { "has": ["Attack speed"] },
+    "frenzy": { "has": ["Attack speed"] },
+    "spread": { "has": [] },
+    "mortar": { "has": ["Range boost"] },
+    "momentum": { "has": ["Move speed"] },
+    "unfold": { "has": ["Transform"] },
+    "link": { "has": ["Linked health", "Health boost"] },
+    "healbot": { "has": ["Construct"], "makes": ["Heal and repair"] },
+    "building": { "makes": ["Built building"] },
+    "builder": { "has": [] }
+  },
+  "items": {
+    "_about": "Design intent the data can't show: add has / makes / feeds / counteredBy (keyword lists), why (shown on the line), or not (keywords to drop). Keyed by item name.",
+    "Rollers": { "counteredBy": ["Slow"], "why": "Rollers need speed to roll in" }
+  }
+}

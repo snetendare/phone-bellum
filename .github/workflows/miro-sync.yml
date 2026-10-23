@@ -1,0 +1,28 @@
+# Redraws the "Phone Bellum – Factions and keywords" Miro board from the repo. See docs/MIRO-SYNC.md.
+name: Miro sync
+on:
+  push:
+    branches: [main]
+    paths:
+      - src/factions.json
+      - src/default-roster.json
+      - src/keywords.json
+      - tools/miro-sync.js
+      - .github/workflows/miro-sync.yml
+  workflow_dispatch:
+concurrency:
+  group: miro-sync
+  cancel-in-progress: false
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Redraw the board
+        env:
+          MIRO_TOKEN: ${{ secrets.MIRO_TOKEN }}
+          MIRO_BOARD: ${{ vars.MIRO_BOARD }}
+        run: node tools/miro-sync.js
