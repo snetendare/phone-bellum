@@ -415,6 +415,9 @@ const Models3D = (THREE) => {
   // wall raised by a spell (a row of sharpened stakes). Placeholders until the buildings get their own models.
   BUILD.lesser = () => [P(box(3.0, 2.0, 2.6), 'tint', [0, 1.0, 0]), P(cone(2.4, 1.6, 4), 'team', [0, 2.8, 0], [0, Math.PI / 4, 0]),
     P(box(0.7, 1.1, 0.15), DARK, [0, 0.55, -1.32]), P(cyl(0.25, 0.25, 1.2, 6), STONE, [0.9, 3.0, 0.5]), ...flagOn(3.4)];
+  // the treasury (Test Grid): a squat vault in gold on a stone plinth, a roof in the team colour and a pile of coins
+  BUILD.treasury = () => [P(box(3.0, 0.5, 3.0), STONE, [0, 0.25, 0]), P(box(2.5, 1.7, 2.5), 'tint', [0, 1.35, 0]), P(cone(2.1, 1.2, 4), 'team', [0, 2.8, 0], [0, Math.PI / 4, 0]),
+    P(box(0.8, 1.0, 0.15), DARK, [0, 1.0, -1.28]), ...[[-1.0, 1.9], [-0.55, 2.0], [-0.8, 1.6]].map(([x, z], k) => P(cyl(0.3, 0.3, 0.3 + k * 0.15, 8), 'tint', [x - 0.5, 0.65 + k * 0.08, z - 0.3])), ...flagOn(3.6)];
   BUILD.wall = () => [...[-1.5, -0.75, 0, 0.75, 1.5].map((x, k) => P(cyl(0.32, 0.32, 2.2 + (k % 2) * 0.3, 6), WOOD, [x, 1.1 + (k % 2) * 0.15, 0])),
     ...[-1.5, -0.75, 0, 0.75, 1.5].map((x, k) => P(cone(0.32, 0.6, 6), '#B79A6E', [x, 2.5 + (k % 2) * 0.3, 0])), P(box(3.6, 0.25, 0.2), 'team', [0, 1.4, -0.3])];
   // Core Awoken: the Mecha Tower on four big wheels
@@ -469,7 +472,7 @@ const Models3D = (THREE) => {
   const RANGED = 12; // metres: from this range on, a unit is drawn as an archer or a caster
   function kindOf(u) {
     if (u.spire) return 'spire';
-    if (u.structure && (u.kind === 'lesser' || u.kind === 'wall')) return u.kind;
+    if (u.structure && (u.kind === 'lesser' || u.kind === 'wall' || u.kind === 'treasury')) return u.kind;
     if (u.building) { const k = 'building:' + u.building; return u.awake && BUILD[k + ':awake'] ? k + ':awake' : BUILD[k] ? k : 'building'; } // Core Awoken: its walking version
     if (u.structure) { const k = TOWERS[u.kind] ? 'tower:' + u.kind : /^f-/.test(u.kind || '') ? 'tower:faction' : 'tower:keep'; return u.awake && BUILD[k + ':awake'] ? k + ':awake' : k; } // Core Awoken: the Mecha Tower on wheels
     if (u.aloft) return u.kind === 'drone' ? 'drone' : 'airship';

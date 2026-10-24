@@ -1656,6 +1656,10 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
     if (sum.felix && sum.felix[me]) gold.push(`+${sum.felix[me]} Felix`);
     if (sum.invest && sum.invest[me]) gold.push(`+${sum.invest[me]} investment`);
     if (sum.loan && sum.loan[me]) gold.push(`−${sum.loan[me]} loan`);
+    const tr = sum.treasury && sum.treasury[me];
+    if (tr && tr.gold) gold.push(`+${tr.gold} treasury`);
+    if (tr && tr.stole) gold.push(`+${tr.stole} stolen from their treasury`);
+    if (tr && tr.lost) gold.push(`−${tr.lost} stolen from your treasury`);
     if (sum.devGold && sum.devGold[me]) gold.push(`+${sum.devGold[me]} buildings and Powers`);
     if (sum.devLoss && sum.devLoss[me].gold) gold.push(`−${sum.devLoss[me].gold} buildings lost`);
     const waiting = !solo() && nextReady[me];

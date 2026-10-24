@@ -477,6 +477,11 @@ const Render3D = (THREE, el, view, opts = {}) => {
         bodies.push({ u: { structure: true, lesser: true, kind: 'wall', color: '#9C7E58', hp: 1 }, side, x: w.x, y: w.y, look: 'solid', scale: 0.8 });
       }
     }
+    // the treasuries (Test Grid): see-through in round 1, before they are built
+    if (Game.treasuryOn(m)) for (const side of [me, foe]) {
+      const ts = Game.treasurySpot(m, side), w = Game.tileToWorld(ts.col, ts.row);
+      bodies.push({ u: Game.treasuryUnit(), side, x: w.x, y: w.y, look: Game.treasuryUp(m) ? 'solid' : 'glass', edge: Art.teamCol(side, me) });
+    }
     for (const side of [me, foe]) if (m.towers && m.towers[side] && Game.towerUp(m, side)) {
       const w = Game.tileToWorld(m.towers[side].col, m.towers[side].row);
       const crest = Game.charShown(m, me, deploying, side) ? Game.charOf(m, side) : null;
