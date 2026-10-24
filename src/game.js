@@ -379,7 +379,7 @@ const Game = (() => {
     // special rules. To bring them back, take iceOff out and use iceShort / iceText as short / text again.
     { id: 'ice', name: 'Frozen Peak', short: 'A snowy mountain top. No special rules for now.', text: 'A snowy mountain top. No special rules for now.', iceOff: true,
       iceShort: 'Hail from round 2. An ice altar rises on even rounds.', iceText: 'Every fight from round 2: a hailstorm drops 10 hail tiles in the storm band (no man’s land at first); units standing in hail take 20 damage per second. Even rounds: the altar of ice rises in the middle of the board. Tap it to buy ice walls for your tower, push the storm band toward your opponent, or summon a Snowgre.', ice: true },
-    { id: 'testgrid', name: 'Test Grid', short: 'A bigger board: each zone is 14 by 7 tiles.', text: 'A test map on a bigger board: each player’s zone is 14 columns wide and 7 rows deep (standard: 12 by 6). The towers are mirrored, as on the Mushroom Cavern. From round 2 each player also has a treasury (400 health) on the other side of their zone from their tower, one tile in toward the middle. A fight it survives pays you 50 gold; if it is destroyed, your opponent steals 50 gold from you instead.', plain: true, grid: { cols: 14, rows: 18, zone: 7 }, pointMirror: true, treasury: true }, // only when picked, never random
+    { id: 'testgrid', name: 'Test Grid', short: 'A bigger board: each zone is 14 by 7 tiles.', text: 'A test map on a bigger board: each player’s zone is 14 columns wide and 7 rows deep (standard: 12 by 6). The towers are mirrored, as on the Mushroom Cavern. From round 2 each player also has a treasury (400 health) on the other side of their zone from their tower, one tile in toward the middle and one tile forward. A fight it survives pays you 50 gold; if it is destroyed, your opponent steals 50 gold from you instead.', plain: true, grid: { cols: 14, rows: 18, zone: 7 }, pointMirror: true, treasury: true }, // only when picked, never random
   ];
   // ---------- Frozen Peak: hailstorm and the altar of ice ----------
   // The storm band is 4 rows deep: no man's land to start with. Each push moves it ICE.push rows toward the other
@@ -620,8 +620,8 @@ const Game = (() => {
   };
   const mapOf = (m) => (m && m.map && MAPS.find(x => x.id === m.map.id)) || null;
   // Treasury (a map's `treasury`: Test Grid). From TREASURY.round each player has one more building: on the other side
-  // of their zone from their tower, one column in toward the middle, on the tower's row (so point-mirrored like the
-  // towers). Its tile is kept free all match. Like the tower it stands again, at full health, in every fight. A fight
+  // of their zone from their tower, one column in toward the middle and one row forward of the tower's row (so
+  // point-mirrored like the towers). Its tile is kept free all match. Like the tower it stands again, at full health, in every fight. A fight
   // it survives pays its owner TREASURY.gold; when it is destroyed, the opponent steals TREASURY.steal gold from its owner.
   const TREASURY = { round: 2, hp: 400, gold: 50, steal: 50 };
   const TREASURY_SQ = -150; // its squad id in fights
@@ -630,7 +630,7 @@ const Game = (() => {
   const treasurySpot = (m, side) => {
     if (!treasuryOn(m)) return null;
     const t = (m.towers && m.towers[side]) || towerSpot(m, side), col = COLS - 1 - t.col;
-    return { col: col + (col < (COLS - 1) / 2 ? 1 : -1), row: t.row };
+    return { col: col + (col < (COLS - 1) / 2 ? 1 : -1), row: t.row + (side === 0 ? -1 : 1) };
   };
   const treasuryAt = (m, side, col, row) => { const t = treasurySpot(m, side); return !!t && t.col === col && t.row === row; };
   const treasuryUnit = () => E.withTraits({ name: 'Treasury', cost: 0, bodies: 1, hp: TREASURY.hp, hit: 0, aps: 1, range: 0, speed: 0, splash: 0, shape: 'square', color: '#D9B95B', structure: true, lesser: true, kind: 'treasury', level: 0 });
