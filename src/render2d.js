@@ -2,7 +2,7 @@
 // It sees the game only through view(), which it calls at the start of every draw and which returns what this
 // screen shows right now:
 //   { m, me, phase, units, mode, bt, battlePre, fx, selected, moving, drag, hoverTile, rangeOf,
-//     editable, placingUnit, placingElf, placingTower, placingBuilding, battleCam, dev }
+//     editable, placingUnit, placingElf, placingTower, placingWall, placingBuilding, battleCam, dev }
 // dev (Factions devtest only): { bPlacing, castMode, guideMode, guideId, guide }: the building being placed, the spell being
 // cast, and the arrow being drawn (guide: its points so far, for squad guideId).
 // fx: short-lived battle effects as plain data (shots, flames, bolts, heals, deaths), in board metres.
@@ -16,8 +16,8 @@
 const Render2D = (cv, view) => {
   let ctx = cv.getContext('2d'); // swapped for a moment while drawing map thumbnails (thumb)
   let m = null, me = 0, phase = 'start', units = [], mode = 'ai', bt = null, battlePre = null, fx = [], battleCam = null;
-  let selected = null, moving = null, drag = null, hoverTile = null, rangeOf = null, editable = false, placingUnit = null, placingElf = false, placingTower = false, dev = null, placingBuilding = null;
-  const pull = () => { ({ m, me, phase, units, mode, bt, battlePre, fx, selected, moving, drag, hoverTile, rangeOf, editable, placingUnit, placingElf, placingTower, placingBuilding, battleCam, dev } = view()); };
+  let selected = null, moving = null, drag = null, hoverTile = null, rangeOf = null, editable = false, placingUnit = null, placingElf = false, placingTower = false, placingWall = false, dev = null, placingBuilding = null;
+  const pull = () => { ({ m, me, phase, units, mode, bt, battlePre, fx, selected, moving, drag, hoverTile, rangeOf, editable, placingUnit, placingElf, placingTower, placingWall, placingBuilding, battleCam, dev } = view()); };
   const foe = () => 1 - me;
   const css = Art.css, tag = Shapes.tag;
   const { ELF_COL, SHROOM_COL, CHARM_COL } = Art;
@@ -421,6 +421,22 @@ const Render2D = (cv, view) => {
     const t = tilePx(), u = Game.treasuryUnit();
     for (const side of [me, foe()]) { const ts = Game.treasurySpot(m, side); if (ts) drawLesser((scol(ts.col) + 0.5) * t, (srow(ts.row) + 0.5) * t, t, side, u, null, false, !Game.treasuryUp(m)); }
   }
+  // a defensive wall (the bastion's): a block of stone filling its tile, edged in its side's colour
+  function drawStoneWall(x, y, t, side, hpr, fresh) {
+    const s = t - 2;
+    ctx.globalAlpha = 0.55 + 0.45 * hpr;
+    ctx.fillStyle = '#8E8676'; ctx.fillRect(x - s / 2, y - s / 2, s, s);
+    ctx.strokeStyle = 'rgba(40, 36, 30, 0.55)'; ctx.lineWidth = 1;
+    for (let k = 1; k < 3; k++) { const yy = y - s / 2 + k * s / 3; ctx.beginPath(); ctx.moveTo(x - s / 2, yy); ctx.lineTo(x + s / 2, yy); ctx.stroke(); }
+    for (let k = 0; k < 3; k++) { const yy = y - s / 2 + k * s / 3, off = k % 2 ? s / 4 : s / 2; for (let xx = x - s / 2 + off; xx < x + s / 2 - 1; xx += s / 2) { ctx.beginPath(); ctx.moveTo(xx, yy); ctx.lineTo(xx, yy + s / 3); ctx.stroke(); } }
+    ctx.strokeStyle = teamCol(side); ctx.lineWidth = 2; ctx.setLineDash(fresh ? [3, 3] : []); ctx.strokeRect(x - s / 2, y - s / 2, s, s); ctx.setLineDash([]);
+    ctx.globalAlpha = 1;
+  }
+  // the bastions' walls while deploying (an opponent's new one only from the fight on)
+  function drawBwalls() {
+    const t = tilePx();
+    for (const side of [me, foe()]) for (const bw of Game.bwallsOf(m, side)) if (Game.bwallShown(m, me, true, side, bw)) drawStoneWall((scol(bw.col) + 0.5) * t, (srow(bw.row) + 0.5) * t, t, side, 1, side === me && bw.round === m.round);
+  }
   // a wall (spell): a row of stakes
   function drawWallBlock(x, y, t, side, hpr) {
     const s = t * 0.8;
@@ -689,6 +705,11 @@ const Render2D = (cv, view) => {
       for (const row of Game.zoneRows(me)) for (let c = 0; c < Game.COLS; c++) if (Game.buildingSpotOk(m, me, c, row)) ctx.strokeRect(scol(c) * t + 3, srow(row) * t + 3, t - 6, t - 6);
       ctx.setLineDash([]); ctx.globalAlpha = 1;
     }
+    if (placingWall && editable) { // where a wall may go: any free tile of your half of the board
+      ctx.strokeStyle = teamCol(me); ctx.globalAlpha = 0.55; ctx.lineWidth = 1.5; ctx.setLineDash([4, 3]);
+      for (let row = 0; row < Game.ROWS; row++) for (let c = 0; c < Game.COLS; c++) if (Game.bwallSpotOk(m, me, c, row)) ctx.strokeRect(scol(c) * t + 3, srow(row) * t + 3, t - 6, t - 6);
+      ctx.setLineDash([]); ctx.globalAlpha = 1;
+    }
     if (placingElf && editable) { // where the elf tower may go: any free tile of your zone
       ctx.strokeStyle = ELF_COL; ctx.globalAlpha = 0.6; ctx.lineWidth = 1.5;
       for (const row of Game.zoneRows(me)) for (let c = 0; c < Game.COLS; c++) if (Game.elfOwnSpotOk(m, me, c, row)) ctx.strokeRect(scol(c) * t + 3, srow(row) * t + 3, t - 6, t - 6);
@@ -747,6 +768,7 @@ const Render2D = (cv, view) => {
     for (const side of [me, foe()]) if (towerVisible(side) && Game.towerUp(m, side)) drawTowerTile(side);
     if (Game.isDev(m)) drawLessers();
     if (Game.treasuryOn(m)) drawTreasuries();
+    if (phase === 'deploy') drawBwalls();
     drawBuildings();
     // the squad tapped last: its range as a dotted ring round its tile (theirs as you can know it)
     const rs = rangeOf && phase === 'deploy' && m.armies[rangeOf.side].find(s => s.id === rangeOf.id);
@@ -798,7 +820,7 @@ const Render2D = (cv, view) => {
     for (const b of bt.bodies) {
       if (!b.alive || !b.u.structure) continue;
       const hpr = b.hp / b.u.hp, t = tilePx();
-      if (b.u.kind === 'wall') { drawWallBlock(PX(b.x), PY(b.y), t, b.side, hpr); continue; }
+      if (b.u.kind === 'wall') { if (b.u.barrier) drawStoneWall(PX(b.x), PY(b.y), t, b.side, hpr); else drawWallBlock(PX(b.x), PY(b.y), t, b.side, hpr); continue; }
       if (b.u.lesser) { drawLesser(PX(b.x), PY(b.y), t, b.side, b.u, hpr, false); continue; }
       if (b.u.awake) { ctx.fillStyle = '#2B2F33'; for (const [dx, dy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) { ctx.beginPath(); ctx.arc(PX(b.x) + dx * t * 0.36, PY(b.y) + dy * t * 0.3, t * 0.12, 0, Math.PI * 2); ctx.fill(); } } // Core Awoken: the Mecha Tower on wheels
       drawKeep(PX(b.x), PY(b.y), t, b.side, hpr, b.u.kind, null, Game.charOf(battlePre || m, b.side));

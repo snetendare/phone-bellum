@@ -1147,6 +1147,29 @@ const Engine = (() => {
     let projectiles = [];
     let t = 0, shots = [], over = false, tick = 0;
     const dist = (a, b) => hyp(a.x - b.x, a.y - b.y);
+    // Walls (u.barrier: half their width, a square on its tile): the enemy can't walk into one or shoot through it
+    // (a lobbed shell flies over); their own side walks and shoots through. How far a body is from a wall is measured
+    // to its edge, so units walk up to it and hit it.
+    const barriers = all.filter(b => b.u.barrier > 0);
+    const gap = (f, b) => f.u.barrier > 0 ? hyp(Math.max(0, Math.abs(f.x - b.x) - f.u.barrier), Math.max(0, Math.abs(f.y - b.y) - f.u.barrier)) : dist(f, b);
+    // the first enemy wall a shot from a to v would run into (not v itself), or null
+    function wallBetween(a, v) {
+      if (!barriers.length || a.u.lob) return null;
+      let best = null, bt = Infinity;
+      for (const w of barriers) {
+        if (!w.alive || w === v || w.side === a.side) continue;
+        const h = w.u.barrier;
+        let t0 = 0, t1 = 1;
+        for (const [p, d, lo, hi] of [[a.x, v.x - a.x, w.x - h, w.x + h], [a.y, v.y - a.y, w.y - h, w.y + h]]) {
+          if (Math.abs(d) < 1e-9) { if (p < lo || p > hi) t0 = 2; continue; }
+          let ta = (lo - p) / d, tb = (hi - p) / d;
+          if (ta > tb) { const x = ta; ta = tb; tb = x; }
+          t0 = Math.max(t0, ta); t1 = Math.min(t1, tb);
+        }
+        if (t0 <= t1 && t0 < bt) { bt = t0; best = w; }
+      }
+      return best;
+    }
     // current range: shortsight can shrink it for a while, but never below 1 m (or the unit's own range if shorter)
     const R = (b) => b.shrinkT > 0 ? Math.max(Math.min(b.u.range, 1), b.u.range - b.shrinkM) : b.u.range;
     // How far an attack reaches. Flame cones can reach further than where the unit stops (g.flameReach x range),
@@ -1236,6 +1259,8 @@ const Engine = (() => {
       const st = stats[owner.side];
       // Dodge: the whole hit misses (the same random numbers on every device)
       if (v.u.dodge > 0 && rnd() * 100 < v.u.dodge) { st.missed += hit; return; }
+      // a guard (the keep's) that is attacked leaves its post and goes for its attacker
+      if (v.guard && owner.alive && owner.side !== v.side && !owner.u.aloft && !(v.avenge && v.avenge.alive)) { v.holdT = 0; v.avenge = owner; v.engaged = true; }
       let pct = owner.u.pctHit > 0 && !v.u.structure ? v.u.hp * owner.u.pctHit / 100 : 0;
       if (cripple[owner.side] > 0) { hit = hit * (1 - towerDown.attack / 100); pct = pct * (1 - towerDown.attack / 100); }
       // Shield: the whole hit is blocked, however big, and it brings no poison
@@ -1305,7 +1330,7 @@ const Engine = (() => {
         for (const f of foes) if (f.alive && hyp(f.x - px, f.y - py) <= owner.u.splash) hitSet.add(f);
       } else {
         let v = null;
-        if (direct && direct.alive && !owner.u.projSpeed) v = direct;
+        if (direct && direct.alive && (!owner.u.projSpeed || direct.u.barrier > 0)) v = direct;
         else {
           let bd = PROJ_HIT_RADIUS;
           for (const f of foes) { if (!f.alive) continue; const d = hyp(f.x - px, f.y - py); if (d <= bd) { bd = d; v = f; } }
@@ -1334,7 +1359,7 @@ const Engine = (() => {
       const valid = [];
       for (const f of sides[1 - b.side]) {
         if (!f.alive || f.hidden) continue;
-        const d = dist(f, b);
+        const d = gap(f, b);
         if (d <= reachOf(b) + 0.01 && d >= b.u.minRange) valid.push([d, f]);
       }
       valid.sort((p, q) => b.u.backline ? q[0] - p[0] : p[0] - q[0]);
@@ -1344,6 +1369,7 @@ const Engine = (() => {
     // the enemy a body attacks: once it has picked one it stays on it until it dies, hides or leaves its reach,
     // even if another enemy comes closer; then it picks the nearest
     function locked(b, valid) {
+      if (b.avenge && b.avenge.alive && valid.includes(b.avenge)) b.lock = b.avenge; // a guard going for its attacker
       if (!(b.lock && b.lock.alive && valid.includes(b.lock))) {
         // aware2: the nearest enemy that isn't about to die from what its side is already shooting at it
         b.lock = g.aware2 ? (valid.find(f => (f.claimDmg || 0) < f.hp) || valid[0]) : valid[0];
@@ -1360,7 +1386,7 @@ const Engine = (() => {
       let best = null, bc = Infinity;
       for (const f of sides[1 - b.side]) {
         if (!f.alive || f.hidden) continue;
-        const d = dist(f, b), mine = f === b.goal;
+        const d = gap(f, b), mine = f === b.goal;
         if (d > aware * (mine ? AWARE.leash : 1)) continue;
         const lane = g.awareLane == null ? AWARE.lane : g.awareLane;
         let c = d - (mine ? AWARE.stick : 0) + lane * Math.abs(f.x - b.x);
@@ -1403,7 +1429,7 @@ const Engine = (() => {
       for (const f of sides[1 - b.side]) {
         if (!f.alive) continue;
         const fx = f.x - b.x, fy = f.y - b.y, fl = hyp(fx, fy);
-        if (fl > reach || fl < b.u.minRange) continue;
+        if (gap(f, b) > reach || fl < b.u.minRange) continue;
         if (f === primary || !al || !fl || (ax * fx + ay * fy) / (al * fl) >= c - 1e-12) out.push(f);
       }
       if (!out.includes(primary)) out.push(primary);
@@ -1440,7 +1466,10 @@ const Engine = (() => {
       }
       // stunned after a charge (a trampler only once its run is over, see the movement loop)
       if (charged && b.u.chargeStun > 0 && !(b.trampleLeft > 0)) b.stunT = b.u.chargeStun;
-      for (const tgt of targets) {
+      const walled = new Set(); // an enemy wall in the way takes the shot instead (a flame burns it once)
+      for (const t0 of targets) {
+        const wl = wallBetween(b, t0), tgt = wl || t0;
+        if (wl && targets.flame) { if (walled.has(wl)) continue; walled.add(wl); }
         const dx = tgt.x - b.x, dy = tgt.y - b.y, d = hyp(dx, dy) || 1;
         const dirX = dx / d, dirY = dy / d;
         if (targets.flame) {
@@ -1755,7 +1784,7 @@ const Engine = (() => {
         let near = null, nd = Infinity;
         for (const f of foes) {
           if (!f.alive || f.hidden) continue;
-          const d = dist(f, b);
+          const d = gap(f, b);
           if (d < nd) { nd = d; near = f; }
         }
         b.near = near;
@@ -1794,7 +1823,8 @@ const Engine = (() => {
           if (b.u.windUp > 0 && mv > 0) { b.setUp = false; if (b.windTarget) { b.windTarget = null; stats[b.side].windLost++; } }
           continue;
         }
-        if (g.aware2 && b.engaged && near) { const gl = goalOf(b, rg); if (gl) { near = gl; nd = dist(gl, b); } }
+        if (g.aware2 && b.engaged && near) { const gl = goalOf(b, rg); if (gl) { near = gl; nd = gap(gl, b); } }
+        if (b.avenge) { if (b.avenge.alive && !b.avenge.hidden) { near = b.avenge; nd = gap(near, b); } else b.avenge = null; } // a guard going for its attacker
         if (near && nd > (g.stopPct > 0 && g.stopPct < 1 && b.engaged ? stopAt(rg) : rg)) {
           const step = b.u.speed * (b.slowT > 0 ? 1 - b.slowMove / 100 : 1) * (cripple[b.side] > 0 ? 1 - towerDown.move / 100 : 1) * dt;
           let mv;
@@ -1816,12 +1846,13 @@ const Engine = (() => {
           }
           // where it wants to go: straight ahead, or at the nearest enemy
           let wx = mx, wy = my;
-          if (b.engaged) { wx = (near.x - b.x) / nd; wy = (near.y - b.y) / nd; }
+          const nr = dist(near, b) || 1; // the direction to it (nd is to its edge for a wall)
+          if (b.engaged) { wx = (near.x - b.x) / nr; wy = (near.y - b.y) / nr; }
           else if (drift > 0 && nd < aware + drift && (near.x - b.x) * mx + (near.y - b.y) * my > 0) {
             // within DRIFT of its sight: lean toward the nearest enemy ahead, harder the closer it gets, so it
             // curves in on a diagonal instead of marching level with the enemy and then turning sharply
             const w = (aware + drift - nd) / drift;
-            wx = mx * (1 - w) + (near.x - b.x) / nd * w; wy = my * (1 - w) + (near.y - b.y) / nd * w;
+            wx = mx * (1 - w) + (near.x - b.x) / nr * w; wy = my * (1 - w) + (near.y - b.y) / nr * w;
           }
           // turn smoothly instead of snapping: the heading swings toward the wanted direction
           if (b.hx === undefined) { b.hx = mx; b.hy = my; }
@@ -1889,6 +1920,7 @@ const Engine = (() => {
           const a = arr[i]; if (!a.alive || a.u.aloft) continue;
           for (let j = i + 1; j < arr.length; j++) {
             const c = arr[j]; if (!c.alive || c.u.aloft) continue;
+            if (a.u.barrier > 0 || c.u.barrier > 0) continue; // a side's own units walk through its walls
             const dx = c.x - a.x, dy = c.y - a.y;
             const d = hyp(dx, dy);
             // structures and bodies still waiting to start (flank squads) don't budge: the other body moves the whole way
@@ -1916,6 +1948,18 @@ const Engine = (() => {
               a.x -= minSep / 2 * ka; c.x += minSep / 2 * kc;
             }
           }
+        }
+      }
+      // walls: an enemy body that walked into one is put back out at its nearest edge
+      for (const w of barriers) {
+        if (!w.alive) continue;
+        const h = w.u.barrier;
+        for (const f of sides[1 - w.side]) {
+          if (!f.alive || f.u.aloft || f.u.structure) continue;
+          const dx = f.x - w.x, dy = f.y - w.y;
+          if (Math.abs(dx) >= h || Math.abs(dy) >= h) continue;
+          if (h - Math.abs(dx) < h - Math.abs(dy)) f.x = w.x + (dx < 0 ? -h : h);
+          else f.y = w.y + (dy < 0 ? -h : h);
         }
       }
       for (const s of strikes) {
@@ -2178,7 +2222,7 @@ const Engine = (() => {
         v.convert = { side: v.side, squad: v.squad, xp: v.xp, dealt: v.dealt || 0 }; // what it earned for its old squad
         v.side = 1 - v.side; v.squad = CONVERT_SQUAD; v.xp = 0; v.dealt = 0; v.turning = false;
         v.windTarget = null; v.windT = 0; v.setUp = false; v.firing = -1; v.burstLeft = 0; v.trampleLeft = 0; v.trampled = null;
-        v.spinTarget = null; v.aims = null; v.lock = null; v.march = null; v.guide = null; v.goal = null; v.spreadTo = null; v.engaged = false; v.holdT = 0; v.delay = 0; v.band = null; v.hidden = false;
+        v.spinTarget = null; v.aims = null; v.lock = null; v.march = null; v.guide = null; v.goal = null; v.spreadTo = null; v.engaged = false; v.holdT = 0; v.avenge = null; v.delay = 0; v.band = null; v.hidden = false;
         v.slowT = 0; v.slowMove = 0; v.slowAtk = 0; v.shrinkT = 0; v.shrinkM = 0; v.kids = null; v.stunT = 0; v.frenzy = 0;
         sides[v.side].push(v); stats[v.side].totalHp += v.hp;
         for (const b of all) {
@@ -2313,16 +2357,19 @@ const Game = (() => {
   // can't be changed and stays for the rest of the match.
   const TOWER_PICK_ROUND = 3, TOWER_OFFER = 3;
   const OUTPOST = { id: 'outpost', name: 'Outpost', text: 'A small watchtower that holds the line until round 3, when you pick your real tower.', unit: { ...TOWER, name: 'Outpost', kind: 'outpost', hp: 400, hit: 18, color: '#A88E6E' } };
+  // the bastion's attack: a ring of fire, its hit 4 times a second to every enemy within its reach (see Engine: moat)
+  const MOAT = { hit: 12, aps: 4, range: 5 };
   const TOWER_TYPES = [
     { id: 'keep', name: 'Keep', text: 'The standard tower: steady, light shots at short range.', unit: { ...TOWER, hp: 700 },
-      skill: { name: 'Guards', text: 'Every fight, 4 guards (reskinned Wisps, without Wisp skills) stand by the keep for 5 s, shooting anything that comes close, then march on the enemy.' },
+      skill: { name: 'Guards', text: 'Every fight, 4 guards (reskinned Wisps, without Wisp skills) stand one on each side of the keep for 5 s, shooting anything that comes close, then march on the enemy. A guard that is hit leaves its post at once and goes for whoever hit it.' },
       skill2: { name: 'Brute guards', cost: 500, needs: true, text: 'Your guards are Brutes instead of Wisps: 4 of them, with every skill you have bought for Brutes. Needs Guards.' } },
     { id: 'sniper', name: 'Sniper tower', text: 'Shoots across most of the board, slowly, for double damage.', unit: { ...TOWER, name: 'Sniper Tower', kind: 'sniper', hp: 500, hit: 60, aps: 0.4, range: 32, color: '#B9C7D6' },
       skill: { name: 'Eagle eye', text: 'The sniper tower and all your Sniper squads get +3 m range and +10% attack speed.' },
       skill2: { name: 'Deploy airship', cost: 500, text: 'Every fight, an airship joins the fight. It can’t be shot down. It takes off in your half of no man’s land, flies toward the enemy, shoots like the sniper tower (Eagle eye included) and drops a paratrooper (a guard, like the keep’s) every 5 s, up to 6 at once. Passive: your sniper tower, the airship and all your Sniper squads deal +30 damage per hit.' } },
-    { id: 'bastion', name: 'Bastion', text: 'Much tougher, with a shorter, slower attack that splashes the units around its target.', unit: { ...TOWER, name: 'Bastion', kind: 'bastion', hp: 1000, aps: 0.8, range: 5, splash: 2, color: '#B79C8A' },
-      skill: { name: 'Home ground', text: 'In fights, your units get +2 armor and +10% health while they stand in your own zone. They lose it in no man’s land and get it back if they return.' },
-      skill2: { name: 'Moats', cost: 250, text: 'A ring of fire around the bastion: 12 damage 4 times a second to every enemy within 5 m, like a Flame Wizard’s flames.' } },
+    { id: 'bastion', name: 'Bastion', text: `Much tougher. Its attack is a moat of fire: ${MOAT.hit} damage ${MOAT.aps} times a second to every enemy within ${MOAT.range} m, like a Flame Wizard’s flames.`,
+      unit: { ...TOWER, name: 'Bastion', kind: 'bastion', hp: 1000, hit: MOAT.hit, aps: MOAT.aps, range: MOAT.range, moat: { ...MOAT }, idle: true, color: '#B79C8A' }, // idle: the moat is its only attack
+      skill: { name: 'Home ground', text: 'The bastion gains a shield that blocks the first 2 hits it takes in every fight. In fights, your units get +2 armor and +10% health while they stand in your own zone. They lose it in no man’s land and get it back if they return.' },
+      skill2: { name: 'Defensive walls', cost: 250, text: 'Gain 3 walls to place anywhere on your side of the board (your zone and your half of no man’s land). Each has 400 health and 4 armor, and stands again in every fight. The enemy can’t walk or shoot through them; your own units can. The bastion also gains 4 armor.' } },
     { id: 'mage', name: 'Mage tower', text: 'A small sun-priest beam: it locks onto one enemy and hits harder and faster the longer it stays on it. Slow against swarms, but melts big units after a few seconds.', unit: { ...TOWER, name: 'Mage Tower', kind: 'mage', hp: 600, hit: 14, aps: 1.5, range: 12, spinUp: 50, spinHit: 50, color: '#A493DE' },
       generals: true }, // no once-per-match skill: a mage general can be called every round instead (MAGE_GENERALS)
     { id: 'bank', name: 'Bank tower', text: 'Sturdy, with an attack between the keep and the sniper tower: medium range, medium fire rate.', unit: { ...TOWER, name: 'Bank Tower', kind: 'bank', hp: 700, hit: 45, aps: 0.6, range: 18, color: '#D9B95B' },
@@ -2406,13 +2453,53 @@ const Game = (() => {
   function undoTowerSkill2(m, side) {
     if (!(m.towerSkill2 && m.towerSkill2[side] === m.round)) return false;
     const cost = towerSkill2Cost(m, side), wasFree = isMapFree(m, side, { kind: 'tskill2' });
+    if (m.bwalls && m.bwalls[side]) m.bwalls[side] = m.bwalls[side].filter(w => w.round !== m.round); // the walls it gave go with it
     m.towerSkill2[side] = 0;
     m.gold[side] += cost;
     if (wasFree) passMapFree(m, side);
     return true;
   }
   const towerSkill2On = (m, side, id) => towerSkill2Of(m, side) && towerType(m, side).id === id && (!towerType(m, side).skill2.needs || towerSkillOf(m, side));
-  const MOAT = { hit: 12, aps: 4, range: 5 };
+  // Home ground (bastion): the bastion's shield (hits blocked). Defensive walls (bastion's second skill): BWALL.count walls,
+  // placed on free tiles of the player's own half of the board (zone and their half of no man's land). They stay all
+  // match, stand again at full health in every fight, and a wall placed this round can be taken back.
+  // m.bwalls[side] = [{ col, row, round }]. In fights: squad ids BWALL_SQ - k, a barrier the enemy can't cross or shoot through.
+  const BWALL = { count: 3, hp: 400, armor: 4, towerArmor: 4, shield: 2 };
+  const BWALL_SQ = -160;
+  const bwallsOf = (m, side) => (m && m.bwalls && m.bwalls[side]) || [];
+  const bwallAt = (m, side, col, row) => bwallsOf(m, side).some(w => w.col === col && w.row === row);
+  const bwallsLeft = (m, side) => towerSkill2On(m, side, 'bastion') ? Math.max(0, BWALL.count - bwallsOf(m, side).length) : 0;
+  // what a viewer may see of a player's walls: their own, and the opponent's from earlier rounds while deploying
+  const bwallShown = (m, viewer, deploying, side, w) => side === viewer || !deploying || w.round < m.round;
+  const ownHalf = (side, row) => side === 0 ? row >= ROWS / 2 && row < ROWS : row >= 0 && row < ROWS / 2;
+  function bwallSpotOk(m, side, col, row) {
+    if (col < 0 || col >= COLS || !ownHalf(side, row) || reserved(side, col, row)) return false;
+    if (occupied(m, side, col, row) || occupied(m, 1 - side, col, row) || bwallAt(m, 1 - side, col, row)) return false;
+    const e = elfSpot(m);
+    return !(e && col === e.col && (row === ROWS / 2 - 1 || row === ROWS / 2));
+  }
+  function placeBwall(m, side, col, row) {
+    if (!bwallsLeft(m, side) || !bwallSpotOk(m, side, col, row)) return false;
+    if (!m.bwalls) m.bwalls = [[], []];
+    m.bwalls[side].push({ col, row, round: m.round });
+    return true;
+  }
+  function unplaceBwall(m, side, col, row) {
+    const i = bwallsOf(m, side).findIndex(w => w.col === col && w.row === row && w.round === m.round);
+    if (i < 0) return false;
+    m.bwalls[side].splice(i, 1);
+    return true;
+  }
+  // walls not placed by the fight go up by themselves: in a line in front of the tower, as close to it as there's room
+  function ensureBwalls(m, side) {
+    const t = m.towers && m.towers[side];
+    if (!t || !bwallsLeft(m, side)) return;
+    const row0 = t.row + (side === 0 ? -2 : 2), spots = [];
+    for (let row = 0; row < ROWS; row++) for (let col = 0; col < COLS; col++) if (bwallSpotOk(m, side, col, row)) spots.push({ col, row, d: Math.abs(col - t.col) + Math.abs(row - row0) * 1.5 });
+    spots.sort((a, b) => a.d - b.d || a.row - b.row || a.col - b.col);
+    for (const s of spots) { if (!bwallsLeft(m, side)) break; placeBwall(m, side, s.col, s.row); }
+  }
+  const bwallUnit = () => E.withTraits({ name: 'Wall', cost: 0, bodies: 1, hp: BWALL.hp, hit: 0, aps: 1, range: 0, speed: 0, splash: 0, shape: 'square', color: '#9C8F7A', structure: true, lesser: true, idle: true, kind: 'wall', barrier: TILE / 2, defense: 'armor', defVal: BWALL.armor, level: 0 });
   // Deploy airship (sniper tower): squad id -4, can't be hit (Engine: aloft), stops hover m short of its target;
   // drops one paratrooper every `every` s, up to `max` alive; +sniperHit damage per hit for the tower, the airship and Snipers
   const AIRSHIP = { speed: 3, hover: 14, every: 5, max: 6, sniperHit: 30 };
@@ -3531,7 +3618,7 @@ const Game = (() => {
   }
 
   const towerAt = (m, side, col, row) => !!(m.towers && m.towers[side] && m.towers[side].col === col && m.towers[side].row === row);
-  const occupied = (m, side, col, row) => towerAt(m, side, col, row) || treasuryAt(m, side, col, row) || elfOwnAt(m, side, col, row) || !!buildingAt(m, side, col, row) || m.armies[side].some(s => covers(m, s, col, row)) || devOccupied(m, side, col, row);
+  const occupied = (m, side, col, row) => towerAt(m, side, col, row) || treasuryAt(m, side, col, row) || bwallAt(m, side, col, row) || elfOwnAt(m, side, col, row) || !!buildingAt(m, side, col, row) || m.armies[side].some(s => covers(m, s, col, row)) || devOccupied(m, side, col, row);
   const needsTower = (m, side) => !!(m.towers && !m.towers[side]);
   // the tower can be placed (or moved) during round 1 only
   function placeTower(m, side, col, row) {
@@ -3642,7 +3729,8 @@ const Game = (() => {
     if (t && towerUp(m, side)) {
       let tu = mageTowerUnit(m, side, towerType(m, side).unit);
       if (towerType(m, side).id === 'slime') tu = { ...slimeTowerUnit(m, side, tu), slime: true };
-      if (towerSkill2On(m, side, 'bastion')) tu = { ...tu, moat: { ...MOAT } };
+      if (towerSkillOn(m, side, 'bastion')) tu = { ...tu, shield: (tu.shield || 0) + BWALL.shield };
+      if (towerSkill2On(m, side, 'bastion')) tu = { ...tu, bonusArmor: (tu.bonusArmor || 0) + BWALL.towerArmor };
       if (eagle) tu = { ...tu, range: tu.range + TOWER_SKILL.eagleRange, aps: tu.aps * (1 + TOWER_SKILL.eagleAps / 100) };
       if (airship) tu = { ...tu, hit: tu.hit + AIRSHIP.sniperHit };
       if (fx.awake && towerType(m, side).awake) tu = { ...tu, ...towerType(m, side).awake, idle: false, awake: true }; // Core Awoken: the Mecha Tower drives
@@ -3675,16 +3763,17 @@ const Game = (() => {
         }
         idx += bb.length; out.push(...bb);
       });
-      // Guards (keep): reskinned Wisps (base stats, no skills) a tile in front of the keep, holding there for a while
-      // Brute guards (keep's second skill): Brutes with the skills bought for Brutes instead
+      // Guards (keep): reskinned Wisps (base stats, no skills), one on each side of the keep, holding there for a while
+      // (until one is hit: it goes for its attacker, see Engine). Brute guards (keep's second skill): Brutes with the skills bought for Brutes instead
       if (towerSkillOn(m, side, 'keep')) {
         const bi = (m.units || []).findIndex(x => x && x.name === 'Brute');
         const brutes = towerSkill2On(m, side, 'keep') && bi >= 0;
         const src = brutes ? unitFor(m, side, bi) : (m.units || []).find(x => x && x.name === 'Wisps') || GUARD;
         const { skills, skillDefs, skillsOn, skillsInnate, skillMods, ...plain } = src;
         const gu = E.withTraits({ ...plain, name: brutes ? 'Brute Guard' : 'Guard', level: 0, bodies: TOWER_SKILL.guards, ...(brutes ? {} : { shape: 'diamond' }), color: '#E2D3A6' });
-        const gb = E.buildSquad(gu, side, w.x, w.y + (side === 0 ? 1 : -1) * TILE, -3, TILE, idx);
-        for (const x of gb) x.holdT = TOWER_SKILL.guardHold;
+        const gb = E.buildSquad(gu, side, w.x, w.y, -3, TILE, idx), fwd = side === 0 ? 1 : -1, off = TILE * 0.6;
+        const posts = [[0, fwd], [-1, 0], [1, 0], [0, -fwd]]; // front, the two sides, behind
+        gb.forEach((x, k) => { const [px, py] = posts[k % posts.length]; x.x = w.x + px * off; x.y = w.y + py * off; x.holdT = TOWER_SKILL.guardHold; x.guard = true; });
         idx += gb.length; out.push(...gb);
       }
       // Deploy airship (sniper tower's second skill): flies from the tower, shoots like it, drops guards as paratroopers
@@ -3716,6 +3805,11 @@ const Game = (() => {
       const ts = treasurySpot(m, side), w = tileToWorld(ts.col, ts.row), tb = E.buildSquad(treasuryUnit(), side, w.x, w.y, TREASURY_SQ, TILE, idx);
       idx += tb.length; out.push(...tb);
     }
+    // Defensive walls (bastion's second skill)
+    if (towerSkill2On(m, side, 'bastion')) bwallsOf(m, side).forEach((bw, k) => {
+      const w = tileToWorld(bw.col, bw.row), wb = E.buildSquad(bwallUnit(), side, w.x, w.y, BWALL_SQ - k, TILE, idx);
+      idx += wb.length; out.push(...wb);
+    });
     // buildings (the Mechites' Factory)
     const bb = buildingBodies(m, side, idx);
     idx += bb.length; out.push(...bb);
@@ -3792,6 +3886,7 @@ const Game = (() => {
   function startBattle(m) {
     ensureTower(m, 0); ensureTower(m, 1);
     settleTowerPicks(m);
+    ensureBwalls(m, 0); ensureBwalls(m, 1);
     ensurePack(m, 0); ensurePack(m, 1);
     ensureCharm(m, 0); ensureCharm(m, 1);
     settleDev(m);
@@ -4551,7 +4646,7 @@ const Game = (() => {
     canBuyBuilding, buyBuilding, buildingSkills, buildingSkillInfo, bskillOf, bskillCost, canBuyBuildingSkill, buyBuildingSkill, undoBuildingSkill,
     buildingXpNeeded, buildingLevelCost, buildingReady, levelBuilding, undoLevelBuilding, constructBuff, buildingBodies, canBuySkill, buySkill, undoSkill, sellValue, sell,
     isRider, hiddenFromFoe, isCarrier, riderOf, carrierOf, squadAt, boardable, unplaceSquad,
-    TOWER, TOWER_TYPES, OUTPOST, TOWER_PICK_ROUND, towerType, towerChoices, needsTowerPick, setTowerType, settleTowerPicks, TOWER_SKILL, towerSkillOf, towerSkillVisible, towerPicked, canBuyTowerSkill, buyTowerSkill, undoTowerSkill, towerSkillCost, towerSkill2Of, towerSkill2Visible, towerSkill2Cost, canBuyTowerSkill2, buyTowerSkill2, undoTowerSkill2, towerSkill2On, AIRSHIP, MOAT, INVEST, MAGE_GENERALS, mageGenPrice, MAGE, mageGenInfo, mageGenOf, mageTpOf, isExtraGen, mageGenCost, canBuyMageGen, buyMageGen, undoMageGen, mageTowerUnit, generalUnit, LOAN, loanNow, investNow, bankBusy, investNow, bankBusy, canTakeLoan, takeLoan, undoLoan, towerRounds, troundInfo, troundOn, troundCost, canBuyTround, buyTround, undoTround, SLIME_UNITS, slimeTowerUnit, slimeSkillDefs, TOWER_MID, towerColOk, towerAt, needsTower, placeTower, ensureTower,
+    TOWER, TOWER_TYPES, OUTPOST, TOWER_PICK_ROUND, towerType, towerChoices, needsTowerPick, setTowerType, settleTowerPicks, TOWER_SKILL, towerSkillOf, towerSkillVisible, towerPicked, canBuyTowerSkill, buyTowerSkill, undoTowerSkill, towerSkillCost, towerSkill2Of, towerSkill2Visible, towerSkill2Cost, canBuyTowerSkill2, buyTowerSkill2, undoTowerSkill2, towerSkill2On, AIRSHIP, MOAT, BWALL, BWALL_SQ, bwallsOf, bwallAt, bwallsLeft, bwallShown, bwallSpotOk, placeBwall, unplaceBwall, ensureBwalls, bwallUnit, INVEST, MAGE_GENERALS, mageGenPrice, MAGE, mageGenInfo, mageGenOf, mageTpOf, isExtraGen, mageGenCost, canBuyMageGen, buyMageGen, undoMageGen, mageTowerUnit, generalUnit, LOAN, loanNow, investNow, bankBusy, investNow, bankBusy, canTakeLoan, takeLoan, undoLoan, towerRounds, troundInfo, troundOn, troundCost, canBuyTround, buyTround, undoTround, SLIME_UNITS, slimeTowerUnit, slimeSkillDefs, TOWER_MID, towerColOk, towerAt, needsTower, placeTower, ensureTower,
     FLANK, flankRows, flankOpen, isFlank, reserved, canPlaceAt, isOff, enemyHolds, inNoMans, hasSkillType,
     STANDARD_PACK, ICE, ALTAR, GOLEM, isIce, hailRound, altarRound, stormShift, stormRows, hailTiles, altarCost, altarRefund, altarCount, pushRoom, altarBought, addAltar, buyAltar, undoAltar, snowgres, snowgreUnit,
     MAPS, ELF_TOWER, SHROOM, SHROOM_SPLIT, shroomAt, shroomTileAt, shroomRemoval, SHROOM_REMOVE, shroomCost, removeShroom, undoRemoveShroom, mapOf, elfSpot, rollMap, BRIBE_COST, bribeList, bribeGold, bribeCount, bribeNow, bribeCost, bribeRefund, ELF_POWER, elfPowered, elfUnit, ELF_OWN, elfOwnCost, elfOwnOf, elfOwnAt, elfOwnUnlocked, elfOwnOffered, canBuyElfOwn, elfOwnSpotOk, buyElfOwn, undoElfOwn, bribeLeader, canBribe, bribe, undoBribe,
@@ -4704,7 +4799,7 @@ const Art = (() => {
 // It sees the game only through view(), which it calls at the start of every draw and which returns what this
 // screen shows right now:
 //   { m, me, phase, units, mode, bt, battlePre, fx, selected, moving, drag, hoverTile, rangeOf,
-//     editable, placingUnit, placingElf, placingTower, placingBuilding, battleCam, dev }
+//     editable, placingUnit, placingElf, placingTower, placingWall, placingBuilding, battleCam, dev }
 // dev (Factions devtest only): { bPlacing, castMode, guideMode, guideId, guide }: the building being placed, the spell being
 // cast, and the arrow being drawn (guide: its points so far, for squad guideId).
 // fx: short-lived battle effects as plain data (shots, flames, bolts, heals, deaths), in board metres.
@@ -4718,8 +4813,8 @@ const Art = (() => {
 const Render2D = (cv, view) => {
   let ctx = cv.getContext('2d'); // swapped for a moment while drawing map thumbnails (thumb)
   let m = null, me = 0, phase = 'start', units = [], mode = 'ai', bt = null, battlePre = null, fx = [], battleCam = null;
-  let selected = null, moving = null, drag = null, hoverTile = null, rangeOf = null, editable = false, placingUnit = null, placingElf = false, placingTower = false, dev = null, placingBuilding = null;
-  const pull = () => { ({ m, me, phase, units, mode, bt, battlePre, fx, selected, moving, drag, hoverTile, rangeOf, editable, placingUnit, placingElf, placingTower, placingBuilding, battleCam, dev } = view()); };
+  let selected = null, moving = null, drag = null, hoverTile = null, rangeOf = null, editable = false, placingUnit = null, placingElf = false, placingTower = false, placingWall = false, dev = null, placingBuilding = null;
+  const pull = () => { ({ m, me, phase, units, mode, bt, battlePre, fx, selected, moving, drag, hoverTile, rangeOf, editable, placingUnit, placingElf, placingTower, placingWall, placingBuilding, battleCam, dev } = view()); };
   const foe = () => 1 - me;
   const css = Art.css, tag = Shapes.tag;
   const { ELF_COL, SHROOM_COL, CHARM_COL } = Art;
@@ -5123,6 +5218,22 @@ const Render2D = (cv, view) => {
     const t = tilePx(), u = Game.treasuryUnit();
     for (const side of [me, foe()]) { const ts = Game.treasurySpot(m, side); if (ts) drawLesser((scol(ts.col) + 0.5) * t, (srow(ts.row) + 0.5) * t, t, side, u, null, false, !Game.treasuryUp(m)); }
   }
+  // a defensive wall (the bastion's): a block of stone filling its tile, edged in its side's colour
+  function drawStoneWall(x, y, t, side, hpr, fresh) {
+    const s = t - 2;
+    ctx.globalAlpha = 0.55 + 0.45 * hpr;
+    ctx.fillStyle = '#8E8676'; ctx.fillRect(x - s / 2, y - s / 2, s, s);
+    ctx.strokeStyle = 'rgba(40, 36, 30, 0.55)'; ctx.lineWidth = 1;
+    for (let k = 1; k < 3; k++) { const yy = y - s / 2 + k * s / 3; ctx.beginPath(); ctx.moveTo(x - s / 2, yy); ctx.lineTo(x + s / 2, yy); ctx.stroke(); }
+    for (let k = 0; k < 3; k++) { const yy = y - s / 2 + k * s / 3, off = k % 2 ? s / 4 : s / 2; for (let xx = x - s / 2 + off; xx < x + s / 2 - 1; xx += s / 2) { ctx.beginPath(); ctx.moveTo(xx, yy); ctx.lineTo(xx, yy + s / 3); ctx.stroke(); } }
+    ctx.strokeStyle = teamCol(side); ctx.lineWidth = 2; ctx.setLineDash(fresh ? [3, 3] : []); ctx.strokeRect(x - s / 2, y - s / 2, s, s); ctx.setLineDash([]);
+    ctx.globalAlpha = 1;
+  }
+  // the bastions' walls while deploying (an opponent's new one only from the fight on)
+  function drawBwalls() {
+    const t = tilePx();
+    for (const side of [me, foe()]) for (const bw of Game.bwallsOf(m, side)) if (Game.bwallShown(m, me, true, side, bw)) drawStoneWall((scol(bw.col) + 0.5) * t, (srow(bw.row) + 0.5) * t, t, side, 1, side === me && bw.round === m.round);
+  }
   // a wall (spell): a row of stakes
   function drawWallBlock(x, y, t, side, hpr) {
     const s = t * 0.8;
@@ -5391,6 +5502,11 @@ const Render2D = (cv, view) => {
       for (const row of Game.zoneRows(me)) for (let c = 0; c < Game.COLS; c++) if (Game.buildingSpotOk(m, me, c, row)) ctx.strokeRect(scol(c) * t + 3, srow(row) * t + 3, t - 6, t - 6);
       ctx.setLineDash([]); ctx.globalAlpha = 1;
     }
+    if (placingWall && editable) { // where a wall may go: any free tile of your half of the board
+      ctx.strokeStyle = teamCol(me); ctx.globalAlpha = 0.55; ctx.lineWidth = 1.5; ctx.setLineDash([4, 3]);
+      for (let row = 0; row < Game.ROWS; row++) for (let c = 0; c < Game.COLS; c++) if (Game.bwallSpotOk(m, me, c, row)) ctx.strokeRect(scol(c) * t + 3, srow(row) * t + 3, t - 6, t - 6);
+      ctx.setLineDash([]); ctx.globalAlpha = 1;
+    }
     if (placingElf && editable) { // where the elf tower may go: any free tile of your zone
       ctx.strokeStyle = ELF_COL; ctx.globalAlpha = 0.6; ctx.lineWidth = 1.5;
       for (const row of Game.zoneRows(me)) for (let c = 0; c < Game.COLS; c++) if (Game.elfOwnSpotOk(m, me, c, row)) ctx.strokeRect(scol(c) * t + 3, srow(row) * t + 3, t - 6, t - 6);
@@ -5449,6 +5565,7 @@ const Render2D = (cv, view) => {
     for (const side of [me, foe()]) if (towerVisible(side) && Game.towerUp(m, side)) drawTowerTile(side);
     if (Game.isDev(m)) drawLessers();
     if (Game.treasuryOn(m)) drawTreasuries();
+    if (phase === 'deploy') drawBwalls();
     drawBuildings();
     // the squad tapped last: its range as a dotted ring round its tile (theirs as you can know it)
     const rs = rangeOf && phase === 'deploy' && m.armies[rangeOf.side].find(s => s.id === rangeOf.id);
@@ -5500,7 +5617,7 @@ const Render2D = (cv, view) => {
     for (const b of bt.bodies) {
       if (!b.alive || !b.u.structure) continue;
       const hpr = b.hp / b.u.hp, t = tilePx();
-      if (b.u.kind === 'wall') { drawWallBlock(PX(b.x), PY(b.y), t, b.side, hpr); continue; }
+      if (b.u.kind === 'wall') { if (b.u.barrier) drawStoneWall(PX(b.x), PY(b.y), t, b.side, hpr); else drawWallBlock(PX(b.x), PY(b.y), t, b.side, hpr); continue; }
       if (b.u.lesser) { drawLesser(PX(b.x), PY(b.y), t, b.side, b.u, hpr, false); continue; }
       if (b.u.awake) { ctx.fillStyle = '#2B2F33'; for (const [dx, dy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) { ctx.beginPath(); ctx.arc(PX(b.x) + dx * t * 0.36, PY(b.y) + dy * t * 0.3, t * 0.12, 0, Math.PI * 2); ctx.fill(); } } // Core Awoken: the Mecha Tower on wheels
       drawKeep(PX(b.x), PY(b.y), t, b.side, hpr, b.u.kind, null, Game.charOf(battlePre || m, b.side));
@@ -6204,7 +6321,7 @@ const Render2D = (cv, view) => {
   // ---------- board: drawn by the renderer (src/render2d.js), which reads what to show from view() ----------
   const cv = $('board');
   const boardView = () => ({ m, me, phase, units, mode, bt, battlePre, fx, selected, moving, drag, hoverTile, rangeOf,
-    editable: editable(), placingUnit: placingUnit(), placingElf: placingElf(), placingTower: placingTower(),
+    editable: editable(), placingUnit: placingUnit(), placingElf: placingElf(), placingTower: placingTower(), placingWall: placingWall(),
     dev: m && m.dev ? { bPlacing, castMode, guideMode, guideId: guideDrag ? guideDrag.id : guideMode !== 'pick' ? guideMode : null, guide: guideDrag ? guideDrag.pts : guideMode != null && guideMode !== 'pick' ? guideDraft : null } : null,
     battleCam: cam && cam.k > 0 ? { zoom: 1 + (CAM.zoom - 1) * cam.k, x: cam.x, y: cam.y, k: cam.k } : null,
     placingBuilding: placingBuilding() });
@@ -6273,7 +6390,7 @@ const Render2D = (cv, view) => {
   // the X on the task line: stop placing that unit (or the Move, the Charisma, the elf tower)
   function stopTask() {
     if (guideMode != null && guideMode !== 'pick' && guideDraft.length && m && editable()) Game.setGuide(m, me, guideMode, guideDraft); // the ✕ finishes an arrow
-    selected = null; moveMode = false; moving = null; charmMode = false; elfPlacing = false;
+    selected = null; moveMode = false; moving = null; charmMode = false; elfPlacing = false; wallPlacing = false;
     bPlacing = null; castMode = null; guideMode = null; guideDraft = []; guideDrag = null;
     if (phase === 'deploy') panelDeploy();
     render();
@@ -6375,6 +6492,8 @@ const Render2D = (cv, view) => {
   const placingTower = () => phase === 'deploy' && m && !Game.needsPack(m, me) && Game.needsTower(m, me);
   let elfPlacing = false; // picking the tile for the elf tower this player is buying
   const placingElf = () => elfPlacing && phase === 'deploy' && !!m && Game.canBuyElfOwn(m, me);
+  let wallPlacing = false; // placing the bastion's Defensive walls
+  const placingWall = () => wallPlacing && phase === 'deploy' && !!m && Game.bwallsLeft(m, me) > 0;
   let buildPlacing = null; // { ui, k }: picking the tile for the building that unit ui's skill k places (the Factory)
   const placingBuilding = () => buildPlacing && phase === 'deploy' && !!m && Game.canBuyBuilding(m, me, buildPlacing.ui, buildPlacing.k) ? { ...buildPlacing, id: Game.buildingIdOf(m, buildPlacing.ui, buildPlacing.k) } : null;
   const buildingName = (id) => (Game.buildingInfo(id) || {}).name || 'building';
@@ -6723,6 +6842,7 @@ const Render2D = (cv, view) => {
       if (tskillOffer() && m.round === Game.TOWER_PICK_ROUND && selected === null && !fresh) hint = `Your ${esc(Game.towerType(m, me).name)} has a skill: ${esc(Game.towerType(m, me).skill.name)}. ${esc(Game.towerType(m, me).skill.text)} It isn’t on until you buy it (${Game.towerSkillCost(m, me)} gold, once per match).`;
       if (choosingTower()) hint = `Choose your tower on the board. The clock starts once ${solo() ? 'you have' : 'both players have'} picked.`;
       if (placingElf()) hint = 'Tap a free tile in your zone to place your elf tower. Tap anywhere else to cancel.';
+      if (placingWall()) hint = `Tap a free tile on your side of the board to place a wall (${Game.bwallsLeft(m, me)} left). Tap a wall you placed this round to take it back.`;
       if (devPicking()) hint = 'Pick one card on the board. If time runs out you get the first one.';
       const pb = bPlacing != null && Game.lessersOf(m, me).find(b => b.key === bPlacing);
       if (pb) hint = `Tap a gold tile to place your ${esc((Game.devBuilding(pb.id) || {}).name || 'building')}.${pb.col != null ? ' Tap anywhere else to leave it where it is.' : ''}`;
@@ -6735,12 +6855,12 @@ const Render2D = (cv, view) => {
     // Only hints about what the next tap does (or why it can't) stay on the panel; the rest (tips, this round's
     // news) go to the Help sheet, whose button turns gold while there's news not read yet this round.
     const devTask = bPlacing != null || castMode != null || guideMode != null;
-    const inline = !can || placingTower() || placingElf() || placingBuilding() || choosingTower() || choosingPack() || devPicking() || devTask || moveMode || (charmMode && Game.canGiveCharm(m, me))
+    const inline = !can || placingTower() || placingElf() || placingWall() || placingBuilding() || choosingTower() || choosingPack() || devPicking() || devTask || moveMode || (charmMode && Game.canGiveCharm(m, me))
       || (selected !== null && !canBuy(selected)) ? hint : '';
     helpTip = inline ? '' : hint;
     // phone: the task the next board tap is for, shown over the board while the drawer is down (dock())
     dockTask = !can ? null : placingTower() ? { text: hint, x: false }
-      : selected !== null || moveMode || (charmMode && Game.canGiveCharm(m, me)) || placingElf() || placingBuilding() || devTask ? { text: hint, x: !(bPlacing != null && Game.unplacedLesser(m, me)) } : null;
+      : selected !== null || moveMode || (charmMode && Game.canGiveCharm(m, me)) || placingElf() || placingWall() || placingBuilding() || devTask ? { text: hint, x: !(bPlacing != null && Game.unplacedLesser(m, me)) } : null;
     const news = can && selected === null && !fresh && !inline && (Game.hailRound(m) || Game.altarRound(m) || m.round === Game.FLANK.round || (tskillOffer() && m.round === Game.TOWER_PICK_ROUND));
     const extraBtns = `<span class="xbtns" style="display:flex;gap:6px;flex-wrap:wrap">
         <button class="btn small" id="buy-deploy" ${can && Game.canBuyDeploy(m, me) ? '' : 'disabled'}>+1 deployment · ${Game.CONFIG.extraDeployCost}</button>
@@ -7770,7 +7890,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   }
 
   function enterDeploy(ms) {
-    phase = 'deploy'; bt = null; battlePre = null; fx = []; selected = null; rangeOf = null; timeUp = false; resultShownAt = 0; elfPlacing = false; buildPlacing = null;
+    phase = 'deploy'; bt = null; battlePre = null; fx = []; selected = null; rangeOf = null; timeUp = false; resultShownAt = 0; elfPlacing = false; wallPlacing = false; buildPlacing = null;
     ready = [false, false];
     heldMs = ms > 0 && mode !== 'guest' && picksPending() ? ms : 0;
     deadline = ms > 0 && !heldMs ? now() + ms : 0;
@@ -7821,6 +7941,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     Game.ensureTower(m, 0); Game.ensureTower(m, 1);
     Game.ensurePack(m, 0); Game.ensurePack(m, 1);
     Game.settleTowerPicks(m);
+    Game.ensureBwalls(m, 0); Game.ensureBwalls(m, 1); // walls not placed go up by themselves
     const pre = snapshot(m);
     // work out the result first; both screens then play the same battle back
     const sim = Game.startBattle(m);
@@ -8000,6 +8121,10 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     }
     if (placingTower()) { if (editable() && Game.placeTower(m, me, t.col, t.row)) changed(); return; }
     if (placingElf()) { if (editable() && Game.buyElfOwn(m, me, t.col, t.row)) { elfPlacing = false; changed(); } else if (!Game.elfOwnSpotOk(m, me, t.col, t.row)) { elfPlacing = false; render(); hud(); panelDeploy(); } return; }
+    if (Game.bwallAt(m, me, t.col, t.row) && editable() && Game.unplaceBwall(m, me, t.col, t.row)) { wallPlacing = true; changed(); return; } // a wall placed this round: taken back
+    if (placingWall()) { if (editable() && Game.placeBwall(m, me, t.col, t.row)) { if (!Game.bwallsLeft(m, me)) wallPlacing = false; changed(); } else { wallPlacing = false; render(); hud(); panelDeploy(); } return; }
+    if (Game.bwallAt(m, me, t.col, t.row)) { overlayMsgSheet('Your wall', `A defensive wall: ${Game.BWALL.hp} health, ${Game.BWALL.armor} armor. It stands again at full health in every fight. The enemy can't walk or shoot through it; your own units can.`); return; }
+    if (Game.treasuryAt(m, me, t.col, t.row) || Game.treasuryAt(m, foe(), t.col, t.row)) { const mine = Game.treasuryAt(m, me, t.col, t.row); overlayMsgSheet(mine ? 'Your treasury' : `${foeName()}'s treasury`, `${Game.treasuryUp(m) ? '' : `It is built in round ${Game.TREASURY.round}. `}A treasury pays its owner ${Game.TREASURY.gold} gold after every fight it survives. If it is destroyed, the other player steals ${Game.TREASURY.steal} gold from its owner instead. It has ${Game.TREASURY.hp} health and stands again at full health in every fight, and losing it doesn't cripple the army. ${mine ? 'Keep it out of reach, or guard it.' : 'Destroy it to steal their gold.'}`); return; }
     if (placingBuilding()) { const p = buildPlacing; buildPlacing = null; if (editable() && Game.buyBuilding(m, me, p.ui, p.k, t.col, t.row)) changed(); else { render(); hud(); panelDeploy(); } return; }
     if (Game.elfOwnAt(m, me, t.col, t.row)) { openMapSheet(); return; }
     if (Game.isDev(m)) { // Factions devtest: placing a building, casting a spell, drawing an arrow; building and spell sheets
@@ -8057,14 +8182,16 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (own) {
       rangeOf = { side: me, id: own.id };
       if (Game.riderOf(m, me, own)) openPairSheet(own, Game.riderOf(m, me, own));
-      else if (own.round === m.round) { if (had && had.side === me && had.id === own.id && editable() && Game.unplace(m, me, t.col, t.row)) { rangeOf = null; changed(); } }
+      else if (own.round === m.round) { if (had && had.side === me && had.id === own.id && !had.placed && editable() && Game.unplace(m, me, t.col, t.row)) { rangeOf = null; changed(); } }
       else openSheet(own.unit, own, me);
       return;
     }
     const enemy = m.armies[foe()].find(s => { const p = Game.seenAt(m, s); return !Game.hiddenFromFoe(m, s) && Game.blockOf(m, s.unit, p.col, p.row).some(([c, r]) => c === t.col && r === t.row) && s.round < m.round; });
     if (enemy) { rangeOf = { side: foe(), id: enemy.id }; openSheet(Game.shownUnit(m, me, foe(), enemy.unit), { ...enemy, unit: Game.shownUnit(m, me, foe(), enemy.unit) }, foe()); return; } // a disguise shows as what it pretends to be
     if (selected !== null && editable() && Game.canPlaceAt(m, me, t.col, t.row, selected)) {
-      if (Game.place(m, me, selected, t.col, t.row)) {
+      const sq = Game.place(m, me, selected, t.col, t.row);
+      if (sq) {
+        rangeOf = { side: me, id: sq.id, placed: true }; // its range shows at once (a tap on it shows it again before one takes it back)
         if (!Game.freeLeft(m, me).includes(selected) && (m.gold[me] < Game.shopCost(m, me, selected) || Game.deploysLeft(m, me) <= 0)) selected = null;
         changed();
       }
@@ -8387,7 +8514,8 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if ($('fall-more')) $('fall-more').addEventListener('click', () => { $('fall-more').parentNode.innerHTML = `<span style="color:var(--foe)">If it falls:</span> that army deals ${D.attack}% less damage, moves ${D.move}% slower and takes ${D.taken}% more damage for ${D.secs} s.`; });
     if ($('tskill')) $('tskill').addEventListener('click', () => { if (editable() && Game.buyTowerSkill(m, me)) { changed(); openTowerSheet(me); } });
     if ($('tskill-undo')) $('tskill-undo').addEventListener('click', () => { if (editable() && Game.undoTowerSkill(m, me)) { changed(); openTowerSheet(me); } });
-    if ($('tskill2')) $('tskill2').addEventListener('click', () => { if (editable() && Game.buyTowerSkill2(m, me)) { changed(); openTowerSheet(me); } });
+    if ($('tskill2')) $('tskill2').addEventListener('click', () => { if (editable() && Game.buyTowerSkill2(m, me)) { if (Game.bwallsLeft(m, me)) { wallPlacing = true; changed(); closeSheet(); } else { changed(); openTowerSheet(me); } } });
+    if ($('bwall')) $('bwall').addEventListener('click', () => { if (editable() && Game.bwallsLeft(m, me)) { wallPlacing = true; closeSheet(); render(); hud(); panelDeploy(); } });
     if ($('tskill2-undo')) $('tskill2-undo').addEventListener('click', () => { if (editable() && Game.undoTowerSkill2(m, me)) { changed(); openTowerSheet(me); } });
     $('sheet').querySelectorAll('[data-mgen]').forEach(b => b.addEventListener('click', () => { if (editable() && Game.buyMageGen(m, me, b.dataset.mgen)) { changed(); openTowerSheet(me); } }));
     if ($('tloan')) $('tloan').addEventListener('click', () => { if (editable() && Game.takeLoan(m, me)) { changed(); openTowerSheet(me); } });
@@ -8540,6 +8668,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     else if (owned) act = chip('Owned', 'var(--gold)') + (phase === 'deploy' && editable() && m.towerSkill2[me] === m.round ? ' <button class="btn small" id="tskill2-undo">Undo</button>' : '');
     else if (phase === 'deploy') act = editable() && Game.canBuyTowerSkill2(m, me) ? `<button class="btn small primary" id="tskill2">Buy · ${cost} gold</button>` : `<button class="btn small" disabled>${blocked ? `Needs ${esc(tt.skill.name)}` : Game.bankBusy(m, me, 'invest') ? 'Not with a loan this round' : m.gold[me] < cost ? `Need ${cost} gold` : `Buy · ${cost} gold`}</button>`;
     else act = `<span class="hint">${cost} gold</span>`;
+    if (side === me && owned && tt.id === 'bastion' && phase === 'deploy') act += Game.bwallsLeft(m, me) ? ` <button class="btn small primary" id="bwall" ${editable() ? '' : 'disabled'}>Place walls · ${Game.bwallsLeft(m, me)} left</button>` : ' <span class="hint">All walls placed</span>';
     return abilityRow(sk.name, act, esc(sk.text) + (side === me && !owned ? ' Once per match; your opponent sees it after the next fight.' : ''));
   }
   const towerStats = (T0) => { const T = towerAttack(T0); return `<div class="stats"><div><span>Health</span><b class="num">${T0.hp}</b></div><div><span>${T0.drone ? 'Drone hit' : 'Hit'}</span><b class="num">${T.hit}</b></div><div><span>Attacks/s</span><b class="num">${T.aps}</b></div><div><span>Range</span><b class="num">${T.range} m</b></div>${T.splash ? `<div><span>Splash</span><b class="num">${T.splash} m</b></div>` : ''}</div>`; };
@@ -9075,6 +9204,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       if (m.round === Game.TOWER_PICK_ROUND && s.towers && s.towers[0]) delete s.towers[0].type; // and the host's tower pick
       if (s.bribe) s.bribe[0] = Game.bribeList(s, 0).filter(r => r !== m.round); // bribes paid this round too
       if (s.elfOwn && s.elfOwn[0] && s.elfOwn[0].round === m.round) s.elfOwn[0] = null; // and an elf tower bought this round
+      if (s.bwalls && s.bwalls[0]) s.bwalls[0] = s.bwalls[0].filter(w => w.round !== m.round); // and walls placed this round
       if (s.towerSkill && s.towerSkill[0] === m.round) s.towerSkill[0] = 0; // and a tower skill
       if (s.towerSkill2 && s.towerSkill2[0] === m.round) s.towerSkill2[0] = 0; // and a second one
       if (s.mageGen) s.mageGen[0] = null; // and the mage general called this round
@@ -9195,6 +9325,10 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (!m.bribe) m.bribe = [[], []];
     const newBribes = Game.elfSpot(m) ? (Array.isArray(d.bribe) ? d.bribe : [d.bribe]).filter(r => (r | 0) === m.round).slice(0, 200) : [];
     m.bribe[1] = Game.bribeList(m, 1).filter(r => r < m.round).concat(newBribes.map(() => m.round));
+    // the guest's walls (bastion): earlier ones stay, the ones sent for this round are taken if there's room and the tile is free
+    if (!m.bwalls) m.bwalls = [[], []];
+    m.bwalls[1] = Game.bwallsOf(m, 1).filter(w => w.round < m.round);
+    if (Array.isArray(d.bwalls)) for (const w of d.bwalls.slice(0, Game.BWALL.count)) if (w && (w.round | 0) === m.round) Game.placeBwall(m, 1, w.col | 0, w.row | 0);
     // the guest's own elf tower: an earlier one stays, one sent for this round is taken (gold was checked on their side)
     if (!m.elfOwn) m.elfOwn = [null, null];
     if (!(m.elfOwn[1] && m.elfOwn[1].round < m.round)) {
@@ -9353,7 +9487,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
 
   function sendSide() {
     if (mode !== 'guest' || !m || phase !== 'deploy') return;
-    send({ t: 'side', round: m.round, army: m.armies[1], gold: m.gold[1], extra: m.extraDeploys[1], nextId: m.nextId[1], tech: (m.tech && m.tech[1]) || {}, tower: (m.towers && m.towers[1]) || null, pack: m.pack ? m.pack[1] : null, unlocks: (m.unlocks && m.unlocks[1]) || {}, bribe: Game.bribeList(m, 1), elfOwn: Game.elfOwnOf(m, 1), towerSkill: (m.towerSkill && m.towerSkill[1]) || 0, towerSkill2: (m.towerSkill2 && m.towerSkill2[1]) || 0, mageGen: Game.mageGenOf(m, 1) || Game.mageTpOf(m, 1) ? { id: Game.mageGenOf(m, 1), tp: Game.mageTpOf(m, 1) } : null, loan: Game.loanNow(m, 1) ? m.round : 0, tround: Game.towerRounds(m, 1).filter(x => Game.troundOn(m, 1, x.id)).map(x => x.id), altar: (m.altar || []).filter(x => x.side === 1 && x.round === m.round).map(x => x.type), shrooms: ((m.map && m.map.removed) || []).filter(x => x.side === 1 && x.round === m.round).map(x => ({ col: x.col, row: x.row })), buildings: Game.buildingsOf(m, 1), bskill: (m.bskill && m.bskill[1]) || {}, ready: ready[1] || timeUp });
+    send({ t: 'side', round: m.round, army: m.armies[1], gold: m.gold[1], extra: m.extraDeploys[1], nextId: m.nextId[1], tech: (m.tech && m.tech[1]) || {}, tower: (m.towers && m.towers[1]) || null, pack: m.pack ? m.pack[1] : null, unlocks: (m.unlocks && m.unlocks[1]) || {}, bribe: Game.bribeList(m, 1), elfOwn: Game.elfOwnOf(m, 1), bwalls: Game.bwallsOf(m, 1), towerSkill: (m.towerSkill && m.towerSkill[1]) || 0, towerSkill2: (m.towerSkill2 && m.towerSkill2[1]) || 0, mageGen: Game.mageGenOf(m, 1) || Game.mageTpOf(m, 1) ? { id: Game.mageGenOf(m, 1), tp: Game.mageTpOf(m, 1) } : null, loan: Game.loanNow(m, 1) ? m.round : 0, tround: Game.towerRounds(m, 1).filter(x => Game.troundOn(m, 1, x.id)).map(x => x.id), altar: (m.altar || []).filter(x => x.side === 1 && x.round === m.round).map(x => x.type), shrooms: ((m.map && m.map.removed) || []).filter(x => x.side === 1 && x.round === m.round).map(x => ({ col: x.col, row: x.row })), buildings: Game.buildingsOf(m, 1), bskill: (m.bskill && m.bskill[1]) || {}, ready: ready[1] || timeUp });
   }
 
   function guestRecv(d) {
@@ -9389,6 +9523,8 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
           if (!m.towerSkill) m.towerSkill = [0, 0];
           if (!incoming.towerSkill2) incoming.towerSkill2 = [0, 0];
           if (!m.towerSkill2) m.towerSkill2 = [0, 0];
+          if (!incoming.bwalls) incoming.bwalls = [[], []];
+          if (!m.bwalls) m.bwalls = [[], []];
           if (!incoming.elfOwn) incoming.elfOwn = [null, null];
           if (!m.elfOwn) m.elfOwn = [null, null];
           if (!incoming.mapFree) incoming.mapFree = [{}, {}];
@@ -9402,7 +9538,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
           if (!incoming.bskill) incoming.bskill = [{}, {}];
           if (!incoming.tround) incoming.tround = [{}, {}];
           if (!m.bskill) m.bskill = [{}, {}];
-          for (const k of ['armies', 'gold', 'extraDeploys', 'nextId', 'tech', 'towers', 'unlocks', 'pack', 'chars', 'buff', 'bribe', 'towerSkill', 'towerSkill2', 'elfOwn', 'mapFree', 'mageGen', 'loan', 'tround', 'buildings', 'bskill']) incoming[k][1] = (m[k] || [null, null])[1];
+          for (const k of ['armies', 'gold', 'extraDeploys', 'nextId', 'tech', 'towers', 'unlocks', 'pack', 'chars', 'buff', 'bribe', 'towerSkill', 'towerSkill2', 'elfOwn', 'bwalls', 'mapFree', 'mageGen', 'loan', 'tround', 'buildings', 'bskill']) incoming[k][1] = (m[k] || [null, null])[1];
           if (incoming.map && m.map) incoming.map.removed = (incoming.map.removed || []).filter(x => !(x.side === 1 && x.round === incoming.round)).concat((m.map.removed || []).filter(x => x.side === 1 && x.round === incoming.round));
           incoming.altar = (incoming.altar || []).filter(x => !(x.side === 1 && x.round === incoming.round)).concat((m.altar || []).filter(x => x.side === 1 && x.round === incoming.round));
           m = incoming; ready[0] = theirReady;

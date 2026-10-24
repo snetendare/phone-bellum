@@ -557,6 +557,29 @@ const Engine = (() => {
     let projectiles = [];
     let t = 0, shots = [], over = false, tick = 0;
     const dist = (a, b) => hyp(a.x - b.x, a.y - b.y);
+    // Walls (u.barrier: half their width, a square on its tile): the enemy can't walk into one or shoot through it
+    // (a lobbed shell flies over); their own side walks and shoots through. How far a body is from a wall is measured
+    // to its edge, so units walk up to it and hit it.
+    const barriers = all.filter(b => b.u.barrier > 0);
+    const gap = (f, b) => f.u.barrier > 0 ? hyp(Math.max(0, Math.abs(f.x - b.x) - f.u.barrier), Math.max(0, Math.abs(f.y - b.y) - f.u.barrier)) : dist(f, b);
+    // the first enemy wall a shot from a to v would run into (not v itself), or null
+    function wallBetween(a, v) {
+      if (!barriers.length || a.u.lob) return null;
+      let best = null, bt = Infinity;
+      for (const w of barriers) {
+        if (!w.alive || w === v || w.side === a.side) continue;
+        const h = w.u.barrier;
+        let t0 = 0, t1 = 1;
+        for (const [p, d, lo, hi] of [[a.x, v.x - a.x, w.x - h, w.x + h], [a.y, v.y - a.y, w.y - h, w.y + h]]) {
+          if (Math.abs(d) < 1e-9) { if (p < lo || p > hi) t0 = 2; continue; }
+          let ta = (lo - p) / d, tb = (hi - p) / d;
+          if (ta > tb) { const x = ta; ta = tb; tb = x; }
+          t0 = Math.max(t0, ta); t1 = Math.min(t1, tb);
+        }
+        if (t0 <= t1 && t0 < bt) { bt = t0; best = w; }
+      }
+      return best;
+    }
     // current range: shortsight can shrink it for a while, but never below 1 m (or the unit's own range if shorter)
     const R = (b) => b.shrinkT > 0 ? Math.max(Math.min(b.u.range, 1), b.u.range - b.shrinkM) : b.u.range;
     // How far an attack reaches. Flame cones can reach further than where the unit stops (g.flameReach x range),
@@ -646,6 +669,8 @@ const Engine = (() => {
       const st = stats[owner.side];
       // Dodge: the whole hit misses (the same random numbers on every device)
       if (v.u.dodge > 0 && rnd() * 100 < v.u.dodge) { st.missed += hit; return; }
+      // a guard (the keep's) that is attacked leaves its post and goes for its attacker
+      if (v.guard && owner.alive && owner.side !== v.side && !owner.u.aloft && !(v.avenge && v.avenge.alive)) { v.holdT = 0; v.avenge = owner; v.engaged = true; }
       let pct = owner.u.pctHit > 0 && !v.u.structure ? v.u.hp * owner.u.pctHit / 100 : 0;
       if (cripple[owner.side] > 0) { hit = hit * (1 - towerDown.attack / 100); pct = pct * (1 - towerDown.attack / 100); }
       // Shield: the whole hit is blocked, however big, and it brings no poison
@@ -715,7 +740,7 @@ const Engine = (() => {
         for (const f of foes) if (f.alive && hyp(f.x - px, f.y - py) <= owner.u.splash) hitSet.add(f);
       } else {
         let v = null;
-        if (direct && direct.alive && !owner.u.projSpeed) v = direct;
+        if (direct && direct.alive && (!owner.u.projSpeed || direct.u.barrier > 0)) v = direct;
         else {
           let bd = PROJ_HIT_RADIUS;
           for (const f of foes) { if (!f.alive) continue; const d = hyp(f.x - px, f.y - py); if (d <= bd) { bd = d; v = f; } }
@@ -744,7 +769,7 @@ const Engine = (() => {
       const valid = [];
       for (const f of sides[1 - b.side]) {
         if (!f.alive || f.hidden) continue;
-        const d = dist(f, b);
+        const d = gap(f, b);
         if (d <= reachOf(b) + 0.01 && d >= b.u.minRange) valid.push([d, f]);
       }
       valid.sort((p, q) => b.u.backline ? q[0] - p[0] : p[0] - q[0]);
@@ -754,6 +779,7 @@ const Engine = (() => {
     // the enemy a body attacks: once it has picked one it stays on it until it dies, hides or leaves its reach,
     // even if another enemy comes closer; then it picks the nearest
     function locked(b, valid) {
+      if (b.avenge && b.avenge.alive && valid.includes(b.avenge)) b.lock = b.avenge; // a guard going for its attacker
       if (!(b.lock && b.lock.alive && valid.includes(b.lock))) {
         // aware2: the nearest enemy that isn't about to die from what its side is already shooting at it
         b.lock = g.aware2 ? (valid.find(f => (f.claimDmg || 0) < f.hp) || valid[0]) : valid[0];
@@ -770,7 +796,7 @@ const Engine = (() => {
       let best = null, bc = Infinity;
       for (const f of sides[1 - b.side]) {
         if (!f.alive || f.hidden) continue;
-        const d = dist(f, b), mine = f === b.goal;
+        const d = gap(f, b), mine = f === b.goal;
         if (d > aware * (mine ? AWARE.leash : 1)) continue;
         const lane = g.awareLane == null ? AWARE.lane : g.awareLane;
         let c = d - (mine ? AWARE.stick : 0) + lane * Math.abs(f.x - b.x);
@@ -813,7 +839,7 @@ const Engine = (() => {
       for (const f of sides[1 - b.side]) {
         if (!f.alive) continue;
         const fx = f.x - b.x, fy = f.y - b.y, fl = hyp(fx, fy);
-        if (fl > reach || fl < b.u.minRange) continue;
+        if (gap(f, b) > reach || fl < b.u.minRange) continue;
         if (f === primary || !al || !fl || (ax * fx + ay * fy) / (al * fl) >= c - 1e-12) out.push(f);
       }
       if (!out.includes(primary)) out.push(primary);
@@ -850,7 +876,10 @@ const Engine = (() => {
       }
       // stunned after a charge (a trampler only once its run is over, see the movement loop)
       if (charged && b.u.chargeStun > 0 && !(b.trampleLeft > 0)) b.stunT = b.u.chargeStun;
-      for (const tgt of targets) {
+      const walled = new Set(); // an enemy wall in the way takes the shot instead (a flame burns it once)
+      for (const t0 of targets) {
+        const wl = wallBetween(b, t0), tgt = wl || t0;
+        if (wl && targets.flame) { if (walled.has(wl)) continue; walled.add(wl); }
         const dx = tgt.x - b.x, dy = tgt.y - b.y, d = hyp(dx, dy) || 1;
         const dirX = dx / d, dirY = dy / d;
         if (targets.flame) {
@@ -1165,7 +1194,7 @@ const Engine = (() => {
         let near = null, nd = Infinity;
         for (const f of foes) {
           if (!f.alive || f.hidden) continue;
-          const d = dist(f, b);
+          const d = gap(f, b);
           if (d < nd) { nd = d; near = f; }
         }
         b.near = near;
@@ -1204,7 +1233,8 @@ const Engine = (() => {
           if (b.u.windUp > 0 && mv > 0) { b.setUp = false; if (b.windTarget) { b.windTarget = null; stats[b.side].windLost++; } }
           continue;
         }
-        if (g.aware2 && b.engaged && near) { const gl = goalOf(b, rg); if (gl) { near = gl; nd = dist(gl, b); } }
+        if (g.aware2 && b.engaged && near) { const gl = goalOf(b, rg); if (gl) { near = gl; nd = gap(gl, b); } }
+        if (b.avenge) { if (b.avenge.alive && !b.avenge.hidden) { near = b.avenge; nd = gap(near, b); } else b.avenge = null; } // a guard going for its attacker
         if (near && nd > (g.stopPct > 0 && g.stopPct < 1 && b.engaged ? stopAt(rg) : rg)) {
           const step = b.u.speed * (b.slowT > 0 ? 1 - b.slowMove / 100 : 1) * (cripple[b.side] > 0 ? 1 - towerDown.move / 100 : 1) * dt;
           let mv;
@@ -1226,12 +1256,13 @@ const Engine = (() => {
           }
           // where it wants to go: straight ahead, or at the nearest enemy
           let wx = mx, wy = my;
-          if (b.engaged) { wx = (near.x - b.x) / nd; wy = (near.y - b.y) / nd; }
+          const nr = dist(near, b) || 1; // the direction to it (nd is to its edge for a wall)
+          if (b.engaged) { wx = (near.x - b.x) / nr; wy = (near.y - b.y) / nr; }
           else if (drift > 0 && nd < aware + drift && (near.x - b.x) * mx + (near.y - b.y) * my > 0) {
             // within DRIFT of its sight: lean toward the nearest enemy ahead, harder the closer it gets, so it
             // curves in on a diagonal instead of marching level with the enemy and then turning sharply
             const w = (aware + drift - nd) / drift;
-            wx = mx * (1 - w) + (near.x - b.x) / nd * w; wy = my * (1 - w) + (near.y - b.y) / nd * w;
+            wx = mx * (1 - w) + (near.x - b.x) / nr * w; wy = my * (1 - w) + (near.y - b.y) / nr * w;
           }
           // turn smoothly instead of snapping: the heading swings toward the wanted direction
           if (b.hx === undefined) { b.hx = mx; b.hy = my; }
@@ -1299,6 +1330,7 @@ const Engine = (() => {
           const a = arr[i]; if (!a.alive || a.u.aloft) continue;
           for (let j = i + 1; j < arr.length; j++) {
             const c = arr[j]; if (!c.alive || c.u.aloft) continue;
+            if (a.u.barrier > 0 || c.u.barrier > 0) continue; // a side's own units walk through its walls
             const dx = c.x - a.x, dy = c.y - a.y;
             const d = hyp(dx, dy);
             // structures and bodies still waiting to start (flank squads) don't budge: the other body moves the whole way
@@ -1326,6 +1358,18 @@ const Engine = (() => {
               a.x -= minSep / 2 * ka; c.x += minSep / 2 * kc;
             }
           }
+        }
+      }
+      // walls: an enemy body that walked into one is put back out at its nearest edge
+      for (const w of barriers) {
+        if (!w.alive) continue;
+        const h = w.u.barrier;
+        for (const f of sides[1 - w.side]) {
+          if (!f.alive || f.u.aloft || f.u.structure) continue;
+          const dx = f.x - w.x, dy = f.y - w.y;
+          if (Math.abs(dx) >= h || Math.abs(dy) >= h) continue;
+          if (h - Math.abs(dx) < h - Math.abs(dy)) f.x = w.x + (dx < 0 ? -h : h);
+          else f.y = w.y + (dy < 0 ? -h : h);
         }
       }
       for (const s of strikes) {
@@ -1588,7 +1632,7 @@ const Engine = (() => {
         v.convert = { side: v.side, squad: v.squad, xp: v.xp, dealt: v.dealt || 0 }; // what it earned for its old squad
         v.side = 1 - v.side; v.squad = CONVERT_SQUAD; v.xp = 0; v.dealt = 0; v.turning = false;
         v.windTarget = null; v.windT = 0; v.setUp = false; v.firing = -1; v.burstLeft = 0; v.trampleLeft = 0; v.trampled = null;
-        v.spinTarget = null; v.aims = null; v.lock = null; v.march = null; v.guide = null; v.goal = null; v.spreadTo = null; v.engaged = false; v.holdT = 0; v.delay = 0; v.band = null; v.hidden = false;
+        v.spinTarget = null; v.aims = null; v.lock = null; v.march = null; v.guide = null; v.goal = null; v.spreadTo = null; v.engaged = false; v.holdT = 0; v.avenge = null; v.delay = 0; v.band = null; v.hidden = false;
         v.slowT = 0; v.slowMove = 0; v.slowAtk = 0; v.shrinkT = 0; v.shrinkM = 0; v.kids = null; v.stunT = 0; v.frenzy = 0;
         sides[v.side].push(v); stats[v.side].totalHp += v.hp;
         for (const b of all) {

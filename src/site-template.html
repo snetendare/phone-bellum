@@ -831,7 +831,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
   // ---------- board: drawn by the renderer (src/render2d.js), which reads what to show from view() ----------
   const cv = $('board');
   const boardView = () => ({ m, me, phase, units, mode, bt, battlePre, fx, selected, moving, drag, hoverTile, rangeOf,
-    editable: editable(), placingUnit: placingUnit(), placingElf: placingElf(), placingTower: placingTower(),
+    editable: editable(), placingUnit: placingUnit(), placingElf: placingElf(), placingTower: placingTower(), placingWall: placingWall(),
     dev: m && m.dev ? { bPlacing, castMode, guideMode, guideId: guideDrag ? guideDrag.id : guideMode !== 'pick' ? guideMode : null, guide: guideDrag ? guideDrag.pts : guideMode != null && guideMode !== 'pick' ? guideDraft : null } : null,
     battleCam: cam && cam.k > 0 ? { zoom: 1 + (CAM.zoom - 1) * cam.k, x: cam.x, y: cam.y, k: cam.k } : null,
     placingBuilding: placingBuilding() });
@@ -900,7 +900,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
   // the X on the task line: stop placing that unit (or the Move, the Charisma, the elf tower)
   function stopTask() {
     if (guideMode != null && guideMode !== 'pick' && guideDraft.length && m && editable()) Game.setGuide(m, me, guideMode, guideDraft); // the ✕ finishes an arrow
-    selected = null; moveMode = false; moving = null; charmMode = false; elfPlacing = false;
+    selected = null; moveMode = false; moving = null; charmMode = false; elfPlacing = false; wallPlacing = false;
     bPlacing = null; castMode = null; guideMode = null; guideDraft = []; guideDrag = null;
     if (phase === 'deploy') panelDeploy();
     render();
@@ -1002,6 +1002,8 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
   const placingTower = () => phase === 'deploy' && m && !Game.needsPack(m, me) && Game.needsTower(m, me);
   let elfPlacing = false; // picking the tile for the elf tower this player is buying
   const placingElf = () => elfPlacing && phase === 'deploy' && !!m && Game.canBuyElfOwn(m, me);
+  let wallPlacing = false; // placing the bastion's Defensive walls
+  const placingWall = () => wallPlacing && phase === 'deploy' && !!m && Game.bwallsLeft(m, me) > 0;
   let buildPlacing = null; // { ui, k }: picking the tile for the building that unit ui's skill k places (the Factory)
   const placingBuilding = () => buildPlacing && phase === 'deploy' && !!m && Game.canBuyBuilding(m, me, buildPlacing.ui, buildPlacing.k) ? { ...buildPlacing, id: Game.buildingIdOf(m, buildPlacing.ui, buildPlacing.k) } : null;
   const buildingName = (id) => (Game.buildingInfo(id) || {}).name || 'building';
@@ -1350,6 +1352,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
       if (tskillOffer() && m.round === Game.TOWER_PICK_ROUND && selected === null && !fresh) hint = `Your ${esc(Game.towerType(m, me).name)} has a skill: ${esc(Game.towerType(m, me).skill.name)}. ${esc(Game.towerType(m, me).skill.text)} It isn’t on until you buy it (${Game.towerSkillCost(m, me)} gold, once per match).`;
       if (choosingTower()) hint = `Choose your tower on the board. The clock starts once ${solo() ? 'you have' : 'both players have'} picked.`;
       if (placingElf()) hint = 'Tap a free tile in your zone to place your elf tower. Tap anywhere else to cancel.';
+      if (placingWall()) hint = `Tap a free tile on your side of the board to place a wall (${Game.bwallsLeft(m, me)} left). Tap a wall you placed this round to take it back.`;
       if (devPicking()) hint = 'Pick one card on the board. If time runs out you get the first one.';
       const pb = bPlacing != null && Game.lessersOf(m, me).find(b => b.key === bPlacing);
       if (pb) hint = `Tap a gold tile to place your ${esc((Game.devBuilding(pb.id) || {}).name || 'building')}.${pb.col != null ? ' Tap anywhere else to leave it where it is.' : ''}`;
@@ -1362,12 +1365,12 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
     // Only hints about what the next tap does (or why it can't) stay on the panel; the rest (tips, this round's
     // news) go to the Help sheet, whose button turns gold while there's news not read yet this round.
     const devTask = bPlacing != null || castMode != null || guideMode != null;
-    const inline = !can || placingTower() || placingElf() || placingBuilding() || choosingTower() || choosingPack() || devPicking() || devTask || moveMode || (charmMode && Game.canGiveCharm(m, me))
+    const inline = !can || placingTower() || placingElf() || placingWall() || placingBuilding() || choosingTower() || choosingPack() || devPicking() || devTask || moveMode || (charmMode && Game.canGiveCharm(m, me))
       || (selected !== null && !canBuy(selected)) ? hint : '';
     helpTip = inline ? '' : hint;
     // phone: the task the next board tap is for, shown over the board while the drawer is down (dock())
     dockTask = !can ? null : placingTower() ? { text: hint, x: false }
-      : selected !== null || moveMode || (charmMode && Game.canGiveCharm(m, me)) || placingElf() || placingBuilding() || devTask ? { text: hint, x: !(bPlacing != null && Game.unplacedLesser(m, me)) } : null;
+      : selected !== null || moveMode || (charmMode && Game.canGiveCharm(m, me)) || placingElf() || placingWall() || placingBuilding() || devTask ? { text: hint, x: !(bPlacing != null && Game.unplacedLesser(m, me)) } : null;
     const news = can && selected === null && !fresh && !inline && (Game.hailRound(m) || Game.altarRound(m) || m.round === Game.FLANK.round || (tskillOffer() && m.round === Game.TOWER_PICK_ROUND));
     const extraBtns = `<span class="xbtns" style="display:flex;gap:6px;flex-wrap:wrap">
         <button class="btn small" id="buy-deploy" ${can && Game.canBuyDeploy(m, me) ? '' : 'disabled'}>+1 deployment · ${Game.CONFIG.extraDeployCost}</button>
@@ -2397,7 +2400,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   }
 
   function enterDeploy(ms) {
-    phase = 'deploy'; bt = null; battlePre = null; fx = []; selected = null; rangeOf = null; timeUp = false; resultShownAt = 0; elfPlacing = false; buildPlacing = null;
+    phase = 'deploy'; bt = null; battlePre = null; fx = []; selected = null; rangeOf = null; timeUp = false; resultShownAt = 0; elfPlacing = false; wallPlacing = false; buildPlacing = null;
     ready = [false, false];
     heldMs = ms > 0 && mode !== 'guest' && picksPending() ? ms : 0;
     deadline = ms > 0 && !heldMs ? now() + ms : 0;
@@ -2448,6 +2451,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     Game.ensureTower(m, 0); Game.ensureTower(m, 1);
     Game.ensurePack(m, 0); Game.ensurePack(m, 1);
     Game.settleTowerPicks(m);
+    Game.ensureBwalls(m, 0); Game.ensureBwalls(m, 1); // walls not placed go up by themselves
     const pre = snapshot(m);
     // work out the result first; both screens then play the same battle back
     const sim = Game.startBattle(m);
@@ -2627,6 +2631,10 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     }
     if (placingTower()) { if (editable() && Game.placeTower(m, me, t.col, t.row)) changed(); return; }
     if (placingElf()) { if (editable() && Game.buyElfOwn(m, me, t.col, t.row)) { elfPlacing = false; changed(); } else if (!Game.elfOwnSpotOk(m, me, t.col, t.row)) { elfPlacing = false; render(); hud(); panelDeploy(); } return; }
+    if (Game.bwallAt(m, me, t.col, t.row) && editable() && Game.unplaceBwall(m, me, t.col, t.row)) { wallPlacing = true; changed(); return; } // a wall placed this round: taken back
+    if (placingWall()) { if (editable() && Game.placeBwall(m, me, t.col, t.row)) { if (!Game.bwallsLeft(m, me)) wallPlacing = false; changed(); } else { wallPlacing = false; render(); hud(); panelDeploy(); } return; }
+    if (Game.bwallAt(m, me, t.col, t.row)) { overlayMsgSheet('Your wall', `A defensive wall: ${Game.BWALL.hp} health, ${Game.BWALL.armor} armor. It stands again at full health in every fight. The enemy can't walk or shoot through it; your own units can.`); return; }
+    if (Game.treasuryAt(m, me, t.col, t.row) || Game.treasuryAt(m, foe(), t.col, t.row)) { const mine = Game.treasuryAt(m, me, t.col, t.row); overlayMsgSheet(mine ? 'Your treasury' : `${foeName()}'s treasury`, `${Game.treasuryUp(m) ? '' : `It is built in round ${Game.TREASURY.round}. `}A treasury pays its owner ${Game.TREASURY.gold} gold after every fight it survives. If it is destroyed, the other player steals ${Game.TREASURY.steal} gold from its owner instead. It has ${Game.TREASURY.hp} health and stands again at full health in every fight, and losing it doesn't cripple the army. ${mine ? 'Keep it out of reach, or guard it.' : 'Destroy it to steal their gold.'}`); return; }
     if (placingBuilding()) { const p = buildPlacing; buildPlacing = null; if (editable() && Game.buyBuilding(m, me, p.ui, p.k, t.col, t.row)) changed(); else { render(); hud(); panelDeploy(); } return; }
     if (Game.elfOwnAt(m, me, t.col, t.row)) { openMapSheet(); return; }
     if (Game.isDev(m)) { // Factions devtest: placing a building, casting a spell, drawing an arrow; building and spell sheets
@@ -2684,14 +2692,16 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (own) {
       rangeOf = { side: me, id: own.id };
       if (Game.riderOf(m, me, own)) openPairSheet(own, Game.riderOf(m, me, own));
-      else if (own.round === m.round) { if (had && had.side === me && had.id === own.id && editable() && Game.unplace(m, me, t.col, t.row)) { rangeOf = null; changed(); } }
+      else if (own.round === m.round) { if (had && had.side === me && had.id === own.id && !had.placed && editable() && Game.unplace(m, me, t.col, t.row)) { rangeOf = null; changed(); } }
       else openSheet(own.unit, own, me);
       return;
     }
     const enemy = m.armies[foe()].find(s => { const p = Game.seenAt(m, s); return !Game.hiddenFromFoe(m, s) && Game.blockOf(m, s.unit, p.col, p.row).some(([c, r]) => c === t.col && r === t.row) && s.round < m.round; });
     if (enemy) { rangeOf = { side: foe(), id: enemy.id }; openSheet(Game.shownUnit(m, me, foe(), enemy.unit), { ...enemy, unit: Game.shownUnit(m, me, foe(), enemy.unit) }, foe()); return; } // a disguise shows as what it pretends to be
     if (selected !== null && editable() && Game.canPlaceAt(m, me, t.col, t.row, selected)) {
-      if (Game.place(m, me, selected, t.col, t.row)) {
+      const sq = Game.place(m, me, selected, t.col, t.row);
+      if (sq) {
+        rangeOf = { side: me, id: sq.id, placed: true }; // its range shows at once (a tap on it shows it again before one takes it back)
         if (!Game.freeLeft(m, me).includes(selected) && (m.gold[me] < Game.shopCost(m, me, selected) || Game.deploysLeft(m, me) <= 0)) selected = null;
         changed();
       }
@@ -3014,7 +3024,8 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if ($('fall-more')) $('fall-more').addEventListener('click', () => { $('fall-more').parentNode.innerHTML = `<span style="color:var(--foe)">If it falls:</span> that army deals ${D.attack}% less damage, moves ${D.move}% slower and takes ${D.taken}% more damage for ${D.secs} s.`; });
     if ($('tskill')) $('tskill').addEventListener('click', () => { if (editable() && Game.buyTowerSkill(m, me)) { changed(); openTowerSheet(me); } });
     if ($('tskill-undo')) $('tskill-undo').addEventListener('click', () => { if (editable() && Game.undoTowerSkill(m, me)) { changed(); openTowerSheet(me); } });
-    if ($('tskill2')) $('tskill2').addEventListener('click', () => { if (editable() && Game.buyTowerSkill2(m, me)) { changed(); openTowerSheet(me); } });
+    if ($('tskill2')) $('tskill2').addEventListener('click', () => { if (editable() && Game.buyTowerSkill2(m, me)) { if (Game.bwallsLeft(m, me)) { wallPlacing = true; changed(); closeSheet(); } else { changed(); openTowerSheet(me); } } });
+    if ($('bwall')) $('bwall').addEventListener('click', () => { if (editable() && Game.bwallsLeft(m, me)) { wallPlacing = true; closeSheet(); render(); hud(); panelDeploy(); } });
     if ($('tskill2-undo')) $('tskill2-undo').addEventListener('click', () => { if (editable() && Game.undoTowerSkill2(m, me)) { changed(); openTowerSheet(me); } });
     $('sheet').querySelectorAll('[data-mgen]').forEach(b => b.addEventListener('click', () => { if (editable() && Game.buyMageGen(m, me, b.dataset.mgen)) { changed(); openTowerSheet(me); } }));
     if ($('tloan')) $('tloan').addEventListener('click', () => { if (editable() && Game.takeLoan(m, me)) { changed(); openTowerSheet(me); } });
@@ -3167,6 +3178,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     else if (owned) act = chip('Owned', 'var(--gold)') + (phase === 'deploy' && editable() && m.towerSkill2[me] === m.round ? ' <button class="btn small" id="tskill2-undo">Undo</button>' : '');
     else if (phase === 'deploy') act = editable() && Game.canBuyTowerSkill2(m, me) ? `<button class="btn small primary" id="tskill2">Buy · ${cost} gold</button>` : `<button class="btn small" disabled>${blocked ? `Needs ${esc(tt.skill.name)}` : Game.bankBusy(m, me, 'invest') ? 'Not with a loan this round' : m.gold[me] < cost ? `Need ${cost} gold` : `Buy · ${cost} gold`}</button>`;
     else act = `<span class="hint">${cost} gold</span>`;
+    if (side === me && owned && tt.id === 'bastion' && phase === 'deploy') act += Game.bwallsLeft(m, me) ? ` <button class="btn small primary" id="bwall" ${editable() ? '' : 'disabled'}>Place walls · ${Game.bwallsLeft(m, me)} left</button>` : ' <span class="hint">All walls placed</span>';
     return abilityRow(sk.name, act, esc(sk.text) + (side === me && !owned ? ' Once per match; your opponent sees it after the next fight.' : ''));
   }
   const towerStats = (T0) => { const T = towerAttack(T0); return `<div class="stats"><div><span>Health</span><b class="num">${T0.hp}</b></div><div><span>${T0.drone ? 'Drone hit' : 'Hit'}</span><b class="num">${T.hit}</b></div><div><span>Attacks/s</span><b class="num">${T.aps}</b></div><div><span>Range</span><b class="num">${T.range} m</b></div>${T.splash ? `<div><span>Splash</span><b class="num">${T.splash} m</b></div>` : ''}</div>`; };
@@ -3702,6 +3714,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       if (m.round === Game.TOWER_PICK_ROUND && s.towers && s.towers[0]) delete s.towers[0].type; // and the host's tower pick
       if (s.bribe) s.bribe[0] = Game.bribeList(s, 0).filter(r => r !== m.round); // bribes paid this round too
       if (s.elfOwn && s.elfOwn[0] && s.elfOwn[0].round === m.round) s.elfOwn[0] = null; // and an elf tower bought this round
+      if (s.bwalls && s.bwalls[0]) s.bwalls[0] = s.bwalls[0].filter(w => w.round !== m.round); // and walls placed this round
       if (s.towerSkill && s.towerSkill[0] === m.round) s.towerSkill[0] = 0; // and a tower skill
       if (s.towerSkill2 && s.towerSkill2[0] === m.round) s.towerSkill2[0] = 0; // and a second one
       if (s.mageGen) s.mageGen[0] = null; // and the mage general called this round
@@ -3822,6 +3835,10 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (!m.bribe) m.bribe = [[], []];
     const newBribes = Game.elfSpot(m) ? (Array.isArray(d.bribe) ? d.bribe : [d.bribe]).filter(r => (r | 0) === m.round).slice(0, 200) : [];
     m.bribe[1] = Game.bribeList(m, 1).filter(r => r < m.round).concat(newBribes.map(() => m.round));
+    // the guest's walls (bastion): earlier ones stay, the ones sent for this round are taken if there's room and the tile is free
+    if (!m.bwalls) m.bwalls = [[], []];
+    m.bwalls[1] = Game.bwallsOf(m, 1).filter(w => w.round < m.round);
+    if (Array.isArray(d.bwalls)) for (const w of d.bwalls.slice(0, Game.BWALL.count)) if (w && (w.round | 0) === m.round) Game.placeBwall(m, 1, w.col | 0, w.row | 0);
     // the guest's own elf tower: an earlier one stays, one sent for this round is taken (gold was checked on their side)
     if (!m.elfOwn) m.elfOwn = [null, null];
     if (!(m.elfOwn[1] && m.elfOwn[1].round < m.round)) {
@@ -3980,7 +3997,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
 
   function sendSide() {
     if (mode !== 'guest' || !m || phase !== 'deploy') return;
-    send({ t: 'side', round: m.round, army: m.armies[1], gold: m.gold[1], extra: m.extraDeploys[1], nextId: m.nextId[1], tech: (m.tech && m.tech[1]) || {}, tower: (m.towers && m.towers[1]) || null, pack: m.pack ? m.pack[1] : null, unlocks: (m.unlocks && m.unlocks[1]) || {}, bribe: Game.bribeList(m, 1), elfOwn: Game.elfOwnOf(m, 1), towerSkill: (m.towerSkill && m.towerSkill[1]) || 0, towerSkill2: (m.towerSkill2 && m.towerSkill2[1]) || 0, mageGen: Game.mageGenOf(m, 1) || Game.mageTpOf(m, 1) ? { id: Game.mageGenOf(m, 1), tp: Game.mageTpOf(m, 1) } : null, loan: Game.loanNow(m, 1) ? m.round : 0, tround: Game.towerRounds(m, 1).filter(x => Game.troundOn(m, 1, x.id)).map(x => x.id), altar: (m.altar || []).filter(x => x.side === 1 && x.round === m.round).map(x => x.type), shrooms: ((m.map && m.map.removed) || []).filter(x => x.side === 1 && x.round === m.round).map(x => ({ col: x.col, row: x.row })), buildings: Game.buildingsOf(m, 1), bskill: (m.bskill && m.bskill[1]) || {}, ready: ready[1] || timeUp });
+    send({ t: 'side', round: m.round, army: m.armies[1], gold: m.gold[1], extra: m.extraDeploys[1], nextId: m.nextId[1], tech: (m.tech && m.tech[1]) || {}, tower: (m.towers && m.towers[1]) || null, pack: m.pack ? m.pack[1] : null, unlocks: (m.unlocks && m.unlocks[1]) || {}, bribe: Game.bribeList(m, 1), elfOwn: Game.elfOwnOf(m, 1), bwalls: Game.bwallsOf(m, 1), towerSkill: (m.towerSkill && m.towerSkill[1]) || 0, towerSkill2: (m.towerSkill2 && m.towerSkill2[1]) || 0, mageGen: Game.mageGenOf(m, 1) || Game.mageTpOf(m, 1) ? { id: Game.mageGenOf(m, 1), tp: Game.mageTpOf(m, 1) } : null, loan: Game.loanNow(m, 1) ? m.round : 0, tround: Game.towerRounds(m, 1).filter(x => Game.troundOn(m, 1, x.id)).map(x => x.id), altar: (m.altar || []).filter(x => x.side === 1 && x.round === m.round).map(x => x.type), shrooms: ((m.map && m.map.removed) || []).filter(x => x.side === 1 && x.round === m.round).map(x => ({ col: x.col, row: x.row })), buildings: Game.buildingsOf(m, 1), bskill: (m.bskill && m.bskill[1]) || {}, ready: ready[1] || timeUp });
   }
 
   function guestRecv(d) {
@@ -4016,6 +4033,8 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
           if (!m.towerSkill) m.towerSkill = [0, 0];
           if (!incoming.towerSkill2) incoming.towerSkill2 = [0, 0];
           if (!m.towerSkill2) m.towerSkill2 = [0, 0];
+          if (!incoming.bwalls) incoming.bwalls = [[], []];
+          if (!m.bwalls) m.bwalls = [[], []];
           if (!incoming.elfOwn) incoming.elfOwn = [null, null];
           if (!m.elfOwn) m.elfOwn = [null, null];
           if (!incoming.mapFree) incoming.mapFree = [{}, {}];
@@ -4029,7 +4048,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
           if (!incoming.bskill) incoming.bskill = [{}, {}];
           if (!incoming.tround) incoming.tround = [{}, {}];
           if (!m.bskill) m.bskill = [{}, {}];
-          for (const k of ['armies', 'gold', 'extraDeploys', 'nextId', 'tech', 'towers', 'unlocks', 'pack', 'chars', 'buff', 'bribe', 'towerSkill', 'towerSkill2', 'elfOwn', 'mapFree', 'mageGen', 'loan', 'tround', 'buildings', 'bskill']) incoming[k][1] = (m[k] || [null, null])[1];
+          for (const k of ['armies', 'gold', 'extraDeploys', 'nextId', 'tech', 'towers', 'unlocks', 'pack', 'chars', 'buff', 'bribe', 'towerSkill', 'towerSkill2', 'elfOwn', 'bwalls', 'mapFree', 'mageGen', 'loan', 'tround', 'buildings', 'bskill']) incoming[k][1] = (m[k] || [null, null])[1];
           if (incoming.map && m.map) incoming.map.removed = (incoming.map.removed || []).filter(x => !(x.side === 1 && x.round === incoming.round)).concat((m.map.removed || []).filter(x => x.side === 1 && x.round === incoming.round));
           incoming.altar = (incoming.altar || []).filter(x => !(x.side === 1 && x.round === incoming.round)).concat((m.altar || []).filter(x => x.side === 1 && x.round === incoming.round));
           m = incoming; ready[0] = theirReady;

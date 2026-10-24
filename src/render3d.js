@@ -82,7 +82,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
     const key = [idOf(v.m), idOf(v.battlePre), v.m.round, v.me, v.phase, uiOff, v.dev ? JSON.stringify([v.dev, v.editable, v.m.dev.casts.length, v.m.armies[v.me].map(q => q.guide || 0)]) : ''].join('|'); // devtest: arrows, spells and placing show at once
     if (key === floorKey && !(v.phase === 'deploy' && floorAge > 0.5)) return;
     floorKey = key; floorAge = 0;
-    floorView = { ...v, bt: v.phase === 'battle' ? null : v.bt, fx: [], selected: null, moving: null, drag: null, hoverTile: null, placingElf: false, placingTower: false, placingBuilding: null };
+    floorView = { ...v, bt: v.phase === 'battle' ? null : v.bt, fx: [], selected: null, moving: null, drag: null, hoverTile: null, placingElf: false, placingTower: false, placingWall: false, placingBuilding: null };
     floor2d.size(); floor2d.floor(uiOff); // the ground view gets the land alone, no zones or grid
     // a texture can't grow in place: when the canvas changed size (the first floor, or after a resize), start a new one
     const dims = floorCv.width + 'x' + floorCv.height;
@@ -459,6 +459,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
     if (hoverTile && (selected !== null || moving != null) && Game.canPlaceAt(m, me, hoverTile.col, hoverTile.row, placingUnit) && (Game.spotFree(m, me, hoverTile.col, hoverTile.row, placingUnit) || (placingUnit != null && Game.boardable(m, me, hoverTile.col, hoverTile.row, placingUnit)))) {
       for (const [c, r] of Game.blockOf(m, placingUnit, hoverTile.col, hoverTile.row)) { const s = tileCenter(v, c, r); tileSq(s.c, s.r, you, 0.2, 1, 0, 0); } // a building's whole block
     }
+    if (v.placingWall && editable) for (let row = 0; row < Game.ROWS; row++) for (let c = 0; c < Game.COLS; c++) if (Game.bwallSpotOk(m, me, c, row)) { const s = tileCenter(v, c, row); tileSq(s.c, s.r, you, 0.55, 0.06); }
     if (v.placingElf && editable) for (const row of Game.zoneRows(me)) for (let c = 0; c < Game.COLS; c++) if (Game.elfOwnSpotOk(m, me, c, row)) { const s = tileCenter(v, c, row); tileSq(s.c, s.r, color(ELF_COL), 0.6, 0.06); }
     if (v.placingTower && editable) for (const row of Game.zoneRows(me)) for (let c = 0; c < Game.COLS; c++) {
       if (Game.towerColOk(c) && !Game.reserved(me, c, row) && !Game.occupied(m, me, c, row)) { const s = tileCenter(v, c, row); tileSq(s.c, s.r, gold, 0.5, 0.06); }
@@ -476,6 +477,13 @@ const Render3D = (THREE, el, view, opts = {}) => {
         const w = Game.tileToWorld(c.col, c.row);
         bodies.push({ u: { structure: true, lesser: true, kind: 'wall', color: '#9C7E58', hp: 1 }, side, x: w.x, y: w.y, look: 'solid', scale: 0.8 });
       }
+    }
+    // the bastions' walls while deploying (an opponent's new one only from the fight on)
+    if (deploying) for (const side of [me, foe]) for (const bw of Game.bwallsOf(m, side)) {
+      if (!Game.bwallShown(m, me, true, side, bw)) continue;
+      const w = Game.tileToWorld(bw.col, bw.row);
+      bodies.push({ u: Game.bwallUnit(), side, x: w.x, y: w.y, look: 'solid', edge: Art.teamCol(side, me) });
+      if (side === me && bw.round === m.round) { const st = tileCenter(v, bw.col, bw.row); tileSq(st.c, st.r, teamColor(side, me), 0.8, 0.05, 14); }
     }
     // the treasuries (Test Grid): see-through in round 1, before they are built
     if (Game.treasuryOn(m)) for (const side of [me, foe]) {

@@ -420,6 +420,10 @@ const Models3D = (THREE) => {
     P(box(0.8, 1.0, 0.15), DARK, [0, 1.0, -1.28]), ...[[-1.0, 1.9], [-0.55, 2.0], [-0.8, 1.6]].map(([x, z], k) => P(cyl(0.3, 0.3, 0.3 + k * 0.15, 8), 'tint', [x - 0.5, 0.65 + k * 0.08, z - 0.3])), ...flagOn(3.6)];
   BUILD.wall = () => [...[-1.5, -0.75, 0, 0.75, 1.5].map((x, k) => P(cyl(0.32, 0.32, 2.2 + (k % 2) * 0.3, 6), WOOD, [x, 1.1 + (k % 2) * 0.15, 0])),
     ...[-1.5, -0.75, 0, 0.75, 1.5].map((x, k) => P(cone(0.32, 0.6, 6), '#B79A6E', [x, 2.5 + (k % 2) * 0.3, 0])), P(box(3.6, 0.25, 0.2), 'team', [0, 1.4, -0.3])];
+  // the bastion's defensive wall: a block of stone filling its tile, battlements along the top and a band in the team colour
+  BUILD.stonewall = () => [P(box(5.6, 2.4, 5.6), STONE, [0, 1.2, 0]),
+    ...[-2.2, -0.73, 0.73, 2.2].flatMap(x => [P(box(0.8, 0.6, 0.8), STONE, [x, 2.7, -2.4]), P(box(0.8, 0.6, 0.8), STONE, [x, 2.7, 2.4])]),
+    P(box(5.7, 0.3, 5.7), 'team', [0, 1.9, 0])];
   // Core Awoken: the Mecha Tower on four big wheels
   BUILD['tower:f-mechites:awake'] = () => [...mechaTower(1.0),
     ...[[-1, -1], [1, -1], [-1, 1], [1, 1]].map(([x, z]) => P(cyl(0.95, 0.95, 0.55, 10), DARK, [x * 2.05, 0.95, z * 1.5], [0, 0, Math.PI / 2])),
@@ -472,6 +476,7 @@ const Models3D = (THREE) => {
   const RANGED = 12; // metres: from this range on, a unit is drawn as an archer or a caster
   function kindOf(u) {
     if (u.spire) return 'spire';
+    if (u.structure && u.kind === 'wall' && u.barrier) return 'stonewall';
     if (u.structure && (u.kind === 'lesser' || u.kind === 'wall' || u.kind === 'treasury')) return u.kind;
     if (u.building) { const k = 'building:' + u.building; return u.awake && BUILD[k + ':awake'] ? k + ':awake' : BUILD[k] ? k : 'building'; } // Core Awoken: its walking version
     if (u.structure) { const k = TOWERS[u.kind] ? 'tower:' + u.kind : /^f-/.test(u.kind || '') ? 'tower:faction' : 'tower:keep'; return u.awake && BUILD[k + ':awake'] ? k + ':awake' : k; } // Core Awoken: the Mecha Tower on wheels
