@@ -5901,10 +5901,11 @@ const Render2D = (cv, view) => {
   };
   const FADE_IN = 1, FADE_OUT = 1; // seconds
   const DEFAULT_VOL = 60;
-  let snd = { vol: DEFAULT_VOL, muted: false, song: '' }; // song: the one menu song the player picked ('' = the menu playlist)
+  // song: the one menu song the player picked ('' = the menu playlist); solo: on an iPhone, take over the phone's sound (see setAudioSession)
+  let snd = { vol: DEFAULT_VOL, muted: false, song: '', solo: false };
   try {
     const p = JSON.parse(localStorage.getItem(SOUND_STORE) || 'null');
-    if (p && isFinite(p.vol)) snd = { vol: Math.max(0, Math.min(100, +p.vol)), muted: !!p.muted, song: SONGS[p.song] ? p.song : '' };
+    if (p && isFinite(p.vol)) snd = { vol: Math.max(0, Math.min(100, +p.vol)), muted: !!p.muted, song: SONGS[p.song] ? p.song : '', solo: !!p.solo };
     else if (localStorage.getItem('phonebellum.music.v1') === 'off') snd.muted = true; // the old On/Off switch
   } catch (e) {}
   const saveSound = () => { try { localStorage.setItem(SOUND_STORE, JSON.stringify(snd)); } catch (e) {} };
@@ -5963,7 +5964,11 @@ const Render2D = (cv, view) => {
   }
   // phones only allow sound after the player touches the page
   // (iPhones only count the end of a touch, so every tap retries until the sound is running)
-  try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) {} // play even with the iPhone's silent switch on
+  // iPhone (Safari's audioSession): by default the game's sound plays alongside other apps ('ambient'), so a Discord call
+  // or music keeps going, but the silent switch mutes it. Settings → Other apps' sound: Pause them ('playback') plays
+  // even with the silent switch on, and takes over the phone's sound from calls and other apps.
+  const setAudioSession = () => { try { if (navigator.audioSession) navigator.audioSession.type = snd.solo ? 'playback' : 'ambient'; } catch (e) {} };
+  setAudioSession();
   // force: resume even if it says it runs (after an interruption, a call or the app in the background, an iPhone's
   // context can sit 'suspended' or 'interrupted', and resume() only works inside a tap)
   const wakeAudio = (force) => {
@@ -6002,6 +6007,13 @@ const Render2D = (cv, view) => {
         <span class="hint">Music volume</span>
         <span class="volrow"><input type="range" id="vol" min="0" max="100" step="5" value="${snd.vol}" aria-label="Music volume"><span class="num" id="vol-n">${snd.vol}</span></span>
       </div>
+      ${navigator.audioSession ? `<div class="bar">
+        <span class="hint">Other apps' sound</span>
+        <div class="seg" role="group" aria-label="Other apps' sound">
+          <button data-solo="0" aria-pressed="${!snd.solo}">Keep playing</button><button data-solo="1" aria-pressed="${snd.solo}">Pause them</button>
+        </div>
+      </div>
+      <p class="hint" style="margin:0">Keep playing: calls (Discord) and music go on under the game, but the silent switch mutes the game. Pause them: the game plays even on silent, and takes over from calls and other apps.</p>` : ''}
       ${inMatch ? `<div class="bar">
         <span class="hint">Board</span>
         <div class="seg" role="group" aria-label="Board">
@@ -6037,6 +6049,10 @@ const Render2D = (cv, view) => {
       Object.values(music).forEach(pl => { if (pl.playing) pl.ramp(musicLevel(), 0.05); });
       syncMusic(); showOn();
     });
+    $('sheet').querySelectorAll('[data-solo]').forEach(b => b.addEventListener('click', () => {
+      snd.solo = b.dataset.solo === '1'; saveSound(); setAudioSession(); wakeAudio(true);
+      $('sheet').querySelectorAll('[data-solo]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+    }));
     $('sheet').querySelectorAll('[data-song]').forEach(b => b.addEventListener('click', () => {
       snd.song = b.dataset.song; saveSound();
       $('sheet').querySelectorAll('[data-song]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
