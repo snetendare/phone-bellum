@@ -404,16 +404,22 @@ const Render2D = (cv, view) => {
     ctx.globalAlpha = 1;
   }
   // a lesser building: a small house in its faction's colour with a roof in its side's colour (hpr: health left in a fight)
-  function drawLesser(x, y, t, side, u, hpr, fresh) {
+  function drawLesser(x, y, t, side, u, hpr, fresh, dim) {
     const s = t * 0.62, c = teamCol(side);
-    ctx.globalAlpha = 1;
+    ctx.globalAlpha = dim ? 0.35 : 1;
     ctx.fillStyle = u.color || '#B7AE9C'; ctx.strokeStyle = c; ctx.lineWidth = 2;
     ctx.beginPath(); ctx.rect(x - s / 2, y - s * 0.2, s, s * 0.62); ctx.fill(); ctx.stroke();
     ctx.fillStyle = c; ctx.beginPath(); ctx.moveTo(x - s * 0.62, y - s * 0.18); ctx.lineTo(x, y - s * 0.62); ctx.lineTo(x + s * 0.62, y - s * 0.18); ctx.closePath(); ctx.fill();
     ctx.fillStyle = css('--bg'); ctx.fillRect(x - s * 0.1, y + s * 0.12, s * 0.2, s * 0.3);
     if (hpr != null) { ctx.strokeStyle = c; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, t * 0.5, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * hpr); ctx.stroke(); }
     if (fresh) { ctx.strokeStyle = c; ctx.setLineDash([3, 3]); ctx.lineWidth = 1; ctx.strokeRect(x - t / 2 + 1.5, y - t / 2 + 1.5, t - 3, t - 3); ctx.setLineDash([]); }
-    if (t >= 26 && u.name) { ctx.font = `500 ${Math.max(8, Math.round(t * 0.24))}px "IBM Plex Mono", monospace`; ctx.fillStyle = css('--ink'); ctx.textAlign = 'center'; ctx.textBaseline = 'bottom'; ctx.globalAlpha = 0.85; ctx.fillText(tag(u), x, y + t / 2 - 1); ctx.globalAlpha = 1; }
+    if (t >= 26 && u.name) { ctx.font = `500 ${Math.max(8, Math.round(t * 0.24))}px "IBM Plex Mono", monospace`; ctx.fillStyle = css('--ink'); ctx.textAlign = 'center'; ctx.textBaseline = 'bottom'; ctx.globalAlpha = dim ? 0.35 : 0.85; ctx.fillText(tag(u), x, y + t / 2 - 1); }
+    ctx.globalAlpha = 1;
+  }
+  // the treasuries (Test Grid): faint in round 1, before they are built
+  function drawTreasuries() {
+    const t = tilePx(), u = Game.treasuryUnit();
+    for (const side of [me, foe()]) { const ts = Game.treasurySpot(m, side); if (ts) drawLesser((scol(ts.col) + 0.5) * t, (srow(ts.row) + 0.5) * t, t, side, u, null, false, !Game.treasuryUp(m)); }
   }
   // a wall (spell): a row of stakes
   function drawWallBlock(x, y, t, side, hpr) {
@@ -740,6 +746,7 @@ const Render2D = (cv, view) => {
     }
     for (const side of [me, foe()]) if (towerVisible(side) && Game.towerUp(m, side)) drawTowerTile(side);
     if (Game.isDev(m)) drawLessers();
+    if (Game.treasuryOn(m)) drawTreasuries();
     drawBuildings();
     // the squad tapped last: its range as a dotted ring round its tile (theirs as you can know it)
     const rs = rangeOf && phase === 'deploy' && m.armies[rangeOf.side].find(s => s.id === rangeOf.id);

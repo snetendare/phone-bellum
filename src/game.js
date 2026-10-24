@@ -379,7 +379,7 @@ const Game = (() => {
     // special rules. To bring them back, take iceOff out and use iceShort / iceText as short / text again.
     { id: 'ice', name: 'Frozen Peak', short: 'A snowy mountain top. No special rules for now.', text: 'A snowy mountain top. No special rules for now.', iceOff: true,
       iceShort: 'Hail from round 2. An ice altar rises on even rounds.', iceText: 'Every fight from round 2: a hailstorm drops 10 hail tiles in the storm band (no man’s land at first); units standing in hail take 20 damage per second. Even rounds: the altar of ice rises in the middle of the board. Tap it to buy ice walls for your tower, push the storm band toward your opponent, or summon a Snowgre.', ice: true },
-    { id: 'testgrid', name: 'Test Grid', short: 'A bigger board: each zone is 14 by 7 tiles.', text: 'A test map with no special rules on a bigger board: each player’s zone is 14 columns wide and 7 rows deep (standard: 12 by 6).', plain: true, grid: { cols: 14, rows: 18, zone: 7 } }, // only when picked, never random
+    { id: 'testgrid', name: 'Test Grid', short: 'A bigger board: each zone is 14 by 7 tiles.', text: 'A test map on a bigger board: each player’s zone is 14 columns wide and 7 rows deep (standard: 12 by 6). The towers are mirrored, as on the Mushroom Cavern. From round 2 each player also has a treasury (400 health) on the other side of their zone from their tower, one tile in toward the middle. A fight it survives pays you 50 gold; if it is destroyed, your opponent steals 50 gold from you instead.', plain: true, grid: { cols: 14, rows: 18, zone: 7 }, pointMirror: true, treasury: true }, // only when picked, never random
   ];
   // ---------- Frozen Peak: hailstorm and the altar of ice ----------
   // The storm band is 4 rows deep: no man's land to start with. Each push moves it ICE.push rows toward the other
@@ -619,6 +619,21 @@ const Game = (() => {
     return side === 1 && mp && mp.pointMirror ? { col: COLS - 1 - t.col, row: t.row } : { ...t };
   };
   const mapOf = (m) => (m && m.map && MAPS.find(x => x.id === m.map.id)) || null;
+  // Treasury (a map's `treasury`: Test Grid). From TREASURY.round each player has one more building: on the other side
+  // of their zone from their tower, one column in toward the middle, on the tower's row (so point-mirrored like the
+  // towers). Its tile is kept free all match. Like the tower it stands again, at full health, in every fight. A fight
+  // it survives pays its owner TREASURY.gold; when it is destroyed, the opponent steals TREASURY.steal gold from its owner.
+  const TREASURY = { round: 2, hp: 400, gold: 50, steal: 50 };
+  const TREASURY_SQ = -150; // its squad id in fights
+  const treasuryOn = (m) => { const mp = mapOf(m); return !!(mp && mp.treasury); };
+  const treasuryUp = (m) => treasuryOn(m) && m.round >= TREASURY.round;
+  const treasurySpot = (m, side) => {
+    if (!treasuryOn(m)) return null;
+    const t = (m.towers && m.towers[side]) || towerSpot(m, side), col = COLS - 1 - t.col;
+    return { col: col + (col < (COLS - 1) / 2 ? 1 : -1), row: t.row };
+  };
+  const treasuryAt = (m, side, col, row) => { const t = treasurySpot(m, side); return !!t && t.col === col && t.row === row; };
+  const treasuryUnit = () => E.withTraits({ name: 'Treasury', cost: 0, bodies: 1, hp: TREASURY.hp, hit: 0, aps: 1, range: 0, speed: 0, splash: 0, shape: 'square', color: '#D9B95B', structure: true, lesser: true, kind: 'treasury', level: 0 });
   // where the elf tower stands (world coordinates), or null: on its column, on the line between the two middle rows
   const elfSpot = (m) => { const mp = mapOf(m); return mp && mp.elfTower && m.map.elfCol != null ? { x: tileToWorld(m.map.elfCol, 0).x, y: 0, col: m.map.elfCol } : null; };
   const towerColOk = (col) => col >= 0 && col < COLS && (col < TOWER_MID[0] || col > TOWER_MID[1]);
@@ -1238,7 +1253,7 @@ const Game = (() => {
   }
 
   const towerAt = (m, side, col, row) => !!(m.towers && m.towers[side] && m.towers[side].col === col && m.towers[side].row === row);
-  const occupied = (m, side, col, row) => towerAt(m, side, col, row) || elfOwnAt(m, side, col, row) || !!buildingAt(m, side, col, row) || m.armies[side].some(s => covers(m, s, col, row)) || devOccupied(m, side, col, row);
+  const occupied = (m, side, col, row) => towerAt(m, side, col, row) || treasuryAt(m, side, col, row) || elfOwnAt(m, side, col, row) || !!buildingAt(m, side, col, row) || m.armies[side].some(s => covers(m, s, col, row)) || devOccupied(m, side, col, row);
   const needsTower = (m, side) => !!(m.towers && !m.towers[side]);
   // the tower can be placed (or moved) during round 1 only
   function placeTower(m, side, col, row) {
@@ -1419,6 +1434,10 @@ const Game = (() => {
         idx += wb.length; out.push(...wb);
       });
     }
+    if (treasuryUp(m)) {
+      const ts = treasurySpot(m, side), w = tileToWorld(ts.col, ts.row), tb = E.buildSquad(treasuryUnit(), side, w.x, w.y, TREASURY_SQ, TILE, idx);
+      idx += tb.length; out.push(...tb);
+    }
     // buildings (the Mechites' Factory)
     const bb = buildingBodies(m, side, idx);
     idx += bb.length; out.push(...bb);
@@ -1481,7 +1500,7 @@ const Game = (() => {
     if (charOf(m, side) !== 'zoe') return;
     const r = rng(m.seed + m.round * 6151 + side * 3571 + 99);
     const spots = [];
-    for (const row of zoneRows(side)) for (let col = 0; col < COLS; col++) if (!reserved(side, col, row) && !towerAt(m, side, col, row) && !shroomAt(m, col, row)) spots.push({ col, row });
+    for (const row of zoneRows(side)) for (let col = 0; col < COLS; col++) if (!reserved(side, col, row) && !towerAt(m, side, col, row) && !treasuryAt(m, side, col, row) && !shroomAt(m, col, row)) spots.push({ col, row });
     for (let k = 0; k < CHAR.zoeTiles && spots.length; k++) m.buff[side].push(spots.splice(Math.floor(r() * spots.length), 1)[0]);
   }
   const onBuffTile = (m, side, col, row) => charOf(m, side) === 'zoe' && !!(m.buff && m.buff[side] || []).some(t => t.col === col && t.row === row);
@@ -1567,6 +1586,7 @@ const Game = (() => {
       if (r) squads[side].push({ id: sq.id, unit: sq.unit, level: sq.level, left: r.alive / r.total, dealt: Math.round(r.dealt || 0) });
     }
     const towerFell = [0, 1].map(sd => { const q = res.squads[sd + ':-2']; return !!(q && q.alive === 0); });
+    const treasuryFell = [0, 1].map(sd => { const q = res.squads[sd + ':' + TREASURY_SQ]; return q ? q.alive === 0 : null; }); // null: no treasury in this fight
     const buildingNews = settleBuildings(m, res);
     // Matteo: the squads keep the charisma they ended the fight with; note the ones that became Gentlemen
     const gentlemen = [[], []];
@@ -1596,7 +1616,7 @@ const Game = (() => {
       }
       return Object.keys(by).map(key => ({ key, dealt: Math.round(by[key]), ...(key === 'tower' ? { name: towerType(m, sd).name } : key.startsWith('b:') ? { name: (buildingInfo(key.slice(2)) || {}).name || 'Building' } : {}) }));
     });
-    const summary = { round: m.round, winner: roundWinner, timeout: res.timeout, dmg, time: res.time, newlyReady, squads, towerFell, gentlemen, converted: res.converted || [0, 0], dealtBy, buildings: buildingNews };
+    const summary = { round: m.round, winner: roundWinner, timeout: res.timeout, dmg, time: res.time, newlyReady, squads, towerFell, treasuryFell, gentlemen, converted: res.converted || [0, 0], dealtBy, buildings: buildingNews };
     // devtest: buildings destroyed in the fight cost their owner what their onDestroyed says (health now, gold below)
     if (isDev(m)) {
       summary.devLoss = [0, 1].map(sd => {
@@ -1635,6 +1655,14 @@ const Game = (() => {
     const loser = dmg[0] > dmg[1] ? 0 : dmg[1] > dmg[0] ? 1 : -1;
     if (loser >= 0) m.gold[loser] += LOSER_BONUS;
     summary.bonusTo = loser;
+    // treasuries: one that stood through the fight pays its owner; a destroyed one lets the opponent steal from its owner
+    summary.treasury = [0, 1].map(sd => ({ gold: treasuryFell[sd] === false ? TREASURY.gold : 0, lost: 0 }));
+    for (const sd of [0, 1]) m.gold[sd] += summary.treasury[sd].gold;
+    for (const sd of [0, 1]) if (treasuryFell[sd]) {
+      const take = Math.min(TREASURY.steal, m.gold[sd]);
+      m.gold[sd] -= take; m.gold[1 - sd] += take;
+      summary.treasury[sd].lost = take; summary.treasury[1 - sd].stole = take;
+    }
     // Major investment (bank) bought in the round just fought pays out now
     summary.invest = [0, 1].map(sd => m.towerSkill2 && m.towerSkill2[sd] === m.round - 1 && towerType(m, sd).id === 'bank' ? INVEST.gold : 0);
     for (const sd of [0, 1]) m.gold[sd] += summary.invest[sd];
@@ -2250,6 +2278,7 @@ const Game = (() => {
     STANDARD_PACK, ICE, ALTAR, GOLEM, isIce, hailRound, altarRound, stormShift, stormRows, hailTiles, altarCost, altarRefund, altarCount, pushRoom, altarBought, addAltar, buyAltar, undoAltar, snowgres, snowgreUnit,
     MAPS, ELF_TOWER, SHROOM, SHROOM_SPLIT, shroomAt, shroomTileAt, shroomRemoval, SHROOM_REMOVE, shroomCost, removeShroom, undoRemoveShroom, mapOf, elfSpot, rollMap, BRIBE_COST, bribeList, bribeGold, bribeCount, bribeNow, bribeCost, bribeRefund, ELF_POWER, elfPowered, elfUnit, ELF_OWN, elfOwnCost, elfOwnOf, elfOwnAt, elfOwnUnlocked, elfOwnOffered, canBuyElfOwn, elfOwnSpotOk, buyElfOwn, undoElfOwn, bribeLeader, canBribe, bribe, undoBribe,
     CHARACTERS, CHAR, charOf, charInfo, enzoSkill, enzoActive, charmOf, isGentleman, canGiveCharm, giveCharm, undoCharm, ensureCharm, felixGold, isTier1, rollBuffTiles, onBuffTile, zoeBuff, yotImps, yotLevel, TOWER_SPOT, towerSpot,
+    TREASURY, TREASURY_SQ, treasuryOn, treasuryUp, treasurySpot, treasuryAt, treasuryUnit,
     FACTION_MODE, FACTIONS: () => FACTIONS, setFactions, factionInfo, factionsOf, factionTowers, towerTypeById, ownsUnit, withFactionTrait, factionSet,
     createDraft, draftTurn, draftOpen, draftAct, draftDone, draftPossible, aiDraftChoice,
     zoneRows, inZone, tileToWorld, squadRange, createMatch, place, unplace, bodiesFor, startBattle, resolve, aiDeploy, occupied,
