@@ -29,7 +29,7 @@ const BASE = 'http://127.0.0.1:8766/?test&peerhost=127.0.0.1&peerport=9000';
 
   // the host loads the Mechites (and Skeleton Archers) and opens a lobby; the units go to the guest with the match
   await host.goto(BASE);
-  const roster = { goldCosts: true, settings: R.settings, skills: R.skills.concat(F.skills), units: [...F.factions[0].units, R.units.find(u => u.name === 'Skeleton Archers')] };
+  const roster = { goldCosts: true, settings: R.settings, skills: R.skills.concat(F.skills), units: [...F.factions[0].units, { ...R.units.find(u => u.name === 'Skeleton Archers'), hit: 14 }] }; // archers at their old hit: the round 2 fight lasts long enough for the Cogbot to fight
   await host.evaluate(() => document.getElementById('load-units').click()); await sleep(200);
   await host.fill('#roster-in', JSON.stringify(roster)); await host.click('#use-roster');
   await host.waitForSelector('#friend', { timeout: 60000 }); await sleep(300);
