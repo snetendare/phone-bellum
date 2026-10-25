@@ -2205,7 +2205,6 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   // or characters, and no AI level-ups until the handover. The X on the coach line leaves the tutorial.
   const TUT_STORE = 'phonebellum.tutorial.v1';
   const TUT = { start: 'Goblin Swarm', foe: 'Skeleton Archers', foeAt: [6, 4], counter: 'Fire Mage', wrong: 'Sniper',
-    foeHit: 14, // the tutorial's Skeleton Archers keep their old hit, so rounds 1 and 2 still come out the same wherever the player places
     shop: ['Goblin Swarm', 'Skeleton Archers', 'Ember Imps', 'Fire Mage', 'Sniper'], // the shop from round 3
     adds: { 3: [['Brute', 5, 4]], 4: [['Wisps', 3, 2]] }, // the enemy's new squads by round: [unit, column, row]
     last: 4, // the round after which the enemy plays for real
@@ -2219,7 +2218,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (speed !== 1) { tutSpeed = speed; speed = 1; } // the fights at 1x, to watch them
     if (customSet && !standardSet) standardSet = { set: rawSet, custom: customSet }; // restoreSet puts the player's units back
     useSet(BUILTIN, false);
-    m = Game.createMatch(units.map(u => u.name === TUT.foe ? { ...u, hit: TUT.foeHit } : u), M, 1, 'standard');
+    m = Game.createMatch(units, M, 1, 'standard');
     m.packages = [[], []];
     for (const n of TUT.shop) m.unlocks[0][unitIx(n)] = 1;
     tutEnemy([[TUT.foe, ...TUT.foeAt]]);
