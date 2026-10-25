@@ -25,7 +25,9 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   await p.locator('#board').screenshot({ path: 'bastion-range-placed.png' });
   assert.ok(!before.equals(await p.locator('#board').screenshot()));
   await tap(free, 12);
-  assert.ok(await p.evaluate(([c]) => { const { m, me } = window.__pb(); return !!Game.squadAt(m, me, c, 12); }, [free]), 'the first tap after placing keeps it');
+  assert.ok(await p.evaluate(([c]) => { const { m, me } = window.__pb(); return !!Game.squadAt(m, me, c, 12); }, [free]), 'a tap after placing keeps it');
+  assert.ok(await p.locator('#sheet-back').isVisible(), '...and opens its sheet (its X takes it back)');
+  await p.click('#sheet #close'); await sleep(150);
   // jump to round 3 on the bastion, with Home ground bought and gold for the walls
   await p.evaluate(() => { const { m, me } = window.__pb(); m.round = 3; m.towers[me].type = 'bastion'; m.towers[1 - me].type = 'keep'; m.towerSkill = [0, 0]; m.towerSkill[me] = 3; m.gold[me] = 2000; });
   const tw = await p.evaluate(() => { const { m, me } = window.__pb(); return m.towers[me]; });

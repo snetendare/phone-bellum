@@ -21,6 +21,29 @@ const Engine = (() => {
   // chargeStun: after a charged hit (and the trample run that follows it) the unit is stunned this many seconds:
   // it can't move or attack
   const STEALTH_BACK = 1.5;    // a stealth unit hides again after this many seconds without attacking
+  // dash (metres): once its target is this close the unit covers the rest at DASH_SPEED (a stealth unit stays hidden)
+  const DASH_SPEED = 30;
+  // lone (Shadow hunter): a body hunts lone enemies, bodies with no other body of their side within LONE_R metres (a
+  // tile shared with nobody); with none left for lone seconds it fights as usual, until it kills a lone one again
+  const LONE_R = 3;
+  // burn (% of each hit): that share of a hit becomes burn instead of landing at once. A burning body takes, once a
+  // second, BURN.share[k] of what is left to burn (half, then two thirds, then the rest: 50%, 33%, 17%); a new burn adds
+  // to what is left and starts the three ticks again. Burn goes past armor and ward, like poison.
+  const BURN = { every: 1, share: [1 / 2, 2 / 3, 1] };
+  // roots = { min, max, dps, pull } (Grasping roots): each body grabs one enemy min..max metres away and drags it toward
+  // itself at pull m/s (it can still attack, not walk), dps damage a second past armor; once it is in reach the body
+  // fights it and grabs another. bull = { every, hit, push, armor, run } (Bullhead): its 1st, (every+1)th, ... attack
+  // also sends it charging through its target and run metres on: hit to every enemy body on the way, each pushed push
+  // metres along, and armor more while it runs. killStack = { speed, aps, max }: each kill gives the body +speed m/s and
+  // +aps attacks a second for the rest of the fight (max stacks, 0 = no cap). killSpawn: each kill makes that many new
+  // bodies of the killer. flare = { per, max, shot }: each second without attacking stores per % attack speed (up to
+  // max %); its next attack spends it, one extra shot in quick succession per shot %. flurry = { hits, gap, leap }: an
+  // attack is hits blows gap s apart; when one kills, the next leaps to the nearest enemy within leap metres. silent:
+  // its first attack in a fight doesn't give it away. firstHit (%): its first attack in a fight hits that much harder.
+  // bldgPct: its hits on structures deal this % of the damage. portal = { unit, secs }: at the start of a fight each
+  // squad opens a portal in front of it (seen for secs s) and unit (levelled like the squad) walks out.
+  // A body with `inside` (Overwatch; the game sets it) sits in that structure: it can't be hit or targeted, doesn't
+  // move and shoots from there, until the structure falls.
   // Roster rules (g.rules): optional mechanics a roster can switch off. Missing or true = on.
   //   vision: units march ahead until they spot an enemy (sight). Off: every unit knows where every enemy is from the start.
   //   stealth: the Stealth skill hides units. Off: stealth units can be targeted like any other.
@@ -149,7 +172,7 @@ const Engine = (() => {
   }
 
   // ---------- skills ----------
-  const SKILL_SLOTS = 3; // skill slots per unit
+  const SKILL_SLOTS = 4; // skill slots per unit (the 4th is for an Awaken skill)
   const SLOTS = Array.from({ length: SKILL_SLOTS }, (_, k) => k);
   // Each skill type and its settings (key, label, default, step). Shared by Counter Lab and the game.
   const SKILL_TYPES = {
@@ -184,7 +207,7 @@ const Engine = (() => {
     healbot: { label: 'Healbot', params: [['hp', 'Healbot health', 300, 25], ['pct', 'Heals each body (% of max health per second)', 4, 0.5], ['range', 'Heal reach (m)', 8, 1], ['speed', 'Healbot move speed (m/s)', 3, 0.5]] },
     building: { label: 'Building', params: [['building', 'Building (id)', 'factory', null]] },
     builder: { label: 'Construct upgrades', params: [['extra', 'More constructs per build', 0, 1], ['faster', 'Build time (−%)', 0, 5], ['aps', 'Construct attack speed (+%)', 0, 5], ['shield', 'Construct shield (hits blocked)', 0, 1], ['armor', 'Construct armor', 0, 1]] },
-    stats:   { label: 'Stat changes', params: [['hp', 'Health (+%)', 0, 5], ['hit', 'Hit size (+%)', 0, 5], ['hitAdd', 'Hit size (+)', 0, 5], ['aps', 'Attacks per second (+)', 0, 0.05], ['apsPct', 'Attack speed (+%)', 0, 5], ['range', 'Range (+m)', 0, 0.5], ['splash', 'Splash (+m)', 0, 0.1], ['armor', 'Armor (+)', 0, 1], ['burst', 'Extra shots in quick succession', 0, 1]] },
+    stats:   { label: 'Stat changes', params: [['hp', 'Health (+%)', 0, 5], ['hit', 'Hit size (+%)', 0, 5], ['hitAdd', 'Hit size (+)', 0, 5], ['aps', 'Attacks per second (+)', 0, 0.05], ['apsPct', 'Attack speed (+%)', 0, 5], ['range', 'Range (+m)', 0, 0.5], ['splash', 'Splash (+m)', 0, 0.1], ['armor', 'Armor (+)', 0, 1], ['burst', 'Extra shots in quick succession', 0, 1], ['speed', 'Move speed (+m/s)', 0, 0.1], ['bodies', 'Bodies per squad (+)', 0, 1]] },
     double:  { label: 'Double strike', params: [['every', 'Every this many attacks', 3, 1], ['hit', 'Hit size (+%)', 5, 1]] },
     bleedDeep: { label: 'Deep bleed', params: [['secs', 'Bleed lasts (+s)', 1, 0.5]] },
     bleedStun: { label: 'Bleed stun', params: [['secs', 'Stun (s)', 1.2, 0.1]] },
@@ -193,6 +216,19 @@ const Engine = (() => {
     aura:    { label: 'Aura', params: [['armor', 'Armor (+)', 2, 1], ['radius', 'Aura radius (m)', 8, 1], ['hit', 'Allies’ hit size (+)', 20, 5], ['aps', 'Allies’ attacks per second (+)', 0.1, 0.05]] },
     spears:  { label: 'Forged spears', params: [['forge', 'Forging time (s)', 1.5, 0.1], ['speed', 'Spear speed (m/s)', 35, 5], ['hit', 'Spear damage', 200, 10], ['bleed', 'Bleed stacks', 1, 1]] },
     slam:    { label: 'Ground slam', params: [['armor', 'Armor (+)', 8, 1], ['range', 'Range (−m)', 10, 1], ['hit', 'Hit size (becomes)', 200, 10], ['stun', 'Stun (s)', 1, 0.1], ['cone', 'Cone (degrees each side)', 30, 5]] },
+    burn:    { label: 'Burn', params: [['pct', 'Share of each hit that burns instead (%)', 50, 5]] },
+    roots:   { label: 'Grasping roots', params: [['min', 'Least distance (m)', 5, 0.5], ['max', 'Most distance (m)', 13, 0.5], ['dps', 'Damage per second while dragged', 10, 1], ['pull', 'Drag speed (m/s)', 1.5, 0.1]] },
+    killStack: { label: 'Stacks on kills', params: [['speed', 'Move speed per kill (+m/s)', 0.4, 0.1], ['aps', 'Attacks per second per kill (+)', 0.2, 0.05], ['max', 'Most stacks (0 = no limit)', 4, 1]] },
+    killSpawn: { label: 'Spawn on kills', params: [['count', 'New bodies per kill', 1, 1]] },
+    bull:    { label: 'Charge through', params: [['every', 'Every this many attacks (from the first)', 3, 1], ['hit', 'Charge damage', 100, 10], ['push', 'Knockback (m)', 6, 0.5], ['armor', 'Armor while charging (+)', 4, 1], ['run', 'Runs on past its target (m)', 6, 0.5]] },
+    flare:   { label: 'Flare', params: [['per', 'Attack speed stored per second idle (%)', 10, 1], ['max', 'Most stored (%)', 100, 10], ['shot', 'Stored % per extra shot', 25, 5]] },
+    portal:  { label: 'Summon portal', params: [['unit', 'Summons (unit name)', 'Brute', null], ['level', 'Its base level (0 = as bought)', 1, 1], ['speed', 'Its move speed (m/s)', 4.5, 0.1], ['cone', 'Its swipe (degrees each side)', 90, 5], ['secs', 'Portal stays (s)', 3, 0.5]] },
+    overwatch: { label: 'Overwatch', params: [['hp', 'Watchtower health', 200, 25]] },
+    freeMove: { label: 'Free moves', params: [] },
+    silent:  { label: 'Silent first strike', params: [] },
+    firstHit: { label: 'Opening strike', params: [['pct', 'First attack hit size (+%)', 25, 5]] },
+    flurry:  { label: 'Flurry', params: [['hits', 'Blows per attack', 3, 1], ['hit', 'Damage per blow (becomes)', 200, 10], ['gap', 'Time between blows (s)', 0.5, 0.05], ['aps', 'Attacks per second (becomes)', 0.2, 0.05], ['leap', 'Leaps to a new target within (m)', 10, 1]] },
+    lone:    { label: 'Hunt lone targets', params: [['secs', 'Gives up after (s) without one', 5, 0.5]] },
   };
   const skillParam = (d, k) => {
     const v = d.params && d.params[k];
@@ -201,9 +237,15 @@ const Engine = (() => {
     return def;
   };
 
-  // One plain sentence describing what a skill does with its current settings
+  // One plain sentence describing what a skill does with its current settings. A skill can carry its own `text`, and
+  // `also`: more effects (each { type, params }) that come with it, described after it
   function describeSkill(d) {
     if (!d || !SKILL_TYPES[d.type]) return '';
+    if (typeof d.text === 'string' && d.text) return d.text;
+    const own = describeOne(d);
+    return Array.isArray(d.also) ? [own, ...d.also.map(describeSkill)].filter(Boolean).join(' ') : own;
+  }
+  function describeOne(d) {
     const P = (k) => skillParam(d, k);
     const n = (k) => { const v = +P(k); return isFinite(v) ? String(Math.round(v * 100) / 100) : '0'; };
     switch (d.type) {
@@ -248,7 +290,7 @@ const Engine = (() => {
       case 'stats': {
         const sg = (k, txt) => +P(k) ? `${+P(k) > 0 ? '+' : '−'}${String(Math.round(Math.abs(+P(k)) * 100) / 100)}${txt}` : null;
         const parts = [sg('hp', '% health'), sg('hit', '% hit size'), sg('hitAdd', ' hit size'), sg('aps', ' attacks per second'), sg('apsPct', '% attack speed'),
-          sg('range', ' m range'), sg('splash', ' m splash'), sg('armor', ' armor')].filter(Boolean);
+          sg('range', ' m range'), sg('splash', ' m splash'), sg('armor', ' armor'), sg('speed', ' m/s move speed'), sg('bodies', +P('bodies') === 1 ? ' body per squad' : ' bodies per squad')].filter(Boolean);
         if (+P('burst') > 0) parts.push(+P('burst') === 1 ? 'attacks twice in quick succession' : `attacks ${+P('burst') + 1} times in quick succession`);
         return parts.length ? parts.join(', ').replace(/^./, s => s.toUpperCase()) + '.' : 'No change.';
       }
@@ -260,13 +302,26 @@ const Engine = (() => {
       case 'aura': return `${+P('armor') ? `+${n('armor')} armor. ` : ''}Allies within ${n('radius')} m get +${n('hit')} damage on every hit and +${n('aps')} attacks per second.`;
       case 'spears': return `Apart from its own attack, it spends 1 armor to forge a titanium spear (${n('forge')} s), then throws it at an enemy in reach (${n('speed')} m/s): ${n('hit')} damage${+P('bleed') > 0 ? ` and ${+P('bleed') === 1 ? 'a stack' : `${n('bleed')} stacks`} of bleed` : ''}. It keeps forging while it has armor left.`;
       case 'slam': return `+${n('armor')} armor, −${n('range')} m range. Its attack becomes a slam that hits every enemy in a cone in front of it for ${n('hit')} damage and stuns them for ${n('stun')} s (not towers).`;
+      case 'burn': return `Its attacks burn: ${n('pct')}% of each hit lands at once and the rest burns over 3 s (most in the first second, least in the last), past armor. A new burn adds to what is still burning and starts the 3 s again.`;
+      case 'roots': return `Each body grabs one enemy ${n('min')}–${n('max')} m away and drags it slowly toward itself (${n('pull')} m/s; it can still attack, but not walk), dealing ${n('dps')} damage a second. Once it is in reach the body attacks it and grabs another.`;
+      case 'killStack': return `Each kill gives that body +${n('speed')} m/s move speed and +${n('aps')} attacks per second for the rest of the fight${+P('max') > 0 ? `, up to ${n('max')} stacks` : ''}.`;
+      case 'killSpawn': return `Each kill brings ${+P('count') === 1 ? 'a new body' : `${n('count')} new bodies`} of it into the fight.`;
+      case 'bull': return `Its first attack and every ${+P('every') === 3 ? 'third' : `${n('every')}th`} one after also send it charging through its target and ${n('run')} m on: ${n('hit')} damage to every enemy in its path, each knocked back ${n('push')} m. +${n('armor')} armor while it charges.`;
+      case 'flare': return `Every second it doesn’t attack it stores ${n('per')}% attack speed (up to ${n('max')}%). Its next attack releases it as a burst: an extra shot in quick succession for every ${n('shot')}% stored.`;
+      case 'portal': return `At the start of a fight each squad opens a portal for ${n('secs')} s and a ${String(P('unit')) === 'Brute' ? 'Hellfiend' : String(P('unit'))} walks out to fight: a level ${+P('level') + 1} ${String(P('unit'))} with ${n('speed')} m/s move speed and a swipe in front of it, levelling up with the squad.`;
+      case 'overwatch': return `Can be placed in one of your buildings (your tower, treasury, walls or buildings; one each): there it can’t be hit until the building falls. Placed anywhere else it fights from a small watchtower (${n('hp')} health).`;
+      case 'freeMove': return 'Squads of it can be moved every round for free, as often as you like.';
+      case 'silent': return 'Its first attack in a fight doesn’t give it away: it stays hidden.';
+      case 'firstHit': return `Its first attack in a fight hits ${n('pct')}% harder.`;
+      case 'flurry': return `Each attack is ${n('hits')} blows of ${n('hit')} damage in quick succession (${n('aps')} attacks per second). When a blow kills, it leaps to the nearest enemy within ${n('leap')} m for the next one.`;
+      case 'lone': return `Ignores enemies that share a tile with others and hunts lone ones. With no lone enemy left for ${n('secs')} s it fights as usual, until it kills a lone one again.`;
     }
     return '';
   }
 
   // A unit with skills applied. defs = the skill definitions that are active; roster = all units (for spawns).
   function applySkills(unit, defs, roster) {
-    const u = withTraits(unit);
+    let u = withTraits(unit);
     for (const d of defs || []) {
       if (!d || !SKILL_TYPES[d.type]) continue;
       const P = (k) => { const v = +skillParam(d, k); return isFinite(v) ? v : 0; };
@@ -341,7 +396,33 @@ const Engine = (() => {
           u.splash = Math.max(0, (u.splash || 0) + P('splash'));
           u.bonusArmor = (u.bonusArmor || 0) + P('armor');
           u.burst = Math.max(1, Math.round(u.burst || 1) + Math.max(0, Math.round(P('burst'))));
+          u.speed = Math.max(0, u.speed + P('speed'));
+          u.bodies = Math.max(1, Math.round(u.bodies || 1) + Math.round(P('bodies')));
           break;
+        case 'burn': u.burn = Math.min(100, Math.max(u.burn || 0, P('pct'))); break;
+        case 'roots': u.roots = { min: Math.max(0, P('min')), max: Math.max(P('min'), P('max')), dps: Math.max(0, P('dps')), pull: Math.max(0.1, P('pull')) }; break;
+        case 'killStack': u.killStack = { speed: P('speed'), aps: P('aps'), max: Math.max(0, Math.round(P('max'))) }; break;
+        case 'killSpawn': u.killSpawn = (u.killSpawn || 0) + Math.max(1, Math.round(P('count'))); break;
+        case 'bull': u.bull = { every: Math.max(1, Math.round(P('every'))), hit: Math.max(0, P('hit')), push: Math.max(0, P('push')), armor: P('armor'), run: Math.max(0, P('run')) }; break;
+        case 'flare': u.flare = { per: Math.max(0, P('per')), max: Math.max(0, P('max')), shot: Math.max(1, P('shot')) }; break;
+        case 'portal': {
+          // the summon: the unit's plain stats at the given level (a level 2 Brute), with its own speed and a swipe
+          const name = String(skillParam(d, 'unit')), src = (roster || []).find(r => r && r.name === name);
+          const { skills, skillDefs, skillsOn, skillsInnate, skillMods, skillOr, skillNeeds, skillNeedsAny, trait, ...plain } = src || { name, cost: 0, bodies: 1, hp: 1100, hit: 98, aps: 1.1, range: 2, speed: 5, splash: 0, defense: 'armor', defVal: 3 };
+          const base = leveled(withTraits({ ...plain, level: 0 }), Math.max(0, Math.round(P('level'))));
+          u.portal = { secs: Math.max(0, P('secs')), unit: withTraits({ ...base, level: 0, name: name === 'Brute' ? 'Hellfiend' : name + ' (summoned)', tag: name === 'Brute' ? 'HEL' : plain.tag, bodies: 1, cost: 0, unlock: 0,
+            speed: Math.max(0.5, P('speed')), flame: Math.max(1, Math.min(180, P('cone'))), slam: true, pierce: 0, burst: 1, pellets: 1, shape: 'imp', color: '#B3261E', summoned: true }) };
+          break;
+        }
+        case 'overwatch': u.overwatch = { hp: Math.max(1, P('hp')) }; break;
+        case 'freeMove': u.freeMove = true; break;
+        case 'silent': u.silent = true; break;
+        case 'firstHit': u.firstHit = (u.firstHit || 0) + Math.max(0, P('pct')); break;
+        case 'flurry':
+          u.flurry = { hits: Math.max(1, Math.round(P('hits'))), gap: Math.max(0.05, P('gap')), leap: Math.max(0, P('leap')) };
+          u.hit = Math.max(0, P('hit')); u.aps = Math.max(0.05, P('aps')); u.burst = 1;
+          break;
+        case 'lone': u.lone = Math.max(0.5, P('secs')); break;
         case 'double': u.hit = u.hit * (1 + P('hit') / 100); u.double = Math.max(2, Math.round(P('every'))); break;
         case 'bleedDeep': u.bleedLonger = (u.bleedLonger || 0) + Math.max(0, P('secs')); u.bleedNoHeal = true; break;
         case 'bleedStun': u.bleedStun = Math.max(u.bleedStun || 0, Math.max(0, P('secs'))); break;
@@ -374,6 +455,7 @@ const Engine = (() => {
           break;
         }
       }
+      if (Array.isArray(d.also) && d.also.length) u = applySkills(u, d.also, roster); // the effects that come with it
     }
     return u;
   }
@@ -418,7 +500,7 @@ const Engine = (() => {
 
   function damageAfterDefense(hit, target, g) {
     const u = target.u;
-    const armor = (u.defense === 'armor' ? u.defVal : 0) + (u.bonusArmor || 0);
+    const armor = (u.defense === 'armor' ? u.defVal : 0) + (u.bonusArmor || 0) + (u.bull && target.trampleLeft > 0 ? u.bull.armor : 0); // Bullhead: tougher while it charges
     let d = armor > 0 ? Math.max(hit - armor, hit * g.minDmgPct / 100) : hit;
     if (u.defense === 'ward') d = Math.min(d, u.defVal);
     if (u.bonusWard > 0) d = Math.min(d, u.bonusWard); // ward from a skill; works next to armor
@@ -514,7 +596,7 @@ const Engine = (() => {
     for (const list of [A, B]) {
       const open = {};
       for (const b of list) {
-        if (!b.u.link && !b.u.escort) continue;
+        if (!b.u.link && !b.u.escort && !b.u.portal) continue;
         const k = b.squad + ':' + b.u.name;
         if (!open[k] || open[k].length >= Math.max(1, Math.round(b.u.bodies))) groups.push(open[k] = []);
         open[k].push(b);
@@ -529,6 +611,20 @@ const Engine = (() => {
       const hb = newBody(leveled(e.unit, lead.level), lead.side, lead.x, lead.y - (lead.side === 0 ? 1 : -1) * 2.5, escortIdx++, -1);
       hb.follow = grp; hb.healPct = e.pct; hb.credit = lead;
       (lead.side === 0 ? A : B).push(hb);
+    }
+    // a portal in front of each squad that summons (Ember Imps' Hellfiend): its unit walks out at once, levelled like the squad
+    const portals = [];
+    for (const grp of groups) {
+      const lead = grp[0], pt = lead.u.portal;
+      if (!pt) continue;
+      let cx = 0, cy = 0;
+      for (const x of grp) { cx += x.x; cy += x.y; }
+      cx /= grp.length; cy = cy / grp.length + (lead.side === 0 ? 1 : -1) * 3;
+      if (g.bounds) { cx = Math.max(g.bounds.x0, Math.min(g.bounds.x1, cx)); cy = Math.max(g.bounds.y0, Math.min(g.bounds.y1, cy)); }
+      const hf = newBody(leveled(pt.unit, lead.level), lead.side, cx, cy, escortIdx++, -1);
+      hf.credit = lead; hf.delay = lead.delay || 0; // a flank squad's portal opens when it arrives
+      (lead.side === 0 ? A : B).push(hf);
+      portals.push({ x: cx, y: cy, side: lead.side, t0: hf.delay, secs: pt.secs });
     }
     const all = A.concat(B);
     const sides = [A, B];
@@ -599,7 +695,7 @@ const Engine = (() => {
       if (!c || v.side === owner.side || v.u.structure || !(c[owner.squad] > 0)) return false;
       if (c[owner.squad] >= CHARM_MAX && !charmUsed[owner.side][owner.squad] && !v.u.carrier && !v.convert && !v.link && !v.u.construct) {
         charmUsed[owner.side][owner.squad] = true;
-        v.hp = v.u.hp * CONVERT_HP / 100; v.turning = true; v.poison = null; v.bleed = null;
+        v.hp = v.u.hp * CONVERT_HP / 100; v.turning = true; v.poison = null; v.bleed = null; v.burn = null;
         turning.push(v);
         return true;
       }
@@ -663,7 +759,8 @@ const Engine = (() => {
     // Flow state stacks add to it
     const R = (b) => { const r = b.flow > 0 ? b.u.range + b.flow * b.u.flow.range : b.u.range; return b.shrinkT > 0 ? Math.max(Math.min(r, 1), r - b.shrinkM) : r; };
     // move speed: a pool's speed boost adds to it while it lasts
-    const spd = (b) => b.poolFastT > 0 ? b.u.speed + b.poolFast : b.u.speed;
+    // ...and kill stacks (Rampager, the Assassin) add to it
+    const spd = (b) => (b.poolFastT > 0 ? b.u.speed + b.poolFast : b.u.speed) + (b.kills > 0 ? b.kills * b.u.killStack.speed : 0);
     // How far an attack reaches. Flame cones can reach further than where the unit stops (g.flameReach x range),
     // so a flamer keeps burning the enemies behind the first one without walking up to each.
     const reachOf = (b) => b.u.flame > 0 && g.flameReach > 1 ? R(b) * g.flameReach : R(b);
@@ -694,11 +791,33 @@ const Engine = (() => {
         x.hp = 0; x.alive = false; x.diedTick = tick;
         if (owner) owner.xp += x.u.hp * x.level;
         fell(x);
+        if (owner) killed(owner, x);
       }
     }
+    // a body of the other side is cut down (not a structure): what the killer gets for it
+    function killed(owner, x) {
+      if (owner.side === x.side || x.u.structure) return;
+      const ks = owner.u.killStack;
+      if (ks && (!(ks.max > 0) || (owner.kills || 0) < ks.max)) owner.kills = (owner.kills || 0) + 1; // the Assassin's trait, Rampager
+      if (owner.u.lone > 0 && isLone(x)) { owner.hunt = true; owner.huntT = 0; } // Shadow hunter: a lone kill starts the hunt again
+      if (owner.u.killSpawn > 0 && owner.alive) for (let k = 0; k < owner.u.killSpawn; k++) { // More where that came from: a new body of the killer
+        const [ox, oy] = SPAWN_SPOTS[(spawnIdx + k) % SPAWN_SPOTS.length], fwd = owner.side === 0 ? 1 : -1;
+        pendingKids.push(newBody(owner.u, owner.side, owner.x - ox * g.spacing * 0.6, owner.y - oy * fwd * g.spacing * 0.6, spawnIdx++, -1));
+      }
+    }
+    // Overwatch: a body sitting in a structure that still stands can't be hit or targeted
+    const sheltered = (f) => !!(f.inside && f.inside.alive);
+    // Shadow hunter: an enemy body that shares its spot with no other body of its side (not a structure)
+    function isLone(f) {
+      if (f.u.structure || f.u.aloft) return false;
+      for (const a of sides[f.side]) if (a !== f && a.alive && !a.u.structure && !a.u.aloft && hyp(a.x - f.x, a.y - f.y) <= LONE_R) return false;
+      return true;
+    }
+    // a target b may pick: not hidden, not sheltered, and a lone one while it hunts
+    const pickable = (b, f) => f.alive && !f.hidden && !sheltered(f) && !(b.hunt && !isLone(f));
     // damage that skips armor and ward (poison)
     function direct(owner, v, amount) {
-      if (v.turning || v.u.aloft) return;
+      if (v.turning || v.u.aloft || sheltered(v)) return;
       const applied = Math.min(amount, poolHp(v));
       if (applied <= 0) return;
       stats[owner.side].dealt += applied;
@@ -711,13 +830,19 @@ const Engine = (() => {
     }
     // n stacks of bleed from owner on v (see BLEED). The stacks are v's own: every source adds to them
     function bleedOn(owner, v, n) {
-      if (!v.alive || v.turning || v.u.aloft || !(n > 0)) return;
+      if (!v.alive || v.turning || v.u.aloft || sheltered(v) || !(n > 0)) return;
       const bl = v.bleed || (v.bleed = { n: 0, t: 0, pulse: BLEED.pulse, src: owner, noHeal: false });
       const before = bl.n;
       bl.n = Math.min(BLEED.max, bl.n + n); bl.src = owner;
       bl.t = Math.max(bl.t, BLEED.secs + (owner.u.bleedLonger || 0));
       if (owner.u.bleedNoHeal) bl.noHeal = true;
       if (owner.u.bleedStun > 0 && before < BLEED.max && bl.n >= BLEED.max && !v.u.structure) v.stunT = Math.max(v.stunT, owner.u.bleedStun);
+    }
+    // amt more to burn on v (see BURN): it adds to what is still burning and the three ticks start again
+    function burnOn(owner, v, amt) {
+      if (!v.alive || v.turning || v.u.aloft) return;
+      const bn = v.burn || (v.burn = { left: 0, k: 0, t: 0, src: owner });
+      bn.left += amt; bn.k = 0; bn.t = BURN.every; bn.src = owner;
     }
     // pools (see u.pools): { x, y, r, side, owner, amt (per second), speed, secs }
     const pools = [];
@@ -729,7 +854,7 @@ const Engine = (() => {
     }
     // damage from the map itself (elf tower, toxic tiles): counts for neither side, earns no experience
     function neutralDamage(v, dmg) {
-      if (v.turning || v.u.aloft) return;
+      if (v.turning || v.u.aloft || sheltered(v)) return;
       if (cripple[v.side] > 0) dmg = dmg * (1 + towerDown.taken / 100);
       loseHp(v, dmg);
       if (poolHp(v) <= 1e-9) kill(null, v);
@@ -766,11 +891,13 @@ const Engine = (() => {
     function hurt(owner, v, hit, fromX, fromY) {
       if (v.turning) return; // being won over: nothing hurts it until it has switched sides
       if (v.u.aloft) return; // an airship can't be shot down
+      if (sheltered(v)) return; // Overwatch: safe inside its building
       const st = stats[owner.side];
       // Dodge: the whole hit misses (the same random numbers on every device)
       if (v.u.dodge > 0 && rnd() * 100 < v.u.dodge) { st.missed += hit; return; }
       // a guard (the keep's) that is attacked leaves its post and goes for its attacker
       if (v.guard && owner.alive && owner.side !== v.side && !owner.u.aloft && !(v.avenge && v.avenge.alive)) { v.holdT = 0; v.avenge = owner; v.engaged = true; }
+      if (owner.u.bldgPct > 0 && v.u.structure) hit = hit * owner.u.bldgPct / 100; // weaker against buildings (the Assassin)
       let pct = owner.u.pctHit > 0 && !v.u.structure ? v.u.hp * owner.u.pctHit / 100 : 0;
       if (cripple[owner.side] > 0) { hit = hit * (1 - towerDown.attack / 100); pct = pct * (1 - towerDown.attack / 100); }
       // Shield: the whole hit is blocked, however big, and it brings no poison
@@ -782,6 +909,8 @@ const Engine = (() => {
         const w = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 1 : 3) : (dy > 0 ? 0 : 2);
         if (v.walls[w] > 0) { v.walls[w]--; st.blocked += hit + pct; return; }
       }
+      let burnAmt = 0; // Burn: a share of the hit burns over the next seconds instead (see BURN)
+      if (owner.u.burn > 0) { burnAmt = hit * owner.u.burn / 100; hit -= burnAmt; }
       let dmg = damageAfterDefense(hit, v, g);
       if (owner.u.frenzyPct > 0) owner.frenzy++; // Frenzy: every hit that lands speeds up its next attacks
       // damage the target's armor turned away earns it a little experience (g.armorXp per point, default 0.5)
@@ -805,6 +934,7 @@ const Engine = (() => {
       loseHp(v, dmg);
       if (poolHp(v) <= 0 && finishing(owner, v)) return;
       if (poolHp(v) <= 0) { kill(owner, v); return; }
+      if (burnAmt > 0) burnOn(owner, v, burnAmt);
       if (owner.u.bleedEvery > 0) { // every n-th hit it lands on the same target gives that target a stack of bleed
         const kn = owner.knives || (owner.knives = new Map()), c = (kn.get(v) || 0) + 1;
         kn.set(v, c);
@@ -886,7 +1016,7 @@ const Engine = (() => {
     function validTargets(b) {
       const valid = [];
       for (const f of sides[1 - b.side]) {
-        if (!f.alive || f.hidden) continue;
+        if (!pickable(b, f)) continue;
         const d = gap(f, b);
         if (d <= reachOf(b) + 0.01 && d >= b.u.minRange) valid.push([d, f]);
       }
@@ -913,7 +1043,7 @@ const Engine = (() => {
       const aware = Math.max(rg + sight, minSight), melee = rg <= AWARE.melee;
       let best = null, bc = Infinity;
       for (const f of sides[1 - b.side]) {
-        if (!f.alive || f.hidden) continue;
+        if (!pickable(b, f)) continue;
         const d = gap(f, b), mine = f === b.goal;
         if (d > aware * (mine ? AWARE.leash : 1)) continue;
         const lane = g.awareLane == null ? AWARE.lane : g.awareLane;
@@ -967,7 +1097,7 @@ const Engine = (() => {
 
     // attacks per second right now: Frenzy speeds it up with every hit landed, up to its cap (never below the base rate)
     function apsOf(b) {
-      const a = b.u.aps + (b.auraAps || 0) + (b.flow > 0 ? b.flow * b.u.flow.aps : 0); // an ally's aura, Flow state stacks
+      const a = b.u.aps + (b.auraAps || 0) + (b.flow > 0 ? b.flow * b.u.flow.aps : 0) + (b.kills > 0 ? b.kills * b.u.killStack.aps : 0); // an ally's aura, Flow state stacks, kill stacks
       if (!(b.u.frenzyPct > 0) || !b.frenzy) return a;
       return Math.max(a, Math.min(b.u.frenzyCap, a * (1 + b.frenzy * b.u.frenzyPct / 100)));
     }
@@ -975,7 +1105,7 @@ const Engine = (() => {
     function fire(b, targets, canCharge) {
       const charged = canCharge && b.u.charge > 1 && b.moved >= CHARGE_RUN;
       b.moved = 0;
-      if (!b.u.aloft) b.hidden = false; // attacking gives a stealth unit away (it hides again after STEALTH_BACK s without attacking); an airship stays out of reach
+      if (!b.u.aloft && !b.quiet) b.hidden = false; // attacking gives a stealth unit away (it hides again after STEALTH_BACK s without attacking); an airship stays out of reach; Silent blade's first attack doesn't
       b.lastAtk = t; b.revealed = true; // a disguised body (b.mask) shows what it is from its first attack
       if (b.u.healPct > 0) {
         // heal a random wounded ally (not itself)
@@ -986,7 +1116,9 @@ const Engine = (() => {
           if (opts.record) shots.push([b.x, b.y, a.x, a.y, b.side, 0, 0, 1]);
         }
       }
-      const hit = b.u.hit * (charged ? b.u.charge : 1) * (b.u.spinHit > 0 ? Math.min(SPIN_CAP, 1 + b.u.spinHit / 100 * Math.max(0, b.firing)) : 1) + (b.auraHit || 0); // an ally's aura adds to every hit
+      const opening = b.u.firstHit > 0 && !b.firstDone ? 1 + b.u.firstHit / 100 : 1; // Shadowborn: the first attack of the fight hits harder
+      b.firstDone = true;
+      const hit = (b.u.hit * (charged ? b.u.charge : 1) * (b.u.spinHit > 0 ? Math.min(SPIN_CAP, 1 + b.u.spinHit / 100 * Math.max(0, b.firing)) : 1) + (b.auraHit || 0)) * opening; // an ally's aura adds to every hit
       // trample: a charged hit doesn't stop the unit; it runs on through its target and over every body in its path
       if (charged && b.u.trample > 0 && targets.length && !targets.flame) {
         const tgt = targets[0], dx = tgt.x - b.x, dy = tgt.y - b.y, d = hyp(dx, dy);
@@ -1016,7 +1148,7 @@ const Engine = (() => {
         for (let j = 0; j < b.u.chain.jumps; j++) {
           let nx = null, nd = b.u.chain.reach + 0.01;
           for (const f of sides[1 - b.side]) {
-            if (!f.alive || f.hidden || done.includes(f)) continue;
+            if (!f.alive || f.hidden || sheltered(f) || done.includes(f)) continue;
             const d = hyp(f.x - lx, f.y - ly);
             if (d <= nd) { nd = d; nx = f; }
           }
@@ -1033,6 +1165,26 @@ const Engine = (() => {
         const [ax, ay, al] = targets.flame, r = reachOf(b), k = al ? r / al : 0;
         shots.push([b.x, b.y, b.x + ax * k, b.y + ay * k, b.side, 0, charged ? 1 : 0, 0, b.u.flame, 1, 0, b.u.slam ? 1 : 0]); // [11]: a ground slam, not fire
       }
+    }
+
+    // Death flurry: the next blow, on the same target; when the last one killed it, a leap to the nearest enemy within
+    // flurry.leap metres first (none: the flurry ends)
+    function flurryStep(b) {
+      b.flurryT -= dt;
+      if (b.flurryT > 1e-9) return;
+      let tgt = b.flurryTgt;
+      if (!(tgt && tgt.alive && !sheltered(tgt))) {
+        tgt = null;
+        let bd = b.u.flurry.leap + 0.01;
+        for (const f of sides[1 - b.side]) { if (!pickable(b, f)) continue; const d = gap(f, b); if (d <= bd) { bd = d; tgt = f; } }
+        if (!tgt) { b.flurryLeft = 0; return; }
+        const d = dist(tgt, b), keep = Math.min(d, Math.max(0.5, R(b) * 0.6));
+        if (opts.record) shots.push([b.x, b.y, tgt.x, tgt.y, b.side, 0, 1, 0, 0]);
+        if (d > 1e-6) { b.hx = (tgt.x - b.x) / d; b.hy = (tgt.y - b.y) / d; b.x = tgt.x - b.hx * keep; b.y = tgt.y - b.hy * keep; }
+        b.flurryTgt = tgt; b.lock = tgt;
+      } else if (gap(tgt, b) > R(b) + 2) { b.flurryLeft = 0; return; }
+      b.flurryLeft--; b.flurryT += b.u.flurry.gap;
+      fire(b, [tgt], false);
     }
 
     // Extra turret skill: each body carries more copies of its weapon (turret 0 is its own attack, see the attack
@@ -1062,7 +1214,7 @@ const Engine = (() => {
     function ram(b, foes) {
       let tgt = null, td = Infinity;
       for (const f of foes) if (f.alive && f.u.structure) { const d = dist(f, b); if (d < td) { td = d; tgt = f; } }
-      if (!tgt) for (const f of foes) if (f.alive && !f.hidden) { const d = dist(f, b); if (d < td) { td = d; tgt = f; } }
+      if (!tgt) for (const f of foes) if (pickable(b, f)) { const d = dist(f, b); if (d < td) { td = d; tgt = f; } }
       if (!tgt) return;
       if (td > RAM_REACH) {
         const mv = Math.min(td - RAM_REACH * 0.5, spd(b) * (b.slowT > 0 ? 1 - b.slowMove / 100 : 1) * (cripple[b.side] > 0 ? 1 - towerDown.move / 100 : 1) * dt);
@@ -1087,7 +1239,7 @@ const Engine = (() => {
       if (b.rollV == null) b.rollV = start;
       if (!(b.rollPast > 0)) {
         let near = null, nd = Infinity;
-        for (const f of foes) { if (!f.alive || f.hidden) continue; const d = dist(f, b); if (d < nd) { nd = d; near = f; } }
+        for (const f of foes) { if (!pickable(b, f)) continue; const d = dist(f, b); if (d < nd) { nd = d; near = f; } }
         if (!near) return;
         b.near = near;
         const [mx, my] = b.march || [0, b.side === 0 ? 1 : -1];
@@ -1095,12 +1247,12 @@ const Engine = (() => {
           let spotted = nd <= Math.max(R(b) + sight, minSight);
           if (!spotted) { // nothing left ahead to march toward: go for the nearest
             spotted = true;
-            for (const f of foes) if (f.alive && !f.hidden && (f.x - b.x) * mx + (f.y - b.y) * my > 0) { spotted = false; break; }
+            for (const f of foes) if (pickable(b, f) && (f.x - b.x) * mx + (f.y - b.y) * my > 0) { spotted = false; break; }
           }
           if (spotted) b.engaged = true;
         }
         // once engaged it stays on its target until that dies or hides, like any unit
-        const tgt = b.engaged ? (b.lock && b.lock.alive && !b.lock.hidden ? b.lock : (b.lock = near)) : null;
+        const tgt = b.engaged ? (b.lock && pickable(b, b.lock) ? b.lock : (b.lock = near)) : null;
         let wx = mx, wy = my;
         if (tgt) { const d = dist(tgt, b) || 1; wx = (tgt.x - b.x) / d; wy = (tgt.y - b.y) / d; }
         // standing still it can set off any way; rolling, it swings round like a walking body
@@ -1230,6 +1382,30 @@ const Engine = (() => {
       }
     }
 
+    // Grasping roots: let go of a target that is gone or in reach (it fights that one), grab the nearest free enemy
+    // min..max metres away, and drag it in, hurting it
+    function rootStep(b) {
+      const rt = b.u.roots;
+      let v = b.rootTgt;
+      if (v && (!v.alive || v.turning || v.side === b.side || sheltered(v) || gap(v, b) > rt.max + 2 || gap(v, b) <= R(b))) {
+        if (v.alive && v.side !== b.side && gap(v, b) <= R(b)) b.lock = v; // dragged into reach: it fights this one
+        v.rootedBy = null; b.rootTgt = v = null;
+      }
+      if (!v) {
+        let bd = Infinity;
+        for (const f of sides[1 - b.side]) {
+          if (!pickable(b, f) || f.u.structure || f.u.anchored || f.u.barrier || f.u.construct || (f.rootedBy && f.rootedBy.alive && f.rootedBy.rootTgt === f)) continue;
+          const d = gap(f, b);
+          if (d >= rt.min - 1e-9 && d <= rt.max + 1e-9 && d < bd) { bd = d; v = f; }
+        }
+        if (!v) return;
+        b.rootTgt = v; v.rootedBy = b;
+      }
+      const d = dist(v, b), mv = Math.min(rt.pull * dt, Math.max(0, d - R(b) * 0.8));
+      if (d > 1e-6) { v.x -= (v.x - b.x) / d * mv; v.y -= (v.y - b.y) / d * mv; }
+      direct(b, v, rt.dps * dt);
+    }
+
     let auraWas = false; // a body with an aura was standing last tick
     // Flow state: an attack made standing still adds a stack
     function flowStep(b) { if (b.u.flow && !(b.moved > 1e-6)) b.flow = Math.min(b.u.flow.max, (b.flow || 0) + 1); }
@@ -1305,23 +1481,41 @@ const Engine = (() => {
       // movement + targeting
       for (const b of all) {
         if (!b.alive || b.delay > 0) continue;
+        b.dashing = false;
+        if (b.inside) { if (b.inside.alive) { b.x = b.inside.x; b.y = b.inside.y; continue; } b.inside = null; } // Overwatch: it stays in its building while that stands
         if (b.stunT > 0) { b.stunT = Math.max(0, b.stunT - dt); continue; } // stunned: can't move (or attack, below)
+        if (b.rootedBy && b.rootedBy.alive && b.rootedBy.rootTgt === b) continue; // dragged by roots: it can't walk (it still attacks)
+        if (b.u.lone > 0) { // Shadow hunter: hunting while there are lone enemies; none for u.lone s and it gives up until its next lone kill
+          if (b.hunt == null) { b.hunt = true; b.huntT = 0; }
+          if (b.hunt) {
+            let any = false;
+            for (const f of sides[1 - b.side]) if (f.alive && !f.hidden && !sheltered(f) && isLone(f)) { any = true; break; }
+            b.huntT = any ? 0 : b.huntT + dt;
+            if (b.huntT >= b.u.lone - 1e-9) b.hunt = false;
+          }
+        }
         if (b.holdT > 0) { b.holdT -= dt; continue; } // holding its ground (it still shoots)
         const foes = sides[1 - b.side];
         if (b.trampleLeft > 0) {
           // running through after a charge: straight on, hitting each body it runs over once
-          const mv = Math.min(b.trampleLeft, spd(b) * (b.slowT > 0 ? 1 - b.slowMove / 100 : 1) * (cripple[b.side] > 0 ? 1 - towerDown.move / 100 : 1) * dt);
+          // a Bullhead charge runs at twice its speed, hits for bull.hit and knocks each body it hits back along its path
+          const mv = Math.min(b.trampleLeft, spd(b) * (b.charging ? 2 : 1) * (b.slowT > 0 ? 1 - b.slowMove / 100 : 1) * (cripple[b.side] > 0 ? 1 - towerDown.move / 100 : 1) * dt);
           const [ux, uy] = b.trampleDir;
           b.x += ux * mv; b.y += uy * mv; b.hx = ux; b.hy = uy;
+          if (g.bounds) { b.x = Math.max(g.bounds.x0, Math.min(g.bounds.x1, b.x)); b.y = Math.max(g.bounds.y0, Math.min(g.bounds.y1, b.y)); }
           b.trampleLeft -= mv;
-          const tHit = b.u.hit * b.u.trample / 100;
+          const tHit = b.charging ? b.u.bull.hit : b.u.hit * b.u.trample / 100;
           for (const f of foes) {
-            if (!f.alive || b.trampled.includes(f) || hyp(f.x - b.x, f.y - b.y) > TRAMPLE_WIDTH) continue;
+            if (!f.alive || sheltered(f) || b.trampled.includes(f) || hyp(f.x - b.x, f.y - b.y) > TRAMPLE_WIDTH) continue;
             b.trampled.push(f);
             if (opts.record) shots.push([b.x, b.y, f.x, f.y, b.side, 1, 1, 0, 0]);
             hurt(b, f, tHit, b.x, b.y);
+            if (b.charging && knockOn && f.alive && !f.u.structure && !f.u.anchored && !f.u.barrier) {
+              f.x += ux * b.u.bull.push; f.y += uy * b.u.bull.push;
+              if (g.bounds) { f.x = Math.max(g.bounds.x0, Math.min(g.bounds.x1, f.x)); f.y = Math.max(g.bounds.y0, Math.min(g.bounds.y1, f.y)); }
+            }
           }
-          if (b.trampleLeft <= 1e-9) { b.trampleLeft = 0; b.trampled = null; if (b.u.chargeStun > 0) b.stunT = b.u.chargeStun; }
+          if (b.trampleLeft <= 1e-9) { b.trampleLeft = 0; b.trampled = null; if (b.charging) b.charging = false; else if (b.u.chargeStun > 0) b.stunT = b.u.chargeStun; }
           continue;
         }
         if (b.u.idle) continue; // a building
@@ -1344,7 +1538,7 @@ const Engine = (() => {
         }
         let near = null, nd = Infinity;
         for (const f of foes) {
-          if (!f.alive || f.hidden) continue;
+          if (!pickable(b, f)) continue;
           const d = gap(f, b);
           if (d < nd) { nd = d; near = f; }
         }
@@ -1387,7 +1581,8 @@ const Engine = (() => {
         if (g.aware2 && b.engaged && near) { const gl = goalOf(b, rg); if (gl) { near = gl; nd = gap(gl, b); } }
         if (b.avenge) { if (b.avenge.alive && !b.avenge.hidden) { near = b.avenge; nd = gap(near, b); } else b.avenge = null; } // a guard going for its attacker
         if (near && nd > (g.stopPct > 0 && g.stopPct < 1 && b.engaged ? stopAt(rg) : rg)) {
-          const step = spd(b) * (b.slowT > 0 ? 1 - b.slowMove / 100 : 1) * (cripple[b.side] > 0 ? 1 - towerDown.move / 100 : 1) * dt;
+          b.dashing = b.u.dash > 0 && b.engaged && nd <= b.u.dash; // dash: the last metres to its target in a flash
+          const step = (b.dashing ? Math.max(DASH_SPEED, spd(b)) : spd(b)) * (b.slowT > 0 ? 1 - b.slowMove / 100 : 1) * (cripple[b.side] > 0 ? 1 - towerDown.move / 100 : 1) * dt;
           let mv;
           // March straight ahead until an enemy comes within sight (range + SIGHT, at least MIN_SIGHT, in any
           // direction), or no enemy is left ahead, then lock on: from then on the body goes for its own nearest
@@ -1401,7 +1596,7 @@ const Engine = (() => {
             let spotted = nd <= aware;
             if (!spotted) { // nothing left ahead to march toward: go for the nearest
               spotted = true;
-              for (const f of foes) if (f.alive && !f.hidden && (f.x - b.x) * mx + (f.y - b.y) * my > 0) { spotted = false; break; }
+              for (const f of foes) if (pickable(b, f) && (f.x - b.x) * mx + (f.y - b.y) * my > 0) { spotted = false; break; }
             }
             if (spotted) b.engaged = true;
           }
@@ -1491,9 +1686,9 @@ const Engine = (() => {
       for (let s = 0; s < 2; s++) {
         const arr = sides[s];
         for (let i = 0; i < arr.length; i++) {
-          const a = arr[i]; if (!a.alive || a.u.aloft) continue;
+          const a = arr[i]; if (!a.alive || a.u.aloft || sheltered(a)) continue;
           for (let j = i + 1; j < arr.length; j++) {
-            const c = arr[j]; if (!c.alive || c.u.aloft) continue;
+            const c = arr[j]; if (!c.alive || c.u.aloft || sheltered(c)) continue;
             if (a.u.barrier > 0 || c.u.barrier > 0) continue; // a side's own units walk through its walls
             const dx = c.x - a.x, dy = c.y - a.y;
             const d = hyp(dx, dy);
@@ -1587,6 +1782,18 @@ const Engine = (() => {
           if (!b.alive) continue;
           if (bl.t <= 1e-9) b.bleed = null;
         }
+        if (b.burn) { // once a second a share of what is left to burn (see BURN)
+          const bn = b.burn;
+          bn.t -= dt;
+          if (bn.t <= 1e-9) {
+            const part = bn.left * BURN.share[bn.k];
+            bn.left -= part; bn.k++; bn.t += BURN.every;
+            if (bn.k >= BURN.share.length) b.burn = null;
+            direct(bn.src, b, part);
+            if (!b.alive) continue;
+          }
+        }
+        if (b.u.roots && !(b.stunT > 0)) rootStep(b);
         if (b.poolFastT > 0) b.poolFastT -= dt;
         // Moat (bastion): every 1/aps s, its hit to every enemy within its reach, like a ring of fire around the tower
         if (b.u.moat) {
@@ -1649,6 +1856,7 @@ const Engine = (() => {
         b.cd -= dt * (b.slowT > 0 ? 1 - b.slowAtk / 100 : 1); // slowed units reload slower
         if (b.firing >= 0) b.firing += dt;
         if (b.stunT > 0) continue; // stunned
+        if (b.flurryLeft > 0) { if (b.alive) flurryStep(b); else b.flurryLeft = 0; continue; } // Death flurry: the rest of its blows
         if (b.u.spear && b.alive) forgeSpear(b); // Titanium spears: forged and thrown apart from its own attack
         if (b.u.mend > 0) { // a healer that never attacks: the most wounded ally in range gets b.u.mend
           if (!b.alive || b.cd > 0) continue;
@@ -1735,6 +1943,9 @@ const Engine = (() => {
         b.cd = Math.max(b.cd, -dt) + 1 / Math.max(0.01, apsOf(b) * spin);
         let n = Math.max(1, Math.round(b.u.burst));
         if (b.u.double > 1 && (b.atkN = (b.atkN || 0) + 1) % b.u.double === 0) n++; // Double strike: every n-th attack strikes once more
+        if (b.u.flare) n += Math.floor(Math.min(b.u.flare.max, b.u.flare.per * (t - b.lastAtk)) / b.u.flare.shot + 1e-9); // Flare: what it stored while it waited
+        b.quiet = !!(b.u.silent && !b.silentUsed); // Silent blade: its first attack keeps it hidden
+        if (b.quiet) b.silentUsed = true;
         flowStep(b);
         if (n > 1) {
           const dx = primary.x - b.x, dy = primary.y - b.y, d = hyp(dx, dy) || 1;
@@ -1742,6 +1953,14 @@ const Engine = (() => {
           b.cd = Math.max(b.cd, (n - 1) * BURST_GAP + dt); // the next attack waits for the burst to finish
         }
         fire(b, aim(b, primary, valid), true);
+        if (b.u.flurry && b.alive && b.u.flurry.hits > 1) { b.flurryLeft = b.u.flurry.hits - 1; b.flurryT = b.u.flurry.gap; b.flurryTgt = primary; }
+        if (b.u.bull && b.alive) { // Bullhead: its 1st, (every+1)th, ... attack sends it charging through its target
+          b.bullN = (b.bullN || 0) + 1;
+          const dx = primary.x - b.x, dy = primary.y - b.y, d = hyp(dx, dy);
+          if ((b.bullN - 1) % b.u.bull.every === 0 && !(b.trampleLeft > 0) && d > 1e-6 && !primary.u.structure) {
+            b.trampleDir = [dx / d, dy / d]; b.trampleLeft = d + b.u.bull.run; b.trampled = []; b.charging = true;
+          }
+        }
       }
       // neutral towers: each shot goes at the nearest unit in range of the side whose turn it is,
       // or of the other side if that one has nobody in range, so both sides are shot at equally
@@ -1779,7 +1998,7 @@ const Engine = (() => {
           if (n.friends[(n.turn + k) % 2]) continue;
           let bd = n.u.range + 0.01;
           for (const f of sides[(n.turn + k) % 2]) {
-            if (!f.alive || f.hidden || f.u.structure) continue;
+            if (!f.alive || f.hidden || sheltered(f) || f.u.structure) continue;
             const d = hyp(f.x - n.x, f.y - n.y);
             if (d <= bd) { bd = d; tgt = f; }
           }
@@ -1827,6 +2046,7 @@ const Engine = (() => {
         v.windTarget = null; v.windT = 0; v.setUp = false; v.firing = -1; v.burstLeft = 0; v.trampleLeft = 0; v.trampled = null;
         v.spinTarget = null; v.aims = null; v.lock = null; v.march = null; v.guide = null; v.goal = null; v.spreadTo = null; v.engaged = false; v.holdT = 0; v.avenge = null; v.delay = 0; v.band = null; v.hidden = false;
         v.slowT = 0; v.slowMove = 0; v.slowAtk = 0; v.shrinkT = 0; v.shrinkM = 0; v.kids = null; v.stunT = 0; v.frenzy = 0; v.flow = 0; v.knives = null; v.atkN = 0; v.forgeT = 0; v.spearReady = false;
+        v.burn = null; v.kills = 0; v.flurryLeft = 0; v.flurryTgt = null; v.rootTgt = null; v.rootedBy = null; v.hunt = null; v.bullN = 0; v.charging = false; v.inside = null;
         sides[v.side].push(v); stats[v.side].totalHp += v.hp;
         for (const b of all) {
           if (b.windTarget === v) { b.windTarget = null; b.windT = 0; }
@@ -1896,7 +2116,7 @@ const Engine = (() => {
       };
     }
 
-    return { step, frame, result, bodies: all, neutrals, mines: () => mines, pools: () => pools, isOver: () => over, time: () => t, lastShots: () => shots, projectiles: () => projectiles, crippled: (side) => cripple[side], charm: (side, squad) => (charm[side] && charm[side][squad]) || 0 };
+    return { step, frame, result, bodies: all, neutrals, mines: () => mines, pools: () => pools, portals: () => portals.filter(p => t >= p.t0 && t < p.t0 + p.secs), isOver: () => over, time: () => t, lastShots: () => shots, projectiles: () => projectiles, crippled: (side) => cripple[side], charm: (side, squad) => (charm[side] && charm[side][squad]) || 0 };
   }
 
   function matrix(units, g) {
@@ -1917,6 +2137,6 @@ const Engine = (() => {
     return m;
   }
 
-  return { TOWER_DOWN, RULES, ruleOn, STEALTH_BACK, SKILL_SLOTS, SLOTS, SKILL_TYPES, skillParam, describeSkill, applySkills, innateUnit, fairBudget, battle, makeArmy, matrix, createBattle, buildSquad, rawStrength, squadsFor, withTraits, leveled, TRAIT_DEFAULTS, SPIN_CAP, CHARGE_RUN, TRAMPLE_RUN, BLAST_RADIUS, BLEED, POISON_HEAL, RAM_REACH, ROLL_START, ROLL_PAST, BUILD_GAP, BUILD_COOP, SITE_REACH, MINE_TRIGGER, REPAIR_SECS, LEVEL_BONUS, MAX_LEVEL, CHARM_MAX, CONVERT_HP, CONVERT_SQUAD };
+  return { DASH_SPEED, LONE_R, BURN, TOWER_DOWN, RULES, ruleOn, STEALTH_BACK, SKILL_SLOTS, SLOTS, SKILL_TYPES, skillParam, describeSkill, applySkills, innateUnit, fairBudget, battle, makeArmy, matrix, createBattle, buildSquad, rawStrength, squadsFor, withTraits, leveled, TRAIT_DEFAULTS, SPIN_CAP, CHARGE_RUN, TRAMPLE_RUN, BLAST_RADIUS, BLEED, POISON_HEAL, RAM_REACH, ROLL_START, ROLL_PAST, BUILD_GAP, BUILD_COOP, SITE_REACH, MINE_TRIGGER, REPAIR_SECS, LEVEL_BONUS, MAX_LEVEL, CHARM_MAX, CONVERT_HP, CONVERT_SQUAD };
 })();
 if (typeof module !== 'undefined') module.exports = Engine;

@@ -3,7 +3,7 @@
 // kindOf picks a figure from a unit's stats (rosters are custom, so names can't be relied on): towers (one per tower
 // type), the elf spire, airships (aloft), the horse and spider shapes, fliers, then archers / casters for ranged
 // units and goblins / brutes / soldiers for melee ones. The default roster's tier 4 units, the wizards and a few more
-// (Ent, Rogue, Shiv, Sniper, Slimeshots, Skeleton Archers) have their own models, by name (NAMED); a custom unit with one of
+// (Ent, Rogue, Shiv, Assassin, Sniper, Slimeshots, Skeleton Archers, the Hellfiend) have their own models, by name (NAMED); a custom unit with one of
 // those names gets that model too. A faction's tower (Factions mode) is one tower model in the faction's colour. height(kind): the top of the model, for markers above it.
 // parts(kind) gives up to three geometries, drawn as separate instanced meshes so each can be coloured per body:
 //   tint  - takes the unit's own colour (its clothes or hide), as the 2D board fills the shape with it
@@ -132,6 +132,26 @@ const Models3D = (THREE) => {
       P(cone(0.32, 0.6, 6), 'tint', [0, 1.88, 0.06], [0.2, 0, 0]),
       P(box(0.3, 0.08, 0.05), DARK, [0, 1.72, -0.21]),
       ...[-1, 1].flatMap(sd => [P(box(0.1, 0.1, 0.18), DARK, [sd * 0.42, 1.0, -0.12]), P(cone(0.05, 0.55, 4), METAL, [sd * 0.42, 1.08, -0.45], [-1.3, 0, 0])])],
+    // Assassin: slim, hooded and cloaked in the unit's colour, a sash in the team colour, a curved blade held low and
+    // a second one reversed along the forearm
+    assassin: () => [...legs(0.78, 0.15, 0.18),
+      P(cyl(0.24, 0.3, 0.78, 6), 'tint', [0, 1.14, 0]),
+      P(cone(0.55, 1.45, 6), 'tint', [0, 0.95, 0.12], [-0.1, 0, 0], [1, 1, 0.55]),
+      P(box(0.1, 0.85, 0.07), 'team', [0, 1.15, -0.28], [0, 0, 0.7]),
+      P(ball(0.22), DARK, [0, 1.72, 0]),
+      P(cone(0.3, 0.62, 6), 'tint', [0, 1.92, 0.04], [0.25, 0, 0]),
+      P(box(0.26, 0.05, 0.04), '#E14B4B', [0, 1.74, -0.2]),
+      P(box(0.09, 0.09, 0.16), DARK, [0.4, 0.95, -0.15]), P(cone(0.06, 0.75, 4), METAL, [0.42, 1.0, -0.6], [-1.45, 0, 0.12]),
+      P(box(0.09, 0.09, 0.16), DARK, [-0.4, 1.15, -0.05]), P(cone(0.05, 0.55, 4), METAL, [-0.42, 1.35, 0.15], [0.5, 0, 0])],
+    // Hellfiend (Ember Imps' summon): a hunched horned brute in the unit's colour, glowing eyes, long clawed arms
+    hellfiend: () => [...legs(0.65, 0.3, 0.34),
+      P(box(1.25, 0.95, 0.8), 'tint', [0, 1.15, 0.05], [0.25, 0, 0]),
+      P(box(1.3, 0.16, 0.85), 'team', [0, 0.72, 0]),
+      P(ball(0.34), 'tint', [0, 1.75, -0.35]),
+      P(cone(0.1, 0.55, 4), BONE, [-0.25, 2.1, -0.3], [0.3, 0, 0.5]), P(cone(0.1, 0.55, 4), BONE, [0.25, 2.1, -0.3], [0.3, 0, -0.5]),
+      P(ball(0.07), FIRE, [-0.12, 1.8, -0.64]), P(ball(0.07), FIRE, [0.12, 1.8, -0.64]),
+      ...[-1, 1].flatMap(sd => [P(cyl(0.17, 0.13, 1.2), 'tint', [sd * 0.78, 1.05, -0.2], [0.5, 0, sd * 0.2]), ...[-0.1, 0, 0.1].map(o => P(cone(0.04, 0.3, 4), BONE, [sd * 0.85 + o, 0.45, -0.55], [-1.2, 0, 0]))]),
+      P(cone(0.3, 0.6, 5), EMBER, [0, 1.55, 0.45], [1.2, 0, 0])],
     // Shiv: slim and hooded like the Rogue, a sash of throwing knives in the team colour, a knife raised to throw
     shiv: () => [...legs(0.75, 0.17, 0.2),
       P(cyl(0.25, 0.32, 0.75, 6), 'tint', [0, 1.12, 0]),
@@ -429,6 +449,10 @@ const Models3D = (THREE) => {
   // the treasury (Test Grid): a squat vault in gold on a stone plinth, a roof in the team colour and a pile of coins
   BUILD.treasury = () => [P(box(3.0, 0.5, 3.0), STONE, [0, 0.25, 0]), P(box(2.5, 1.7, 2.5), 'tint', [0, 1.35, 0]), P(cone(2.1, 1.2, 4), 'team', [0, 2.8, 0], [0, Math.PI / 4, 0]),
     P(box(0.8, 1.0, 0.15), DARK, [0, 1.0, -1.28]), ...[[-1.0, 1.9], [-0.55, 2.0], [-0.8, 1.6]].map(([x, z], k) => P(cyl(0.3, 0.3, 0.3 + k * 0.15, 8), 'tint', [x - 0.5, 0.65 + k * 0.08, z - 0.3])), ...flagOn(3.6)];
+  // Overwatch's watchtower: four posts, a platform with a parapet in the unit's colour, a roof in the team colour
+  BUILD.watchtower = () => [...[[-1, -1], [1, -1], [-1, 1], [1, 1]].map(([x, z]) => P(box(0.25, 3.0, 0.25), WOOD, [x * 0.9, 1.5, z * 0.9])),
+    P(box(2.3, 0.2, 2.3), WOOD, [0, 3.0, 0]), ...[[0, -1], [0, 1], [-1, 0], [1, 0]].map(([x, z]) => P(box(x ? 0.12 : 2.3, 0.5, z ? 0.12 : 2.3), 'tint', [x * 1.1, 3.35, z * 1.1])),
+    P(cone(1.8, 1.0, 4), 'team', [0, 4.6, 0], [0, Math.PI / 4, 0]), ...[[-1, -1], [1, 1]].map(([x, z]) => P(box(0.1, 1.2, 0.1), WOOD, [x * 1.05, 3.9, z * 1.05]))];
   BUILD.wall = () => [...[-1.5, -0.75, 0, 0.75, 1.5].map((x, k) => P(cyl(0.32, 0.32, 2.2 + (k % 2) * 0.3, 6), WOOD, [x, 1.1 + (k % 2) * 0.15, 0])),
     ...[-1.5, -0.75, 0, 0.75, 1.5].map((x, k) => P(cone(0.32, 0.6, 6), '#B79A6E', [x, 2.5 + (k % 2) * 0.3, 0])), P(box(3.6, 0.25, 0.2), 'team', [0, 1.4, -0.3])];
   // the bastion's defensive wall: a block of stone filling its tile, battlements along the top and a band in the team colour
@@ -484,12 +508,12 @@ const Models3D = (THREE) => {
     'Rollers': 'roller', 'Cog Builder': 'cogBuilder', 'Mechite Guards': 'mechGuard', 'Cog Turret': 'cogTurret', 'Healbot': 'healbot',
     'Minebot': 'minebot', 'Repairbot': 'repairbot', 'Cogbot Fighter': 'cogFighter', 'Cogbot Machinegunner': 'cogGunner', 'CogMech': 'cogMech',
     'Fire Mage': 'wizard:fire', 'Flame Wizard': 'wizard:flame', 'Leaf Wizard': 'wizard:leaf', 'Earth Wizard': 'wizard:earth', 'Steel Wizard': 'wizard:steel', 'Slime Wizard': 'wizard:slime',
-    'Water Mage': 'wizard:water', 'Shiv': 'shiv' };
+    'Water Mage': 'wizard:water', 'Shiv': 'shiv', 'Assassin': 'assassin', 'Hellfiend': 'hellfiend' };
   const RANGED = 12; // metres: from this range on, a unit is drawn as an archer or a caster
   function kindOf(u) {
     if (u.spire) return 'spire';
     if (u.structure && u.kind === 'wall' && u.barrier) return 'stonewall';
-    if (u.structure && (u.kind === 'lesser' || u.kind === 'wall' || u.kind === 'treasury')) return u.kind;
+    if (u.structure && (u.kind === 'lesser' || u.kind === 'wall' || u.kind === 'treasury' || u.kind === 'watchtower')) return u.kind;
     if (u.building) { const k = 'building:' + u.building; return u.awake && BUILD[k + ':awake'] ? k + ':awake' : BUILD[k] ? k : 'building'; } // Core Awoken: its walking version
     if (u.structure) { const k = TOWERS[u.kind] ? 'tower:' + u.kind : /^f-/.test(u.kind || '') ? 'tower:faction' : 'tower:keep'; return u.awake && BUILD[k + ':awake'] ? k + ':awake' : k; } // Core Awoken: the Mecha Tower on wheels
     if (u.aloft) return u.kind === 'drone' ? 'drone' : 'airship';

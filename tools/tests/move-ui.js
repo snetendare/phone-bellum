@@ -24,7 +24,8 @@ const ctx2d = require('./board2d'); // these checks are for the 2D board
   s = await st(); console.log('round 2 hp', s.hp, 'gold', s.gold);
   await p.click('#move-btn'); await p.waitForTimeout(100); console.log('hint:', await hint());
   await tap(9, 14); console.log('hint:', await hint());
-  await tap(5, 11);
+  const free = await p.evaluate(() => { const { m, me } = window.__pb(); for (const [c, r] of [[5, 11], [6, 11], [7, 11], [5, 12], [6, 12]]) if (!m.armies[me].some(q => q.col === c && q.row === r)) return [c, r]; });
+  await tap(...free); // a free tile (where the package squads stand depends on the deal)
   s = await st(); console.log('moved', JSON.stringify(s.army.find(q => q.from)), 'gold', s.gold, 'moved', s.moved);
   await p.locator('#board').screenshot({ path: 'move-2-moved.png' });
   await p.click('#undo-move'); s = await st(); console.log('undo -> gold', s.gold, 'moved', s.moved);

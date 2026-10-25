@@ -164,7 +164,7 @@ const Game = (() => {
   }
   function unplaceBwall(m, side, col, row) {
     const i = bwallsOf(m, side).findIndex(w => w.col === col && w.row === row && w.round === m.round);
-    if (i < 0) return false;
+    if (i < 0 || m.armies[side].some(s => s.col === col && s.row === row)) return false; // not with a squad in it (Overwatch)
     m.bwalls[side].splice(i, 1);
     return true;
   }
@@ -741,10 +741,22 @@ const Game = (() => {
   // ui (optional): the unit being placed, for unit-specific tiles (all of a footprint's tiles must be allowed)
   const canPlaceAt = (m, side, col, row, ui) => blockOf(m, ui, col, row).every(([c, r]) => canPlaceTile(m, side, c, r, ui));
   // no squad, tower or building on any tile the unit would take
-  const spotFree = (m, side, col, row, ui) => blockOf(m, ui, col, row).every(([c, r]) => !occupied(m, side, c, r));
+  const spotFree = (m, side, col, row, ui) => blockOf(m, ui, col, row).every(([c, r]) => !occupied(m, side, c, r) || garrisonFree(m, side, c, r, ui));
   const canPlaceTile = (m, side, col, row, ui) => col >= 0 && col < COLS && row >= 0 && row < ROWS && !reserved(side, col, row) && !(ui != null && isOff(m, ui, side)) &&
     !(ui != null && m && m.units[ui] && m.units[ui].noFlank && isFlank(side, col, row)) &&
-    (inZone(side, row) || (flankOpen(m) && isFlank(side, col, row)) || (inNoMans(row) && hasSkillType(m, side, ui, 'forward'))) && !enemyHolds(m, side, col, row);
+    (inZone(side, row) || (flankOpen(m) && isFlank(side, col, row)) || (inNoMans(row) && hasSkillType(m, side, ui, 'forward')) || garrisonFree(m, side, col, row, ui)) && !enemyHolds(m, side, col, row);
+  // ---------- Overwatch (the Sniper's Awaken skill) ----------
+  // A squad of a unit with Overwatch can stand in one of its player's buildings: the tower, the treasury (once it is
+  // up), a defensive wall or a building (the Factory). One squad per building. In a fight it sits inside, safe until the
+  // building falls (Engine: b.inside); a squad of it anywhere else fights from a small watchtower of its own.
+  const garrisonAt = (m, side, col, row) => !!m && ((towerAt(m, side, col, row) && towerUp(m, side)) || (treasuryAt(m, side, col, row) && treasuryUp(m)) ||
+    bwallAt(m, side, col, row) || !!buildingAt(m, side, col, row));
+  // a building tile with room for a squad of ui
+  const garrisonFree = (m, side, col, row, ui) => ui != null && !!m && !!m.units[ui] && !m.units[ui].building && hasSkillType(m, side, ui, 'overwatch') && garrisonAt(m, side, col, row) &&
+    !m.armies[side].some(s => covers(m, s, col, row));
+  const inBuilding = (m, side, sq) => !!sq && !isRider(sq) && garrisonAt(m, side, sq.col, sq.row);
+  const WATCH_SQ = -500; // watchtowers in a fight: squad ids -500, -501, ...
+  const watchUnit = (hp) => E.withTraits({ name: 'Watchtower', cost: 0, bodies: 1, hp, hit: 0, aps: 1, range: 0, speed: 0, splash: 0, shape: 'square', color: '#9C7A54', structure: true, lesser: true, idle: true, kind: 'watchtower', level: 0 });
   // ---------- carriers (Just a horse) ----------
   // A squad of a carrier unit can hold one squad of any other unit inside. The rider is an ordinary squad in the
   // army (it levels, sells and counts like any other) with `in` = the carrier's squad id, on the carrier's tile.
@@ -925,12 +937,14 @@ const Game = (() => {
   // Every skill a player buys for a unit makes that unit's other skills SKILL_STEP gold dearer (other units' skills
   // stay as they are). side (optional): that player's price, for a skill they don't have yet the price to buy it, for
   // one they bought the refund for undoing it (so buying and undoing in any order always adds up)
+  // An Awaken skill (flat on its definition) always costs its own price and doesn't make the others dearer.
   const SKILL_STEP = 50;
-  const skillsBought = (m, side, ui) => ((m.tech && m.tech[side] && m.tech[side][ui]) || []).filter((r, k) => r > 0 && !isInnate(m, ui, k)).length;
+  const isFlat = (m, ui, k) => !!(skillDef(m, ui, k) && skillDef(m, ui, k).flat);
+  const skillsBought = (m, side, ui) => ((m.tech && m.tech[side] && m.tech[side][ui]) || []).filter((r, k) => r > 0 && !isInnate(m, ui, k) && !isFlat(m, ui, k)).length;
   const skillCost = (m, ui, k, side) => {
     const d = skillDef(m, ui, k); if (!d) return 0;
     const base = Math.max(0, Math.round(+d.cost || 0));
-    if (side == null || isInnate(m, ui, k)) return base;
+    if (side == null || isInnate(m, ui, k) || isFlat(m, ui, k)) return base;
     const n = skillsBought(m, side, ui) - (hasSkill(m, side, ui, k) ? 1 : 0);
     return base + SKILL_STEP * Math.max(0, n);
   };
@@ -975,7 +989,7 @@ const Game = (() => {
   // the unit with f applied to the units it brings into a fight: spawns, what it builds, its healbot
   function withKids(u, f) {
     let out = u;
-    for (const k of ['spawn', 'build', 'escort']) if (u[k] && u[k].unit) { if (out === u) out = { ...u }; out[k] = { ...u[k], unit: f(u[k].unit) }; }
+    for (const k of ['spawn', 'build', 'escort', 'portal']) if (u[k] && u[k].unit) { if (out === u) out = { ...u }; out[k] = { ...u[k], unit: f(u[k].unit) }; }
     return out;
   }
   // ---------- unlocks (like Mechabellum: some units start unlocked, the rest cost gold once per match) ----------
@@ -1014,7 +1028,15 @@ const Game = (() => {
 
   // A unit can make a skill wait for others: skillNeeds[k] = the slots that must be bought first (e.g. [0, 1])
   const skillNeeds = (m, ui, k) => { const n = m.units[ui] && Array.isArray(m.units[ui].skillNeeds) ? m.units[ui].skillNeeds[k] : null; return Array.isArray(n) ? n.filter(j => j !== k && skillDef(m, ui, j)) : []; };
-  const skillNeedsMissing = (m, side, ui, k) => skillNeeds(m, ui, k).filter(j => !hasSkill(m, side, ui, j));
+  // ...or for any one of several: skillNeedsAny[k] = slots of which one must be bought first (an Awaken skill: 2 or 3)
+  const skillNeedsAny = (m, ui, k) => { const n = m.units[ui] && Array.isArray(m.units[ui].skillNeedsAny) ? m.units[ui].skillNeedsAny[k] : null; return Array.isArray(n) ? n.filter(j => j !== k && skillDef(m, ui, j)) : []; };
+  const skillNeedsMissing = (m, side, ui, k) => {
+    const any = skillNeedsAny(m, ui, k);
+    return skillNeeds(m, ui, k).filter(j => !hasSkill(m, side, ui, j)).concat(any.length && !any.some(j => hasSkill(m, side, ui, j)) ? any : []);
+  };
+  // a skill that another one bought on top of it needs (it can't be taken back before that one)
+  const skillHeldUp = (m, side, ui, k) => E.SLOTS.some(j => j !== k && hasSkill(m, side, ui, j) && !isInnate(m, ui, j) &&
+    (skillNeeds(m, ui, j).includes(k) || (skillNeedsAny(m, ui, j).includes(k) && !skillNeedsAny(m, ui, j).some(x => x !== k && hasSkill(m, side, ui, x)))));
   // ...and make skills either-or: skillOr = [[1, 2], ...] = a player can own only one skill of each group
   const skillOr = (m, ui, k) => { const g = m.units[ui] && Array.isArray(m.units[ui].skillOr) ? m.units[ui].skillOr : []; return [...new Set(g.filter(x => Array.isArray(x) && x.includes(k)).flat())].filter(j => j !== k && skillDef(m, ui, j)); };
   const skillOrTaken = (m, side, ui, k) => skillOr(m, ui, k).filter(j => hasSkill(m, side, ui, j));
@@ -1044,7 +1066,9 @@ const Game = (() => {
     // Forward planting can't be taken back while a squad of that unit stands in no man's land
     const d = skillDef(m, ui, k);
     if (d && d.type === 'forward' && m.armies[side].some(s => s.unit === ui && inNoMans(s.row))) return false;
-    if (E.SLOTS.some(j => j !== k && hasSkill(m, side, ui, j) && skillNeeds(m, ui, j).includes(k))) return false; // a skill bought on top of it goes first
+    if (skillHeldUp(m, side, ui, k)) return false; // a skill bought on top of it goes first
+    if (d && d.type === 'overwatch' && m.armies[side].some(s => s.unit === ui && inBuilding(m, side, s))) return false; // Overwatch: not while a squad of it sits in a building
+    if (d && d.type === 'freeMove' && m.armies[side].some(s => s.unit === ui && s.movedRound === m.round && movedId(m, side) !== s.id)) return false; // Spirit walk: not after a free move
     if (isBuildingSkill(m, ui, k)) { // the building placed with it goes too
       const id = buildingIdOf(m, ui, k);
       m.buildings[side] = buildingsOf(m, side).filter(b => !(b.id === id && b.round === m.round));
@@ -1271,7 +1295,9 @@ const Game = (() => {
   // Squads placed this round can be moved freely. Once per round a player may also move one squad from an
   // earlier round, for CONFIG.moveCost gold. Moving it back to where it was refunds the gold.
   const movedId = (m, side) => (m.moved && m.moved[side] != null) ? m.moved[side] : null;
-  const canMove = (m, side, sq) => !!sq && !(m.units[sq.unit] && m.units[sq.unit].building) && (sq.round === m.round || // a building stays put
+  // A unit with Spirit walk (freeMove) moves any squad of it, any number of times, for free
+  const freeMover = (m, side, sq) => !!sq && hasSkillType(m, side, sq.unit, 'freeMove');
+  const canMove = (m, side, sq) => !!sq && !(m.units[sq.unit] && m.units[sq.unit].building) && (sq.round === m.round || freeMover(m, side, sq) || // a building stays put
     (movedId(m, side) == null ? m.gold[side] >= CONFIG.moveCost : movedId(m, side) === sq.id));
   function moveSquad(m, side, sqId, col, row) {
     const sq = m.armies[side].find(s => s.id === sqId);
@@ -1279,18 +1305,24 @@ const Game = (() => {
     // a squad can move onto a free tile, or into a carrier with room (a rider can also step out, or change carriers)
     const into = boardable(m, side, col, row, sq.unit);
     if (into && into.id === sq.in) return false;
-    if (!canPlaceAt(m, side, col, row, sq.unit) || (occupied(m, side, col, row) && !into)) return false;
-    if (sq.round !== m.round && movedId(m, side) == null) {
+    if (!canPlaceAt(m, side, col, row, sq.unit) || (occupied(m, side, col, row) && !into && !garrisonFree(m, side, col, row, sq.unit))) return false;
+    if (sq.round !== m.round && !freeMover(m, side, sq) && movedId(m, side) == null) {
       if (!m.moved) m.moved = [null, null];
       m.gold[side] -= CONFIG.moveCost;
       m.moved[side] = sq.id;
       sq.from = { col: sq.col, row: sq.row, ...(isRider(sq) ? { in: sq.in } : {}) };
       sq.movedRound = m.round;
     }
+    if (sq.round !== m.round && freeMover(m, side, sq) && !(sq.from && sq.movedRound === m.round)) { // free, but the opponent still sees it where it was until the fight
+      sq.from = { col: sq.col, row: sq.row, ...(isRider(sq) ? { in: sq.in } : {}) };
+      sq.movedRound = m.round;
+    }
     sq.col = col; sq.row = row;
     if (into) sq.in = into.id; else delete sq.in;
     syncRiders(m, side);
-    if (sq.from && sq.movedRound === m.round && sq.from.col === col && sq.from.row === row && sq.from.in === sq.in) undoMove(m, side);
+    if (sq.from && sq.movedRound === m.round && sq.from.col === col && sq.from.row === row && sq.from.in === sq.in) {
+      if (movedId(m, side) === sq.id) undoMove(m, side); else { delete sq.from; delete sq.movedRound; } // back where it was (a free move costs nothing to undo)
+    }
     return true;
   }
   // put this round's moved squad back on its old tile and refund the move
@@ -1507,6 +1539,20 @@ const Game = (() => {
     // buildings (the Mechites' Factory)
     const bb = buildingBodies(m, side, idx);
     idx += bb.length; out.push(...bb);
+    // Overwatch: a squad on a building's tile sits in it; any other squad of it gets a watchtower of its own
+    let watch = 0;
+    for (const sq of m.armies[side]) {
+      if (isRider(sq)) continue;
+      const mine = out.filter(x => x.squad === sq.id && x.u.overwatch);
+      if (!mine.length) continue;
+      const w = tileToWorld(sq.col, sq.row);
+      let host = inBuilding(m, side, sq) ? out.find(x => (x.u.structure || x.u.building) && !x.u.aloft && Math.abs(x.x - w.x) < 0.5 && Math.abs(x.y - w.y) < 0.5) : null;
+      if (!host) {
+        [host] = E.buildSquad(watchUnit(mine[0].u.overwatch.hp), side, w.x, w.y, WATCH_SQ - watch++, TILE, idx);
+        idx++; out.push(host);
+      }
+      for (const x of mine) { x.inside = host; x.x = host.x; x.y = host.y; x.delay = 0; }
+    }
     // Snowgres stand on their own tiles in no man's land; squad ids -10, -11, ... (not squads in the army)
     snowgres(m, side).forEach((sg, k) => {
       const w = tileToWorld(sg.col, sg.row), b = E.buildSquad(snowgreUnit(m, sg.strength), side, w.x, w.y, -10 - k, TILE, idx);
@@ -1516,7 +1562,7 @@ const Game = (() => {
     const yot = yotImps(m, side);
     if (yot.length) {
       const ui = m.units.findIndex(u => u && u.name === CHAR.yotUnit);
-      const iu = { ...unitFor(m, side, ui), bodies: 1 };
+      const iu = { ...unitFor(m, side, ui), bodies: 1, portal: null }; // one body each: no hellfiend portal (that's a squad's)
       for (const t of yot) {
         const w = tileToWorld(t.col, t.row), b = E.buildSquad(iu, side, w.x, w.y, YOT_SQUAD, TILE, idx, yotLevel(m));
         idx += b.length; out.push(...b);
@@ -2334,14 +2380,14 @@ const Game = (() => {
     deploysAllowed, deploysLeft, deployedThisRound, canBuyDeploy, buyDeploy, refundDeploy,
     PACKAGE, allPackages, packOf, needsPack, freeLeft, choosePack, ensurePack,
     unlockCost, tierOf, startLevel, shopCost, mapFreeOf, mapFreeLeft, isUnlocked, unlockVisible, unlock, undoUnlock,
-    skillDef, skillCost, SKILL_STEP, skillsBought, isInnate, hasSkill, skillVisible, skillNeeds, skillNeedsMissing, skillOr, skillOrTaken, unitFor, withCharacter,
+    skillDef, skillCost, SKILL_STEP, skillsBought, isInnate, hasSkill, skillVisible, skillNeeds, skillNeedsAny, skillNeedsMissing, skillHeldUp, isFlat, skillOr, skillOrTaken, unitFor, withCharacter,
     footprint, blockOf, spotFree, buildingRecords, recordOf, recordWorld, buildingEffects,
     setBuildings, BUILDINGS: () => BUILDINGS, buildingInfo, BUILDING_SQUAD, isBuildingSkill, buildingIdOf, buildingsOf, buildingOf, buildingAt, buildingShown, buildingSpotOk,
     canBuyBuilding, buyBuilding, buildingSkills, buildingSkillInfo, bskillOf, bskillCost, canBuyBuildingSkill, buyBuildingSkill, undoBuildingSkill,
     buildingXpNeeded, buildingLevelCost, buildingReady, levelBuilding, undoLevelBuilding, constructBuff, buildingBodies, canBuySkill, buySkill, undoSkill, sellValue, sell,
     isRider, hiddenFromFoe, isCarrier, riderOf, carrierOf, squadAt, boardable, unplaceSquad,
     TOWER, TOWER_TYPES, OUTPOST, TOWER_PICK_ROUND, towerType, towerChoices, needsTowerPick, setTowerType, settleTowerPicks, TOWER_SKILL, towerSkillOf, towerSkillVisible, towerPicked, canBuyTowerSkill, buyTowerSkill, undoTowerSkill, towerSkillCost, towerSkill2Of, towerSkill2Visible, towerSkill2Cost, canBuyTowerSkill2, buyTowerSkill2, undoTowerSkill2, towerSkill2On, AIRSHIP, MOAT, BWALL, BWALL_SQ, bwallsOf, bwallAt, bwallsLeft, bwallShown, bwallSpotOk, placeBwall, unplaceBwall, ensureBwalls, bwallUnit, INVEST, MAGE_GENERALS, mageGenPrice, MAGE, mageGenInfo, mageGenOf, mageTpOf, isExtraGen, mageGenCost, canBuyMageGen, buyMageGen, undoMageGen, mageTowerUnit, generalUnit, LOAN, loanNow, investNow, bankBusy, investNow, bankBusy, canTakeLoan, takeLoan, undoLoan, towerRounds, troundInfo, troundOn, troundCost, canBuyTround, buyTround, undoTround, SLIME_UNITS, slimeTowerUnit, slimeSkillDefs, TOWER_MID, towerColOk, towerAt, needsTower, placeTower, ensureTower,
-    FLANK, flankRows, flankOpen, isFlank, reserved, canPlaceAt, isOff, enemyHolds, inNoMans, hasSkillType,
+    FLANK, flankRows, flankOpen, isFlank, reserved, canPlaceAt, isOff, enemyHolds, inNoMans, hasSkillType, garrisonAt, garrisonFree, inBuilding, WATCH_SQ, watchUnit, freeMover,
     STANDARD_PACK, ICE, ALTAR, GOLEM, isIce, hailRound, altarRound, stormShift, stormRows, hailTiles, altarCost, altarRefund, altarCount, pushRoom, altarBought, addAltar, buyAltar, undoAltar, snowgres, snowgreUnit,
     MAPS, ELF_TOWER, SHROOM, SHROOM_SPLIT, shroomAt, shroomTileAt, shroomRemoval, SHROOM_REMOVE, shroomCost, removeShroom, undoRemoveShroom, mapOf, elfSpot, rollMap, BRIBE_COST, bribeList, bribeGold, bribeCount, bribeNow, bribeCost, bribeRefund, ELF_POWER, elfPowered, elfUnit, ELF_OWN, elfOwnCost, elfOwnOf, elfOwnAt, elfOwnUnlocked, elfOwnOffered, canBuyElfOwn, elfOwnSpotOk, buyElfOwn, undoElfOwn, bribeLeader, canBribe, bribe, undoBribe,
     CHARACTERS, CHAR, charOf, charInfo, enzoSkill, enzoActive, charmOf, isGentleman, canGiveCharm, giveCharm, undoCharm, ensureCharm, felixGold, isTier1, rollBuffTiles, onBuffTile, zoeBuff, yotImps, yotLevel, TOWER_SPOT, towerSpot,

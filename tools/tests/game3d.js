@@ -48,7 +48,7 @@ const dock = require('./dock'); // the phone layout's deploy drawer
   await tap(s.tower.col, s.tower.row);
   check(/Your tower/.test(await sheet() || ''), `tap on your tower opens its sheet (${await sheet()})`);
   if (await sheet()) await closeSheet();
-  // the unit sheet of a squad from this round's package... is a take-back tap; a pick from the shop, then a tap places it
+  // a pick from the shop, then a tap places it; a tap on it opens its sheet, its X takes it back
   const card = p.locator('#shop .ucard[aria-disabled="false"]:not([data-locked])').first();
   await dock.up(p); const ui = +(await card.getAttribute('data-i')); await card.click(); await p.waitForTimeout(150);
   const [a] = await freeTiles(ui), g0 = s.gold;
@@ -57,9 +57,10 @@ const dock = require('./dock'); // the phone layout's deploy drawer
   check(!!placed && s.gold < g0, `shop pick placed at ${a}, gold ${g0} -> ${s.gold}`);
   await p.evaluate(() => { const card = document.querySelector('#shop .ucard[aria-pressed="true"]'); if (card) card.click(); }); await p.waitForTimeout(150); // drop the pick
   await tap(...a);
-  s = await st(); check(placed && s.army.some(q => q.id === placed.id), 'first tap shows its range, keeps it');
-  await tap(...a);
-  s = await st(); check(placed && !s.army.some(q => q.id === placed.id) && s.gold === g0, `second tap takes it back, gold ${s.gold}`);
+  s = await st(); check(placed && s.army.some(q => q.id === placed.id) && !!(await sheet()), 'a tap on it opens its sheet, keeps it');
+  if (await sheet()) await closeSheet();
+  await p.click(`#unx button[data-id="${placed.id}"]`); await p.waitForTimeout(300);
+  s = await st(); check(placed && !s.army.some(q => q.id === placed.id) && s.gold === g0, `its X takes it back, gold ${s.gold}`);
 
   // idle: nothing moves in the shop, so the board stops drawing (the meter counts frames drawn in the last second)
   const fps = async () => +(await p.locator('.meter3d').textContent()).split(' fps')[0];

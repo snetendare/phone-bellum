@@ -265,6 +265,10 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
 @keyframes tut-glow-in { 50% { box-shadow: inset 0 0 0 2px var(--gold); } }
 /* marks drawn over either board: a unit's range under the mouse (a dotted circle), the tutorial's blinking tiles */
 .marks { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 1; pointer-events: none; overflow: visible; }
+/* the small X at the top right of a squad placed this round: takes it back for a full refund */
+.unx { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
+.unx button { position: absolute; pointer-events: auto; width: 16px; height: 16px; margin: -8px 0 0 -8px; padding: 0; border-radius: 50%; border: 1.5px solid var(--you); background: var(--bg); color: var(--ink); font: 700 9px/1 var(--font-body, sans-serif); display: grid; place-items: center; cursor: pointer; box-shadow: 0 1px 3px rgba(0,0,0,0.5); }
+.unx button::before { content: ''; position: absolute; inset: -5px -5px -3px -3px; } /* a bigger target for a finger, reaching out from the tile more than into it */
 .marks .range { fill: none; stroke-width: 2; stroke-linecap: round; stroke-dasharray: 0.1 6; opacity: 0.9; }
 @media (prefers-reduced-motion: reduce) { .coach, .coach-ring, .tut-glow, .marks .tut-tile { animation: none; } .tut-glow { box-shadow: inset 0 0 0 2px var(--gold); } }
 </style>
@@ -295,6 +299,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
     <div class="coach" id="coach" role="status" aria-live="polite" hidden><button class="coach-x" id="coach-x" aria-label="Leave the tutorial">✕</button><p id="coach-text"></p><span class="btnrow" id="coach-btns"></span></div>
     <div class="coach-ring" id="coach-ring" hidden></div>
     <svg class="marks" id="marks" aria-hidden="true"></svg>
+    <div class="unx" id="unx"></div>
   </div>
 
   <div class="panel" id="panel"></div>
@@ -339,7 +344,8 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
     'Slime Wizard': 'Lobs huge, slow globs of slime that splash over a wide area. Poison heals it and speeds it up.',
     'Ether Golem': 'A walking wall. Heavy armor shrugs off small hits while it holds its lane.',
     'Slimeshots': 'A pack of slime spitters lobbing small splashing globs. Shreds packed swarms. Poison heals them and speeds them up.',
-    'Ent': 'Slow tree guardians sweeping everything around them in a full circle. With the Explode on death skill, each one explodes when it falls, hurting everything around it.',
+    'Ent': 'Slow tree guardians whose blows crush everything within 2 m of where they land. Awakened, each one explodes when it falls, hurting everything around it.',
+    'Assassin': 'A lone killer that stays hidden, dashes the last 10 m to its target and strikes for 500. Every kill makes it faster. Weak against buildings.',
     'Sun Priest': 'Channels a beam that burns hotter the longer it holds one target. Melts giants.',
     'Meteor Caller': 'Drops slow meteors from far behind the lines. Helpless once something reaches it.',
     'War Mammoth': 'Charges straight through the enemy line, trampling every body in its path, then stands stunned for a moment before it turns to charge again.',
@@ -366,7 +372,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
     'Steel Wizard': ['giant', 'both'], 'Earth Wizard': ['giant', 'both'],
     'War Mammoth': ['giant', null, 'charger'], 'Necromancer': ['giant', null, 'summoner'],
     'Just a horse': ['single', null, 'raider'],
-    'Rogue': ['group', 'giants'], 'Spiders': ['swarm', 'giants'],
+    'Rogue': ['group', 'giants'], 'Spiders': ['swarm', 'giants'], 'Assassin': ['single', 'giants'],
     'Truespear': ['single', 'giants'],
     'Shiv': ['group', 'giants'], 'Water Mage': ['single', 'crowds'],
   };
@@ -1282,7 +1288,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
       ${helpTip ? `<p style="margin:0">${helpTip}</p>` : ''}
       <ul class="helplist">
         <li>Pick a unit card, then tap a highlighted tile in your zone, the bottom six rows. Each squad costs its gold and one deployment.</li>
-        <li>Drag a squad you placed this round to move it, or tap it to take it back. Your round 1 package squads are free.</li>
+        <li>Drag a squad you placed this round to move it, or tap the ✕ on its top right corner to take it back. Your round 1 package squads are free.</li>
         <li>A squad with a gold badge can level up: tap it. Tap an older squad, a tower or an enemy squad to see what it does.</li>
         ${document.documentElement.classList.contains('dock') ? '<li>Hold the blue tab on the deploy panel and slide it up or down (or tap it). Picking a unit puts it down so you can see every tile; the ✕ on the board stops placing.</li>' : ''}
         ${board3d ? '<li>3D board: spread two fingers (or scroll) to go in a view: Strategic, Angled, Cinematic. Pinch (or press Esc) to go back. Pinch on from Strategic (or scroll back) for Tilted: the whole board from your side, still for placing.</li>' : ''}
@@ -1337,14 +1343,14 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
     else {
       hint = selected !== null
         ? (canBuy(selected) ? `Tap a tile in your zone${Game.flankOpen(m) ? ' or a flank tile in theirs' : ''} to place ${esc(units[selected].name)}.` : left <= 0 ? 'No deployments left this round.' : `Not enough gold for ${esc(units[selected].name)}.`)
-        : (fresh ? 'Tap a squad to see its range. Drag one you placed this round to move it, or tap it again to take it back.' : 'Pick a unit, then tap a tile in the bottom six rows.');
+        : (fresh ? 'Tap a squad to see its range. Drag one you placed this round to move it, or tap its ✕ to take it back.' : 'Pick a unit, then tap a tile in the bottom six rows.');
       if (left <= 0 && selected === null) hint = Game.canBuyDeploy(m, me) || m.extraDeploys[me] < Game.CONFIG.maxExtraDeploys ? `No deployments left. Buy one more for ${Game.CONFIG.extraDeployCost} gold (once per round), or spend gold on upgrades.` : 'No deployments left this round. Spend gold on upgrades.';
       if (readyN && selected === null) hint = `${readyN} squad${readyN === 1 ? ' is' : 's are'} ready to level up. Tap ${readyN === 1 ? 'it' : 'one'} to upgrade.`;
       if (Game.charOf(m, me) === 'zoe' && selected === null && (m.buff && m.buff[me] || []).length) hint += ` Starred tiles are your buff tiles this round: ${(zb => `+${zb.dmg}% damage, +${zb.hp}% health${zb.aps ? ` and +${zb.aps}% attack speed` : ''}`)(Game.zoeBuff(m, me))} for a squad that starts the fight there. The bonus grows every round you use them.`;
       if (Game.hailRound(m) && selected === null && !fresh) hint = `Hail this round: ${Game.ICE.hailDps} damage a second on hail tiles. ${MORE('map-more')}`;
       if (Game.altarRound(m) && selected === null && !fresh) hint = `${Game.hailRound(m) ? 'Hail this round, and the' : 'The'} altar of ice has risen: tap it for ice walls, a push of the hail or a Snowgre. ${MORE('map-more')}`;
       if (m.round === Game.FLANK.round && selected === null && !fresh) hint = `Flanks are open: you can deploy on the blue edge columns in their half. ${MORE('flank-more')}`;
-      if (m.round === 1 && selected === null && m.armies[me].some(s => s.free)) hint = 'Your package squads are already on the board. Drag them where you want them, or tap one twice to take it back.';
+      if (m.round === 1 && selected === null && m.armies[me].some(s => s.free)) hint = 'Your package squads are already on the board. Drag them where you want them, or tap the ✕ on one to take it back.';
       if (charmMode && Game.canGiveCharm(m, me)) hint = 'Tap one of your squads to give it a stack of Charisma.';
       if (moveMode) hint = moving == null ? `Tap one of your squads from an earlier round to move it (${Game.CONFIG.moveCost} gold, once per round).` : `Tap a free tile to move ${esc(units[m.armies[me].find(s => s.id === moving).unit].name)} there, or drag it.`;
       if (selected !== null && !moveMode && m.armies[me].some(q => Game.boardable(m, me, q.col, q.row, selected))) hint += ` Or tap your ${esc(units[m.armies[me].find(q => Game.boardable(m, me, q.col, q.row, selected)).unit].name)} (gold outline) to hide this squad inside it.`;
@@ -1920,7 +1926,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
       if (u.build && u.build.unit) { const c = u.build.unit; t.push(`BUILDS once per fight: when an enemy is within ${u.build.range} m it stops for ${n1(u.build.time)} s (faster with other builders next to it) and builds ${u.build.count} ${c.name}${u.build.count > 1 ? 's' : ''} (${n1(c.hp)} health, ${n1(c.hit)} hit, ${n1(c.aps)} attacks/s, ${c.range} m range, never moves, gone after the fight), then fights on`); }
       if (u.link) t.push('linked health: its bodies share one health pool and fall together');
       if (u.escort) t.push(`brings a healbot that heals the squad ${n1(u.escort.pct)}% of max health a second`);
-      if (u.trait && u.trait.name) t.push(`trait ${u.trait.name}: ${u.trait.text || ''}`);
+      for (const x of [u.trait, u.trait2]) if (x && x.name) t.push(`trait ${x.name}: ${x.text || ''}`);
       const need = (k) => Game.skillNeeds(m, i, k).map(j => `"${u.skillDefs[j].name}"`).join(' and ');
       const either = (k) => Game.skillOr(m, i, k).map(j => `"${u.skillDefs[j].name}"`).join(' or ');
       const sk = (u.skillDefs || []).map((d, k) => d ? `skill ${k + 1} "${d.name}" (${Game.isInnate(m, i, k) ? 'BUILT IN: always on for both players, free' : `${Game.skillCost(m, i, k, 1)} gold${Game.hasSkill(m, 1, i, k) ? ', YOU OWN IT' : need(k) ? `, needs ${need(k)} first` : ''}${either(k) ? `, EITHER OR: can't be owned together with ${either(k)}` : ''}`}): ${Engine.describeSkill(d)}` : null).filter(Boolean);
@@ -2563,7 +2569,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (myB && myB.round === m.round) { guideDrag = null; drag = { bkey: myB.key, from: t, over: t, moved: false }; return true; } // drag a new building
     const sq = Game.squadAt(m, me, t.col, t.row);
     if (!sq) return false;
-    if (sq.round < m.round && !(moveMode || Game.movedId(m, me) === sq.id)) return false;
+    if (sq.round < m.round && !(moveMode || Game.movedId(m, me) === sq.id || Game.freeMover(m, me, sq))) return false;
     if (!Game.canMove(m, me, sq)) return false;
     drag = { id: sq.id, from: t, over: t, moved: false };
     return true;
@@ -2606,8 +2612,8 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   });
   cv.addEventListener('pointerleave', () => boardHover(null));
   cv.addEventListener('click', (ev) => boardTap(tileAt(ev)));
-  // a tap on a tile (2D or 3D board). It clears the range ring; tapping a squad shows its range (a squad of yours
-  // from this round is taken back with a second tap)
+  // a tap on a tile (2D or 3D board). It clears the range ring; tapping a squad shows its range and its sheet (a squad
+  // of yours from this round is taken back with the X at its top right corner, see unplaceMarks)
   function boardTap(t) {
     const had = rangeOf;
     rangeOf = null;
@@ -2623,8 +2629,8 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       const step = tutStep(), own = Game.squadAt(m, me, t.col, t.row);
       if (m.round >= 3 && Game.towerAt(m, me, t.col, t.row)) { tut.towerSeen = true; openTowerSheet(me); panelDeploy(); return; }
       if (m.round < 4) { // only placing and taking back, so no sheet pulls the player off the script
-        if (own) { if (editable() && own.round === m.round && Game.unplace(m, me, t.col, t.row)) changed(); }
-        else if (selected !== null && editable() && Game.place(m, me, selected, t.col, t.row)) {
+        if (own) return; // its X takes it back
+        if (selected !== null && editable() && Game.place(m, me, selected, t.col, t.row)) {
           if (m.round < 3 || m.gold[me] < Game.shopCost(m, me, selected) || Game.deploysLeft(m, me) <= 0) selected = null;
           changed();
         }
@@ -2637,6 +2643,15 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     }
     if (placingTower()) { if (editable() && Game.placeTower(m, me, t.col, t.row)) changed(); return; }
     if (placingElf()) { if (editable() && Game.buyElfOwn(m, me, t.col, t.row)) { elfPlacing = false; changed(); } else if (!Game.elfOwnSpotOk(m, me, t.col, t.row)) { elfPlacing = false; render(); hud(); panelDeploy(); } return; }
+    if (!placingWall() && !placingBuilding() && !moveMode && !charmMode && !Game.isDev(m)) { // Overwatch: a squad goes into one of your buildings, or one in it opens its sheet first (the building's on the next tap)
+      if (selected !== null && editable() && Game.garrisonFree(m, me, t.col, t.row, selected)) {
+        const sq = Game.place(m, me, selected, t.col, t.row);
+        if (sq) { rangeOf = { side: me, id: sq.id, placed: true }; if (m.gold[me] < Game.shopCost(m, me, selected) || Game.deploysLeft(m, me) <= 0) selected = null; changed(); }
+        return;
+      }
+      const gs = Game.squadAt(m, me, t.col, t.row);
+      if (gs && Game.inBuilding(m, me, gs) && !(had && had.side === me && had.id === gs.id)) { rangeOf = { side: me, id: gs.id }; openSheet(gs.unit, gs, me); return; }
+    }
     if (Game.bwallAt(m, me, t.col, t.row) && editable() && Game.unplaceBwall(m, me, t.col, t.row)) { wallPlacing = true; changed(); return; } // a wall placed this round: taken back
     if (placingWall()) { if (editable() && Game.placeBwall(m, me, t.col, t.row)) { if (!Game.bwallsLeft(m, me)) wallPlacing = false; changed(); } else { wallPlacing = false; render(); hud(); panelDeploy(); } return; }
     if (Game.bwallAt(m, me, t.col, t.row)) { overlayMsgSheet('Your wall', `A defensive wall: ${Game.BWALL.hp} health, ${Game.BWALL.armor} armor. It stands again at full health in every fight. The enemy can't walk or shoot through it; your own units can.`); return; }
@@ -2698,8 +2713,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (own) {
       rangeOf = { side: me, id: own.id };
       if (Game.riderOf(m, me, own)) openPairSheet(own, Game.riderOf(m, me, own));
-      else if (own.round === m.round) { if (had && had.side === me && had.id === own.id && !had.placed && editable() && Game.unplace(m, me, t.col, t.row)) { rangeOf = null; changed(); } }
-      else openSheet(own.unit, own, me);
+      else openSheet(own.unit, own, me); // one placed this round is taken back with the X on its top right corner
       return;
     }
     const enemy = m.armies[foe()].find(s => { const p = Game.seenAt(m, s); return !Game.hiddenFromFoe(m, s) && Game.blockOf(m, s.unit, p.col, p.row).some(([c, r]) => c === t.col && r === t.row) && s.round < m.round; });
@@ -2781,7 +2795,46 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     $('coach-ring').hidden = !ring || cinematic;
     coachClear(mode === 'tutorial' && tutStep() === 'flank' && !cinematic ? tiles : []);
     if (marksHtml !== html) { marksHtml = html; svg.innerHTML = html; } // only on a change, so the blinking runs on
+    unplaceMarks(cinematic);
   }
+  // the X at the top right corner of each squad you placed this round (taps on the squad open its sheet instead).
+  // The buttons are kept by squad id and only moved, so one being tapped is never swapped out under the finger.
+  function unplaceMarks(cinematic) {
+    const box = $('unx');
+    if (!box) return;
+    const list = phase === 'deploy' && m && editable() && !cinematic && !choosingPack() && !choosingTower()
+      ? m.armies[me].filter(s => s.round === m.round && !Game.isRider(s) && !(drag && drag.moved && drag.id === s.id)) : [];
+    const keep = new Set();
+    if (list.length) {
+      const at = wrapMap(), T = Game.TILE;
+      for (const sq of list) {
+        const n = Game.footprint(m, sq.unit), c = Game.tileToWorld(sq.col + (n - 1) / 2, sq.row + (n - 1) / 2), h = T * n / 2;
+        const mid = at(c.x, c.y);
+        // the corner of its tile (or block) that is top right on the screen, whichever way the board is turned
+        let best = null;
+        for (const [dx, dy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) { const p = at(c.x + dx * h, c.y + dy * h); if (!best || p[0] - p[1] > best[0] - best[1]) best = p; }
+        const x = mid[0] + (best[0] - mid[0]) * 0.92, y = mid[1] + (best[1] - mid[1]) * 0.92; // on the corner, clear of the squad itself
+        let b = box.querySelector(`button[data-id="${sq.id}"]`);
+        if (!b) {
+          b = document.createElement('button'); b.type = 'button'; b.dataset.id = sq.id; b.textContent = '✕';
+          b.setAttribute('aria-label', `Take back ${units[sq.unit].name}${sq.cost ? ` (+${sq.cost} gold)` : ''}`);
+          box.appendChild(b);
+        }
+        const l = x.toFixed(1) + 'px', tp = y.toFixed(1) + 'px';
+        if (b.style.left !== l) b.style.left = l;
+        if (b.style.top !== tp) b.style.top = tp;
+        keep.add(String(sq.id));
+      }
+    }
+    for (const b of [...box.children]) if (!keep.has(b.dataset.id)) b.remove();
+  }
+  $('unx').addEventListener('pointerdown', (ev) => ev.stopPropagation());
+  $('unx').addEventListener('click', (ev) => {
+    const b = ev.target.closest('button[data-id]');
+    if (!b || !m || phase !== 'deploy' || !editable()) return;
+    ev.stopPropagation();
+    if (Game.unplaceSquad(m, me, +b.dataset.id)) { if (rangeOf && rangeOf.side === me && rangeOf.id === +b.dataset.id) rangeOf = null; changed(); }
+  });
 
   // the coach line between the blinking flank tiles, so it doesn't cover the top ones
   function coachClear(tiles) {
@@ -3000,7 +3053,8 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
           if (phase === 'deploy' && editable() && m.tech[me][i][k] === m.round) act += ` <button class="btn small" data-unskill="${k}">Undo</button>`;
         } else if (phase === 'deploy') {
           const needs = Game.skillNeedsMissing(m, me, i, k).map(j => defs[j].name), other = Game.skillOrTaken(m, me, i, k).map(j => defs[j].name);
-          const why = other.length ? `You have ${other.join(' and ')}` : needs.length ? `Needs ${needs.join(' and ')}` : !m.armies[me].some(q => q.unit === i) ? 'Place a squad first' : m.gold[me] < cost ? `Need ${cost} gold` : '';
+          const any = Game.skillNeedsAny(m, i, k).length > 0 && Game.skillNeeds(m, i, k).length === 0; // needs one of several (an Awaken skill)
+          const why = other.length ? `You have ${other.join(' and ')}` : needs.length ? `Needs ${needs.join(any ? ' or ' : ' and ')}` : !m.armies[me].some(q => q.unit === i) ? 'Place a squad first' : m.gold[me] < cost ? `Need ${cost} gold` : '';
           const place = Game.isBuildingSkill(m, i, k); // a building: buying it picks its tile next
           act = why || !editable() ? `<button class="btn small" disabled>${why || `${place ? 'Place' : 'Buy'} · ${cost} gold`}</button>` : `<button class="btn small primary" ${place ? 'data-bplace' : 'data-skill'}="${k}">${place ? 'Place' : 'Buy'} · ${cost} gold</button>`;
         } else act = `<span class="hint">${cost} gold</span>`;
@@ -3009,9 +3063,10 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
           ? `<span class="chip" style="color:var(--foe);border:1px solid currentColor;border-radius:99px;padding:1px 8px;font-size:12px">${foeName()} has it</span>` : `<span class="hint">Not bought</span>`;
       }
       const or = Game.skillOr(m, i, k).map(j => defs[j].name); // either-or: owning one rules out the other
+      const anyOf = Game.skillNeedsAny(m, i, k).map(j => defs[j].name), awaken = Game.isFlat(m, i, k) || k === Engine.SKILL_SLOTS - 1;
       return `<div style="display:grid;gap:4px;border-top:1px solid var(--line);padding-top:8px">
-        <div class="bar"><b style="font-family:var(--font-display)">${esc(d.name)}</b><span>${act}</span></div>
-        <span class="hint">${esc(Engine.describeSkill(d))}${or.length ? ` <b style="color:#A493DE">Either or:</b> you can have this or ${esc(or.join(' or '))}, not both.` : ''}</span></div>`;
+        <div class="bar"><b style="font-family:var(--font-display)">${awaken ? '<span style="color:var(--gold)">Awaken:</span> ' : ''}${esc(d.name)}</b><span>${act}</span></div>
+        <span class="hint">${esc(Engine.describeSkill(d))}${or.length ? ` <b style="color:#A493DE">Either or:</b> you can have this or ${esc(or.join(' or '))}, not both.` : ''}${anyOf.length ? ` <b style="color:var(--gold)">Needs</b> ${esc(anyOf.join(' or '))} first.` : ''}${Game.isFlat(m, i, k) ? ' Always this price.' : ''}</span></div>`;
     });
     return `<div style="display:grid;gap:8px"><h4 style="margin:0;font-size:12px;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted)">Skills${enzo ? ` · Enzo: one random skill per unit, free with ${Game.CHAR.enzoMin}+ squads of it` : mine ? ' · for all your squads of this unit' : ''}</h4>${rows.join('')}</div>`;
   }
@@ -3380,7 +3435,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       ${(() => { const r = roleOf(i, owner === me ? me : null); return `<p class="roleline"><span class="roles">${roleIcons(r)}${rangeSvg(r.range)}</span><span>${r.text}</span></p>`; })()}
       ${unlockBlock(i, side)}
       <p class="role" style="margin:0">${ROLES[u.name] && !customSet ? ROLES[u.name] : customSet ? `From a Counter Lab roster · ${Game.unitCostOf(base)} gold` : ''}</p>
-      ${u.trait && u.trait.name ? `<p style="margin:0"><b style="color:var(--gold)">Trait: ${esc(u.trait.name)}</b>${u.trait.text ? ` · ${esc(u.trait.text)}` : ''}</p>` : ''}
+      ${[u.trait, u.trait2].filter(x => x && x.name).map(x => `<p style="margin:0"><b style="color:var(--gold)">Trait: ${esc(x.name)}</b>${x.text ? ` · ${esc(x.text)}` : ''}</p>`).join('')}
       ${lvl}
       ${sq && m && !compact ? (() => { const q = side === me ? sq : Game.seenAt(m, sq); return shroomBlock(q.col, q.row); })() : ''}
       ${tr.length ? `<div class="traits">${tr.map(x => `<span>${x}</span>`).join('')}</div>` : ''}
@@ -3805,7 +3860,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     // the guest's move this round: one squad at most
     if (!m.moved) m.moved = [null, null];
     m.moved[1] = null;
-    for (const q of m.armies[1]) if (q.movedRound === m.round) { if (m.moved[1] == null) m.moved[1] = q.id; else { delete q.from; delete q.movedRound; } }
+    for (const q of m.armies[1]) if (q.movedRound === m.round && !Game.freeMover(m, 1, q)) { if (m.moved[1] == null) m.moved[1] = q.id; else { delete q.from; delete q.movedRound; } }
     m.gold[1] = Math.max(0, +d.gold || 0);
     m.extraDeploys[1] = Math.max(0, Math.min(Game.CONFIG.maxExtraDeploys, d.extra | 0));
     m.nextId[1] = Math.max(m.nextId[1], d.nextId | 0);

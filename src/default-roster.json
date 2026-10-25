@@ -229,7 +229,7 @@
       "id": "emberMortar",
       "type": "mortar",
       "name": "Ember Mortar",
-      "cost": 300,
+      "cost": 150,
       "params": {
         "range": 15,
         "min": 5,
@@ -384,6 +384,341 @@
         "stun": 1,
         "cone": 30
       }
+    },
+    {
+      "id": "aaargh",
+      "type": "stats",
+      "name": "AAARGH!",
+      "cost": 100,
+      "params": {
+        "speed": 0.8,
+        "aps": 0.3
+      }
+    },
+    {
+      "id": "tacticalness",
+      "type": "spread",
+      "name": "Tacticalness",
+      "cost": 150,
+      "params": {
+        "min": 1,
+        "max": 6
+      },
+      "also": [
+        {
+          "type": "stats",
+          "params": {
+            "bodies": 3
+          }
+        }
+      ]
+    },
+    {
+      "id": "moreGoblins",
+      "type": "killSpawn",
+      "name": "More where that came from",
+      "cost": 150,
+      "params": {
+        "count": 1
+      }
+    },
+    {
+      "id": "tuffSkin",
+      "type": "armorHp",
+      "name": "Tuff skin",
+      "cost": 150,
+      "params": {
+        "armor": 4,
+        "hp": 25
+      }
+    },
+    {
+      "id": "rampager",
+      "type": "killStack",
+      "name": "Rampager",
+      "cost": 150,
+      "params": {
+        "speed": 0.4,
+        "aps": 0.2,
+        "max": 4
+      }
+    },
+    {
+      "id": "bullhead",
+      "type": "bull",
+      "name": "Bullhead",
+      "cost": 150,
+      "params": {
+        "every": 3,
+        "hit": 100,
+        "push": 6,
+        "armor": 4,
+        "run": 6
+      },
+      "also": [
+        {
+          "type": "stats",
+          "params": {
+            "armor": 4
+          }
+        }
+      ]
+    },
+    {
+      "id": "longbones",
+      "type": "stats",
+      "name": "Longbones",
+      "cost": 100,
+      "params": {
+        "range": 3,
+        "hit": 5
+      }
+    },
+    {
+      "id": "graverot",
+      "type": "poison",
+      "name": "Graverot arrows",
+      "cost": 150,
+      "params": {
+        "pct": 150,
+        "duration": 6,
+        "slow": 0
+      },
+      "also": [
+        {
+          "type": "stats",
+          "params": {
+            "aps": -0.15
+          }
+        }
+      ]
+    },
+    {
+      "id": "dreadRangers",
+      "type": "shield",
+      "name": "Dread rangers",
+      "cost": 150,
+      "params": {
+        "hits": 1
+      },
+      "also": [
+        {
+          "type": "stats",
+          "params": {
+            "range": 2
+          }
+        }
+      ]
+    },
+    {
+      "id": "forwardRoots",
+      "type": "forward",
+      "name": "Forward planting",
+      "cost": 100,
+      "params": {},
+      "also": [
+        {
+          "type": "stats",
+          "params": {
+            "hp": 10
+          }
+        }
+      ]
+    },
+    {
+      "id": "reinforcedBark",
+      "type": "stats",
+      "name": "Reinforced Bark",
+      "cost": 150,
+      "params": {
+        "hp": 20,
+        "armor": 4
+      }
+    },
+    {
+      "id": "graspingRoots",
+      "type": "roots",
+      "name": "Grasping roots",
+      "cost": 150,
+      "params": {
+        "min": 5,
+        "max": 13,
+        "dps": 10,
+        "pull": 1.5
+      }
+    },
+    {
+      "id": "entExplode",
+      "type": "explode",
+      "name": "Explode on death",
+      "cost": 300,
+      "params": {
+        "pct": 30,
+        "radius": 5
+      },
+      "flat": true
+    },
+    {
+      "id": "rangerScope",
+      "type": "range",
+      "name": "Ranger scope",
+      "cost": 100,
+      "params": {
+        "m": 3
+      }
+    },
+    {
+      "id": "deadeye",
+      "type": "stats",
+      "name": "Deadeye",
+      "cost": 150,
+      "params": {
+        "range": 5,
+        "hit": 20,
+        "apsPct": -35
+      }
+    },
+    {
+      "id": "assaultgunner",
+      "type": "stats",
+      "name": "Assaultgunner",
+      "cost": 150,
+      "params": {
+        "apsPct": 300,
+        "range": -5,
+        "hit": -50
+      }
+    },
+    {
+      "id": "overwatch",
+      "type": "overwatch",
+      "name": "Overwatch",
+      "cost": 300,
+      "params": {
+        "hp": 200
+      },
+      "also": [
+        {
+          "type": "stats",
+          "params": {
+            "range": 2
+          }
+        }
+      ],
+      "flat": true
+    },
+    {
+      "id": "sightweavers",
+      "type": "stats",
+      "name": "Sightweavers",
+      "cost": 100,
+      "params": {
+        "range": 2
+      },
+      "also": [
+        {
+          "type": "shrink",
+          "params": {
+            "m": 2,
+            "duration": 3
+          }
+        }
+      ]
+    },
+    {
+      "id": "transphysical",
+      "type": "ward",
+      "name": "Transphysical",
+      "cost": 150,
+      "params": {
+        "cap": 40
+      }
+    },
+    {
+      "id": "shadowborn",
+      "type": "stealth",
+      "name": "Shadowborn",
+      "cost": 150,
+      "params": {},
+      "also": [
+        {
+          "type": "firstHit",
+          "params": {
+            "pct": 25
+          }
+        }
+      ]
+    },
+    {
+      "id": "spiritWalk",
+      "type": "freeMove",
+      "name": "Spirit walk",
+      "cost": 300,
+      "params": {},
+      "flat": true
+    },
+    {
+      "id": "spitfire",
+      "type": "burn",
+      "name": "Spitfire",
+      "cost": 100,
+      "params": {
+        "pct": 50
+      }
+    },
+    {
+      "id": "flare",
+      "type": "flare",
+      "name": "Flare",
+      "cost": 150,
+      "params": {
+        "per": 10,
+        "max": 100,
+        "shot": 25
+      }
+    },
+    {
+      "id": "hellfiend",
+      "type": "portal",
+      "name": "Summon hellfiend",
+      "cost": 300,
+      "params": {
+        "unit": "Brute",
+        "level": 1,
+        "speed": 4.5,
+        "cone": 90,
+        "secs": 3
+      },
+      "flat": true
+    },
+    {
+      "id": "silentBlade",
+      "type": "silent",
+      "name": "Silent blade",
+      "cost": 100,
+      "params": {}
+    },
+    {
+      "id": "deathFlurry",
+      "type": "flurry",
+      "name": "Death Flurry",
+      "cost": 200,
+      "params": {
+        "hits": 3,
+        "hit": 200,
+        "gap": 0.5,
+        "aps": 0.2,
+        "leap": 10
+      }
+    },
+    {
+      "id": "shadowHunter",
+      "type": "lone",
+      "name": "Shadow hunter",
+      "cost": 200,
+      "params": {
+        "secs": 5
+      }
     }
   ],
   "units": [
@@ -414,9 +749,9 @@
       "shape": "triangle",
       "color": "#9BD35A",
       "skills": [
-        "swift",
-        "shrink",
-        "spread"
+        "aaargh",
+        "tacticalness",
+        "moreGoblins"
       ],
       "skillsOn": [
         false,
@@ -425,16 +760,19 @@
       ],
       "skillMods": [
         null,
-        {
-          "params": {},
-          "cost": 50
-        },
+        null,
         null
       ],
       "skillsInnate": [
         false,
         false,
         false
+      ],
+      "skillOr": [
+        [
+          1,
+          2
+        ]
       ]
     },
     {
@@ -442,7 +780,7 @@
       "pellets": 1,
       "spinUp": 0,
       "pierce": 0,
-      "projSpeed": 0,
+      "projSpeed": 30,
       "minRange": 0,
       "charge": 1,
       "knockback": 0,
@@ -464,9 +802,9 @@
       "shape": "triangle",
       "color": "#E9E3CF",
       "skills": [
-        "range",
-        "rapid",
-        "boneShield"
+        "longbones",
+        "graverot",
+        "dreadRangers"
       ],
       "skillsOn": [
         false,
@@ -482,6 +820,12 @@
         false,
         false,
         false
+      ],
+      "skillOr": [
+        [
+          1,
+          2
+        ]
       ]
     },
     {
@@ -511,11 +855,13 @@
       "shape": "imp",
       "color": "#FFA94D",
       "skills": [
-        "swift",
-        "heavy",
-        "emberMortar"
+        "spitfire",
+        "flare",
+        "emberMortar",
+        "hellfiend"
       ],
       "skillsOn": [
+        false,
         false,
         false,
         false
@@ -523,12 +869,29 @@
       "skillMods": [
         null,
         null,
+        null,
         null
       ],
       "skillsInnate": [
         false,
         false,
+        false,
         false
+      ],
+      "skillOr": [
+        [
+          1,
+          2
+        ]
+      ],
+      "skillNeedsAny": [
+        null,
+        null,
+        null,
+        [
+          1,
+          2
+        ]
       ]
     },
     {
@@ -605,35 +968,43 @@
       "shape": "cross",
       "color": "#F7D154",
       "skills": [
-        "rapid",
-        "spawn",
-        "range"
+        "rangerScope",
+        "deadeye",
+        "assaultgunner",
+        "overwatch"
       ],
       "skillsOn": [
+        false,
         false,
         false,
         false
       ],
       "skillMods": [
-        {
-          "params": {
-            "range": 0,
-            "aps": 15
-          },
-          "cost": 150
-        },
-        {
-          "params": {
-            "waves": 3,
-            "every": 8.5
-          }
-        },
+        null,
+        null,
+        null,
         null
       ],
       "skillsInnate": [
         false,
         false,
+        false,
         false
+      ],
+      "skillOr": [
+        [
+          1,
+          2
+        ]
+      ],
+      "skillNeedsAny": [
+        null,
+        null,
+        null,
+        [
+          1,
+          2
+        ]
       ]
     },
     {
@@ -663,20 +1034,30 @@
       "shape": "square",
       "color": "#8D99AE",
       "skills": [
-        "armorHp",
-        "swift"
+        "tuffSkin",
+        "rampager",
+        "bullhead"
       ],
       "skillsOn": [
+        false,
         false,
         false
       ],
       "skillMods": [
         null,
+        null,
         null
       ],
       "skillsInnate": [
         false,
+        false,
         false
+      ],
+      "skillOr": [
+        [
+          1,
+          2
+        ]
       ]
     },
     {
@@ -706,23 +1087,43 @@
       "shape": "ring",
       "color": "#ff90ff",
       "skills": [
-        "stealth",
-        "skmv5oxj501"
+        "sightweavers",
+        "transphysical",
+        "shadowborn",
+        "spiritWalk"
       ],
       "skillsOn": [
+        false,
+        false,
         false,
         false
       ],
       "skillMods": [
         null,
-        {
-          "params": {},
-          "cost": 200
-        }
+        null,
+        null,
+        null
       ],
       "skillsInnate": [
         false,
+        false,
+        false,
         false
+      ],
+      "skillOr": [
+        [
+          1,
+          2
+        ]
+      ],
+      "skillNeedsAny": [
+        null,
+        null,
+        null,
+        [
+          1,
+          2
+        ]
       ]
     },
     {
@@ -1201,7 +1602,7 @@
       "charge": 1,
       "knockback": 0,
       "windUp": 0,
-      "flame": 180,
+      "flame": 0,
       "defense": "none",
       "defVal": 0,
       "level": 0,
@@ -1214,15 +1615,17 @@
       "aps": 1.1,
       "range": 4,
       "speed": 2.2,
-      "splash": 0,
+      "splash": 2,
       "shape": "square",
       "color": "#0d3000",
       "skills": [
-        "armorHp",
-        "forward",
-        "explode"
+        "forwardRoots",
+        "reinforcedBark",
+        "graspingRoots",
+        "entExplode"
       ],
       "skillsOn": [
+        false,
         false,
         false,
         false
@@ -1230,19 +1633,31 @@
       "skillsInnate": [
         false,
         false,
+        false,
         false
       ],
       "skillMods": [
-        {
-          "params": {
-            "armor": 4,
-            "hp": 20
-          }
-        },
+        null,
+        null,
         null,
         null
       ],
-      "deathBlast": 0
+      "deathBlast": 0,
+      "skillOr": [
+        [
+          1,
+          2
+        ]
+      ],
+      "skillNeedsAny": [
+        null,
+        null,
+        null,
+        [
+          1,
+          2
+        ]
+      ]
     },
     {
       "burst": 1,
@@ -1380,7 +1795,7 @@
       "hit": 80,
       "aps": 1.1,
       "range": 4,
-      "speed": 6,
+      "speed": 5.5,
       "splash": 0,
       "shape": "triangle",
       "color": "#460000",
@@ -1609,6 +2024,77 @@
         "waterbomb",
         "poolShaper",
         "flowState"
+      ],
+      "skillsOn": [
+        false,
+        false,
+        false
+      ],
+      "skillsInnate": [
+        false,
+        false,
+        false
+      ],
+      "skillMods": [
+        null,
+        null,
+        null
+      ],
+      "skillOr": [
+        [
+          1,
+          2
+        ]
+      ]
+    },
+    {
+      "burst": 1,
+      "pellets": 1,
+      "spinUp": 0,
+      "pierce": 0,
+      "projSpeed": 0,
+      "minRange": 0,
+      "charge": 1,
+      "knockback": 0,
+      "windUp": 0,
+      "flame": 0,
+      "trample": 0,
+      "deathBlast": 0,
+      "defense": "none",
+      "defVal": 0,
+      "level": 0,
+      "unlock": 150,
+      "name": "Assassin",
+      "cost": 500,
+      "bodies": 1,
+      "hp": 350,
+      "hit": 500,
+      "aps": 0.35,
+      "range": 2,
+      "speed": 6,
+      "splash": 0,
+      "shape": "dagger",
+      "color": "#3A3550",
+      "stealth": true,
+      "dash": 10,
+      "bldgPct": 50,
+      "killStack": {
+        "speed": 0.1,
+        "aps": 0.1,
+        "max": 0
+      },
+      "trait": {
+        "name": "Stealthed",
+        "text": "Can't be targeted until it attacks, and hides again after 1.5 s without attacking. It dashes to a target within 10 m without being seen, and deals 50% less damage to buildings."
+      },
+      "trait2": {
+        "name": "Bloodrush",
+        "text": "Every kill gives it +0.1 m/s move speed and +0.1 attacks per second for the rest of the fight."
+      },
+      "skills": [
+        "silentBlade",
+        "deathFlurry",
+        "shadowHunter"
       ],
       "skillsOn": [
         false,

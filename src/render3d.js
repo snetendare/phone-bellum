@@ -31,6 +31,8 @@ const Render3D = (THREE, el, view, opts = {}) => {
   const BW = Game.COLS * Game.TILE, BD = Game.ROWS * Game.TILE, T = Game.TILE;
   const css = Art.css;
   const { ELF_COL, SHROOM_COL, CHARM_COL, BLEED_COL, POOL_COL } = Art;
+  // Overwatch: how high a squad in one of its buildings stands, on its roof (a building's model is drawn at its real size)
+  const roofOf = (u) => u ? models.height(models.kindOf(u)) * 0.9 : 0;
   const models = Models3D(THREE);
 
   // ---------- three.js basics: renderer, scene, camera, light ----------
@@ -374,7 +376,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
       const crest = b.u.structure ? Game.charOf(src, b.side) : null;
       const u = b.mask && b.side !== me && !b.revealed ? { ...b.u, ...b.mask } : b.u; // a disguise, until its first attack (devtest)
       const tag = b.u.structure || b.u.aloft || b.u.noCount || (b.hidden && b.side !== me) ? null : `${b.side}|${b.squad}|${u.name}`;
-      bodies.push({ u, side: b.side, x: p.x, y: p.y, hx: b.hx, hy: b.hy, look, moving: p.moving, phase: p.phase, b, crest, edge: Art.teamCol(b.side, me), tag });
+      bodies.push({ u, side: b.side, x: p.x, y: p.y, hx: b.hx, hy: b.hy, look, moving: p.moving, phase: p.phase, b, crest, edge: Art.teamCol(b.side, me), tag, raise: b.inside && b.inside.alive ? roofOf(b.inside.u) : 0 });
       if (b.u.structure && b.walls) addWalls(f, b.x, b.y, b.walls);
     }
     // Pool shaper's pools: water on the ground, ringed in their side's colour
@@ -386,6 +388,18 @@ const Render3D = (THREE, el, view, opts = {}) => {
     for (const mn of bt.mines ? bt.mines() : []) {
       const [wx, wz] = world(f, mn.x, mn.y), team = teamColor(mn.side, me);
       scene_(() => { disc(wx, wz, 0.55, color('#2B2F33'), 0.9); arc(wx, wz, 0.8, team, mn.side === me ? 0.9 : 0.5, 1, 0.14); });
+    }
+    // Summon hellfiend: a swirling portal on the ground for its first seconds
+    for (const pt of bt.portals ? bt.portals() : []) {
+      const [wx, wz] = world(f, pt.x, pt.y);
+      scene_(() => { disc(wx, wz, 2.4, color('#5A0F18'), 0.7, 0.2); for (let k = 0; k < 3; k++) arc(wx, wz, (2.4 - k * 0.6) * (1 + 0.08 * Math.sin(clock * 5 + k * 2)), color(k % 2 ? '#FFB347' : '#FF5A2D'), 0.9, 1, 0.18, 10); });
+    }
+    // Grasping roots: a root from each Ent to the enemy it drags
+    for (const b of bt.bodies) {
+      const v2 = b.rootTgt;
+      if (!b.alive || !v2 || !v2.alive) continue;
+      const p = shown.get(b) || b, q = shown.get(v2) || v2;
+      scene_(() => { beam(p.x * f, 0.25, -p.y * f, q.x * f, 0.25, -q.y * f, 0.22, color('#6B4A2A'), 0.95); beam(p.x * f, 0.4, -p.y * f, q.x * f, 0.4, -q.y * f, 0.08, color('#3FA34D'), 0.9); });
     }
     // a linked squad: a faint line joins its bodies (they share one health pool)
     for (const b of bt.bodies) {
@@ -415,7 +429,9 @@ const Render3D = (THREE, el, view, opts = {}) => {
       const u = units[sq.unit], w = Game.tileToWorld(sq.col, sq.row), st = tileCenter(v, sq.col, sq.row);
       const list = Engine.buildSquad(u, side, w.x, w.y, sq.id, T);
       squadTiles.add(sq.col + ',' + sq.row);
-      for (const b of list) bodies.push({ u, side, x: b.x, y: b.y, look: 'solid', tag: side + '|' + sq.id, tile: sq });
+      const raise = Game.garrisonAt(m, side, sq.col, sq.row) ? roofOf(Game.towerAt(m, side, sq.col, sq.row) ? towerUnit(m, side, Game.towerTypeShown(m, me, deploying, side))
+        : Game.treasuryAt(m, side, sq.col, sq.row) ? Game.treasuryUnit() : Game.bwallAt(m, side, sq.col, sq.row) ? Game.bwallUnit() : { building: 'factory' }) : 0; // Overwatch: it stands on top of the building it is in
+      for (const b of list) bodies.push({ u, side, x: b.x, y: b.y, look: 'solid', tag: side + '|' + sq.id, tile: sq, raise });
       if (fresh) tileSq(st.c, st.r, teamColor(side, me), 0.8, 0.05, 14);
       // badges over the squad: level pips, charisma pips (or the Gentleman's hat), ready to level up (its tag goes
       // under it, see labels)
@@ -554,11 +570,16 @@ const Render3D = (THREE, el, view, opts = {}) => {
     if (b.poison && b.poison.length) dots.push(color('#6FD08C'));
     if (b.slowT > 0) dots.push(color('#9BD0FF'));
     if (b.bleed) for (let k = 0; k < b.bleed.n; k++) dots.push(color(BLEED_COL));
+    if (b.burn) dots.push(color('#FF7A1A')); // burning
     const ch = v0.bt.charm ? v0.bt.charm(b.side, b.squad) : 0;
     if (ch >= Engine.CHARM_MAX) { icon('hat', wx, top + 0.35, wz, Math.max(0.8, r * 0.9)); y += 0.5; }
     else if (ch > 0) dots.push(color(CHARM_COL));
     if (dots.length) iconRow(dots.map(() => 'dot'), wx, y + 0.1, wz, 0.4, dots);
     scene_(() => sceneMarkers(b, wx, wz, r, top, t));
+    if (b.dashing || b.charging) { // a dash or a Bullhead charge: streaks in the team colour behind it
+      const hx = (b.hx || 0) * f, hz = -(b.hy || 0) * f;
+      for (const o of [-0.5, 0, 0.5]) beam(wx - hx * r * 1.2 - hz * r * o, 0.7 * r, wz - hz * r * 1.2 + hx * r * o, wx - hx * r * 3 - hz * r * o, 0.7 * r, wz - hz * r * 3 + hx * r * o, 0.07, team, 0.6);
+    }
     if (b.fast) { // yellow mushroom: speed streaks behind it
       const hx = (b.hx || 0) * f, hz = -(b.hy || 0) * f;
       for (const o of [-0.4, 0.4]) beam(wx - hx * r * 1.2 - hz * r * o, 0.6 * r, wz - hz * r * 1.2 + hx * r * o, wx - hx * r * 2.4 - hz * r * o, 0.6 * r, wz - hz * r * 2.4 + hx * r * o, 0.06, color(SHROOM_COL.yellow), 0.6);
@@ -606,7 +627,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
         const fixed = (s.u.structure || s.u.building) && !s.u.awake;
         const r = s.u.structure || s.u.building ? (s.scale || 1) : size(s.u) * MODEL_SCALE, sc = r * (s.look === 'ghost' || s.look === 'ghostFoe' ? 0.85 : 1);
         const hx = s.hx || 0, hy = s.hy == null ? (s.side === 1 ? -1 : 1) : s.hy;
-        const lift = s.u.aloft ? (s.u.kind === 'drone' ? 4 : 6) + Math.sin(clock * 1.5 + (s.phase || 0)) * 0.3 : 0; // a drone flies lower than an airship
+        const lift = (s.u.aloft ? (s.u.kind === 'drone' ? 4 : 6) + Math.sin(clock * 1.5 + (s.phase || 0)) * 0.3 : 0) + (s.raise || 0); // a drone flies lower than an airship; a squad in a building stands on it
         // Mechites glide (smooth); a roller rolls instead of bobbing
         const bob = s.moving && !s.u.smooth && !rollAt ? Math.abs(Math.sin(clock * 9 + s.phase)) * 0.12 * r * s.moving : 0;
         const [wx, wz] = world(f, s.x, s.y);

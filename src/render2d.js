@@ -779,6 +779,13 @@ const Render2D = (cv, view) => {
     if (Game.treasuryOn(m)) drawTreasuries();
     if (phase === 'deploy') drawBwalls();
     drawBuildings();
+    // Overwatch: a squad standing in one of its side's buildings is drawn over the building (theirs as far as you can see it)
+    for (const side of [me, foe()]) for (const sq of m.armies[side]) {
+      if (Game.isRider(sq) || (side !== me && ((phase === 'deploy' && sq.round >= m.round) || Game.hiddenFromFoe(m, sq)))) continue;
+      const p = side === me ? (drag && drag.moved && drag.id === sq.id ? drag.over : sq) : phase === 'deploy' ? Game.seenAt(m, sq) : sq;
+      if (!Game.garrisonAt(m, side, p.col, p.row)) continue;
+      drawSquad({ ...sq, col: p.col, row: p.row, ...(side !== me ? { unit: Game.shownUnit(m, me, side, sq.unit), level: Game.seenLevel(m, sq) } : {}) }, side, side === me && phase === 'deploy' && (sq.round === m.round || sq.movedRound === m.round));
+    }
     // the squad tapped last: its range as a dotted ring round its tile (theirs as you can know it)
     const rs = rangeOf && phase === 'deploy' && m.armies[rangeOf.side].find(s => s.id === rangeOf.id);
     if (rs) {
@@ -829,6 +836,23 @@ const Render2D = (cv, view) => {
       ctx.strokeStyle = teamCol(q.side); ctx.globalAlpha = 0.45; ctx.lineWidth = 1.5; ctx.stroke();
     }
     ctx.globalAlpha = 1;
+    // Summon hellfiend: a swirling portal in front of each squad for its first seconds
+    for (const pt of bt.portals ? bt.portals() : []) {
+      const pr = tilePx() * 0.42, a0 = bt.time() * 5;
+      ctx.fillStyle = 'rgba(120,20,30,0.45)'; ctx.beginPath(); ctx.ellipse(PX(pt.x), PY(pt.y), pr, pr * 0.7, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#FF6A3D'; ctx.lineWidth = 2;
+      for (let k = 0; k < 3; k++) { ctx.beginPath(); ctx.ellipse(PX(pt.x), PY(pt.y), pr * (1 - k * 0.25), pr * 0.7 * (1 - k * 0.25), 0, a0 + k * 2, a0 + k * 2 + 3.6); ctx.stroke(); }
+    }
+    // Grasping roots: a gnarled line from each Ent to the enemy it drags
+    for (const b of bt.bodies) {
+      const v = b.rootTgt;
+      if (!b.alive || !v || !v.alive) continue;
+      ctx.strokeStyle = '#6B4A2A'; ctx.lineWidth = 3; ctx.globalAlpha = 0.85;
+      const x1 = PX(b.x), y1 = PY(b.y), x2 = PX(v.x), y2 = PY(v.y), mx = (x1 + x2) / 2 + (y2 - y1) * 0.12, my = (y1 + y2) / 2 - (x2 - x1) * 0.12;
+      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.quadraticCurveTo(mx, my, x2, y2); ctx.stroke();
+      ctx.strokeStyle = '#3FA34D'; ctx.lineWidth = 1; ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
     for (const b of bt.bodies) {
       if (b.alive || b.boarded) continue; // a rider still inside its carrier isn't a corpse
       ctx.fillStyle = muted; ctx.globalAlpha = 0.18;
@@ -897,6 +921,14 @@ const Render2D = (cv, view) => {
       if (b.poison && b.poison.length) { ctx.fillStyle = '#6FD08C'; ctx.beginPath(); ctx.arc(PX(b.x) + r * 0.9, PY(b.y) - r * 0.9, Math.max(2, r * 0.3), 0, Math.PI * 2); ctx.fill(); }
       if (b.slowT > 0) { ctx.fillStyle = '#9BD0FF'; ctx.beginPath(); ctx.arc(PX(b.x) - r * 0.9, PY(b.y) - r * 0.9, Math.max(2, r * 0.3), 0, Math.PI * 2); ctx.fill(); } // slowed
       if (b.bleed && b.bleed.n > 0) bleedMark(PX(b.x), PY(b.y), r, b.bleed.n);
+      if (b.burn) { ctx.fillStyle = '#FF7A1A'; ctx.globalAlpha = 0.6 + 0.4 * Math.abs(Math.sin(bt.time() * 9 + b.x)); ctx.beginPath(); ctx.arc(PX(b.x), PY(b.y) - r * 1.05, Math.max(2, r * 0.3), 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1; } // burning
+      if (b.inside && b.inside.alive) { ctx.strokeStyle = css('--gold'); ctx.lineWidth = 1.5; ctx.setLineDash([2, 2]); ctx.beginPath(); ctx.arc(PX(b.x), PY(b.y), r + 3, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]); } // Overwatch: safe in its building
+      if (b.dashing || b.charging) { // a dash or a Bullhead charge: speed lines behind it
+        ctx.strokeStyle = c; ctx.globalAlpha = 0.6; ctx.lineWidth = 1.5;
+        const hx = (b.hx || 0) * flip(), hy = -(b.hy || 0) * flip();
+        for (const o of [-0.5, 0, 0.5]) { ctx.beginPath(); ctx.moveTo(PX(b.x) - hx * r * 1.2 + hy * r * o, PY(b.y) - hy * r * 1.2 - hx * r * o); ctx.lineTo(PX(b.x) - hx * r * 3 + hy * r * o, PY(b.y) - hy * r * 3 - hx * r * o); ctx.stroke(); }
+        ctx.globalAlpha = 1;
+      }
       if (b.forgeT > 0 && b.forgeFull > 0) { // forging a titanium spear: a steel ring fills
         ctx.strokeStyle = '#C9D1D9'; ctx.lineWidth = 2; ctx.setLineDash([3, 2]);
         ctx.beginPath(); ctx.arc(PX(b.x), PY(b.y), r + 5, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * (1 - b.forgeT / b.forgeFull)); ctx.stroke(); ctx.setLineDash([]);

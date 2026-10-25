@@ -84,7 +84,20 @@
     "link": { "has": ["Linked health", "Health boost"] },
     "healbot": { "has": ["Construct"], "makes": ["Heal and repair"] },
     "building": { "makes": ["Built building"] },
-    "builder": { "has": [] }
+    "builder": { "has": [] },
+    "burn": { "makes": ["Burn"] },
+    "roots": { "makes": ["Displace"] },
+    "killStack": { "has": ["Move speed", "Attack speed"] },
+    "killSpawn": { "makes": ["Spawn"] },
+    "bull": { "has": ["Run-through", "Armor"], "makes": ["Displace"] },
+    "flare": { "has": ["Attack speed"] },
+    "portal": { "makes": ["Spawn"] },
+    "overwatch": { "has": ["Range boost"] },
+    "freeMove": { "has": [] },
+    "silent": { "has": ["Stealth"] },
+    "firstHit": { "has": ["Damage boost"] },
+    "flurry": { "has": ["Damage boost"] },
+    "lone": { "has": [] }
   },
   "items": {
     "_about": "Design intent the data can't show: add has / makes / feeds / counteredBy (keyword lists), why (shown on the line), or not (keywords to drop). Keyed by item name.",
