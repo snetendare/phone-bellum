@@ -20,7 +20,7 @@ const Render2D = (cv, view) => {
   const pull = () => { ({ m, me, phase, units, mode, bt, battlePre, fx, selected, moving, drag, hoverTile, rangeOf, editable, placingUnit, placingElf, placingTower, placingWall, placingBuilding, battleCam, dev } = view()); };
   const foe = () => 1 - me;
   const css = Art.css, tag = Shapes.tag;
-  const { ELF_COL, SHROOM_COL, CHARM_COL } = Art;
+  const { ELF_COL, SHROOM_COL, CHARM_COL, BLEED_COL, POOL_COL } = Art;
   let W = 0, H = 0, S = 0;
   function size() {
     const r = cv.getBoundingClientRect();
@@ -509,6 +509,15 @@ const Render2D = (cv, view) => {
     }
   }
 
+  // bleeding: a red drop by the body and a pip per stack under it; at full stacks it throbs
+  function bleedMark(x, y, r, n) {
+    const dr = Math.max(2, r * 0.32), bx = x + r * 0.95, by = y + r * 0.6;
+    ctx.fillStyle = BLEED_COL; ctx.globalAlpha = n >= Engine.BLEED.max ? 0.55 + 0.45 * Math.abs(Math.sin(bt.time() * 8)) : 1;
+    ctx.beginPath(); ctx.moveTo(bx, by - dr * 1.8); ctx.quadraticCurveTo(bx + dr, by - dr * 0.5, bx + dr, by); ctx.arc(bx, by, dr, 0, Math.PI); ctx.quadraticCurveTo(bx - dr, by - dr * 0.5, bx, by - dr * 1.8); ctx.fill();
+    const pr = Math.max(1.2, r * 0.14);
+    for (let k = 0; k < n; k++) { ctx.beginPath(); ctx.arc(x + (k - (n - 1) / 2) * pr * 2.6, y + r * 1.3, pr, 0, Math.PI * 2); ctx.fill(); }
+    ctx.globalAlpha = 1;
+  }
   // the Gentleman's top hat (brim centred on x, y; s = its width)
   function drawHat(x, y, s) {
     ctx.fillStyle = '#16161C'; ctx.strokeStyle = '#EDEFF2'; ctx.lineWidth = 1;
@@ -802,7 +811,8 @@ const Render2D = (cv, view) => {
         const cx = PX(e.x1), cy = PY(e.y1), ex = PX(e.x2), ey = PY(e.y2);
         const ang = Math.atan2(ey - cy, ex - cx), half = e.half * Math.PI / 180, rr = Math.hypot(ex - cx, ey - cy);
         const grd = ctx.createRadialGradient(cx, cy, 0, cx, cy, rr);
-        grd.addColorStop(0, 'rgba(255,210,90,0.6)'); grd.addColorStop(0.6, 'rgba(255,120,40,0.35)'); grd.addColorStop(1, 'rgba(255,70,20,0.05)');
+        if (e.slam) { grd.addColorStop(0, 'rgba(205,175,120,0.65)'); grd.addColorStop(0.6, 'rgba(140,105,60,0.4)'); grd.addColorStop(1, 'rgba(90,70,40,0.05)'); } // a ground slam: dust and rock
+        else { grd.addColorStop(0, 'rgba(255,210,90,0.6)'); grd.addColorStop(0.6, 'rgba(255,120,40,0.35)'); grd.addColorStop(1, 'rgba(255,70,20,0.05)'); }
         ctx.fillStyle = grd; ctx.globalAlpha = 0.4 + 0.6 * a;
         ctx.beginPath(); ctx.moveTo(cx, cy); ctx.arc(cx, cy, rr, ang - half, ang + half); ctx.closePath(); ctx.fill();
       }
@@ -810,6 +820,13 @@ const Render2D = (cv, view) => {
         ctx.strokeStyle = teamCol(e.side); ctx.globalAlpha = 0.5 * a; ctx.lineWidth = 1;
         ctx.beginPath(); ctx.arc(PX(e.x), PY(e.y), radius(e.u) * (1 + e.age / e.life), 0, Math.PI * 2); ctx.stroke();
       }
+    }
+    ctx.globalAlpha = 1;
+    // Pool shaper's pools: water on the ground, ringed in their side's colour
+    for (const q of bt.pools ? bt.pools() : []) {
+      ctx.fillStyle = POOL_COL; ctx.globalAlpha = 0.22 + 0.05 * Math.sin(bt.time() * 2 + q.x);
+      ctx.beginPath(); ctx.arc(PX(q.x), PY(q.y), q.r * S, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = teamCol(q.side); ctx.globalAlpha = 0.45; ctx.lineWidth = 1.5; ctx.stroke();
     }
     ctx.globalAlpha = 1;
     for (const b of bt.bodies) {
@@ -879,6 +896,11 @@ const Render2D = (cv, view) => {
       }
       if (b.poison && b.poison.length) { ctx.fillStyle = '#6FD08C'; ctx.beginPath(); ctx.arc(PX(b.x) + r * 0.9, PY(b.y) - r * 0.9, Math.max(2, r * 0.3), 0, Math.PI * 2); ctx.fill(); }
       if (b.slowT > 0) { ctx.fillStyle = '#9BD0FF'; ctx.beginPath(); ctx.arc(PX(b.x) - r * 0.9, PY(b.y) - r * 0.9, Math.max(2, r * 0.3), 0, Math.PI * 2); ctx.fill(); } // slowed
+      if (b.bleed && b.bleed.n > 0) bleedMark(PX(b.x), PY(b.y), r, b.bleed.n);
+      if (b.forgeT > 0 && b.forgeFull > 0) { // forging a titanium spear: a steel ring fills
+        ctx.strokeStyle = '#C9D1D9'; ctx.lineWidth = 2; ctx.setLineDash([3, 2]);
+        ctx.beginPath(); ctx.arc(PX(b.x), PY(b.y), r + 5, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * (1 - b.forgeT / b.forgeFull)); ctx.stroke(); ctx.setLineDash([]);
+      }
       if (b.stunT > 0) { // stunned after a charge: three dots circling over its head
         ctx.fillStyle = '#FFD23F';
         for (let k = 0; k < 3; k++) { const a = bt.time() * 6 + k * 2.094; ctx.beginPath(); ctx.arc(PX(b.x) + Math.cos(a) * r * 0.8, PY(b.y) - r * 1.2 + Math.sin(a) * r * 0.3, Math.max(1.5, r * 0.2), 0, Math.PI * 2); ctx.fill(); }
@@ -957,7 +979,7 @@ const Render2D = (cv, view) => {
     }
     ctx.globalAlpha = 1;
     for (const p of bt.projectiles()) {
-      if (p.owner.u.shape === 'spear') { // a thrown spear: shaft and head along its flight, in the unit's colour
+      if (p.spear || p.owner.u.shape === 'spear') { // a thrown spear (Truespear, a titanium spear): shaft and head along its flight, in the unit's colour
         const L = Math.max(12, 3 * S), dx = p.dirX * flip(), dy = -p.dirY * flip(), hx = PX(p.x), hy = PY(p.y), tx = hx - dx * L, ty = hy - dy * L;
         ctx.strokeStyle = teamCol(p.owner.side); ctx.lineWidth = 3.5; ctx.lineCap = 'round';
         ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(hx, hy); ctx.stroke();

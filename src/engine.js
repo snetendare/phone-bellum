@@ -87,6 +87,29 @@ const Engine = (() => {
   // reach metres of the last one, up to jumps times, dealing chain.hit each time (lightning).
   // mend: the body never attacks; each attack heals the most wounded ally in range (not structures) by this much
   // pctHit: every hit also deals this share of the target's max health (not to structures); that part ignores armor (ward still caps the hit)
+  // Bleed (u.bleedEvery = n: every n-th hit a body lands on the same target gives it a stack of bleed; Titanium spears
+  // give one too). A bleeding body loses BLEED.dmg every BLEED.pulse s for BLEED.secs s (each new stack starts that time
+  // again); each stack doubles the damage, up to BLEED.max stacks, and at BLEED.max it also loses BLEED.maxPct % of its
+  // max health a second (not structures). Bleed skips armor and ward, like poison. The stacks belong to the target, so
+  // every source adds to the same ones. u.bleedLonger: its stacks last that many seconds more; u.bleedNoHeal: a body
+  // bleeding from it can't heal or regenerate until the bleed runs out; u.bleedStun: a body it brings to BLEED.max
+  // stacks is stunned that many seconds.
+  const BLEED = { dmg: 2, pulse: 0.5, secs: 2, max: 5, maxPct: 2 };
+  // Poisoned bodies heal POISON_HEAL % as much (slime units drink poison and heal fully)
+  const POISON_HEAL = 50;
+  // waterHeal: allies inside the splash of its attacks heal for its hit; with no enemy in reach it shoots at the most
+  // wounded ally in reach instead (structures aren't healed)
+  // pools = { pct, speed, secs }: where its attacks land they leave a pool the size of their splash, for the rest of the
+  // fight (a new one isn't made where it would overlap a pool already there). Every second enemies in it take pct % of
+  // the hit (past armor) and allies in it heal that much, and allies in it move `speed` m/s faster for `secs` s.
+  // flow = { aps, range, max }: each attack it makes while standing still adds a stack (up to max): +aps attacks a
+  // second and +range metres each. Moving takes all the stacks away.
+  // aura = { radius, hit, aps }: other units of its side within radius get +hit on every hit and +aps attacks a second
+  // (the strongest aura counts, they don't add up)
+  // spear = { forge, speed, hit, bleed }: apart from its own attack, it spends 1 armor to forge a spear (forge s), then
+  // throws it at the nearest enemy in reach (speed m/s): hit damage to the first body it reaches and bleed stacks.
+  // It forges only while it has armor left and an enemy in reach. The spear's hit grows with the unit's level.
+  // stunHit: every hit stuns the target this many seconds (not structures)
   const BLAST_RADIUS = 4;      // a body with deathBlast explodes when it dies, hitting enemies within this distance
   const PIERCE_DEPTH = 10;     // metres a piercing shot travels past its target
   const PIERCE_WIDTH = 1;      // half-width of the pierce corridor (m)
@@ -122,7 +145,7 @@ const Engine = (() => {
     const L = Math.max(0, Math.min(MAX_LEVEL, Math.round(level == null ? u.level : level)));
     if (!L) return { ...u, level: 0 };
     const k = 1 + LEVEL_BONUS * L;
-    return { ...u, level: L, hp: u.hp * k, hit: u.hit * k };
+    return { ...u, level: L, hp: u.hp * k, hit: u.hit * k, ...(u.spear ? { spear: { ...u.spear, hit: u.spear.hit * k } } : {}) };
   }
 
   // ---------- skills ----------
@@ -161,6 +184,15 @@ const Engine = (() => {
     healbot: { label: 'Healbot', params: [['hp', 'Healbot health', 300, 25], ['pct', 'Heals each body (% of max health per second)', 4, 0.5], ['range', 'Heal reach (m)', 8, 1], ['speed', 'Healbot move speed (m/s)', 3, 0.5]] },
     building: { label: 'Building', params: [['building', 'Building (id)', 'factory', null]] },
     builder: { label: 'Construct upgrades', params: [['extra', 'More constructs per build', 0, 1], ['faster', 'Build time (−%)', 0, 5], ['aps', 'Construct attack speed (+%)', 0, 5], ['shield', 'Construct shield (hits blocked)', 0, 1], ['armor', 'Construct armor', 0, 1]] },
+    stats:   { label: 'Stat changes', params: [['hp', 'Health (+%)', 0, 5], ['hit', 'Hit size (+%)', 0, 5], ['hitAdd', 'Hit size (+)', 0, 5], ['aps', 'Attacks per second (+)', 0, 0.05], ['apsPct', 'Attack speed (+%)', 0, 5], ['range', 'Range (+m)', 0, 0.5], ['splash', 'Splash (+m)', 0, 0.1], ['armor', 'Armor (+)', 0, 1], ['burst', 'Extra shots in quick succession', 0, 1]] },
+    double:  { label: 'Double strike', params: [['every', 'Every this many attacks', 3, 1], ['hit', 'Hit size (+%)', 5, 1]] },
+    bleedDeep: { label: 'Deep bleed', params: [['secs', 'Bleed lasts (+s)', 1, 0.5]] },
+    bleedStun: { label: 'Bleed stun', params: [['secs', 'Stun (s)', 1.2, 0.1]] },
+    pools:   { label: 'Pools', params: [['splash', 'Splash (+m)', 2, 0.5], ['aps', 'Attacks per second (−)', 0.2, 0.05], ['pct', 'Damage / heal per second (% of hit)', 25, 5], ['speed', 'Ally move speed (+m/s)', 0.5, 0.1], ['secs', 'Speed lasts (s)', 2, 0.5]] },
+    flow:    { label: 'Flow state', params: [['aps', 'Attacks per second per stack (+)', 0.1, 0.05], ['range', 'Range per stack (+m)', 0.4, 0.1], ['max', 'Most stacks', 5, 1]] },
+    aura:    { label: 'Aura', params: [['armor', 'Armor (+)', 2, 1], ['radius', 'Aura radius (m)', 8, 1], ['hit', 'Allies’ hit size (+)', 20, 5], ['aps', 'Allies’ attacks per second (+)', 0.1, 0.05]] },
+    spears:  { label: 'Forged spears', params: [['forge', 'Forging time (s)', 1.5, 0.1], ['speed', 'Spear speed (m/s)', 35, 5], ['hit', 'Spear damage', 200, 10], ['bleed', 'Bleed stacks', 1, 1]] },
+    slam:    { label: 'Ground slam', params: [['armor', 'Armor (+)', 8, 1], ['range', 'Range (−m)', 10, 1], ['hit', 'Hit size (becomes)', 200, 10], ['stun', 'Stun (s)', 1, 0.1], ['cone', 'Cone (degrees each side)', 30, 5]] },
   };
   const skillParam = (d, k) => {
     const v = d.params && d.params[k];
@@ -213,6 +245,21 @@ const Engine = (() => {
         if (c.length) parts.push(`its constructs and what its buildings make get ${c.join(', ')}`);
         return parts.length ? parts.join('; ').replace(/^./, s => s.toUpperCase()) + '.' : 'No change.';
       }
+      case 'stats': {
+        const sg = (k, txt) => +P(k) ? `${+P(k) > 0 ? '+' : '−'}${String(Math.round(Math.abs(+P(k)) * 100) / 100)}${txt}` : null;
+        const parts = [sg('hp', '% health'), sg('hit', '% hit size'), sg('hitAdd', ' hit size'), sg('aps', ' attacks per second'), sg('apsPct', '% attack speed'),
+          sg('range', ' m range'), sg('splash', ' m splash'), sg('armor', ' armor')].filter(Boolean);
+        if (+P('burst') > 0) parts.push(+P('burst') === 1 ? 'attacks twice in quick succession' : `attacks ${+P('burst') + 1} times in quick succession`);
+        return parts.length ? parts.join(', ').replace(/^./, s => s.toUpperCase()) + '.' : 'No change.';
+      }
+      case 'double': return `${+P('hit') ? `+${n('hit')}% hit size, and e` : 'E'}very ${+P('every') === 2 ? 'second' : +P('every') === 3 ? 'third' : `${n('every')}th`} attack strikes twice in quick succession.`;
+      case 'bleedDeep': return `Its bleed lasts ${n('secs')} s longer, and a unit bleeding from it can’t heal or regenerate until the bleed runs out.`;
+      case 'bleedStun': return `An enemy its bleed brings to ${BLEED.max} stacks is stunned for ${n('secs')} s (not towers).`;
+      case 'pools': return `+${n('splash')} m splash, −${n('aps')} attacks per second. Its attacks leave pools the size of their splash for the rest of the fight (pools can’t overlap): every second enemies in a pool take ${n('pct')}% of the hit and allies in it heal that much, and allies in it move ${n('speed')} m/s faster for ${n('secs')} s.`;
+      case 'flow': return `Each attack it makes while standing still gives it +${n('aps')} attacks per second and +${n('range')} m range, up to ${n('max')} stacks. Moving takes them all away.`;
+      case 'aura': return `${+P('armor') ? `+${n('armor')} armor. ` : ''}Allies within ${n('radius')} m get +${n('hit')} damage on every hit and +${n('aps')} attacks per second.`;
+      case 'spears': return `Apart from its own attack, it spends 1 armor to forge a titanium spear (${n('forge')} s), then throws it at an enemy in reach (${n('speed')} m/s): ${n('hit')} damage${+P('bleed') > 0 ? ` and ${+P('bleed') === 1 ? 'a stack' : `${n('bleed')} stacks`} of bleed` : ''}. It keeps forging while it has armor left.`;
+      case 'slam': return `+${n('armor')} armor, −${n('range')} m range. Its attack becomes a slam that hits every enemy in a cone in front of it for ${n('hit')} damage and stuns them for ${n('stun')} s (not towers).`;
     }
     return '';
   }
@@ -285,6 +332,34 @@ const Engine = (() => {
         case 'healbot':
           u.escort = { pct: Math.max(0, P('pct')), unit: withTraits({ name: 'Healbot', cost: 0, bodies: 1, hp: Math.max(1, P('hp')), hit: 0, aps: 1, range: Math.max(1, P('range')),
             speed: Math.max(0.5, P('speed')), splash: 0, shape: 'diamond', color: '#8FD6A0', construct: true, noCount: true, follow: true }) };
+          break;
+        case 'stats':
+          u.hp = u.hp * (1 + P('hp') / 100);
+          u.hit = Math.max(0, u.hit * (1 + P('hit') / 100) + P('hitAdd'));
+          u.aps = Math.max(0.05, (u.aps + P('aps')) * (1 + P('apsPct') / 100));
+          u.range = Math.max(0.5, u.range + P('range'));
+          u.splash = Math.max(0, (u.splash || 0) + P('splash'));
+          u.bonusArmor = (u.bonusArmor || 0) + P('armor');
+          u.burst = Math.max(1, Math.round(u.burst || 1) + Math.max(0, Math.round(P('burst'))));
+          break;
+        case 'double': u.hit = u.hit * (1 + P('hit') / 100); u.double = Math.max(2, Math.round(P('every'))); break;
+        case 'bleedDeep': u.bleedLonger = (u.bleedLonger || 0) + Math.max(0, P('secs')); u.bleedNoHeal = true; break;
+        case 'bleedStun': u.bleedStun = Math.max(u.bleedStun || 0, Math.max(0, P('secs'))); break;
+        case 'pools':
+          u.splash = Math.max(0, (u.splash || 0) + P('splash'));
+          u.aps = Math.max(0.05, u.aps - P('aps'));
+          u.pools = { pct: Math.max(0, P('pct')), speed: Math.max(0, P('speed')), secs: Math.max(0, P('secs')) };
+          break;
+        case 'flow': u.flow = { aps: Math.max(0, P('aps')), range: Math.max(0, P('range')), max: Math.max(1, Math.round(P('max'))) }; break;
+        case 'aura': u.bonusArmor = (u.bonusArmor || 0) + P('armor'); u.aura = { radius: Math.max(0, P('radius')), hit: P('hit'), aps: P('aps') }; break;
+        case 'spears': u.spear = { forge: Math.max(0.1, P('forge')), speed: Math.max(2, P('speed')), hit: Math.max(0, P('hit')), bleed: Math.max(0, Math.round(P('bleed'))) }; break;
+        case 'slam':
+          u.bonusArmor = (u.bonusArmor || 0) + P('armor');
+          u.range = Math.max(1, u.range - P('range'));
+          u.hit = Math.max(0, P('hit'));
+          u.flame = Math.max(1, Math.min(180, P('cone'))); u.slam = true; // a cone that lands at once, like a flame (drawn as a slam)
+          u.stunHit = Math.max(u.stunHit || 0, Math.max(0, P('stun')));
+          u.pierce = 0; u.burst = 1; u.pellets = 1;
           break;
         case 'builder': {
           // buildings go up faster too, and what its buildings make gets the same upgrades (see the game's constructBuff)
@@ -474,7 +549,7 @@ const Engine = (() => {
     const fell = (v) => {
       // a tower with teleport (Teleport mage general): instead of falling it jumps to u.teleport { x, y } with 1 health, once, and its side isn't crippled
       if (v.u.structure && v.u.teleport && !v.teleported) {
-        v.teleported = true; v.alive = true; v.hp = 1; v.diedTick = undefined; v.poison = null;
+        v.teleported = true; v.alive = true; v.hp = 1; v.diedTick = undefined; v.poison = null; v.bleed = null;
         v.x = v.u.teleport.x; v.y = v.u.teleport.y;
         return;
       }
@@ -524,7 +599,7 @@ const Engine = (() => {
       if (!c || v.side === owner.side || v.u.structure || !(c[owner.squad] > 0)) return false;
       if (c[owner.squad] >= CHARM_MAX && !charmUsed[owner.side][owner.squad] && !v.u.carrier && !v.convert && !v.link && !v.u.construct) {
         charmUsed[owner.side][owner.squad] = true;
-        v.hp = v.u.hp * CONVERT_HP / 100; v.turning = true; v.poison = null;
+        v.hp = v.u.hp * CONVERT_HP / 100; v.turning = true; v.poison = null; v.bleed = null;
         turning.push(v);
         return true;
       }
@@ -542,6 +617,10 @@ const Engine = (() => {
     }
     // healing and regeneration strength (a map can make them stronger)
     const healMul = g.healMul > 0 ? g.healMul : 1;
+    // how much of a heal a body gets: none while it bleeds from Too deep (bleedNoHeal), POISON_HEAL % while poisoned
+    // (slime units drink poison, so they heal in full)
+    const healK = (v) => v.bleed && v.bleed.noHeal ? 0 : v.poison && v.poison.length && !v.u.slime ? POISON_HEAL / 100 : 1;
+    function heal(v, amt) { if (amt > 0 && v.hp < v.u.hp) v.hp = Math.min(v.u.hp, v.hp + amt * healK(v)); }
     // neutral structures (a map's elf tower): they belong to neither side, can't be hit, and shoot at
     // units of both sides in turn. Each is { u, x, y, friends: [bool, bool] }. A side it is friends with
     // (bribed) is never shot; it gets small splash heals instead (u.healHit, u.healAps, u.healSplash).
@@ -581,7 +660,10 @@ const Engine = (() => {
       return best;
     }
     // current range: shortsight can shrink it for a while, but never below 1 m (or the unit's own range if shorter)
-    const R = (b) => b.shrinkT > 0 ? Math.max(Math.min(b.u.range, 1), b.u.range - b.shrinkM) : b.u.range;
+    // Flow state stacks add to it
+    const R = (b) => { const r = b.flow > 0 ? b.u.range + b.flow * b.u.flow.range : b.u.range; return b.shrinkT > 0 ? Math.max(Math.min(r, 1), r - b.shrinkM) : r; };
+    // move speed: a pool's speed boost adds to it while it lasts
+    const spd = (b) => b.poolFastT > 0 ? b.u.speed + b.poolFast : b.u.speed;
     // How far an attack reaches. Flame cones can reach further than where the unit stops (g.flameReach x range),
     // so a flamer keeps burning the enemies behind the first one without walking up to each.
     const reachOf = (b) => b.u.flame > 0 && g.flameReach > 1 ? R(b) * g.flameReach : R(b);
@@ -627,6 +709,24 @@ const Engine = (() => {
       if (poolHp(v) <= 1e-9 && finishing(owner, v)) return;
       if (poolHp(v) <= 1e-9) kill(owner, v);
     }
+    // n stacks of bleed from owner on v (see BLEED). The stacks are v's own: every source adds to them
+    function bleedOn(owner, v, n) {
+      if (!v.alive || v.turning || v.u.aloft || !(n > 0)) return;
+      const bl = v.bleed || (v.bleed = { n: 0, t: 0, pulse: BLEED.pulse, src: owner, noHeal: false });
+      const before = bl.n;
+      bl.n = Math.min(BLEED.max, bl.n + n); bl.src = owner;
+      bl.t = Math.max(bl.t, BLEED.secs + (owner.u.bleedLonger || 0));
+      if (owner.u.bleedNoHeal) bl.noHeal = true;
+      if (owner.u.bleedStun > 0 && before < BLEED.max && bl.n >= BLEED.max && !v.u.structure) v.stunT = Math.max(v.stunT, owner.u.bleedStun);
+    }
+    // pools (see u.pools): { x, y, r, side, owner, amt (per second), speed, secs }
+    const pools = [];
+    function makePool(owner, x, y, hit) {
+      const r = owner.u.splash;
+      if (!(r > 0)) return;
+      for (const q of pools) if (hyp(q.x - x, q.y - y) < q.r + r) return; // pools can't overlap
+      pools.push({ x, y, r, side: owner.side, owner, amt: hit * owner.u.pools.pct / 100, speed: owner.u.pools.speed, secs: owner.u.pools.secs });
+    }
     // damage from the map itself (elf tower, toxic tiles): counts for neither side, earns no experience
     function neutralDamage(v, dmg) {
       if (v.turning || v.u.aloft) return;
@@ -640,7 +740,7 @@ const Engine = (() => {
       // spell zones (Factions devtest), every tick while the unit stands in them; tl.side is the caster:
       // burn hurts the caster's enemies, mend heals the caster's units, mud slows the caster's enemies
       if (tl.type === 'burn') { if (b.side !== tl.side) neutralDamage(b, tl.dps * dt); return; }
-      if (tl.type === 'mend') { if (b.side === tl.side && b.hp < b.u.hp) b.hp = Math.min(b.u.hp, b.hp + tl.dps * healMul * dt); return; }
+      if (tl.type === 'mend') { if (b.side === tl.side) heal(b, tl.dps * healMul * dt); return; }
       if (tl.type === 'mud') {
         if (b.side === tl.side) return;
         if (!(b.slowT > 0)) { b.slowMove = 0; b.slowAtk = 0; }
@@ -697,7 +797,7 @@ const Engine = (() => {
       const applied = Math.min(dmg, poolHp(v));
       st.dealt += applied;
       owner.dealt = (owner.dealt || 0) + applied;
-      if (owner.u.lifesteal > 0 && owner.alive) owner.hp = Math.min(owner.u.hp, owner.hp + applied * owner.u.lifesteal / 100);
+      if (owner.u.lifesteal > 0 && owner.alive) heal(owner, applied * owner.u.lifesteal / 100);
       st.wasted += dmg - applied;
       // experience: damage dealt, half of damage absorbed, and a bounty for killing leveled bodies
       owner.xp += applied;
@@ -705,6 +805,12 @@ const Engine = (() => {
       loseHp(v, dmg);
       if (poolHp(v) <= 0 && finishing(owner, v)) return;
       if (poolHp(v) <= 0) { kill(owner, v); return; }
+      if (owner.u.bleedEvery > 0) { // every n-th hit it lands on the same target gives that target a stack of bleed
+        const kn = owner.knives || (owner.knives = new Map()), c = (kn.get(v) || 0) + 1;
+        kn.set(v, c);
+        if (c % owner.u.bleedEvery === 0) bleedOn(owner, v, 1);
+      }
+      if (owner.u.stunHit > 0 && !v.u.structure) v.stunT = Math.max(v.stunT, owner.u.stunHit);
       if (owner.u.poisonPct > 0) {
         // poison: a share of the hit, spread over its duration. Each attacker keeps one dose on the target;
         // its next hit refreshes that dose. Doses from different attackers add up.
@@ -762,6 +868,18 @@ const Engine = (() => {
         for (let k = 0; k < Math.min(owner.u.pierce, cand.length); k++) hitSet.add(cand[k][1]);
       }
       for (const v of hitSet) hurt(owner, v, hit, fromX, fromY);
+      // Waterhealing: allies inside the splash heal for the hit
+      if (owner.u.waterHeal && owner.u.splash > 0) for (const a of sides[owner.side]) if (a.alive && !a.u.structure && !a.turning && hyp(a.x - px, a.y - py) <= owner.u.splash) heal(a, hit * healMul);
+      if (owner.u.pools) makePool(owner, px, py, hit);
+    }
+    // a thrown titanium spear lands: its hit to the nearest enemy body within reach of where it is, and its bleed
+    function spearLand(p) {
+      let v = null, bd = PROJ_HIT_RADIUS;
+      for (const f of sides[1 - p.owner.side]) { if (!f.alive) continue; const d = hyp(f.x - p.x, f.y - p.y); if (d <= bd) { bd = d; v = f; } }
+      if (!v) { stats[p.owner.side].missed += p.hit; return; }
+      const before = poolHp(v);
+      hurt(p.owner, v, p.hit, p.fx, p.fy);
+      if (v.alive && poolHp(v) < before) bleedOn(p.owner, v, p.bleed); // a shield or a dodge stops the bleed too
     }
 
     // enemies the unit may attack right now, nearest first
@@ -849,7 +967,7 @@ const Engine = (() => {
 
     // attacks per second right now: Frenzy speeds it up with every hit landed, up to its cap (never below the base rate)
     function apsOf(b) {
-      const a = b.u.aps;
+      const a = b.u.aps + (b.auraAps || 0) + (b.flow > 0 ? b.flow * b.u.flow.aps : 0); // an ally's aura, Flow state stacks
       if (!(b.u.frenzyPct > 0) || !b.frenzy) return a;
       return Math.max(a, Math.min(b.u.frenzyCap, a * (1 + b.frenzy * b.u.frenzyPct / 100)));
     }
@@ -864,11 +982,11 @@ const Engine = (() => {
         const hurtAllies = sides[b.side].filter(a => a.alive && a !== b && a.hp < a.u.hp);
         if (hurtAllies.length) {
           const a = hurtAllies[Math.min(hurtAllies.length - 1, Math.floor(rnd() * hurtAllies.length))];
-          a.hp = Math.min(a.u.hp, a.hp + b.u.hit * b.u.healPct / 100 * healMul);
+          heal(a, b.u.hit * b.u.healPct / 100 * healMul);
           if (opts.record) shots.push([b.x, b.y, a.x, a.y, b.side, 0, 0, 1]);
         }
       }
-      const hit = b.u.hit * (charged ? b.u.charge : 1) * (b.u.spinHit > 0 ? Math.min(SPIN_CAP, 1 + b.u.spinHit / 100 * Math.max(0, b.firing)) : 1);
+      const hit = b.u.hit * (charged ? b.u.charge : 1) * (b.u.spinHit > 0 ? Math.min(SPIN_CAP, 1 + b.u.spinHit / 100 * Math.max(0, b.firing)) : 1) + (b.auraHit || 0); // an ally's aura adds to every hit
       // trample: a charged hit doesn't stop the unit; it runs on through its target and over every body in its path
       if (charged && b.u.trample > 0 && targets.length && !targets.flame) {
         const tgt = targets[0], dx = tgt.x - b.x, dy = tgt.y - b.y, d = hyp(dx, dy);
@@ -913,7 +1031,7 @@ const Engine = (() => {
       // a flame is drawn once, as a wedge from the unit out to its range
       if (opts.record && targets.flame) {
         const [ax, ay, al] = targets.flame, r = reachOf(b), k = al ? r / al : 0;
-        shots.push([b.x, b.y, b.x + ax * k, b.y + ay * k, b.side, 0, charged ? 1 : 0, 0, b.u.flame]);
+        shots.push([b.x, b.y, b.x + ax * k, b.y + ay * k, b.side, 0, charged ? 1 : 0, 0, b.u.flame, 1, 0, b.u.slam ? 1 : 0]); // [11]: a ground slam, not fire
       }
     }
 
@@ -947,7 +1065,7 @@ const Engine = (() => {
       if (!tgt) for (const f of foes) if (f.alive && !f.hidden) { const d = dist(f, b); if (d < td) { td = d; tgt = f; } }
       if (!tgt) return;
       if (td > RAM_REACH) {
-        const mv = Math.min(td - RAM_REACH * 0.5, b.u.speed * (b.slowT > 0 ? 1 - b.slowMove / 100 : 1) * (cripple[b.side] > 0 ? 1 - towerDown.move / 100 : 1) * dt);
+        const mv = Math.min(td - RAM_REACH * 0.5, spd(b) * (b.slowT > 0 ? 1 - b.slowMove / 100 : 1) * (cripple[b.side] > 0 ? 1 - towerDown.move / 100 : 1) * dt);
         b.hx = (tgt.x - b.x) / td; b.hy = (tgt.y - b.y) / td;
         b.x += b.hx * mv; b.y += b.hy * mv; b.moved += mv;
         if (dist(tgt, b) > RAM_REACH) return;
@@ -1027,7 +1145,7 @@ const Engine = (() => {
       if (!n) return;
       const dx = sx / n - b.x, dy = sy / n - b.y, d = hyp(dx, dy), keep = 2.5;
       if (d <= keep) return;
-      const mv = Math.min(d - keep, b.u.speed * moveMul(b) * dt);
+      const mv = Math.min(d - keep, spd(b) * moveMul(b) * dt);
       b.hx = dx / d; b.hy = dy / d;
       b.x += b.hx * mv; b.y += b.hy * mv; b.moved += mv;
     }
@@ -1064,7 +1182,7 @@ const Engine = (() => {
       const d = dist(s, b);
       b.siteAt = d <= SITE_REACH;
       if (b.siteAt) return true;
-      const mv = Math.min(d - SITE_REACH * 0.8, b.u.speed * moveMul(b) * dt);
+      const mv = Math.min(d - SITE_REACH * 0.8, spd(b) * moveMul(b) * dt);
       b.hx = (s.x - b.x) / d; b.hy = (s.y - b.y) / d;
       b.x += b.hx * mv; b.y += b.hy * mv; b.moved += mv;
       return true;
@@ -1086,7 +1204,7 @@ const Engine = (() => {
     function walkTo(b, x, y, stop) {
       const dx = x - b.x, dy = y - b.y, d = hyp(dx, dy);
       if (d <= stop + 1e-6) return true;
-      const mv = Math.min(d - stop, b.u.speed * moveMul(b) * dt);
+      const mv = Math.min(d - stop, spd(b) * moveMul(b) * dt);
       b.hx = dx / d; b.hy = dy / d;
       b.x += b.hx * mv; b.y += b.hy * mv; b.moved += mv;
       return d - mv <= stop + 1e-6;
@@ -1110,6 +1228,39 @@ const Engine = (() => {
         for (const v of sides[b.side]) if (needsRepair(v)) { const d = dist(v, b); if (d < bd) { bd = d; best = v; } }
         b.repairing = best && walkTo(b, best.x, best.y, SITE_REACH * 0.8) ? best : null;
       }
+    }
+
+    let auraWas = false; // a body with an aura was standing last tick
+    // Flow state: an attack made standing still adds a stack
+    function flowStep(b) { if (b.u.flow && !(b.moved > 1e-6)) b.flow = Math.min(b.u.flow.max, (b.flow || 0) + 1); }
+    // Waterhealing with no enemy in reach: a shot at the most wounded ally in reach (not itself); its splash heals
+    function healShot(b) {
+      let tgt = null, most = 1e-9;
+      for (const a of sides[b.side]) {
+        if (a === b || !a.alive || a.u.structure || a.u.aloft || a.boarded || a.turning || dist(a, b) > R(b) + 0.01) continue;
+        if (a.u.hp - a.hp > most) { most = a.u.hp - a.hp; tgt = a; }
+      }
+      if (!tgt) { b.cd = Math.max(b.cd, -dt); return; }
+      b.cd = Math.max(b.cd, -dt) + 1 / Math.max(0.01, apsOf(b));
+      flowStep(b);
+      fire(b, [tgt], false);
+    }
+    // Titanium spears: with armor left and an enemy in reach it spends 1 armor and forges (u.spear.forge s), then throws
+    // the spear at the nearest enemy in reach (it holds a finished spear until there is one)
+    function forgeSpear(b) {
+      const sp = b.u.spear;
+      if (b.forgeT > 0) { b.forgeT -= dt; if (b.forgeT > 1e-9) return; b.forgeT = 0; b.spearReady = true; }
+      if (!b.spearReady && (b.u.defense === 'armor' ? b.u.defVal : 0) + (b.u.bonusArmor || 0) < 1 - 1e-9) return; // no armor left to forge with
+      const valid = validTargets(b);
+      if (!valid.length) return;
+      if (b.spearReady) {
+        const tgt = valid[0], dx = tgt.x - b.x, dy = tgt.y - b.y, d = hyp(dx, dy) || 1;
+        b.spearReady = false;
+        projectiles.push({ owner: b, x: b.x, y: b.y, fx: b.x, fy: b.y, tx: tgt.x, ty: tgt.y, dirX: dx / d, dirY: dy / d, left: d, hit: sp.hit, spear: true, speed: sp.speed, bleed: sp.bleed });
+        return;
+      }
+      b.u = { ...b.u, bonusArmor: (b.u.bonusArmor || 0) - 1 }; // the armor goes into the spear
+      b.forgeT = b.forgeFull = sp.forge;
     }
 
     function step() {
@@ -1159,7 +1310,7 @@ const Engine = (() => {
         const foes = sides[1 - b.side];
         if (b.trampleLeft > 0) {
           // running through after a charge: straight on, hitting each body it runs over once
-          const mv = Math.min(b.trampleLeft, b.u.speed * (b.slowT > 0 ? 1 - b.slowMove / 100 : 1) * (cripple[b.side] > 0 ? 1 - towerDown.move / 100 : 1) * dt);
+          const mv = Math.min(b.trampleLeft, spd(b) * (b.slowT > 0 ? 1 - b.slowMove / 100 : 1) * (cripple[b.side] > 0 ? 1 - towerDown.move / 100 : 1) * dt);
           const [ux, uy] = b.trampleDir;
           b.x += ux * mv; b.y += uy * mv; b.hx = ux; b.hy = uy;
           b.trampleLeft -= mv;
@@ -1182,7 +1333,7 @@ const Engine = (() => {
         if (b.follow) { escortMove(b); continue; }
         if (b.spreadTo) { // Spread: run out to its own spot first
           const sx = b.spreadTo.x - b.x, sy = b.spreadTo.y - b.y, sd = hyp(sx, sy);
-          const mv = Math.min(sd, b.u.speed * (b.slowT > 0 ? 1 - b.slowMove / 100 : 1) * dt);
+          const mv = Math.min(sd, spd(b) * (b.slowT > 0 ? 1 - b.slowMove / 100 : 1) * dt);
           if (sd > 1e-6) { b.hx = sx / sd; b.hy = sy / sd; b.x += b.hx * mv; b.y += b.hy * mv; b.moved += mv; }
           // allies pushing it away (separation) can keep it from ever reaching a spot near the middle of the squad:
           // it gives up after the time the run should take plus a second, and charges from where it is
@@ -1199,7 +1350,7 @@ const Engine = (() => {
         }
         b.near = near;
         if (b.u.flee > 0 && near && nd < b.u.flee) { // keeping away from the enemy
-          const mv = b.u.speed * moveMul(b) * dt;
+          const mv = spd(b) * moveMul(b) * dt;
           b.hx = -(near.x - b.x) / (nd || 1); b.hy = -(near.y - b.y) / (nd || 1);
           b.x += b.hx * mv; b.y += b.hy * mv; b.moved += mv;
           if (g.bounds) { b.x = Math.max(g.bounds.x0, Math.min(g.bounds.x1, b.x)); b.y = Math.max(g.bounds.y0, Math.min(g.bounds.y1, b.y)); }
@@ -1222,7 +1373,7 @@ const Engine = (() => {
           const p = b.guide[0], gx = p.x - b.x, gy = p.y - b.y, gd = hyp(gx, gy);
           if (gd < 1.5) { b.guide.shift(); if (!b.guide.length) b.guide = null; continue; }
           if (near && nd <= reachOf(b)) continue; // something in reach: stand and fight it
-          const step = b.u.speed * (b.slowT > 0 ? 1 - b.slowMove / 100 : 1) * (cripple[b.side] > 0 ? 1 - towerDown.move / 100 : 1) * dt;
+          const step = spd(b) * (b.slowT > 0 ? 1 - b.slowMove / 100 : 1) * (cripple[b.side] > 0 ? 1 - towerDown.move / 100 : 1) * dt;
           if (b.hx === undefined) { b.hx = gx / gd; b.hy = gy / gd; }
           const k = Math.min(1, TURN * dt);
           let hx = b.hx + (gx / gd - b.hx) * k, hy = b.hy + (gy / gd - b.hy) * k, hl = hyp(hx, hy);
@@ -1236,7 +1387,7 @@ const Engine = (() => {
         if (g.aware2 && b.engaged && near) { const gl = goalOf(b, rg); if (gl) { near = gl; nd = gap(gl, b); } }
         if (b.avenge) { if (b.avenge.alive && !b.avenge.hidden) { near = b.avenge; nd = gap(near, b); } else b.avenge = null; } // a guard going for its attacker
         if (near && nd > (g.stopPct > 0 && g.stopPct < 1 && b.engaged ? stopAt(rg) : rg)) {
-          const step = b.u.speed * (b.slowT > 0 ? 1 - b.slowMove / 100 : 1) * (cripple[b.side] > 0 ? 1 - towerDown.move / 100 : 1) * dt;
+          const step = spd(b) * (b.slowT > 0 ? 1 - b.slowMove / 100 : 1) * (cripple[b.side] > 0 ? 1 - towerDown.move / 100 : 1) * dt;
           let mv;
           // March straight ahead until an enemy comes within sight (range + SIGHT, at least MIN_SIGHT, in any
           // direction), or no enemy is left ahead, then lock on: from then on the body goes for its own nearest
@@ -1280,6 +1431,19 @@ const Engine = (() => {
             b.setUp = false;
             if (b.windTarget) { b.windTarget = null; stats[b.side].windLost++; }
           }
+        }
+      }
+      // Flow state: a body that walked since its last attack has lost its stacks
+      for (const b of all) if (b.flow > 0 && b.moved > 1e-6) b.flow = 0;
+      // auras (Reforge): other units of the side near one get its bonus to every hit and to attack speed this tick
+      const auraNow = all.some(b => b.alive && b.u.aura);
+      if (auraNow || auraWas) { // the last one gone: its bonus goes too
+        auraWas = auraNow;
+        for (const a of all) { a.auraHit = 0; a.auraAps = 0; }
+        for (const src of all) {
+          if (!src.alive || !src.u.aura) continue;
+          const au = src.u.aura;
+          for (const a of sides[src.side]) if (a !== src && a.alive && !a.u.structure && dist(a, src) <= au.radius) { a.auraHit = Math.max(a.auraHit, au.hit); a.auraAps = Math.max(a.auraAps, au.aps); }
         }
       }
       // builders at work: each builder building within BUILD_COOP of others speeds them up (1x, 1.5x, 1.75x, ...)
@@ -1383,7 +1547,17 @@ const Engine = (() => {
           neutralDamage(f, dmg);
         }
       }
-      // ongoing effects: poison, regeneration, shortsight wearing off, spawns
+      // pools: enemies standing in one take its damage, allies heal and speed up (one pool at a time each)
+      if (pools.length) {
+        const done = new Set();
+        for (const q of pools) for (const f of all) {
+          if (!f.alive || f.u.structure || f.u.aloft || done.has(f) || hyp(f.x - q.x, f.y - q.y) > q.r) continue;
+          done.add(f);
+          if (f.side !== q.side) direct(q.owner, f, q.amt * dt);
+          else { heal(f, q.amt * healMul * dt); if (q.speed > 0) { f.poolFast = q.speed; f.poolFastT = q.secs; } }
+        }
+      }
+      // ongoing effects: poison, bleed, regeneration, shortsight wearing off, spawns
       const n0 = all.length;
       for (let i = 0; i < n0; i++) {
         const b = all[i];
@@ -1391,7 +1565,7 @@ const Engine = (() => {
         if (b.poison && b.poison.length) {
           for (const p of b.poison) {
             if (!b.alive) break;
-            if (b.u.slime) b.hp = Math.min(b.u.hp, b.hp + p.dps * Math.min(dt, p.t)); // slime units drink poison: it heals them
+            if (b.u.slime) heal(b, p.dps * Math.min(dt, p.t)); // slime units drink poison: it heals them
             else if (p.src) direct(p.src, b, p.dps * Math.min(dt, p.t));
             else neutralDamage(b, p.dps * Math.min(dt, p.t)); // poison from a map tile: nobody's damage
             p.t -= dt;
@@ -1399,6 +1573,21 @@ const Engine = (() => {
           b.poison = b.poison.filter(p => p.t > 0);
           if (!b.alive) continue;
         }
+        if (b.bleed) { // every BLEED.pulse s: BLEED.dmg, doubled for each stack after the first, and a share of max health at BLEED.max
+          const bl = b.bleed;
+          bl.pulse -= dt;
+          if (bl.pulse <= 1e-9) {
+            bl.pulse += BLEED.pulse;
+            let dmg = BLEED.dmg;
+            for (let k = 1; k < bl.n; k++) dmg *= 2;
+            if (bl.n >= BLEED.max && !b.u.structure) dmg += b.u.hp * BLEED.maxPct / 100 * BLEED.pulse;
+            direct(bl.src, b, dmg);
+          }
+          bl.t -= dt;
+          if (!b.alive) continue;
+          if (bl.t <= 1e-9) b.bleed = null;
+        }
+        if (b.poolFastT > 0) b.poolFastT -= dt;
         // Moat (bastion): every 1/aps s, its hit to every enemy within its reach, like a ring of fire around the tower
         if (b.u.moat) {
           b.moatCd = (b.moatCd == null ? 0 : b.moatCd) - dt;
@@ -1409,7 +1598,7 @@ const Engine = (() => {
             if (any && opts.record) shots.push([b.x, b.y, b.x + b.u.moat.range, b.y, b.side, 0, 0, 0, 180]);
           }
         }
-        if (b.u.regen > 0 && b.hp < b.u.hp) b.hp = Math.min(b.u.hp, b.hp + b.u.hp * b.u.regen / 100 * healMul * dt);
+        if (b.u.regen > 0) heal(b, b.u.hp * b.u.regen / 100 * healMul * dt);
         if (b.produce && !b.produced && !(b.site && b.site.work < b.site.need)) { // a building makes its unit
           b.prodT = (b.prodT == null ? b.produce.time : b.prodT) - dt;
           if (b.prodT <= 1e-9) {
@@ -1428,7 +1617,7 @@ const Engine = (() => {
         }
         if (b.follow && b.healPct > 0) { // a healbot mends the bodies of its squad within reach
           let to = null;
-          for (const a of b.follow) if (a.alive && a.hp < a.u.hp && dist(a, b) <= b.u.range + 0.01) { a.hp = Math.min(a.u.hp, a.hp + a.u.hp * b.healPct / 100 * healMul * dt); to = to || a; }
+          for (const a of b.follow) if (a.alive && a.hp < a.u.hp && dist(a, b) <= b.u.range + 0.01) { heal(a, a.u.hp * b.healPct / 100 * healMul * dt); to = to || a; }
           b.healFx = (b.healFx || 0) - dt;
           if (to && b.healFx <= 0) { b.healFx = 1; if (opts.record) shots.push([b.x, b.y, to.x, to.y, b.side, 0, 0, 1]); }
         }
@@ -1459,7 +1648,8 @@ const Engine = (() => {
         if (b.u.roll > 0 || b.follow || b.buildT > 0 || b.siteJob || b.u.idle || b.u.bot) continue; // rollers hit by rolling; healbots, bots and buildings never attack; builders at work don't
         b.cd -= dt * (b.slowT > 0 ? 1 - b.slowAtk / 100 : 1); // slowed units reload slower
         if (b.firing >= 0) b.firing += dt;
-        if (b.stunT > 0) continue; // stunned after a charge
+        if (b.stunT > 0) continue; // stunned
+        if (b.u.spear && b.alive) forgeSpear(b); // Titanium spears: forged and thrown apart from its own attack
         if (b.u.mend > 0) { // a healer that never attacks: the most wounded ally in range gets b.u.mend
           if (!b.alive || b.cd > 0) continue;
           let tgt = null, most = 1e-9;
@@ -1469,7 +1659,7 @@ const Engine = (() => {
           }
           if (!tgt) { b.cd = Math.max(b.cd, -dt); continue; }
           b.cd = Math.max(b.cd, -dt) + 1 / Math.max(0.01, b.u.aps);
-          tgt.hp = Math.min(tgt.u.hp, tgt.hp + b.u.mend * healMul);
+          heal(tgt, b.u.mend * healMul);
           if (opts.record) shots.push([b.x, b.y, tgt.x, tgt.y, b.side, 0, 0, 1]);
           continue;
         }
@@ -1523,7 +1713,7 @@ const Engine = (() => {
         } else {
           if (b.cd > 0) continue;
           valid = validTargets(b);
-          if (!valid.length) continue;
+          if (!valid.length) { if (b.u.waterHeal) healShot(b); continue; } // Waterhealing: no enemy in reach, so it shoots a wounded ally
           primary = locked(b, valid);
         }
         // spin-up builds while the unit keeps hitting one target: it stays on that target while it can,
@@ -1543,7 +1733,9 @@ const Engine = (() => {
         b.spin = spin;
         // reload doesn't stack up while the unit has nothing to shoot: keep at most one step of carry-over
         b.cd = Math.max(b.cd, -dt) + 1 / Math.max(0.01, apsOf(b) * spin);
-        const n = Math.max(1, Math.round(b.u.burst));
+        let n = Math.max(1, Math.round(b.u.burst));
+        if (b.u.double > 1 && (b.atkN = (b.atkN || 0) + 1) % b.u.double === 0) n++; // Double strike: every n-th attack strikes once more
+        flowStep(b);
         if (n > 1) {
           const dx = primary.x - b.x, dy = primary.y - b.y, d = hyp(dx, dy) || 1;
           b.burstLeft = n - 1; b.burstTimer = BURST_GAP; b.burstDir = [dx / d, dy / d];
@@ -1574,7 +1766,7 @@ const Engine = (() => {
               n.healTurn = 1 - tgt.side;
               n.healCd = Math.max(n.healCd, -dt) + 1 / n.u.healAps;
               const amt = n.u.healHit * healMul;
-              for (const f of sides[tgt.side]) if (f.alive && !f.u.structure && hyp(f.x - tgt.x, f.y - tgt.y) <= n.u.healSplash) f.hp = Math.min(f.u.hp, f.hp + amt);
+              for (const f of sides[tgt.side]) if (f.alive && !f.u.structure && hyp(f.x - tgt.x, f.y - tgt.y) <= n.u.healSplash) heal(f, amt);
               if (opts.record) shots.push([n.x, n.y, tgt.x, tgt.y, n.side != null ? n.side : 2, n.u.healSplash, n.u.strong ? 1 : 0, 1]);
             }
           }
@@ -1606,18 +1798,19 @@ const Engine = (() => {
         const next = [];
         for (const p of projectiles) {
           const foes = sides[1 - p.owner.side];
-          let mv = p.owner.u.projSpeed * dt, done = false;
+          let mv = (p.speed || p.owner.u.projSpeed) * dt, done = false;
+          const land = () => p.spear ? spearLand(p) : impact(p.owner, p.x, p.y, null, p.hit, p.dirX, p.dirY, p.fx, p.fy);
           while (mv > 0 && !done) {
             const sub = Math.min(0.5, mv, p.left);
             p.x += p.dirX * sub; p.y += p.dirY * sub; p.left -= sub; mv -= sub;
-            if (!p.owner.u.lob) for (const f of foes) {
+            if (!p.owner.u.lob || p.spear) for (const f of foes) {
               if (f.alive && hyp(f.x - p.x, f.y - p.y) <= PROJ_HIT_RADIUS) {
-                impact(p.owner, p.x, p.y, null, p.hit, p.dirX, p.dirY, p.fx, p.fy);
+                land();
                 done = true; break;
               }
             }
             if (!done && p.left <= 1e-6) {
-              impact(p.owner, p.x, p.y, null, p.hit, p.dirX, p.dirY, p.fx, p.fy);
+              land();
               done = true;
             }
           }
@@ -1633,7 +1826,7 @@ const Engine = (() => {
         v.side = 1 - v.side; v.squad = CONVERT_SQUAD; v.xp = 0; v.dealt = 0; v.turning = false;
         v.windTarget = null; v.windT = 0; v.setUp = false; v.firing = -1; v.burstLeft = 0; v.trampleLeft = 0; v.trampled = null;
         v.spinTarget = null; v.aims = null; v.lock = null; v.march = null; v.guide = null; v.goal = null; v.spreadTo = null; v.engaged = false; v.holdT = 0; v.avenge = null; v.delay = 0; v.band = null; v.hidden = false;
-        v.slowT = 0; v.slowMove = 0; v.slowAtk = 0; v.shrinkT = 0; v.shrinkM = 0; v.kids = null; v.stunT = 0; v.frenzy = 0;
+        v.slowT = 0; v.slowMove = 0; v.slowAtk = 0; v.shrinkT = 0; v.shrinkM = 0; v.kids = null; v.stunT = 0; v.frenzy = 0; v.flow = 0; v.knives = null; v.atkN = 0; v.forgeT = 0; v.spearReady = false;
         sides[v.side].push(v); stats[v.side].totalHp += v.hp;
         for (const b of all) {
           if (b.windTarget === v) { b.windTarget = null; b.windT = 0; }
@@ -1659,7 +1852,7 @@ const Engine = (() => {
       return {
         t, shots: final ? [] : shots,
         p: final ? [] : projectiles.map(p => [p.x, p.y, p.owner.side]),
-        b: all.map(x => [x.x, x.y, x.alive ? x.hp / x.u.hp : 0, x.side, x.windTarget && x.u.windUp > 0 ? 1 - x.windT / x.u.windUp : 0, x.hidden ? 1 : 0, x.poison && x.poison.length ? 1 : 0, x.slowT > 0 && x.slowMove > 0 ? 1 : 0, x.stunT > 0 ? 1 : 0]),
+        b: all.map(x => [x.x, x.y, x.alive ? x.hp / x.u.hp : 0, x.side, x.windTarget && x.u.windUp > 0 ? 1 - x.windT / x.u.windUp : 0, x.hidden ? 1 : 0, x.poison && x.poison.length ? 1 : 0, x.slowT > 0 && x.slowMove > 0 ? 1 : 0, x.stunT > 0 ? 1 : 0, x.bleed ? x.bleed.n : 0]),
       };
     }
 
@@ -1703,7 +1896,7 @@ const Engine = (() => {
       };
     }
 
-    return { step, frame, result, bodies: all, neutrals, mines: () => mines, isOver: () => over, time: () => t, lastShots: () => shots, projectiles: () => projectiles, crippled: (side) => cripple[side], charm: (side, squad) => (charm[side] && charm[side][squad]) || 0 };
+    return { step, frame, result, bodies: all, neutrals, mines: () => mines, pools: () => pools, isOver: () => over, time: () => t, lastShots: () => shots, projectiles: () => projectiles, crippled: (side) => cripple[side], charm: (side, squad) => (charm[side] && charm[side][squad]) || 0 };
   }
 
   function matrix(units, g) {
@@ -1724,6 +1917,6 @@ const Engine = (() => {
     return m;
   }
 
-  return { TOWER_DOWN, RULES, ruleOn, STEALTH_BACK, SKILL_SLOTS, SLOTS, SKILL_TYPES, skillParam, describeSkill, applySkills, innateUnit, fairBudget, battle, makeArmy, matrix, createBattle, buildSquad, rawStrength, squadsFor, withTraits, leveled, TRAIT_DEFAULTS, SPIN_CAP, CHARGE_RUN, TRAMPLE_RUN, BLAST_RADIUS, RAM_REACH, ROLL_START, ROLL_PAST, BUILD_GAP, BUILD_COOP, SITE_REACH, MINE_TRIGGER, REPAIR_SECS, LEVEL_BONUS, MAX_LEVEL, CHARM_MAX, CONVERT_HP, CONVERT_SQUAD };
+  return { TOWER_DOWN, RULES, ruleOn, STEALTH_BACK, SKILL_SLOTS, SLOTS, SKILL_TYPES, skillParam, describeSkill, applySkills, innateUnit, fairBudget, battle, makeArmy, matrix, createBattle, buildSquad, rawStrength, squadsFor, withTraits, leveled, TRAIT_DEFAULTS, SPIN_CAP, CHARGE_RUN, TRAMPLE_RUN, BLAST_RADIUS, BLEED, POISON_HEAL, RAM_REACH, ROLL_START, ROLL_PAST, BUILD_GAP, BUILD_COOP, SITE_REACH, MINE_TRIGGER, REPAIR_SECS, LEVEL_BONUS, MAX_LEVEL, CHARM_MAX, CONVERT_HP, CONVERT_SQUAD };
 })();
 if (typeof module !== 'undefined') module.exports = Engine;

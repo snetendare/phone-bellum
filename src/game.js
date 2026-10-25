@@ -345,8 +345,8 @@ const Game = (() => {
   // the leaders with simple abilities, and no mage or slime tower. Units by name, so a Counter Lab roster just keeps
   // the ones it has (with none of them, the pack leaves nothing out).
   const STANDARD_PACK = {
-    units: ['Goblin Swarm', 'Skeleton Archers', 'Fire Mage', 'Sniper', 'Brute', 'Leaf Wizard', 'Earth Wizard',
-      'Flame Wizard', 'Steel Wizard', 'Ether Golem', 'Sun Priest', 'War Mammoth'],
+    units: ['Goblin Swarm', 'Skeleton Archers', 'Fire Mage', 'Sniper', 'Brute', 'Leaf Wizard', 'Earth Wizard', 'Shiv',
+      'Flame Wizard', 'Steel Wizard', 'Water Mage', 'Ether Golem', 'Sun Priest', 'War Mammoth'],
     chars: ['cage', 'zoe', 'emile', 'wilhelm', 'phil', 'felix'],
     offTowers: ['mage', 'slime'],
   };
@@ -422,7 +422,8 @@ const Game = (() => {
     // special rules. To bring them back, take iceOff out and use iceShort / iceText as short / text again.
     { id: 'ice', name: 'Frozen Peak', short: 'A snowy mountain top. No special rules for now.', text: 'A snowy mountain top. No special rules for now.', iceOff: true,
       iceShort: 'Hail from round 2. An ice altar rises on even rounds.', iceText: 'Every fight from round 2: a hailstorm drops 10 hail tiles in the storm band (no man’s land at first); units standing in hail take 20 damage per second. Even rounds: the altar of ice rises in the middle of the board. Tap it to buy ice walls for your tower, push the storm band toward your opponent, or summon a Snowgre.', ice: true },
-    { id: 'testgrid', name: 'Test Grid', short: 'A bigger board: each zone is 14 by 7 tiles.', text: 'A test map on a bigger board: each player’s zone is 14 columns wide and 7 rows deep (standard: 12 by 6). The towers are mirrored, as on the Mushroom Cavern. From round 2 each player also has a treasury (400 health) on the other side of their zone from their tower, one tile in toward the middle and one tile forward. A fight it survives pays you 50 gold; if it is destroyed, your opponent steals 50 gold from you instead.', plain: true, grid: { cols: 14, rows: 18, zone: 7 }, pointMirror: true, treasury: true }, // only when picked, never random
+    { id: 'testgrid', name: 'Test Grid', short: 'A bigger board: each zone is 14 by 7 tiles.', text: 'A test map on a bigger board: each player’s zone is 14 columns wide and 7 rows deep (standard: 12 by 6). The towers are mirrored, as on the Mushroom Cavern. From round 2 each player also has a treasury (400 health) on the other side of their zone from their tower, one tile in toward the middle and one tile forward. A fight it survives pays you 50 gold; if it is destroyed, your opponent steals 50 gold from you instead. Units have 2 m more range (melee units, under 5 m, keep theirs). Units with a move speed of 3 or more move 0.2 m/s slower, and 0.4 slower from 5 on (Shiv and Water Mage keep theirs).', plain: true, grid: { cols: 14, rows: 18, zone: 7 }, pointMirror: true, treasury: true,
+      rangeAdd: 2, rangeAddMin: 5, slowSteps: [[3, 0.2], [5, 0.2]], tuneKeep: ['Shiv', 'Water Mage'] }, // only when picked, never random
   ];
   // ---------- Frozen Peak: hailstorm and the altar of ice ----------
   // The storm band is 4 rows deep: no man's land to start with. Each push moves it ICE.push rows toward the other
@@ -662,6 +663,16 @@ const Game = (() => {
     return side === 1 && mp && mp.pointMirror ? { col: COLS - 1 - t.col, row: t.row } : { ...t };
   };
   const mapOf = (m) => (m && m.map && MAPS.find(x => x.id === m.map.id)) || null;
+  // a map's own range and speed for a unit (Test Grid): +rangeAdd m for units with rangeAddMin m of range or more, and
+  // each [speed, cut] step in slowSteps the unit reaches takes cut m/s off its move speed. Units in tuneKeep keep theirs.
+  function mapTuned(mp, u) {
+    if (!mp || (!mp.rangeAdd && !mp.slowSteps) || (mp.tuneKeep || []).includes(u.name)) return u;
+    let out = u;
+    if (mp.rangeAdd && u.range >= (mp.rangeAddMin || 0)) out = { ...out, range: out.range + mp.rangeAdd };
+    const cut = (mp.slowSteps || []).reduce((c, [at, by]) => u.speed >= at - 1e-9 ? c + by : c, 0);
+    if (cut > 0) out = { ...out, speed: Math.max(0.1, out.speed - cut) };
+    return out;
+  }
   // Treasury (a map's `treasury`: Test Grid). From TREASURY.round each player has one more building: on the other side
   // of their zone from their tower, one column in toward the middle and one row forward of the tower's row (so
   // point-mirrored like the towers). Its tile is kept free all match. Like the tower it stands again, at full health, in every fight. A fight
@@ -1004,12 +1015,16 @@ const Game = (() => {
   // A unit can make a skill wait for others: skillNeeds[k] = the slots that must be bought first (e.g. [0, 1])
   const skillNeeds = (m, ui, k) => { const n = m.units[ui] && Array.isArray(m.units[ui].skillNeeds) ? m.units[ui].skillNeeds[k] : null; return Array.isArray(n) ? n.filter(j => j !== k && skillDef(m, ui, j)) : []; };
   const skillNeedsMissing = (m, side, ui, k) => skillNeeds(m, ui, k).filter(j => !hasSkill(m, side, ui, j));
+  // ...and make skills either-or: skillOr = [[1, 2], ...] = a player can own only one skill of each group
+  const skillOr = (m, ui, k) => { const g = m.units[ui] && Array.isArray(m.units[ui].skillOr) ? m.units[ui].skillOr : []; return [...new Set(g.filter(x => Array.isArray(x) && x.includes(k)).flat())].filter(j => j !== k && skillDef(m, ui, j)); };
+  const skillOrTaken = (m, side, ui, k) => skillOr(m, ui, k).filter(j => hasSkill(m, side, ui, j));
   function canBuySkill(m, side, ui, k) {
     const d = skillDef(m, ui, k);
     if (!d || hasSkill(m, side, ui, k)) return false;
     if (charOf(m, side) === 'enzo') return false; // Enzo's squads come with their skill instead
     if (!m.armies[side].some(s => s.unit === ui)) return false; // needs a squad of that type on the board
     if (skillNeedsMissing(m, side, ui, k).length) return false;
+    if (skillOrTaken(m, side, ui, k).length) return false; // either-or: it has the other one
     return m.gold[side] >= skillCost(m, ui, k, side);
   }
   function buySkill(m, side, ui, k) {
@@ -1381,6 +1396,7 @@ const Game = (() => {
       if (zoe) { const zb = zoeBuff(m, side); u = { ...u, hit: u.hit * (1 + zb.dmg / 100), hp: u.hp * (1 + zb.hp / 100), aps: u.aps * (1 + zb.aps / 100) }; }
       if (eagle && u.name === 'Sniper') u = { ...u, range: u.range + TOWER_SKILL.eagleRange, aps: u.aps * (1 + TOWER_SKILL.eagleAps / 100) };
       if (mp && mp.rangeCut && u.range > mp.rangeKeep) u = { ...u, range: Math.max(mp.rangeKeep, u.range * (1 - mp.rangeCut / 100)) }; // the map shortens reach (never below rangeKeep)
+      u = mapTuned(mp, u); // ...or tunes range and speed (Test Grid)
       const aura = isDev(m) ? auraFor(m, side, sq.col, sq.row) : null; // devtest: a building's aura
       if (aura) u = modUnit(u, aura);
       const b = E.buildSquad(u, side, w.x, w.y, sq.id, TILE, idx, sq.level);
@@ -1519,7 +1535,7 @@ const Game = (() => {
     if (u.name === 'Sniper' && towerSkillOn(m, side, 'sniper') && (!pub || towerSkillVisible(m, side))) r += TOWER_SKILL.eagleRange;
     const mp = mapOf(m);
     if (mp && mp.rangeCut && r > mp.rangeKeep) r = Math.max(mp.rangeKeep, r * (1 - mp.rangeCut / 100));
-    return r;
+    return mapTuned(mp, { name: u.name, range: r, speed: u.speed }).range;
   }
 
   // ---------- Yot-Yot's imps ----------
@@ -2318,7 +2334,7 @@ const Game = (() => {
     deploysAllowed, deploysLeft, deployedThisRound, canBuyDeploy, buyDeploy, refundDeploy,
     PACKAGE, allPackages, packOf, needsPack, freeLeft, choosePack, ensurePack,
     unlockCost, tierOf, startLevel, shopCost, mapFreeOf, mapFreeLeft, isUnlocked, unlockVisible, unlock, undoUnlock,
-    skillDef, skillCost, SKILL_STEP, skillsBought, isInnate, hasSkill, skillVisible, skillNeeds, skillNeedsMissing, unitFor, withCharacter,
+    skillDef, skillCost, SKILL_STEP, skillsBought, isInnate, hasSkill, skillVisible, skillNeeds, skillNeedsMissing, skillOr, skillOrTaken, unitFor, withCharacter,
     footprint, blockOf, spotFree, buildingRecords, recordOf, recordWorld, buildingEffects,
     setBuildings, BUILDINGS: () => BUILDINGS, buildingInfo, BUILDING_SQUAD, isBuildingSkill, buildingIdOf, buildingsOf, buildingOf, buildingAt, buildingShown, buildingSpotOk,
     canBuyBuilding, buyBuilding, buildingSkills, buildingSkillInfo, bskillOf, bskillCost, canBuyBuildingSkill, buyBuildingSkill, undoBuildingSkill,

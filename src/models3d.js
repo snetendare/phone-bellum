@@ -3,7 +3,7 @@
 // kindOf picks a figure from a unit's stats (rosters are custom, so names can't be relied on): towers (one per tower
 // type), the elf spire, airships (aloft), the horse and spider shapes, fliers, then archers / casters for ranged
 // units and goblins / brutes / soldiers for melee ones. The default roster's tier 4 units, the wizards and a few more
-// (Ent, Rogue, Sniper, Slimeshots, Skeleton Archers) have their own models, by name (NAMED); a custom unit with one of
+// (Ent, Rogue, Shiv, Sniper, Slimeshots, Skeleton Archers) have their own models, by name (NAMED); a custom unit with one of
 // those names gets that model too. A faction's tower (Factions mode) is one tower model in the faction's colour. height(kind): the top of the model, for markers above it.
 // parts(kind) gives up to three geometries, drawn as separate instanced meshes so each can be coloured per body:
 //   tint  - takes the unit's own colour (its clothes or hide), as the 2D board fills the shape with it
@@ -132,6 +132,16 @@ const Models3D = (THREE) => {
       P(cone(0.32, 0.6, 6), 'tint', [0, 1.88, 0.06], [0.2, 0, 0]),
       P(box(0.3, 0.08, 0.05), DARK, [0, 1.72, -0.21]),
       ...[-1, 1].flatMap(sd => [P(box(0.1, 0.1, 0.18), DARK, [sd * 0.42, 1.0, -0.12]), P(cone(0.05, 0.55, 4), METAL, [sd * 0.42, 1.08, -0.45], [-1.3, 0, 0])])],
+    // Shiv: slim and hooded like the Rogue, a sash of throwing knives in the team colour, a knife raised to throw
+    shiv: () => [...legs(0.75, 0.17, 0.2),
+      P(cyl(0.25, 0.32, 0.75, 6), 'tint', [0, 1.12, 0]),
+      P(box(0.1, 0.95, 0.08), 'team', [0, 1.15, -0.3], [0, 0, -0.65]),
+      ...[-0.25, 0, 0.25].map(o => P(cone(0.035, 0.28, 4), METAL, [o * 0.9, 1.15 + o * 0.6, -0.36], [Math.PI, 0, -0.65])),
+      P(ball(0.22), SKIN, [0, 1.68, 0]),
+      P(cone(0.3, 0.55, 6), 'tint', [0, 1.86, 0.05], [0.2, 0, 0]),
+      P(box(0.28, 0.07, 0.05), DARK, [0, 1.7, -0.2]),
+      P(box(0.1, 0.1, 0.16), DARK, [0.4, 1.75, -0.05]), P(cone(0.05, 0.45, 4), METAL, [0.4, 2.05, -0.08]),
+      P(box(0.1, 0.1, 0.16), DARK, [-0.4, 1.0, -0.12])],
     // Sniper: a wide-brimmed hat, a strap in the team colour, a long rifle with a scope
     sniper: () => [...legs(0.8, 0.18, 0.22),
       P(cyl(0.3, 0.36, 0.8, 6), 'tint', [0, 1.2, 0]),
@@ -166,6 +176,7 @@ const Models3D = (THREE) => {
       earth: () => [P(ball(0.2), ROCK, [0.55, 2.3, -0.15], [0.4, 0.6, 0]), P(ball(0.08), STONE, [0.3, 2.6, -0.1])],
       steel: () => [P(box(0.3, 0.3, 0.3), METAL, [0.55, 2.3, -0.15], [0.6, 0.6, 0]), ...[-1, 1].map(sd => P(cone(0.06, 0.2, 4), METAL, [0.55 + sd * 0.2, 2.3, -0.15], [0, 0, -sd * Math.PI / 2]))],
       slime: () => [P(ball(0.2), '#7BD93F', [0.55, 2.3, -0.15]), P(cone(0.07, 0.25, 5), '#7BD93F', [0.55, 2.1, -0.15], [Math.PI, 0, 0])],
+      water: () => [P(ball(0.19), '#5FB4F0', [0.55, 2.28, -0.15]), P(cone(0.13, 0.32, 6), '#5FB4F0', [0.55, 2.5, -0.15]), P(ball(0.07), '#BDE3FF', [0.3, 2.55, -0.1])],
     }).map(([k, top]) => ['wizard:' + k, () => [
       P(cone(0.6, 1.5, 7), 'tint', [0, 0.75, 0]),
       P(ball(0.25), SKIN, [0, 1.6, 0]),
@@ -472,7 +483,8 @@ const Models3D = (THREE) => {
     'Ent': 'ent', 'Rogue': 'rogue', 'Sniper': 'sniper', 'Slimeshots': 'slimeshot', 'Skeleton Archers': 'skeleton',
     'Rollers': 'roller', 'Cog Builder': 'cogBuilder', 'Mechite Guards': 'mechGuard', 'Cog Turret': 'cogTurret', 'Healbot': 'healbot',
     'Minebot': 'minebot', 'Repairbot': 'repairbot', 'Cogbot Fighter': 'cogFighter', 'Cogbot Machinegunner': 'cogGunner', 'CogMech': 'cogMech',
-    'Fire Mage': 'wizard:fire', 'Flame Wizard': 'wizard:flame', 'Leaf Wizard': 'wizard:leaf', 'Earth Wizard': 'wizard:earth', 'Steel Wizard': 'wizard:steel', 'Slime Wizard': 'wizard:slime' };
+    'Fire Mage': 'wizard:fire', 'Flame Wizard': 'wizard:flame', 'Leaf Wizard': 'wizard:leaf', 'Earth Wizard': 'wizard:earth', 'Steel Wizard': 'wizard:steel', 'Slime Wizard': 'wizard:slime',
+    'Water Mage': 'wizard:water', 'Shiv': 'shiv' };
   const RANGED = 12; // metres: from this range on, a unit is drawn as an archer or a caster
   function kindOf(u) {
     if (u.spire) return 'spire';

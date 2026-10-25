@@ -264,6 +264,126 @@
         "armor": 16,
         "hp": 0
       }
+    },
+    {
+      "id": "aeroblades",
+      "type": "double",
+      "name": "Aeroblades",
+      "cost": 150,
+      "params": {
+        "every": 3,
+        "hit": 5
+      }
+    },
+    {
+      "id": "tooDeep",
+      "type": "bleedDeep",
+      "name": "Too deep",
+      "cost": 150,
+      "params": {
+        "secs": 1
+      }
+    },
+    {
+      "id": "anemia",
+      "type": "bleedStun",
+      "name": "Anemia",
+      "cost": 150,
+      "params": {
+        "secs": 1.2
+      }
+    },
+    {
+      "id": "waterbomb",
+      "type": "stats",
+      "name": "Waterbomb",
+      "cost": 100,
+      "params": {
+        "splash": 1.2,
+        "hitAdd": 50
+      }
+    },
+    {
+      "id": "poolShaper",
+      "type": "pools",
+      "name": "Pool shaper",
+      "cost": 150,
+      "params": {
+        "splash": 2,
+        "aps": 0.2,
+        "pct": 25,
+        "speed": 0.5,
+        "secs": 2
+      }
+    },
+    {
+      "id": "flowState",
+      "type": "flow",
+      "name": "Flow state",
+      "cost": 150,
+      "params": {
+        "aps": 0.1,
+        "range": 0.4,
+        "max": 5
+      }
+    },
+    {
+      "id": "heavyMetal",
+      "type": "armorHp",
+      "name": "Heavy metal",
+      "cost": 150,
+      "params": {
+        "armor": 4,
+        "hp": 25
+      }
+    },
+    {
+      "id": "reforge",
+      "type": "aura",
+      "name": "Reforge",
+      "cost": 200,
+      "params": {
+        "armor": 2,
+        "radius": 8,
+        "hit": 20,
+        "aps": 0.1
+      }
+    },
+    {
+      "id": "titanSpears",
+      "type": "spears",
+      "name": "Shape Titanium spears",
+      "cost": 200,
+      "params": {
+        "forge": 1.5,
+        "speed": 35,
+        "hit": 200,
+        "bleed": 1
+      }
+    },
+    {
+      "id": "stoneSpikes",
+      "type": "stats",
+      "name": "Stone spikes",
+      "cost": 150,
+      "params": {
+        "range": 5,
+        "burst": 1,
+        "apsPct": -20
+      }
+    },
+    {
+      "id": "livingArmor",
+      "type": "slam",
+      "name": "Living armor",
+      "cost": 150,
+      "params": {
+        "armor": 8,
+        "range": 10,
+        "hit": 200,
+        "stun": 1,
+        "cone": 30
+      }
     }
   ],
   "units": [
@@ -336,7 +456,7 @@
       "cost": 100,
       "bodies": 8,
       "hp": 32,
-      "hit": 14,
+      "hit": 12,
       "aps": 0.75,
       "range": 19,
       "speed": 2.1,
@@ -680,8 +800,8 @@
       "color": "#24590d",
       "skills": [
         "regen",
-        "range",
-        "heavy"
+        "stoneSpikes",
+        "livingArmor"
       ],
       "skillsOn": [
         false,
@@ -689,20 +809,25 @@
         false
       ],
       "skillMods": [
-        null,
-        null,
         {
           "params": {
-            "hit": 20,
-            "slow": 30
-          },
-          "cost": 150
-        }
+            "hp": 25,
+            "pct": 2
+          }
+        },
+        null,
+        null
       ],
       "skillsInnate": [
         false,
         false,
         false
+      ],
+      "skillOr": [
+        [
+          1,
+          2
+        ]
       ]
     },
     {
@@ -759,8 +884,8 @@
       "knockback": 0,
       "windUp": 0,
       "flame": 0,
-      "defense": "none",
-      "defVal": 0,
+      "defense": "armor",
+      "defVal": 6,
       "level": 0,
       "unlock": 100,
       "name": "Steel Wizard",
@@ -775,9 +900,9 @@
       "shape": "bar",
       "color": "#57535a",
       "skills": [
-        "range",
-        "heavy",
-        "steelPlating"
+        "heavyMetal",
+        "reforge",
+        "titanSpears"
       ],
       "skillsOn": [
         false,
@@ -786,18 +911,23 @@
       ],
       "skillMods": [
         null,
-        {
-          "params": {
-            "slow": 20,
-            "hit": 20
-          }
-        },
+        null,
         null
       ],
       "skillsInnate": [
         false,
         false,
         false
+      ],
+      "trait": {
+        "name": "Steel armor",
+        "text": "Has 6 armor."
+      },
+      "skillOr": [
+        [
+          1,
+          2
+        ]
       ]
     },
     {
@@ -1016,7 +1146,7 @@
         "armorHp"
       ],
       "trample": 50,
-      "chargeStun": 1.5
+      "chargeStun": 1
     },
     {
       "burst": 1,
@@ -1130,7 +1260,7 @@
       "level": 0,
       "name": "Slimeshots",
       "cost": 200,
-      "unlock": 100,
+      "unlock": 50,
       "bodies": 10,
       "hp": 95,
       "hit": 7,
@@ -1380,6 +1510,126 @@
         false,
         false,
         false
+      ]
+    },
+    {
+      "burst": 1,
+      "pellets": 1,
+      "spinUp": 0,
+      "pierce": 0,
+      "minRange": 0,
+      "charge": 1,
+      "knockback": 0,
+      "windUp": 0,
+      "flame": 0,
+      "trample": 0,
+      "deathBlast": 0,
+      "defense": "none",
+      "defVal": 0,
+      "level": 0,
+      "projSpeed": 30,
+      "unlock": 50,
+      "name": "Shiv",
+      "cost": 200,
+      "bodies": 4,
+      "hp": 150,
+      "hit": 15,
+      "aps": 1.5,
+      "range": 18,
+      "speed": 3,
+      "splash": 0,
+      "shape": "knife",
+      "color": "#B7A6C9",
+      "bleedEvery": 2,
+      "trait": {
+        "name": "Apply bleed",
+        "text": "Every second knife it lands on the same target gives it a stack of bleed: it loses 2 health twice a second for 2 s. Each new stack starts the 2 s again and doubles the damage, up to 5 stacks (32 each time); at 5 stacks it also loses 2% of its max health a second. Bleed goes past armor."
+      },
+      "skills": [
+        "aeroblades",
+        "tooDeep",
+        "anemia"
+      ],
+      "skillsOn": [
+        false,
+        false,
+        false
+      ],
+      "skillsInnate": [
+        false,
+        false,
+        false
+      ],
+      "skillMods": [
+        null,
+        null,
+        null
+      ],
+      "skillOr": [
+        [
+          1,
+          2
+        ]
+      ]
+    },
+    {
+      "burst": 1,
+      "pellets": 1,
+      "spinUp": 0,
+      "pierce": 0,
+      "minRange": 0,
+      "charge": 1,
+      "knockback": 0,
+      "windUp": 0,
+      "flame": 0,
+      "trample": 0,
+      "deathBlast": 0,
+      "defense": "none",
+      "defVal": 0,
+      "level": 0,
+      "projSpeed": 15,
+      "unlock": 100,
+      "name": "Water Mage",
+      "cost": 300,
+      "bodies": 1,
+      "hp": 600,
+      "hit": 50,
+      "aps": 0.9,
+      "range": 22,
+      "speed": 2.1,
+      "splash": 3.5,
+      "shape": "drop",
+      "color": "#3B5BDB",
+      "waterHeal": 1,
+      "trait": {
+        "name": "Waterhealing",
+        "text": "Allies caught in the splash of its attacks heal for its hit. With no enemy in reach and an ally hurt, it shoots at the most wounded ally in reach instead."
+      },
+      "skills": [
+        "waterbomb",
+        "poolShaper",
+        "flowState"
+      ],
+      "skillsOn": [
+        false,
+        false,
+        false
+      ],
+      "skillsInnate": [
+        false,
+        false,
+        false
+      ],
+      "skillMods": [
+        null,
+        null,
+        null
+      ],
+      "skillOr": [
+        [
+          1,
+          2
+        ]
       ]
     }
   ]

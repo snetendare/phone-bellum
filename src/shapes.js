@@ -1,7 +1,7 @@
 // ===== Unit shapes (shared by Counter Lab and the demo) =====
 const Shapes = (() => {
-  const LIST = ['circle', 'ring', 'square', 'triangle', 'diamond', 'pentagon', 'hexagon', 'star', 'cross', 'bar', 'horse', 'spider', 'sun', 'flame', 'spear', 'imp'];
-  const LABELS = { circle: 'Circle', ring: 'Ring', square: 'Square', triangle: 'Triangle', diamond: 'Diamond', pentagon: 'Pentagon', hexagon: 'Hexagon', star: 'Star', cross: 'Cross', bar: 'Bar', horse: 'Horse', spider: 'Spider', sun: 'Sun', flame: 'Flame', spear: 'Spear', imp: 'Imp' };
+  const LIST = ['circle', 'ring', 'square', 'triangle', 'diamond', 'pentagon', 'hexagon', 'star', 'cross', 'bar', 'horse', 'spider', 'sun', 'flame', 'spear', 'imp', 'knife', 'drop'];
+  const LABELS = { circle: 'Circle', ring: 'Ring', square: 'Square', triangle: 'Triangle', diamond: 'Diamond', pentagon: 'Pentagon', hexagon: 'Hexagon', star: 'Star', cross: 'Cross', bar: 'Bar', horse: 'Horse', spider: 'Spider', sun: 'Sun', flame: 'Flame', spear: 'Spear', imp: 'Imp', knife: 'Knife', drop: 'Drop' };
   const DEFAULTS = {
     'Goblin Swarm': 'triangle', 'Skeleton Archers': 'diamond', 'Ember Imps': 'imp', 'Fire Mage': 'hexagon',
     'Sniper': 'cross', 'Brute': 'square', 'Wisps': 'ring', 'Crossbow Volley': 'pentagon', 'Ballista': 'bar',
@@ -69,6 +69,11 @@ const Shapes = (() => {
       { p: [[-0.13, -0.4], [0.13, -0.4], [0.13, 1.32], [-0.13, 1.32]] }],
     // an imp: a square body with two small horns
     imp: IMP,
+    // a throwing knife standing upright: blade, crossguard, grip, pommel
+    knife: [{ p: [[0, -1.36], [0.3, -0.86], [0.24, 0.2], [-0.24, 0.2], [-0.3, -0.86]] }, { p: [[-0.6, 0.2], [0.6, 0.2], [0.6, 0.42], [-0.6, 0.42]] },
+      { p: [[-0.16, 0.42], [0.16, 0.42], [0.16, 1.1], [-0.16, 1.1]] }, { c: [0, 1.16, 0.24] }],
+    // a drop of water
+    drop: [{ p: [[0, -1.32], [0.74, 0.02], [-0.74, 0.02]] }, { c: [0, 0.32, 0.84] }],
   };
   for (const parts of Object.values(FIGURES)) for (const pt of parts) if (pt.p) pt.p = clockwise(pt.p);
 
@@ -111,7 +116,7 @@ const Shapes = (() => {
       }
       case 'bar': ctx.beginPath(); ctx.rect(x - r * 1.3, y - r * 0.55, r * 2.6, r * 1.1); return false;
       case 'ring': ctx.beginPath(); ctx.arc(x, y, r * 0.8, 0, Math.PI * 2); return true;
-      case 'spider': case 'sun': case 'flame': case 'spear': case 'imp':
+      case 'spider': case 'sun': case 'flame': case 'spear': case 'imp': case 'knife': case 'drop':
         ctx.beginPath();
         for (const pt of FIGURES[shape]) {
           if (pt.c) { const [cx, cy, cr] = pt.c; ctx.moveTo(x + (cx + cr) * r, y + cy * r); ctx.arc(x + cx * r, y + cy * r, cr * r, 0, Math.PI * 2); }
@@ -151,7 +156,7 @@ const Shapes = (() => {
       case 'cross': { const a = r * 1.15, b = r * 0.42; body = `<polygon points="${[[-b, -a], [b, -a], [b, -b], [a, -b], [a, b], [b, b], [b, a], [-b, a], [-b, b], [-a, b], [-a, -b], [-b, -b]].map(([px, py]) => `${(c + px).toFixed(2)},${(c + py).toFixed(2)}`).join(' ')}"/>`; break; }
       case 'bar': body = `<rect x="${c - r * 1.3}" y="${c - r * 0.55}" width="${r * 2.6}" height="${r * 1.1}"/>`; break;
       case 'horse': { const rr = r * 0.95; body = `<polygon points="${HORSE.map(([px, py]) => `${(c + px * rr).toFixed(2)},${(c + py * rr).toFixed(2)}`).join(' ')}"/>`; break; }
-      case 'spider': case 'sun': case 'flame': case 'spear': case 'imp': { const rr = r * 0.95; body = FIGURES[shape].map(pt => pt.c
+      case 'spider': case 'sun': case 'flame': case 'spear': case 'imp': case 'knife': case 'drop': { const rr = r * 0.95; body = FIGURES[shape].map(pt => pt.c
         ? `<circle cx="${(c + pt.c[0] * rr).toFixed(2)}" cy="${(c + pt.c[1] * rr).toFixed(2)}" r="${(pt.c[2] * rr).toFixed(2)}"/>`
         : `<polygon points="${pt.p.map(([px, py]) => `${(c + px * rr).toFixed(2)},${(c + py * rr).toFixed(2)}`).join(' ')}"/>`).join(''); break; }
       case 'ring': body = `<circle cx="${c}" cy="${c}" r="${r * 0.8}" fill="none" stroke="currentColor" stroke-width="${Math.max(1.5, r * 0.45)}"/>`; break;

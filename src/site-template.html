@@ -333,7 +333,9 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
     'Leaf Wizard': 'Fast caster that fires six-shot volleys of twin leaves.',
     'Earth Wizard': 'Slow, crushing boulders that roll through every enemy in their path.',
     'Flame Wizard': 'A slow fortress that sprays fire across everything in front of it.',
-    'Steel Wizard': 'Heavy caster that hammers everything in reach.',
+    'Steel Wizard': 'Armored heavy caster that hammers everything in reach.',
+    'Shiv': 'A small band of knife throwers. Every second knife on the same target opens a wound that bleeds harder with each one. Melts big targets over time.',
+    'Water Mage': 'Lobs slow water bombs that splash its enemies and heal its allies caught in them. With nobody to hit, it heals its own side.',
     'Slime Wizard': 'Lobs huge, slow globs of slime that splash over a wide area. Poison heals it and speeds it up.',
     'Ether Golem': 'A walking wall. Heavy armor shrugs off small hits while it holds its lane.',
     'Slimeshots': 'A pack of slime spitters lobbing small splashing globs. Shreds packed swarms. Poison heals them and speeds them up.',
@@ -366,6 +368,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
     'Just a horse': ['single', null, 'raider'],
     'Rogue': ['group', 'giants'], 'Spiders': ['swarm', 'giants'],
     'Truespear': ['single', 'giants'],
+    'Shiv': ['group', 'giants'], 'Water Mage': ['single', 'crowds'],
   };
   const IS_TXT = { swarm: 'Swarm', group: 'Small group', single: 'Single', giant: 'Giant' };
   const BEATS_TXT = { crowds: 'beats crowds', giants: 'beats giants', both: 'beats crowds and giants' };
@@ -1894,7 +1897,8 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
       if (u.defense === 'armor') t.push(`armor ${u.defVal}`);
       if (u.defense === 'ward') t.push(`ward ${u.defVal} (max damage per hit)`);
       if (u.burst > 1) t.push(`burst ${u.burst}`);
-      if (u.flame > 0) t.push(u.flame >= 180 ? 'every attack hits all enemies in range all around it' : `flamethrower: every attack hits all enemies in range within ${u.flame}° to each side of its target`);
+      if (u.flame > 0) t.push(u.flame >= 180 ? 'every attack hits all enemies in range all around it' : `${u.slam ? 'ground slam' : 'flamethrower'}: every attack hits all enemies in range within ${u.flame}° to each side of its target`);
+      if (u.stunHit > 0) t.push(`every hit stuns for ${u.stunHit} s (not towers)`);
       else if (u.pellets > 1) t.push(`shotgun ${u.pellets}`);
       if (u.spinUp > 0) t.push(`spin-up ${u.spinUp}%/s on one target, up to 3x attack speed, starts over when it switches target`);
       if (u.spinHit > 0) t.push(`damage spin-up ${u.spinHit}%/s on one target, up to 3x hit size, starts over when it switches target`);
@@ -1916,8 +1920,10 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
       if (u.build && u.build.unit) { const c = u.build.unit; t.push(`BUILDS once per fight: when an enemy is within ${u.build.range} m it stops for ${n1(u.build.time)} s (faster with other builders next to it) and builds ${u.build.count} ${c.name}${u.build.count > 1 ? 's' : ''} (${n1(c.hp)} health, ${n1(c.hit)} hit, ${n1(c.aps)} attacks/s, ${c.range} m range, never moves, gone after the fight), then fights on`); }
       if (u.link) t.push('linked health: its bodies share one health pool and fall together');
       if (u.escort) t.push(`brings a healbot that heals the squad ${n1(u.escort.pct)}% of max health a second`);
+      if (u.trait && u.trait.name) t.push(`trait ${u.trait.name}: ${u.trait.text || ''}`);
       const need = (k) => Game.skillNeeds(m, i, k).map(j => `"${u.skillDefs[j].name}"`).join(' and ');
-      const sk = (u.skillDefs || []).map((d, k) => d ? `skill ${k + 1} "${d.name}" (${Game.isInnate(m, i, k) ? 'BUILT IN: always on for both players, free' : `${Game.skillCost(m, i, k, 1)} gold${Game.hasSkill(m, 1, i, k) ? ', YOU OWN IT' : need(k) ? `, needs ${need(k)} first` : ''}`}): ${Engine.describeSkill(d)}` : null).filter(Boolean);
+      const either = (k) => Game.skillOr(m, i, k).map(j => `"${u.skillDefs[j].name}"`).join(' or ');
+      const sk = (u.skillDefs || []).map((d, k) => d ? `skill ${k + 1} "${d.name}" (${Game.isInnate(m, i, k) ? 'BUILT IN: always on for both players, free' : `${Game.skillCost(m, i, k, 1)} gold${Game.hasSkill(m, 1, i, k) ? ', YOU OWN IT' : need(k) ? `, needs ${need(k)} first` : ''}${either(k) ? `, EITHER OR: can't be owned together with ${either(k)}` : ''}`}): ${Engine.describeSkill(d)}` : null).filter(Boolean);
       const lock = Game.isUnlocked(m, 1, i) ? (Game.unlockCost(m, i, 1) ? ' [unlocked]' : '') : ` [LOCKED: unlock once for ${Game.unlockCost(m, i, 1)} gold before you can place it]`;
       return `- ${u.name}${lock}: price ${Game.shopCost(m, 1, i)}${Game.startLevel(m, 1) ? ` (squads start at level ${Game.startLevel(m, 1) + 1})` : ''}, ${u.bodies} ${u.bodies === 1 ? 'body' : 'bodies'} x ${n1(u.hp, 0)} hp each, hit ${n1(u.hit)} x ${n1(u.aps, 2)}/s, range ${u.range} m, speed ${u.speed} m/s${t.length ? ', ' + t.join(', ') : ''}. Level-up cost ${Game.levelCost(u)}.${sk.length ? '\n    ' + sk.join('\n    ') : ''}`;
     };
@@ -2199,6 +2205,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   // or characters, and no AI level-ups until the handover. The X on the coach line leaves the tutorial.
   const TUT_STORE = 'phonebellum.tutorial.v1';
   const TUT = { start: 'Goblin Swarm', foe: 'Skeleton Archers', foeAt: [6, 4], counter: 'Fire Mage', wrong: 'Sniper',
+    foeHit: 14, // the tutorial's Skeleton Archers keep their old hit, so rounds 1 and 2 still come out the same wherever the player places
     shop: ['Goblin Swarm', 'Skeleton Archers', 'Ember Imps', 'Fire Mage', 'Sniper'], // the shop from round 3
     adds: { 3: [['Brute', 5, 4]], 4: [['Wisps', 3, 2]] }, // the enemy's new squads by round: [unit, column, row]
     last: 4, // the round after which the enemy plays for real
@@ -2212,7 +2219,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (speed !== 1) { tutSpeed = speed; speed = 1; } // the fights at 1x, to watch them
     if (customSet && !standardSet) standardSet = { set: rawSet, custom: customSet }; // restoreSet puts the player's units back
     useSet(BUILTIN, false);
-    m = Game.createMatch(units, M, 1, 'standard');
+    m = Game.createMatch(units.map(u => u.name === TUT.foe ? { ...u, hit: TUT.foeHit } : u), M, 1, 'standard');
     m.packages = [[], []];
     for (const n of TUT.shop) m.unlocks[0][unitIx(n)] = 1;
     tutEnemy([[TUT.foe, ...TUT.foeAt]]);
@@ -2477,7 +2484,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   }
 
   function absorb() {
-    for (const s of bt.lastShots()) if (s[8] > 0) fx.push({ kind: 'flame', x1: s[0], y1: s[1], x2: s[2], y2: s[3], side: s[4], half: s[8], age: 0, life: 0.3 });
+    for (const s of bt.lastShots()) if (s[8] > 0) fx.push({ kind: 'flame', x1: s[0], y1: s[1], x2: s[2], y2: s[3], side: s[4], half: s[8], slam: s[11] === 1, age: 0, life: s[11] === 1 ? 0.45 : 0.3 });
     else if (s[10] === 1) fx.push({ kind: 'bolt', x1: s[0], y1: s[1], x2: s[2], y2: s[3], side: s[4], age: 0, life: 0.22, seed: Math.random() });
     else fx.push({ kind: s[7] === 1 ? 'heal' : 'shot', x1: s[0], y1: s[1], x2: s[2], y2: s[3], side: s[4], splash: s[5], charged: s[6], spin: s[9] || 1, age: 0, life: s[7] === 1 ? 0.35 : 0.18 });
     for (const b of bt.bodies) if (!b.alive && !b._gone) { b._gone = true; fx.push({ kind: 'death', x: b.x, y: b.y, u: b.u, side: b.side, age: 0, life: 0.5 }); }
@@ -2993,8 +3000,8 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
           act = `<span class="chip" style="color:var(--gold);border:1px solid currentColor;border-radius:99px;padding:1px 8px;font-size:12px">Owned</span>`;
           if (phase === 'deploy' && editable() && m.tech[me][i][k] === m.round) act += ` <button class="btn small" data-unskill="${k}">Undo</button>`;
         } else if (phase === 'deploy') {
-          const needs = Game.skillNeedsMissing(m, me, i, k).map(j => defs[j].name);
-          const why = needs.length ? `Needs ${needs.join(' and ')}` : !m.armies[me].some(q => q.unit === i) ? 'Place a squad first' : m.gold[me] < cost ? `Need ${cost} gold` : '';
+          const needs = Game.skillNeedsMissing(m, me, i, k).map(j => defs[j].name), other = Game.skillOrTaken(m, me, i, k).map(j => defs[j].name);
+          const why = other.length ? `You have ${other.join(' and ')}` : needs.length ? `Needs ${needs.join(' and ')}` : !m.armies[me].some(q => q.unit === i) ? 'Place a squad first' : m.gold[me] < cost ? `Need ${cost} gold` : '';
           const place = Game.isBuildingSkill(m, i, k); // a building: buying it picks its tile next
           act = why || !editable() ? `<button class="btn small" disabled>${why || `${place ? 'Place' : 'Buy'} · ${cost} gold`}</button>` : `<button class="btn small primary" ${place ? 'data-bplace' : 'data-skill'}="${k}">${place ? 'Place' : 'Buy'} · ${cost} gold</button>`;
         } else act = `<span class="hint">${cost} gold</span>`;
@@ -3002,9 +3009,10 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
         act = Game.skillVisible(m, side, i, k) || (phase !== 'deploy' && Game.hasSkill(m, side, i, k))
           ? `<span class="chip" style="color:var(--foe);border:1px solid currentColor;border-radius:99px;padding:1px 8px;font-size:12px">${foeName()} has it</span>` : `<span class="hint">Not bought</span>`;
       }
+      const or = Game.skillOr(m, i, k).map(j => defs[j].name); // either-or: owning one rules out the other
       return `<div style="display:grid;gap:4px;border-top:1px solid var(--line);padding-top:8px">
         <div class="bar"><b style="font-family:var(--font-display)">${esc(d.name)}</b><span>${act}</span></div>
-        <span class="hint">${esc(Engine.describeSkill(d))}</span></div>`;
+        <span class="hint">${esc(Engine.describeSkill(d))}${or.length ? ` <b style="color:#A493DE">Either or:</b> you can have this or ${esc(or.join(' or '))}, not both.` : ''}</span></div>`;
     });
     return `<div style="display:grid;gap:8px"><h4 style="margin:0;font-size:12px;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted)">Skills${enzo ? ` · Enzo: one random skill per unit, free with ${Game.CHAR.enzoMin}+ squads of it` : mine ? ' · for all your squads of this unit' : ''}</h4>${rows.join('')}</div>`;
   }
@@ -3350,7 +3358,8 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (u.link) tr.push('Linked health');
     if (u.escort) tr.push(`Healbot: ${Math.round(u.escort.pct * 10) / 10}% health a second`);
     if (u.burst > 1) tr.push(`Burst ${u.burst}`);
-    if (u.flame > 0) tr.push(`${u.flame >= 180 ? 'Hits all around itself' : `Flame cone ${u.flame}°`}, reaches ${Math.round(u.range * (Game.SETTINGS.flameReach || 1) * 10) / 10} m`);
+    if (u.flame > 0) tr.push(`${u.flame >= 180 ? 'Hits all around itself' : `${u.slam ? 'Slam' : 'Flame'} cone ${u.flame}°`}, reaches ${Math.round(u.range * (Game.SETTINGS.flameReach || 1) * 10) / 10} m`);
+    if (u.stunHit > 0) tr.push(`Stuns ${u.stunHit} s`);
     else if (u.pellets > 1) tr.push(`Shotgun ${u.pellets}`);
     if (u.spinUp > 0) tr.push(`Spin-up ${u.spinUp}%/s`);
     if (u.spinHit > 0) tr.push(`Damage spin-up ${u.spinHit}%/s`);
@@ -3372,6 +3381,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       ${(() => { const r = roleOf(i, owner === me ? me : null); return `<p class="roleline"><span class="roles">${roleIcons(r)}${rangeSvg(r.range)}</span><span>${r.text}</span></p>`; })()}
       ${unlockBlock(i, side)}
       <p class="role" style="margin:0">${ROLES[u.name] && !customSet ? ROLES[u.name] : customSet ? `From a Counter Lab roster · ${Game.unitCostOf(base)} gold` : ''}</p>
+      ${u.trait && u.trait.name ? `<p style="margin:0"><b style="color:var(--gold)">Trait: ${esc(u.trait.name)}</b>${u.trait.text ? ` · ${esc(u.trait.text)}` : ''}</p>` : ''}
       ${lvl}
       ${sq && m && !compact ? (() => { const q = side === me ? sq : Game.seenAt(m, sq); return shroomBlock(q.col, q.row); })() : ''}
       ${tr.length ? `<div class="traits">${tr.map(x => `<span>${x}</span>`).join('')}</div>` : ''}

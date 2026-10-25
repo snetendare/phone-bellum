@@ -30,7 +30,7 @@
 const Render3D = (THREE, el, view, opts = {}) => {
   const BW = Game.COLS * Game.TILE, BD = Game.ROWS * Game.TILE, T = Game.TILE;
   const css = Art.css;
-  const { ELF_COL, SHROOM_COL, CHARM_COL } = Art;
+  const { ELF_COL, SHROOM_COL, CHARM_COL, BLEED_COL, POOL_COL } = Art;
   const models = Models3D(THREE);
 
   // ---------- three.js basics: renderer, scene, camera, light ----------
@@ -377,6 +377,11 @@ const Render3D = (THREE, el, view, opts = {}) => {
       bodies.push({ u, side: b.side, x: p.x, y: p.y, hx: b.hx, hy: b.hy, look, moving: p.moving, phase: p.phase, b, crest, edge: Art.teamCol(b.side, me), tag });
       if (b.u.structure && b.walls) addWalls(f, b.x, b.y, b.walls);
     }
+    // Pool shaper's pools: water on the ground, ringed in their side's colour
+    for (const q of bt.pools ? bt.pools() : []) {
+      const [wx, wz] = world(f, q.x, q.y), team = teamColor(q.side, me);
+      scene_(() => { disc(wx, wz, q.r, color(POOL_COL), 0.3, 0.3); arc(wx, wz, q.r, team, 0.5, 1, 0.08); });
+    }
     // the Mecha Tower's mines: a dark disc ringed in the team colour (the opponent's fainter)
     for (const mn of bt.mines ? bt.mines() : []) {
       const [wx, wz] = world(f, mn.x, mn.y), team = teamColor(mn.side, me);
@@ -543,10 +548,12 @@ const Render3D = (THREE, el, view, opts = {}) => {
     if (b.delay > 0) arc(wx, wz, r * 1.58, color(css('--gold') || '#E6B84A'), 1, b.delay / Game.FLANK.delay, 0.1);
     if (b.level > 0) for (let k = 0; k < b.level; k++) arc(wx, wz, r * (1.8 + k * 0.24), color(css('--gold') || '#E6B84A'), 0.9, 1, 0.12);
     if (b.convert) arc(wx, wz, r * 1.66, color(CHARM_COL), 0.9, 1, 0.07, 16);
-    // small dots over the head: poisoned (green), slowed (blue), charisma stacks (pink)
+    if (b.forgeT > 0 && b.forgeFull > 0) arc(wx, wz, r * 1.7, color('#C9D1D9'), 0.95, 1 - b.forgeT / b.forgeFull, 0.1, 24); // forging a titanium spear
+    // small dots over the head: poisoned (green), slowed (blue), bleeding (a red one per stack), charisma stacks (pink)
     const dots = [];
     if (b.poison && b.poison.length) dots.push(color('#6FD08C'));
     if (b.slowT > 0) dots.push(color('#9BD0FF'));
+    if (b.bleed) for (let k = 0; k < b.bleed.n; k++) dots.push(color(BLEED_COL));
     const ch = v0.bt.charm ? v0.bt.charm(b.side, b.squad) : 0;
     if (ch >= Engine.CHARM_MAX) { icon('hat', wx, top + 0.35, wz, Math.max(0.8, r * 0.9)); y += 0.5; }
     else if (ch > 0) dots.push(color(CHARM_COL));
@@ -650,7 +657,8 @@ const Render3D = (THREE, el, view, opts = {}) => {
     if (!battle) return;
     // projectiles in flight: thrown spears, and team-coloured shot for the rest
     const ps = v.phase === 'battle' ? v.bt.projectiles() : [];
-    const spears = ps.filter(p => p.owner.u.shape === 'spear'), rest = ps.filter(p => p.owner.u.shape !== 'spear');
+    const isSpear = (p) => p.spear || p.owner.u.shape === 'spear'; // Truespear, and titanium spears
+    const spears = ps.filter(isSpear), rest = ps.filter(p => !isSpear(p));
     const sg = group('projectiles', shotGeo, flatMat, rest.length);
     rest.forEach((p, i) => { tmpP.set(p.x * f, 1.6, -p.y * f); tmpS.setScalar(fxWide() * 1.4); tmpQ.identity(); sg.setMatrixAt(i, tmpM.compose(tmpP, tmpQ, tmpS)); sg.setColorAt(i, tmpC.copy(teamColor(p.owner.side, me)).lerp(white, 0.45)); });
     finish(sg, rest.length);
@@ -708,7 +716,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
         for (let sgm = 0; sgm < FAN_SEG; sgm++) {
           const a0 = ang - half + 2 * half * sgm / FAN_SEG, a1 = ang - half + 2 * half * (sgm + 1) / FAN_SEG, o = (nf * FAN_SEG + sgm) * 9;
           fanPos.set([x1, 0.3, z1, x1 + Math.cos(a0) * rr, 0.3, z1 + Math.sin(a0) * rr, x1 + Math.cos(a1) * rr, 0.3, z1 + Math.sin(a1) * rr], o);
-          fanCol.set([0.55 * k, 0.32 * k, 0.08 * k, 0.12 * k, 0.03 * k, 0, 0.12 * k, 0.03 * k, 0], o);
+          fanCol.set(e.slam ? [0.42 * k, 0.33 * k, 0.2 * k, 0.12 * k, 0.09 * k, 0.05 * k, 0.12 * k, 0.09 * k, 0.05 * k] : [0.55 * k, 0.32 * k, 0.08 * k, 0.12 * k, 0.03 * k, 0, 0.12 * k, 0.03 * k, 0], o); // a ground slam is dust, not fire
         }
         nf++;
       }
