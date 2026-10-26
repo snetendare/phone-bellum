@@ -9277,7 +9277,9 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   function unplaceMarks(cinematic) {
     const box = $('unx');
     if (!box) return;
-    const list = []; // UI 2.0: no ✕ marks; a squad is dragged down to the tray to take it back
+    // UI 2.0: no ✕ marks (a squad is dragged down to the tray to take it back), except in the tutorial, whose script uses them
+    const list = mode === 'tutorial' && phase === 'deploy' && m && editable() && !cinematic && !choosingPack() && !choosingTower()
+      ? m.armies[me].filter(s => s.round === m.round && !Game.isRider(s) && !(drag && drag.moved && drag.id === s.id)) : [];
     const keep = new Set();
     if (list.length) {
       const at = wrapMap(), T = Game.TILE;

@@ -121,7 +121,7 @@ const { chromium } = require('playwright-core');
     check(/That’s the basics/.test(await coach()) && await p.evaluate(() => localStorage.getItem('phonebellum.tutorial.v1') === 'done'), `${board}: after round 4 the tutorial is saved as done`);
     await p.click('#coach-btns .btn >> nth=1'); await wait(p, 800);
     s = await st();
-    check(s.round === 5 && /unlock for gold/.test(await coach()) && await p.locator('#panel .tiers').count() === 1 && await p.locator('#coach-x').isHidden(), `${board}: Keep playing: round 5 against the AI, the full shop, one line about it`);
+    check(s.round === 5 && /unlock for gold/.test(await coach()) && await p.locator('#panel .shop2').count() === 1 && await p.locator('#coach-x').isHidden(), `${board}: Keep playing: round 5 against the AI, the full shop, one line about it`);
     await p.screenshot({ path: `tutorial-${board}-handover.png` });
     await p.click('#coach-btns .btn'); await wait(p);
     check(await coach() === '', `${board}: Got it hides it`);
