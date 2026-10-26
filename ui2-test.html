@@ -88,9 +88,26 @@ button:focus-visible, .card:focus-visible { outline: 2px solid var(--gold); outl
 .card .nm { font-size: 11.5px; font-weight: 600; text-align: center; line-height: 1.15; max-width: 100%; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .card .cost { font-family: var(--font-data); font-size: 13px; color: var(--gold); margin-top: 2px; }
 .card .beats { position: absolute; top: 4px; right: 4px; width: 16px; height: 16px; opacity: .85; }
-.card.locked { background: repeating-linear-gradient(135deg, var(--panel) 0 6px, #111b1e 6px 12px); }
-.card.locked svg.unit { opacity: .45; }
-.card .lock { position: absolute; top: 4px; left: 5px; width: 13px; height: 13px; }
+.tier { flex: 0 0 22px; height: 112px; border-radius: 8px; display: grid; grid-template-rows: auto 1fr; justify-items: center; padding-block: 6px;
+  background: color-mix(in srgb, var(--tc) 14%, var(--bg)); border: 1px solid color-mix(in srgb, var(--tc) 45%, transparent); scroll-snap-align: start; }
+.tier b { font-family: var(--font-display); font-size: 13px; color: var(--tc); line-height: 1; }
+.tier span { writing-mode: vertical-rl; transform: rotate(180deg); font-family: var(--font-data); font-size: 11px; color: var(--muted); align-self: center; letter-spacing: .04em; }
+.tier.gap { margin-left: 6px; }
+.addcard { flex: 0 0 76px; height: 112px; border-radius: 10px; border: 1.5px dashed color-mix(in srgb, var(--tc) 60%, var(--line)); color: var(--tc);
+  display: grid; align-content: center; justify-items: center; gap: 2px; scroll-snap-align: start; }
+.addcard .p { font-size: 30px; line-height: 1; font-weight: 300; }
+.addcard .w { font-size: 12px; font-weight: 600; color: var(--ink); }
+.addcard .c { font-family: var(--font-data); font-size: 11px; color: var(--muted); }
+.addcard:active { background: color-mix(in srgb, var(--tc) 10%, transparent); }
+.card.new { animation: pop .5s ease-out; }
+@keyframes pop { 0% { transform: scale(.7); opacity: 0 } 70% { transform: scale(1.06) } 100% { transform: none } }
+.urow { display: grid; grid-template-columns: 36px 1fr auto; gap: 10px; align-items: center; padding: 8px 10px; background: var(--panel-2); border-radius: 8px; }
+.urow svg { width: 36px; height: 36px; }
+.urow b { font-size: 14px; font-weight: 600; display: block; }
+.urow p { margin: 0; font-size: 12.5px; color: var(--muted); }
+.urow .info { text-align: left; min-width: 0; }
+.urow .go { min-width: 92px; height: 38px; border-radius: 8px; background: var(--gold); color: #1A1406; font-weight: 600; font-size: 13px; }
+.urow .go[disabled] { background: var(--panel); color: var(--muted); cursor: default; }
 .card.poor { opacity: .45; }
 .card.sel { transform: translateY(-6px); border-color: var(--gold); box-shadow: 0 6px 18px rgba(0,0,0,.4); }
 .card.lift { opacity: .3; }
@@ -262,6 +279,8 @@ const BEATS = {
   both: '<svg class="beats" viewBox="0 0 16 16" aria-label="Beats crowds and giants"><circle cx="8" cy="8" r="6" fill="none" stroke="var(--gold)" stroke-width="1.6"/><circle cx="5.5" cy="8" r="1.5" fill="var(--gold)"/><circle cx="10.5" cy="8" r="1.5" fill="var(--gold)"/></svg>',
 };
 const LOCK = '<svg class="lock" viewBox="0 0 13 13" aria-hidden="true"><rect x="2" y="6" width="9" height="6.5" rx="1" fill="var(--muted)"/><path d="M4 6V4.2a2.5 2.5 0 0 1 5 0V6" fill="none" stroke="var(--muted)" stroke-width="1.5"/></svg>';
+let justUnlocked = null;
+const TIER_COST = { 1: 100, 2: 200, 3: 300, 4: 500 };
 const BEATS_TXT = { crowds: 'beats crowds', giants: 'beats giants', both: 'beats crowds and giants' };
 
 // ---------- helpers ----------
@@ -359,12 +378,21 @@ function drawTray() {
   $('deploys').innerHTML = d;
   if ($('plus')) $('plus').onclick = () => { if (S.gold < EXTRA_COST) return toast(`Need ${EXTRA_COST} gold`); S.gold -= EXTRA_COST; S.extra = 1; toast('One more deployment this round'); render(); };
   $('hint').textContent = hintText();
-  $('shop').innerHTML = U.map((u, i) => {
-    const locked = !S.unlocked.has(i), price = u.cost + (locked ? u.unlock : 0);
-    const poor = S.gold < price || deploysLeft() <= 0;
-    return `<div class="card ${locked ? 'locked' : ''} ${poor ? 'poor' : ''} ${S.sel === i ? 'sel' : ''}" style="--tc:var(--t${u.tier})" data-u="${i}" tabindex="0" role="button" aria-label="${esc(u.name)}, ${u.cost} gold${locked ? ', locked' : ''}">
-      ${u.beats ? BEATS[u.beats] : ''}${locked ? LOCK : ''}${unitIcon(u)}<div class="nm">${esc(u.name)}</div><div class="cost">${u.cost}</div></div>`;
-  }).join('');
+  // per tier: a small tab, the units you have unlocked, then an Unlock space while any are left
+  let h = '';
+  for (let t = 1; t <= 4; t++) {
+    const all = U.map((u, i) => i).filter(i => U[i].tier === t), own = all.filter(i => S.unlocked.has(i)), rest = all.length - own.length;
+    h += `<div class="tier ${t > 1 ? 'gap' : ''}" style="--tc:var(--t${t})" aria-label="Tier ${t}"><b>T${t}</b><span>${TIER_COST[t]}</span></div>`;
+    for (const i of own) {
+      const u = U[i], poor = S.gold < u.cost || deploysLeft() <= 0;
+      h += `<div class="card ${poor ? 'poor' : ''} ${S.sel === i ? 'sel' : ''} ${justUnlocked === i ? 'new' : ''}" style="--tc:var(--t${t})" data-u="${i}" tabindex="0" role="button" aria-label="${esc(u.name)}, ${u.cost} gold">
+        ${u.beats ? BEATS[u.beats] : ''}${unitIcon(u)}<div class="nm">${esc(u.name)}</div><div class="cost">${u.cost}</div></div>`;
+    }
+    if (rest) h += `<button class="addcard" style="--tc:var(--t${t})" data-add="${t}" aria-label="Unlock a tier ${t} unit"><span class="p">+</span><span class="w">Unlock</span><span class="c">${rest} more</span></button>`;
+  }
+  $('shop').innerHTML = h;
+  $('shop').querySelectorAll('[data-add]').forEach(b => b.onclick = () => openUnlock(+b.dataset.add));
+  if (justUnlocked !== null) { const c = $('shop').querySelector(`.card[data-u="${justUnlocked}"]`); if (c) c.scrollIntoView({ block: 'nearest', inline: 'center', behavior: 'smooth' }); justUnlocked = null; }
 }
 function hintText() {
   if (S.sel !== null) return `Tap a glowing tile to place ${U[S.sel].name}.`;
@@ -412,7 +440,7 @@ function updateDrag(e) {
   drag.overTray = e.clientY > tr.top;
   if (drag.kind === 'card') {
     const locked = !S.unlocked.has(U.indexOf(drag.u)), price = drag.u.cost + (locked ? drag.u.unlock : 0);
-    drag.label = locked ? `Unlock+buy ${price}` : `${price}`; drag.labelBad = S.gold < price || deploysLeft() <= 0;
+    drag.label = `${price}`; drag.labelBad = S.gold < price || deploysLeft() <= 0;
   } else if (!drag.sq.isNew) {
     const free = S.moved === drag.sq;
     drag.label = free ? 'Move' : `Move · ${MOVE_COST}`; drag.labelBad = !free && (S.gold < MOVE_COST || (S.moved && S.moved !== drag.sq));
@@ -484,8 +512,7 @@ window.addEventListener('pointerup', e => {
   if (drag) { press = p; endDrag(); press = null; return; }
   if (p.held || p.scroll) return;
   if (p.card) { // tap a card: pick it (tap again to drop the pick)
-    if (!S.unlocked.has(p.ui) && S.sel !== p.ui) { S.sel = p.ui; toast(`Locked: placing it unlocks it for ${U[p.ui].unlock}`); }
-    else S.sel = S.sel === p.ui ? null : p.ui;
+    S.sel = S.sel === p.ui ? null : p.ui;
     closeSheet(false); render(); return;
   }
   if (p.board) {
@@ -545,17 +572,32 @@ function askSell(q) {
     <button class="big" id="sellok">Sell · +${sellValue(q)}</button>`);
   s.querySelector('#sellok').onclick = () => { sell(q); closeSheet(); render(); };
 }
-function openInfo(ui) {
+function openInfo(ui, back) {
   const u = U[ui], locked = !S.unlocked.has(ui);
   const s = sheet(`
-    <div class="sh-head">${unitIcon(u, 36)}<h2>${esc(u.name)}</h2><span class="lv">T${u.tier} · ${u.cost}</span><button class="x" data-close aria-label="Close">×</button></div>
+    <div class="sh-head">${unitIcon(u, 36)}<h2>${esc(u.name)}</h2><span class="lv">T${u.tier} · ${u.cost}</span>${back ? `<button class="x" id="back" aria-label="Back">‹</button>` : `<button class="x" data-close aria-label="Close">×</button>`}</div>
     <p class="role">${esc(u.role)}${u.beats ? ` <b style="color:var(--gold);font-weight:500">Best: ${BEATS_TXT[u.beats]}.</b>` : ''}</p>
     ${statChips(u)}
     ${locked ? `<button class="big" id="unl" ${S.gold >= u.unlock ? '' : 'disabled'}>Unlock · ${u.unlock}</button>` : ''}
     <div class="sk-title">Skills you can buy once it’s on the board</div>
     <div class="skills">${u.skills.map(k => `<div class="skill"><b>${esc(k.n)}</b><p>${esc(k.t)}</p><button disabled>${k.c}</button></div>`).join('')}</div>
-    <p class="foot">${locked ? 'Or just drag the card onto the board: it unlocks and buys in one go.' : 'Drag the card onto your zone to place it.'}</p>`);
-  const b = s.querySelector('#unl'); if (b) b.onclick = () => { S.gold -= u.unlock; S.unlocked.add(ui); toast(`${u.name} unlocked`); closeSheet(); render(); };
+    <p class="foot">${locked ? 'Once unlocked, it gets a card in your tray.' : 'Drag the card onto your zone to place it.'}</p>`);
+  const b = s.querySelector('#unl'); if (b) b.onclick = () => unlock(ui);
+  const bk = s.querySelector('#back'); if (bk) bk.onclick = () => openUnlock(back);
+}
+function unlock(ui) {
+  const u = U[ui]; if (S.gold < u.unlock) return toast(`Need ${u.unlock} gold`);
+  S.gold -= u.unlock; S.unlocked.add(ui); justUnlocked = ui; S.sel = ui;
+  closeSheet(false); render(); toast(`${u.name} unlocked · tap a glowing tile or drag the card`);
+}
+function openUnlock(t) {
+  const list = U.map((u, i) => i).filter(i => U[i].tier === t && !S.unlocked.has(i));
+  const s = sheet(`
+    <div class="sh-head"><h2>Unlock a tier ${t} unit</h2><button class="x" data-close aria-label="Close">×</button></div>
+    <p class="role">Unlocking is once per match. Then the unit costs ${TIER_COST[t]} a squad. Tap a name for its details.</p>
+    <div class="skills">${list.map(i => { const u = U[i]; return `<div class="urow">${unitIcon(u, 36)}<button class="info" data-info="${i}"><b>${esc(u.name)}</b><p>${u.beats ? BEATS_TXT[u.beats][0].toUpperCase() + BEATS_TXT[u.beats].slice(1) : esc(u.role.split('.')[0])}</p></button><button class="go" data-unl="${i}" ${S.gold >= u.unlock ? '' : 'disabled'}>Unlock · ${u.unlock}</button></div>`; }).join('')}</div>`);
+  s.querySelectorAll('[data-unl]').forEach(b => b.onclick = () => unlock(+b.dataset.unl));
+  s.querySelectorAll('[data-info]').forEach(b => b.onclick = () => openInfo(+b.dataset.info, t));
 }
 function openFoe(q) {
   const u = U[q.u];
@@ -626,8 +668,8 @@ $('notes-btn').onclick = () => {
       <li>Your whole zone stays in sight. <span>The shop is one row of cards under your thumb instead of a drawer over the board.</span></li>
       <li>Drag a card up onto a tile. <span>Glowing tiles show where it can go, the range ring shows its reach, and on a phone the squad floats above your finger. Tapping a card, then a tile, still works.</span></li>
       <li>Hold a card for details. <span>A tap picks, a hold explains, so the card itself stays small.</span></li>
-      <li>One row of all units, sorted by price. <span>The coloured top edge shows the tier. No tier tabs.</span></li>
-      <li>Locked units sit in the row. <span>Dragging one onto the board unlocks and buys it in one go.</span></li>
+      <li>The tray holds only your unlocked units, grouped by tier. <span>A small tab starts each tier (with its price), and the last space in each tier is + Unlock while that tier has units left.</span></li>
+      <li>+ Unlock opens a short list of that tier’s locked units. <span>Unlocking adds the card to your tray and picks it, ready to place.</span></li>
       <li>No Move button and no ✕ marks. <span>Drag a new squad anywhere for free, or down to the tray to take it back. Drag an older squad to move it (50, once a round) or down to sell it.</span></li>
       <li>Deployments are pips next to your gold, with +1 beside them.</li>
       <li>Leaders are portraits in the top bar. <span>Tap one to read it.</span></li>

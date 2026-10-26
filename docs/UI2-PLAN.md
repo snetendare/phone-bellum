@@ -15,9 +15,9 @@ Test page: `ui2-test.html` (standalone prototype of the deploy screen, Standard 
 
 ## Plan
 
-1. Tray instead of drawer: one row of compact cards under the thumb (all units, sorted by price, tier as the coloured top edge, one "beats" icon, lock badge). The whole board stays in sight. No tier tabs.
+1. Tray instead of drawer: one row of compact cards under the thumb. The whole board stays in sight. Grouped by tier: a small tier tab (with the price), your unlocked units, then a "+ Unlock" space (same size as a card) while that tier has units left. + Unlock opens a short list of the tier's locked units; unlocking adds the card and picks it. (Vilhelm's idea, 2026-10-26.)
 2. Drag a card up onto a tile (ghost floats above the finger on touch, glowing valid tiles, range ring, price label). Tap card then tile still works. Hold a card for details.
-3. Locked units: dragging one unlocks and buys in one go (label "Unlock+buy 150").
+3. Locked units are not in the tray; they live behind each tier's + Unlock space.
 4. No ✕ marks and no Move button: drag a new squad freely or down to the tray to take it back; drag an older squad to move it (50, once a round) or down to sell (confirm sheet).
 5. Deployments as pips next to gold, +1 beside them. Leaders as portraits in the top bar. Round clock as a ring around the round number.
 6. The squad sheet takes the tray's place, so the board shrinks but stays whole, with the range ring shown. One big Level up button, one-line skills with price on the button.
