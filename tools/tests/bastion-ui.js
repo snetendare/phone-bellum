@@ -1,5 +1,5 @@
-// The Bastion's Defensive walls on the page (vs AI, 2D board): bought from the tower's sheet, placed by tapping tiles
-// of your own half, taken back with a tap; a placed squad shows its range at once. Screenshots go to the current folder.
+// The Bastion's Defensive walls on the page (vs AI, 2D board): bought from the tower's sheet, placed by tapping near
+// the edge of a tile of your own half (the wall goes along that edge), taken back with a tap on it; a placed squad shows its range at once. Screenshots go to the current folder.
 // Run from the repo root with the game served on port 8766: node tools/tests/bastion-ui.js
 const { chromium } = require('playwright-core');
 const ctx2d = require('./board2d'); // these checks are for the 2D board
@@ -10,7 +10,8 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   const p = await (await ctx2d(b, { viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 })).newPage();
   const errors = [];
   p.on('pageerror', e => { errors.push(e.message); console.log('PAGE ERROR', e.message); });
-  const tap = async (c, r) => { const b2 = await p.locator('#board').boundingBox(); await p.mouse.click(b2.x + (c + .5) * b2.width / 12, b2.y + (r + .5) * b2.height / 16); await sleep(150); };
+  // fx, fy: where in the tile (0..1), the middle by default
+  const tap = async (c, r, fx = 0.5, fy = 0.5) => { const b2 = await p.locator('#board').boundingBox(); await p.mouse.click(b2.x + (c + fx) * b2.width / 12, b2.y + (r + fy) * b2.height / 16); await sleep(150); };
   await p.goto('http://127.0.0.1:8766/?test'); await sleep(500);
   await p.click('#settings summary'); await p.click('[data-tm="0"]'); await p.click('#go'); await sleep(300);
   await p.dblclick('[data-pack="0"]'); await sleep(200);
@@ -38,21 +39,23 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   await p.click('#tskill2'); await sleep(200);
   console.log('hint:', await p.locator('#task').innerText().catch(() => ''));
   await p.locator('#board').screenshot({ path: 'bastion-walls-placing.png' });
-  // not in their half; then three tiles of my half
-  await tap(5, 6);
+  // not in their half; then along the top edges of three tiles of my half
+  await tap(5, 6, 0.5, 0.1);
   let walls = await p.evaluate(() => { const { m, me } = window.__pb(); return Game.bwallsOf(m, me).length; });
   assert.strictEqual(walls, 0, 'not in their half');
   await p.click('#close').catch(() => {});
   await tap(tw.col, tw.row); await sleep(150); await p.click('#bwall'); await sleep(150);
-  for (const c of [4, 5, 6]) await tap(c, 8);
-  walls = await p.evaluate(() => { const { m, me } = window.__pb(); return Game.bwallsOf(m, me).map(w => [w.col, w.row]); });
+  for (const c of [4, 5]) await tap(c, 9, 0.5, 0.1);
+  await tap(6, 9, 0.9, 0.5); // near its right edge
+  walls = await p.evaluate(() => { const { m, me } = window.__pb(); return Game.bwallsOf(m, me).map(w => [w.col, w.row, w.edge]); });
   console.log('walls:', JSON.stringify(walls));
-  assert.deepStrictEqual(walls, [[4, 8], [5, 8], [6, 8]]);
+  assert.deepStrictEqual(walls, [[4, 9, 'n'], [5, 9, 'n'], [6, 9, 'e']]);
+  assert.ok(await p.evaluate(() => { const { m, me } = window.__pb(); return !Game.occupied(m, me, 4, 9); }), 'the tile stays free');
   await p.locator('#board').screenshot({ path: 'bastion-walls-placed.png' });
-  await tap(5, 8); // taken back, and placing again
+  await tap(5, 8, 0.5, 0.92); // on the wall, from the tile above it: taken back, and placing again
   walls = await p.evaluate(() => { const { m, me } = window.__pb(); return Game.bwallsOf(m, me).length; });
   assert.strictEqual(walls, 2, 'a tap takes this round’s wall back');
-  await tap(5, 9);
+  await tap(5, 10, 0.5, 0.1);
   walls = await p.evaluate(() => { const { m, me } = window.__pb(); return Game.bwallsOf(m, me).length; });
   assert.strictEqual(walls, 3);
   // the fight has them

@@ -42,6 +42,17 @@ const Engine = (() => {
   // its first attack in a fight doesn't give it away. firstHit (%): its first attack in a fight hits that much harder.
   // bldgPct: its hits on structures deal this % of the damage. portal = { unit, secs }: at the start of a fight each
   // squad opens a portal in front of it (seen for secs s) and unit (levelled like the squad) walks out.
+  // windWalk (metres): when a hit misses it (Dodge), the body dashes that far straight back from where the hit came from.
+  // bounce = { n, pct, reach }: a shot that hits one body flies on to the nearest other enemy within reach metres,
+  // pct % of the hit, up to n times (each body once per shot).
+  // missiles = { n, every, hit, splash, speed }: at the start of a fight and every `every` s after, it fires n homing
+  // missiles at the nearest enemies (different ones while there are enough): hit to everything within splash of where
+  // each lands. A shot with bounce bounces on from there. Their hit grows with the unit's level.
+  // spinBlade: its 360° attack (flame 180) is drawn as spinning blades. mech: drawn as the Leafblade suit.
+  // roar = { radius, attack, speed, max } (Berserkers): when the body starts fighting it roars once: enemies within
+  // radius get attack % slower attacks and its allies there speed % faster moves, for the fight; both
+  // stack from several roars up to max % per body. unstoppable: it can't be slowed or displaced (slows, roar debuffs,
+  // knockback, Bullhead pushes and roots don't take).
   // A body with `inside` (Overwatch; the game sets it) sits in that structure: it can't be hit or targeted, doesn't
   // move and shoots from there, until the structure falls.
   // Roster rules (g.rules): optional mechanics a roster can switch off. Missing or true = on.
@@ -168,11 +179,11 @@ const Engine = (() => {
     const L = Math.max(0, Math.min(MAX_LEVEL, Math.round(level == null ? u.level : level)));
     if (!L) return { ...u, level: 0 };
     const k = 1 + LEVEL_BONUS * L;
-    return { ...u, level: L, hp: u.hp * k, hit: u.hit * k, ...(u.spear ? { spear: { ...u.spear, hit: u.spear.hit * k } } : {}) };
+    return { ...u, level: L, hp: u.hp * k, hit: u.hit * k, ...(u.spear ? { spear: { ...u.spear, hit: u.spear.hit * k } } : {}), ...(u.missiles ? { missiles: { ...u.missiles, hit: u.missiles.hit * k } } : {}) };
   }
 
   // ---------- skills ----------
-  const SKILL_SLOTS = 4; // skill slots per unit (the 4th is for an Awaken skill)
+  const SKILL_SLOTS = 4; // skill slots per unit (the 4th is for a Master skill or an Awaken skill)
   const SLOTS = Array.from({ length: SKILL_SLOTS }, (_, k) => k);
   // Each skill type and its settings (key, label, default, step). Shared by Counter Lab and the game.
   const SKILL_TYPES = {
@@ -229,6 +240,11 @@ const Engine = (() => {
     firstHit: { label: 'Opening strike', params: [['pct', 'First attack hit size (+%)', 25, 5]] },
     flurry:  { label: 'Flurry', params: [['hits', 'Blows per attack', 3, 1], ['hit', 'Damage per blow (becomes)', 200, 10], ['gap', 'Time between blows (s)', 0.5, 0.05], ['aps', 'Attacks per second (becomes)', 0.2, 0.05], ['leap', 'Leaps to a new target within (m)', 10, 1]] },
     lone:    { label: 'Hunt lone targets', params: [['secs', 'Gives up after (s) without one', 5, 0.5]] },
+    windWalk: { label: 'Wind walk', params: [['pct', 'Chance to dodge a hit (%)', 33, 1], ['step', 'Dashes back after a dodge (m)', 6, 0.5]] },
+    bounce:  { label: 'Bouncing shots', params: [['n', 'Most bounces per shot', 2, 1], ['pct', 'Damage per bounce (% of hit)', 30, 5], ['reach', 'Bounces to an enemy within (m)', 10, 1]] },
+    leafblade: { label: 'Leafblade suit', params: [['hp', 'Health (+%)', 150, 10], ['armor', 'Armor (+)', 4, 1], ['hit', 'Hit size (+%)', 50, 5], ['range', 'Range (becomes, m)', 3, 0.5], ['dash', 'Dashes to enemies within (m)', 8, 1],
+      ['missiles', 'Missiles per salvo', 2, 1], ['every', 'Salvo every (s)', 10, 1], ['mhit', 'Missile damage', 150, 10], ['msplash', 'Missile blast (m)', 2.5, 0.5], ['mspeed', 'Missile speed (m/s)', 25, 1]] },
+    berserk: { label: 'Berserkers', params: [['radius', 'Roar reach (m)', 8, 1], ['attack', 'Enemy attack speed (−%)', 5, 1], ['speed', 'Ally move speed (+%)', 5, 1], ['max', 'Most per body from roars (%)', 25, 5]] },
   };
   const skillParam = (d, k) => {
     const v = d.params && d.params[k];
@@ -309,11 +325,15 @@ const Engine = (() => {
       case 'bull': return `Its first attack and every ${+P('every') === 3 ? 'third' : `${n('every')}th`} one after also send it charging through its target and ${n('run')} m on: ${n('hit')} damage to every enemy in its path, each knocked back ${n('push')} m. +${n('armor')} armor while it charges.`;
       case 'flare': return `Every second it doesn’t attack it stores ${n('per')}% attack speed (up to ${n('max')}%). Its next attack releases it as a burst: an extra shot in quick succession for every ${n('shot')}% stored.`;
       case 'portal': return `At the start of a fight each squad opens a portal for ${n('secs')} s and a ${String(P('unit')) === 'Brute' ? 'Hellfiend' : String(P('unit'))} walks out to fight: a level ${+P('level') + 1} ${String(P('unit'))} with ${n('speed')} m/s move speed and a swipe in front of it, levelling up with the squad.`;
-      case 'overwatch': return `Can be placed in one of your buildings (your tower, treasury, walls or buildings; one each): there it can’t be hit until the building falls. Placed anywhere else it fights from a small watchtower (${n('hp')} health).`;
+      case 'overwatch': return `Can be placed in one of your buildings (your tower, treasury or buildings; one each): there it can’t be hit until the building falls. Placed anywhere else it fights from a small watchtower (${n('hp')} health).`;
       case 'freeMove': return 'Squads of it can be moved every round for free, as often as you like.';
       case 'silent': return 'Its first attack in a fight doesn’t give it away: it stays hidden.';
       case 'firstHit': return `Its first attack in a fight hits ${n('pct')}% harder.`;
       case 'flurry': return `Each attack is ${n('hits')} blows of ${n('hit')} damage in quick succession (${n('aps')} attacks per second). When a blow kills, it leaps to the nearest enemy within ${n('leap')} m for the next one.`;
+      case 'windWalk': return `Each hit has a ${n('pct')}% chance to miss it completely. When one does, it dashes ${n('step')} m (a tile) straight back.`;
+      case 'bounce': return `A shot that hits bounces on to the nearest other enemy within ${n('reach')} m for ${n('pct')}% of its damage, up to ${n('n')} ${+P('n') === 1 ? 'time' : 'times'}.`;
+      case 'leafblade': return `It becomes a leaf-mech suit with two long leaf blades: +${n('hp')}% health, +${n('armor')} armor, and its attack becomes a spin that hits every enemy within ${n('range')} m (+${n('hit')}% hit). It dashes at enemies within ${n('dash')} m. At the start of a fight and every ${n('every')} s it fires ${n('missiles')} homing missiles at the nearest enemies, ${n('mhit')} damage each in a ${n('msplash')} m blast.`;
+      case 'berserk': return `Can’t be slowed or displaced (slows, knockback, pushes and roots don’t take). When the fight starts it roars: enemies within ${n('radius')} m attack ${n('attack')}% slower and allies there move ${n('speed')}% faster, for the fight. Roars stack, up to ${n('max')}% on any one unit.`;
       case 'lone': return `Ignores enemies that share a tile with others and hunts lone ones. With no lone enemy left for ${n('secs')} s it fights as usual, until it kills a lone one again.`;
     }
     return '';
@@ -423,6 +443,16 @@ const Engine = (() => {
           u.hit = Math.max(0, P('hit')); u.aps = Math.max(0.05, P('aps')); u.burst = 1;
           break;
         case 'lone': u.lone = Math.max(0.5, P('secs')); break;
+        case 'windWalk': u.dodge = Math.min(90, Math.max(u.dodge || 0, P('pct'))); u.windWalk = Math.max(u.windWalk || 0, Math.max(0, P('step'))); break;
+        case 'bounce': u.bounce = { n: Math.max(1, Math.round(P('n'))), pct: Math.max(0, P('pct')), reach: Math.max(1, P('reach')) }; break;
+        case 'leafblade':
+          u.hp = u.hp * (1 + P('hp') / 100); u.bonusArmor = (u.bonusArmor || 0) + P('armor'); u.hit = u.hit * (1 + P('hit') / 100);
+          u.range = Math.max(1, P('range')); u.flame = 180; u.spinBlade = true; u.mech = true; // a spin all around itself
+          u.projSpeed = 0; u.burst = 1; u.pellets = 1; u.pierce = 0; u.splash = 0; u.windUp = 0; u.minRange = 0;
+          u.dash = Math.max(u.dash || 0, Math.max(0, P('dash')));
+          if (P('missiles') > 0) u.missiles = { n: Math.round(P('missiles')), every: Math.max(1, P('every')), hit: Math.max(0, P('mhit')), splash: Math.max(0, P('msplash')), speed: Math.max(2, P('mspeed')) };
+          break;
+        case 'berserk': u.unstoppable = true; u.roar = { radius: Math.max(0, P('radius')), attack: Math.max(0, P('attack')), speed: Math.max(0, P('speed')), max: Math.max(0, P('max')) }; break;
         case 'double': u.hit = u.hit * (1 + P('hit') / 100); u.double = Math.max(2, Math.round(P('every'))); break;
         case 'bleedDeep': u.bleedLonger = (u.bleedLonger || 0) + Math.max(0, P('secs')); u.bleedNoHeal = true; break;
         case 'bleedStun': u.bleedStun = Math.max(u.bleedStun || 0, Math.max(0, P('secs'))); break;
@@ -732,20 +762,22 @@ const Engine = (() => {
     let projectiles = [];
     let t = 0, shots = [], over = false, tick = 0;
     const dist = (a, b) => hyp(a.x - b.x, a.y - b.y);
-    // Walls (u.barrier: half their width, a square on its tile): the enemy can't walk into one or shoot through it
-    // (a lobbed shell flies over); their own side walks and shoots through. How far a body is from a wall is measured
-    // to its edge, so units walk up to it and hit it.
+    // Walls (u.barrier: half their length along x, u.barrierY: half along y, the same when missing; a defensive wall is a
+    // long thin one along a tile's edge): the enemy can't walk into one or shoot through it (a lobbed shell flies over);
+    // their own side walks and shoots through. How far a body is from a wall is measured to its edge, so units walk up
+    // to it and hit it.
     const barriers = all.filter(b => b.u.barrier > 0);
-    const gap = (f, b) => f.u.barrier > 0 ? hyp(Math.max(0, Math.abs(f.x - b.x) - f.u.barrier), Math.max(0, Math.abs(f.y - b.y) - f.u.barrier)) : dist(f, b);
+    const halfX = (w) => w.u.barrier, halfY = (w) => w.u.barrierY > 0 ? w.u.barrierY : w.u.barrier;
+    const gap = (f, b) => f.u.barrier > 0 ? hyp(Math.max(0, Math.abs(f.x - b.x) - halfX(f)), Math.max(0, Math.abs(f.y - b.y) - halfY(f))) : dist(f, b);
     // the first enemy wall a shot from a to v would run into (not v itself), or null
     function wallBetween(a, v) {
       if (!barriers.length || a.u.lob) return null;
       let best = null, bt = Infinity;
       for (const w of barriers) {
         if (!w.alive || w === v || w.side === a.side) continue;
-        const h = w.u.barrier;
+        const h = halfX(w), hy = halfY(w);
         let t0 = 0, t1 = 1;
-        for (const [p, d, lo, hi] of [[a.x, v.x - a.x, w.x - h, w.x + h], [a.y, v.y - a.y, w.y - h, w.y + h]]) {
+        for (const [p, d, lo, hi] of [[a.x, v.x - a.x, w.x - h, w.x + h], [a.y, v.y - a.y, w.y - hy, w.y + hy]]) {
           if (Math.abs(d) < 1e-9) { if (p < lo || p > hi) t0 = 2; continue; }
           let ta = (lo - p) / d, tb = (hi - p) / d;
           if (ta > tb) { const x = ta; ta = tb; tb = x; }
@@ -760,7 +792,8 @@ const Engine = (() => {
     const R = (b) => { const r = b.flow > 0 ? b.u.range + b.flow * b.u.flow.range : b.u.range; return b.shrinkT > 0 ? Math.max(Math.min(r, 1), r - b.shrinkM) : r; };
     // move speed: a pool's speed boost adds to it while it lasts
     // ...and kill stacks (Rampager, the Assassin) add to it
-    const spd = (b) => (b.poolFastT > 0 ? b.u.speed + b.poolFast : b.u.speed) + (b.kills > 0 ? b.kills * b.u.killStack.speed : 0);
+    // ...and Berserkers' roars speed it up by a share
+    const spd = (b) => ((b.poolFastT > 0 ? b.u.speed + b.poolFast : b.u.speed) + (b.kills > 0 ? b.kills * b.u.killStack.speed : 0)) * (b.roarSpd > 0 ? 1 + b.roarSpd / 100 : 1);
     // How far an attack reaches. Flame cones can reach further than where the unit stops (g.flameReach x range),
     // so a flamer keeps burning the enemies behind the first one without walking up to each.
     const reachOf = (b) => b.u.flame > 0 && g.flameReach > 1 ? R(b) * g.flameReach : R(b);
@@ -867,7 +900,7 @@ const Engine = (() => {
       if (tl.type === 'burn') { if (b.side !== tl.side) neutralDamage(b, tl.dps * dt); return; }
       if (tl.type === 'mend') { if (b.side === tl.side) heal(b, tl.dps * healMul * dt); return; }
       if (tl.type === 'mud') {
-        if (b.side === tl.side) return;
+        if (b.side === tl.side || b.u.unstoppable) return;
         if (!(b.slowT > 0)) { b.slowMove = 0; b.slowAtk = 0; }
         b.slowMove = Math.max(b.slowMove, tl.slow); b.slowT = Math.max(b.slowT, 0.25); // wears off a moment after it walks out
         return;
@@ -881,6 +914,7 @@ const Engine = (() => {
         (b.poison || (b.poison = [])).push({ src: null, dps: b.u.hp * tl.poisonPct / 100, t: tl.poisonDur });
         // slime units get it the other way round: the poison heals them (see the ongoing effects) and the slow speeds them up
         if (b.u.slime) { if (!(b.slowT > 0)) { b.slowMove = -tl.slowMove; b.slowAtk = -tl.slowAtk; b.slowT = tl.slowDur; } return; }
+        if (b.u.unstoppable) return; // Berserkers: no slow
         if (!(b.slowT > 0)) { b.slowMove = 0; b.slowAtk = 0; }
         b.slowMove = Math.max(b.slowMove, tl.slowMove); b.slowAtk = Math.max(b.slowAtk, tl.slowAtk); b.slowT = Math.max(b.slowT, tl.slowDur);
       }
@@ -894,7 +928,18 @@ const Engine = (() => {
       if (sheltered(v)) return; // Overwatch: safe inside its building
       const st = stats[owner.side];
       // Dodge: the whole hit misses (the same random numbers on every device)
-      if (v.u.dodge > 0 && rnd() * 100 < v.u.dodge) { st.missed += hit; return; }
+      if (v.u.dodge > 0 && rnd() * 100 < v.u.dodge) {
+        st.missed += hit;
+        if (v.u.windWalk > 0 && !v.u.structure && !v.u.anchored) { // Wind walk: a dash straight back from where the hit came from
+          let dx = v.x - fromX, dy = v.y - fromY, d = hyp(dx, dy);
+          if (d < 1e-6) { dx = 0; dy = v.side === 0 ? -1 : 1; d = 1; }
+          v.x += dx / d * v.u.windWalk; v.y += dy / d * v.u.windWalk; v.hx = -dx / d; v.hy = -dy / d;
+          if (g.bounds) { v.x = Math.max(g.bounds.x0, Math.min(g.bounds.x1, v.x)); v.y = Math.max(g.bounds.y0, Math.min(g.bounds.y1, v.y)); }
+          v.dashing = true;
+          if (v.u.windUp > 0) { v.setUp = false; v.windTarget = null; }
+        }
+        return;
+      }
       // a guard (the keep's) that is attacked leaves its post and goes for its attacker
       if (v.guard && owner.alive && owner.side !== v.side && !owner.u.aloft && !(v.avenge && v.avenge.alive)) { v.holdT = 0; v.avenge = owner; v.engaged = true; }
       if (owner.u.bldgPct > 0 && v.u.structure) hit = hit * owner.u.bldgPct / 100; // weaker against buildings (the Assassin)
@@ -949,7 +994,7 @@ const Engine = (() => {
         const dose = list.find(p => p.src === owner);
         if (dose) { dose.dps = dps; dose.t = owner.u.poisonDur; } else list.push({ src: owner, dps, t: owner.u.poisonDur });
       }
-      if (owner.u.slowDur > 0) {
+      if (owner.u.slowDur > 0 && !v.u.unstoppable) {
         // slow: the stronger effect counts, and the longest remaining time
         if (!(v.slowT > 0)) { v.slowMove = 0; v.slowAtk = 0; }
         v.slowMove = Math.max(v.slowMove, owner.u.slowMove || 0);
@@ -960,7 +1005,7 @@ const Engine = (() => {
         v.shrinkM = v.shrinkT > 0 ? Math.max(v.shrinkM, owner.u.shrinkM) : owner.u.shrinkM;
         v.shrinkT = Math.max(v.shrinkT, owner.u.shrinkDur);
       }
-      if (owner.u.knockback > 0 && knockOn && !v.u.structure && !v.u.anchored) {
+      if (owner.u.knockback > 0 && knockOn && !v.u.structure && !v.u.anchored && !v.u.unstoppable) {
         // big hits on small bodies push the full distance; on big bodies barely at all
         const push = owner.u.knockback * Math.min(1, hit / v.u.hp);
         const dx = v.x - fromX, dy = v.y - fromY, d = hyp(dx, dy) || 1;
@@ -998,9 +1043,68 @@ const Engine = (() => {
         for (let k = 0; k < Math.min(owner.u.pierce, cand.length); k++) hitSet.add(cand[k][1]);
       }
       for (const v of hitSet) hurt(owner, v, hit, fromX, fromY);
+      if (owner.u.bounce && !(owner.u.splash > 0) && hitSet.size) { const v = hitSet.values().next().value; bounceOn(owner, v, hit, 0, [v]); } // Bouncing blade
       // Waterhealing: allies inside the splash heal for the hit
       if (owner.u.waterHeal && owner.u.splash > 0) for (const a of sides[owner.side]) if (a.alive && !a.u.structure && !a.turning && hyp(a.x - px, a.y - py) <= owner.u.splash) heal(a, hit * healMul);
       if (owner.u.pools) makePool(owner, px, py, hit);
+    }
+    // Bouncing blade: from body v the shot flies on (homing, as fast as the unit's shots) to the nearest other enemy
+    // within bounce.reach that it hasn't hit yet, bounce.pct % of hit0; k bounces done so far
+    function bounceOn(owner, v, hit0, k, done) {
+      const bo = owner.u.bounce;
+      if (!bo || k >= bo.n) return;
+      let nx = null, nd = bo.reach + 0.01;
+      for (const f of sides[1 - owner.side]) {
+        if (!f.alive || f.hidden || sheltered(f) || f.u.aloft || done.includes(f)) continue;
+        const d = hyp(f.x - v.x, f.y - v.y);
+        if (d <= nd) { nd = d; nx = f; }
+      }
+      if (!nx) return;
+      const d = nd || 1;
+      projectiles.push({ owner, x: v.x, y: v.y, fx: v.x, fy: v.y, tx: nx.x, ty: nx.y, dirX: (nx.x - v.x) / d, dirY: (nx.y - v.y) / d, left: d, hit: hit0 * bo.pct / 100,
+        homing: nx, bounce: { k: k + 1, hit0, done: done.concat([nx]) }, speed: Math.max(20, owner.u.projSpeed || 0) });
+    }
+    // a bounce or a missile lands: its hit to the body it was after (or the nearest within reach of where it is), a
+    // missile's to everything within its blast; a bounce bounces on
+    function homingLand(p) {
+      const foes = sides[1 - p.owner.side];
+      let v = p.homing && p.homing.alive && hyp(p.homing.x - p.x, p.homing.y - p.y) <= PROJ_HIT_RADIUS + 0.5 ? p.homing : null;
+      if (!v) { let bd = PROJ_HIT_RADIUS; for (const f of foes) { if (!f.alive) continue; const d = hyp(f.x - p.x, f.y - p.y); if (d <= bd) { bd = d; v = f; } } }
+      if (p.missile && p.splash > 0) {
+        if (opts.record) shots.push([p.x, p.y, p.x, p.y, p.owner.side, p.splash, 1, 0, 0]);
+        let any = false;
+        for (const f of foes) if (f.alive && hyp(f.x - p.x, f.y - p.y) <= p.splash) { any = true; hurt(p.owner, f, p.hit, p.fx, p.fy); }
+        if (!any) stats[p.owner.side].missed += p.hit;
+      } else if (v) hurt(p.owner, v, p.hit, p.fx, p.fy);
+      else stats[p.owner.side].missed += p.hit;
+      if (!v) return;
+      if (p.bounce) bounceOn(p.owner, v, p.bounce.hit0, p.bounce.k, p.bounce.done);
+      else if (p.missile && p.owner.u.bounce) bounceOn(p.owner, v, p.hit, 0, [v]);
+    }
+    // Leafblade: a salvo of missiles.n homing missiles at the nearest enemies (units before buildings), one each while
+    // there are enough
+    function salvo(b) {
+      const ms = b.u.missiles, list = [];
+      for (const f of sides[1 - b.side]) if (pickable(b, f) && !f.u.aloft) list.push([(f.u.structure ? 1e6 : 0) + dist(f, b), f]);
+      if (!list.length) return false;
+      list.sort((p, q) => p[0] - q[0]);
+      for (let k = 0; k < ms.n; k++) {
+        const tgt = list[k % list.length][1], d = dist(tgt, b) || 1;
+        projectiles.push({ owner: b, x: b.x, y: b.y, fx: b.x, fy: b.y, tx: tgt.x, ty: tgt.y, dirX: (tgt.x - b.x) / d, dirY: (tgt.y - b.y) / d, left: d, hit: ms.hit,
+          homing: tgt, missile: true, splash: ms.splash, speed: ms.speed });
+      }
+      return true;
+    }
+    // Berserkers: a roar when the body starts fighting (see u.roar)
+    function roar(b) {
+      const r = b.u.roar;
+      b.roared = true;
+      if (opts.record) shots.push([b.x, b.y, b.x, b.y, b.side, r.radius, 0, 0, 0, 1, 0, 0, 1]); // [12]: a roar
+      for (const f of all) {
+        if (f === b || !f.alive || f.u.structure || f.u.aloft || hyp(f.x - b.x, f.y - b.y) > r.radius) continue;
+        if (f.side === b.side) f.roarSpd = Math.min(r.max, (f.roarSpd || 0) + r.speed);
+        else if (!f.u.unstoppable) f.roarAtk = Math.min(r.max, (f.roarAtk || 0) + r.attack);
+      }
     }
     // a thrown titanium spear lands: its hit to the nearest enemy body within reach of where it is, and its bleed
     function spearLand(p) {
@@ -1098,8 +1202,9 @@ const Engine = (() => {
     // attacks per second right now: Frenzy speeds it up with every hit landed, up to its cap (never below the base rate)
     function apsOf(b) {
       const a = b.u.aps + (b.auraAps || 0) + (b.flow > 0 ? b.flow * b.u.flow.aps : 0) + (b.kills > 0 ? b.kills * b.u.killStack.aps : 0); // an ally's aura, Flow state stacks, kill stacks
-      if (!(b.u.frenzyPct > 0) || !b.frenzy) return a;
-      return Math.max(a, Math.min(b.u.frenzyCap, a * (1 + b.frenzy * b.u.frenzyPct / 100)));
+      const roared = b.roarAtk > 0 ? 1 - b.roarAtk / 100 : 1; // an enemy Berserker's roar
+      if (!(b.u.frenzyPct > 0) || !b.frenzy) return a * roared;
+      return Math.max(a, Math.min(b.u.frenzyCap, a * (1 + b.frenzy * b.u.frenzyPct / 100))) * roared;
     }
 
     function fire(b, targets, canCharge) {
@@ -1163,7 +1268,7 @@ const Engine = (() => {
       // a flame is drawn once, as a wedge from the unit out to its range
       if (opts.record && targets.flame) {
         const [ax, ay, al] = targets.flame, r = reachOf(b), k = al ? r / al : 0;
-        shots.push([b.x, b.y, b.x + ax * k, b.y + ay * k, b.side, 0, charged ? 1 : 0, 0, b.u.flame, 1, 0, b.u.slam ? 1 : 0]); // [11]: a ground slam, not fire
+        shots.push([b.x, b.y, b.x + ax * k, b.y + ay * k, b.side, 0, charged ? 1 : 0, 0, b.u.flame, 1, 0, b.u.slam ? 1 : b.u.spinBlade ? 2 : 0]); // [11]: a ground slam (1) or spinning blades (2), not fire
       }
     }
 
@@ -1394,7 +1499,7 @@ const Engine = (() => {
       if (!v) {
         let bd = Infinity;
         for (const f of sides[1 - b.side]) {
-          if (!pickable(b, f) || f.u.structure || f.u.anchored || f.u.barrier || f.u.construct || (f.rootedBy && f.rootedBy.alive && f.rootedBy.rootTgt === f)) continue;
+          if (!pickable(b, f) || f.u.structure || f.u.anchored || f.u.barrier || f.u.construct || f.u.unstoppable || (f.rootedBy && f.rootedBy.alive && f.rootedBy.rootTgt === f)) continue;
           const d = gap(f, b);
           if (d >= rt.min - 1e-9 && d <= rt.max + 1e-9 && d < bd) { bd = d; v = f; }
         }
@@ -1482,6 +1587,7 @@ const Engine = (() => {
       for (const b of all) {
         if (!b.alive || b.delay > 0) continue;
         b.dashing = false;
+        if (b.u.roar && !b.roared) roar(b); // Berserkers roar as they start
         if (b.inside) { if (b.inside.alive) { b.x = b.inside.x; b.y = b.inside.y; continue; } b.inside = null; } // Overwatch: it stays in its building while that stands
         if (b.stunT > 0) { b.stunT = Math.max(0, b.stunT - dt); continue; } // stunned: can't move (or attack, below)
         if (b.rootedBy && b.rootedBy.alive && b.rootedBy.rootTgt === b) continue; // dragged by roots: it can't walk (it still attacks)
@@ -1510,7 +1616,7 @@ const Engine = (() => {
             b.trampled.push(f);
             if (opts.record) shots.push([b.x, b.y, f.x, f.y, b.side, 1, 1, 0, 0]);
             hurt(b, f, tHit, b.x, b.y);
-            if (b.charging && knockOn && f.alive && !f.u.structure && !f.u.anchored && !f.u.barrier) {
+            if (b.charging && knockOn && f.alive && !f.u.structure && !f.u.anchored && !f.u.barrier && !f.u.unstoppable) {
               f.x += ux * b.u.bull.push; f.y += uy * b.u.bull.push;
               if (g.bounds) { f.x = Math.max(g.bounds.x0, Math.min(g.bounds.x1, f.x)); f.y = Math.max(g.bounds.y0, Math.min(g.bounds.y1, f.y)); }
             }
@@ -1722,13 +1828,13 @@ const Engine = (() => {
       // walls: an enemy body that walked into one is put back out at its nearest edge
       for (const w of barriers) {
         if (!w.alive) continue;
-        const h = w.u.barrier;
+        const h = halfX(w), hy = halfY(w);
         for (const f of sides[1 - w.side]) {
           if (!f.alive || f.u.aloft || f.u.structure) continue;
           const dx = f.x - w.x, dy = f.y - w.y;
-          if (Math.abs(dx) >= h || Math.abs(dy) >= h) continue;
-          if (h - Math.abs(dx) < h - Math.abs(dy)) f.x = w.x + (dx < 0 ? -h : h);
-          else f.y = w.y + (dy < 0 ? -h : h);
+          if (Math.abs(dx) >= h || Math.abs(dy) >= hy) continue;
+          if (h - Math.abs(dx) < hy - Math.abs(dy)) f.x = w.x + (dx < 0 ? -h : h);
+          else f.y = w.y + (dy < 0 ? -hy : hy);
         }
       }
       for (const s of strikes) {
@@ -1858,6 +1964,10 @@ const Engine = (() => {
         if (b.stunT > 0) continue; // stunned
         if (b.flurryLeft > 0) { if (b.alive) flurryStep(b); else b.flurryLeft = 0; continue; } // Death flurry: the rest of its blows
         if (b.u.spear && b.alive) forgeSpear(b); // Titanium spears: forged and thrown apart from its own attack
+        if (b.u.missiles && b.alive) { // Leafblade: a salvo at the start and every missiles.every s
+          b.missileT = (b.missileT || 0) - dt;
+          if (b.missileT <= 1e-9) { if (salvo(b)) b.missileT = b.u.missiles.every; else b.missileT = 0; }
+        }
         if (b.u.mend > 0) { // a healer that never attacks: the most wounded ally in range gets b.u.mend
           if (!b.alive || b.cd > 0) continue;
           let tgt = null, most = 1e-9;
@@ -2018,11 +2128,15 @@ const Engine = (() => {
         for (const p of projectiles) {
           const foes = sides[1 - p.owner.side];
           let mv = (p.speed || p.owner.u.projSpeed) * dt, done = false;
-          const land = () => p.spear ? spearLand(p) : impact(p.owner, p.x, p.y, null, p.hit, p.dirX, p.dirY, p.fx, p.fy);
+          const land = () => p.spear ? spearLand(p) : p.homing ? homingLand(p) : impact(p.owner, p.x, p.y, null, p.hit, p.dirX, p.dirY, p.fx, p.fy);
+          if (p.homing && p.homing.alive) { // a bounce or a missile follows its target
+            const dx = p.homing.x - p.x, dy = p.homing.y - p.y, d = hyp(dx, dy);
+            if (d > 1e-6) { p.dirX = dx / d; p.dirY = dy / d; p.left = d; p.tx = p.homing.x; p.ty = p.homing.y; }
+          }
           while (mv > 0 && !done) {
             const sub = Math.min(0.5, mv, p.left);
             p.x += p.dirX * sub; p.y += p.dirY * sub; p.left -= sub; mv -= sub;
-            if (!p.owner.u.lob || p.spear) for (const f of foes) {
+            if ((!p.owner.u.lob || p.spear) && !p.homing) for (const f of foes) { // a bounce or a missile only lands on what it follows
               if (f.alive && hyp(f.x - p.x, f.y - p.y) <= PROJ_HIT_RADIUS) {
                 land();
                 done = true; break;
@@ -2046,7 +2160,7 @@ const Engine = (() => {
         v.windTarget = null; v.windT = 0; v.setUp = false; v.firing = -1; v.burstLeft = 0; v.trampleLeft = 0; v.trampled = null;
         v.spinTarget = null; v.aims = null; v.lock = null; v.march = null; v.guide = null; v.goal = null; v.spreadTo = null; v.engaged = false; v.holdT = 0; v.avenge = null; v.delay = 0; v.band = null; v.hidden = false;
         v.slowT = 0; v.slowMove = 0; v.slowAtk = 0; v.shrinkT = 0; v.shrinkM = 0; v.kids = null; v.stunT = 0; v.frenzy = 0; v.flow = 0; v.knives = null; v.atkN = 0; v.forgeT = 0; v.spearReady = false;
-        v.burn = null; v.kills = 0; v.flurryLeft = 0; v.flurryTgt = null; v.rootTgt = null; v.rootedBy = null; v.hunt = null; v.bullN = 0; v.charging = false; v.inside = null;
+        v.burn = null; v.kills = 0; v.flurryLeft = 0; v.flurryTgt = null; v.rootTgt = null; v.rootedBy = null; v.hunt = null; v.bullN = 0; v.charging = false; v.inside = null; v.missileT = 0; v.roarSpd = 0; v.roarAtk = 0;
         sides[v.side].push(v); stats[v.side].totalHp += v.hp;
         for (const b of all) {
           if (b.windTarget === v) { b.windTarget = null; b.windT = 0; }

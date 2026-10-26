@@ -605,7 +605,8 @@
           }
         }
       ],
-      "flat": true
+      "flat": true,
+      "master": true
     },
     {
       "id": "sightweavers",
@@ -655,7 +656,8 @@
       "name": "Spirit walk",
       "cost": 300,
       "params": {},
-      "flat": true
+      "flat": true,
+      "master": true
     },
     {
       "id": "spitfire",
@@ -719,6 +721,54 @@
       "params": {
         "secs": 5
       }
+    },
+    {
+      "id": "windWalk",
+      "type": "windWalk",
+      "name": "Wind walk",
+      "cost": 100,
+      "params": {
+        "pct": 33,
+        "step": 6
+      }
+    },
+    {
+      "id": "bouncingBlade",
+      "type": "bounce",
+      "name": "Bouncing blade",
+      "cost": 150,
+      "params": {
+        "n": 2,
+        "pct": 30,
+        "reach": 10
+      }
+    },
+    {
+      "id": "petalburst",
+      "type": "rapid",
+      "name": "Petalburst",
+      "cost": 150,
+      "params": {
+        "aps": 100,
+        "range": 50
+      }
+    },
+    {
+      "id": "leafblade",
+      "type": "leafblade",
+      "name": "Leafblade",
+      "cost": 300,
+      "params": {},
+      "flat": true
+    },
+    {
+      "id": "berserkers",
+      "type": "berserk",
+      "name": "Berserkers",
+      "cost": 300,
+      "params": {},
+      "flat": true,
+      "master": true
     }
   ],
   "units": [
@@ -1036,9 +1086,11 @@
       "skills": [
         "tuffSkin",
         "rampager",
-        "bullhead"
+        "bullhead",
+        "berserkers"
       ],
       "skillsOn": [
+        false,
         false,
         false,
         false
@@ -1046,14 +1098,25 @@
       "skillMods": [
         null,
         null,
+        null,
         null
       ],
       "skillsInnate": [
         false,
         false,
+        false,
         false
       ],
       "skillOr": [
+        [
+          1,
+          2
+        ]
+      ],
+      "skillNeedsAny": [
+        null,
+        null,
+        null,
         [
           1,
           2
@@ -1127,15 +1190,15 @@
       ]
     },
     {
-      "burst": 6,
-      "pellets": 2,
+      "burst": 1,
+      "pellets": 1,
       "spinUp": 0,
       "pierce": 0,
       "projSpeed": 35,
       "minRange": 0,
       "charge": 1,
       "knockback": 0,
-      "windUp": 0.2,
+      "windUp": 0,
       "flame": 0,
       "defense": "none",
       "defVal": 0,
@@ -1144,20 +1207,22 @@
       "name": "Leaf Wizard",
       "cost": 200,
       "bodies": 1,
-      "hp": 240,
-      "hit": 21,
-      "aps": 0.45,
+      "hp": 210,
+      "hit": 95,
+      "aps": 1.2,
       "range": 27,
       "speed": 5,
       "splash": 0,
       "shape": "hexagon",
       "color": "#00d200",
       "skills": [
-        "rapid",
-        "range",
-        "dodge"
+        "windWalk",
+        "bouncingBlade",
+        "petalburst",
+        "leafblade"
       ],
       "skillsOn": [
+        false,
         false,
         false,
         false
@@ -1165,12 +1230,29 @@
       "skillMods": [
         null,
         null,
+        null,
         null
       ],
       "skillsInnate": [
         false,
         false,
+        false,
         false
+      ],
+      "skillOr": [
+        [
+          1,
+          2
+        ]
+      ],
+      "skillNeedsAny": [
+        null,
+        null,
+        null,
+        [
+          1,
+          2
+        ]
       ]
     },
     {

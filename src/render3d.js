@@ -426,11 +426,12 @@ const Render3D = (THREE, el, view, opts = {}) => {
         if (side === me && deploying && Game.isReady(m, sq)) icon('plus', wx + camRight.x * 4, 5, wz + camRight.z * 4, 1.1);
         return [wx, wz];
       }
-      const u = units[sq.unit], w = Game.tileToWorld(sq.col, sq.row), st = tileCenter(v, sq.col, sq.row);
+      const awake = sq.awaken > 0 && (side === me || !deploying || Game.seenAwake(m, sq)); // the opponent's awakening from this round stays hidden
+      const u = awake && Game.unitFor(m, side, sq.unit, sq).mech ? { ...units[sq.unit], mech: true } : units[sq.unit], w = Game.tileToWorld(sq.col, sq.row), st = tileCenter(v, sq.col, sq.row);
       const list = Engine.buildSquad(u, side, w.x, w.y, sq.id, T);
       squadTiles.add(sq.col + ',' + sq.row);
       const raise = Game.garrisonAt(m, side, sq.col, sq.row) ? roofOf(Game.towerAt(m, side, sq.col, sq.row) ? towerUnit(m, side, Game.towerTypeShown(m, me, deploying, side))
-        : Game.treasuryAt(m, side, sq.col, sq.row) ? Game.treasuryUnit() : Game.bwallAt(m, side, sq.col, sq.row) ? Game.bwallUnit() : { building: 'factory' }) : 0; // Overwatch: it stands on top of the building it is in
+        : Game.treasuryAt(m, side, sq.col, sq.row) ? Game.treasuryUnit() : { building: 'factory' }) : 0; // Overwatch: it stands on top of the building it is in
       for (const b of list) bodies.push({ u, side, x: b.x, y: b.y, look: 'solid', tag: side + '|' + sq.id, tile: sq, raise });
       if (fresh) tileSq(st.c, st.r, teamColor(side, me), 0.8, 0.05, 14);
       // badges over the squad: level pips, charisma pips (or the Gentleman's hat), ready to level up (its tag goes
@@ -445,6 +446,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
       const bs = viewMode === 'strategic' ? 2.5 : viewMode === 'tilted' ? 2 : 1.6, o = 1.4 + bs * 0.6;
       if (pips.length) { const n = (pips.length - 1) * 0.42 * bs * 1.1 / 2; iconRow(pips.map(() => 'dot'), wx - camRight.x * (o - n) - camDown.x * o, top + 0.2, wz - camRight.z * (o - n) - camDown.z * o, 0.42 * bs * 1.5, pips); }
       if (Game.isGentleman(sq)) icon('hat', wx, top + 1.1, wz, 1.1 * bs * 0.8);
+      if (awake) arc(wx, wz, T * 0.42, gold, 0.85, 1, 0.07); // awakened: a gold ring on its tile
       if (side === me && deploying && Game.isReady(m, sq)) icon('plus', wx + (camRight.x - camDown.x) * o, top + 0.2, wz + (camRight.z - camDown.z) * o, 0.9 * bs);
       return [wx, wz];
     };
@@ -480,7 +482,10 @@ const Render3D = (THREE, el, view, opts = {}) => {
     if (hoverTile && (selected !== null || moving != null) && Game.canPlaceAt(m, me, hoverTile.col, hoverTile.row, placingUnit) && (Game.spotFree(m, me, hoverTile.col, hoverTile.row, placingUnit) || (placingUnit != null && Game.boardable(m, me, hoverTile.col, hoverTile.row, placingUnit)))) {
       for (const [c, r] of Game.blockOf(m, placingUnit, hoverTile.col, hoverTile.row)) { const s = tileCenter(v, c, r); tileSq(s.c, s.r, you, 0.2, 1, 0, 0); } // a building's whole block
     }
-    if (v.placingWall && editable) for (let row = 0; row < Game.ROWS; row++) for (let c = 0; c < Game.COLS; c++) if (Game.bwallSpotOk(m, me, c, row)) { const s = tileCenter(v, c, row); tileSq(s.c, s.r, you, 0.55, 0.06); }
+    if (v.placingWall && editable) for (let row = 0; row < Game.ROWS; row++) for (let c = 0; c < Game.COLS; c++) for (const e of ['n', 'w', 's', 'e']) if (Game.bwallSpotOk(m, me, c, row, e)) { // a free edge: a line along it
+      const w = Game.bwallWorld(me, { col: c, row, edge: e }), [wx, wz] = world(f, w.x, w.y), h = T / 2 - 0.6, up = e === 'e' || e === 'w';
+      beam(wx - (up ? 0 : h), 0.12, wz - (up ? h : 0), wx + (up ? 0 : h), 0.12, wz + (up ? h : 0), 0.35, you, 0.7);
+    }
     if (v.placingElf && editable) for (const row of Game.zoneRows(me)) for (let c = 0; c < Game.COLS; c++) if (Game.elfOwnSpotOk(m, me, c, row)) { const s = tileCenter(v, c, row); tileSq(s.c, s.r, color(ELF_COL), 0.6, 0.06); }
     if (v.placingTower && editable) for (const row of Game.zoneRows(me)) for (let c = 0; c < Game.COLS; c++) {
       if (Game.towerColOk(c) && !Game.reserved(me, c, row) && !Game.occupied(m, me, c, row)) { const s = tileCenter(v, c, row); tileSq(s.c, s.r, gold, 0.5, 0.06); }
@@ -502,9 +507,9 @@ const Render3D = (THREE, el, view, opts = {}) => {
     // the bastions' walls while deploying (an opponent's new one only from the fight on)
     if (deploying) for (const side of [me, foe]) for (const bw of Game.bwallsOf(m, side)) {
       if (!Game.bwallShown(m, me, true, side, bw)) continue;
-      const w = Game.tileToWorld(bw.col, bw.row);
-      bodies.push({ u: Game.bwallUnit(), side, x: w.x, y: w.y, look: 'solid', edge: Art.teamCol(side, me) });
-      if (side === me && bw.round === m.round) { const st = tileCenter(v, bw.col, bw.row); tileSq(st.c, st.r, teamColor(side, me), 0.8, 0.05, 14); }
+      const w = Game.bwallWorld(side, bw);
+      bodies.push({ u: Game.bwallUnit(Game.edgeOf(side, bw)), side, x: w.x, y: w.y, look: 'solid', edge: Art.teamCol(side, me) });
+      if (side === me && bw.round === m.round) { const [wx, wz] = world(f, w.x, w.y); arc(wx, wz, 2.4, teamColor(side, me), 0.8, 1, 0.08); } // placed this round
     }
     // the treasuries (Test Grid): see-through in round 1, before they are built
     if (Game.treasuryOn(m)) for (const side of [me, foe]) {
@@ -631,7 +636,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
         // Mechites glide (smooth); a roller rolls instead of bobbing
         const bob = s.moving && !s.u.smooth && !rollAt ? Math.abs(Math.sin(clock * 9 + s.phase)) * 0.12 * r * s.moving : 0;
         const [wx, wz] = world(f, s.x, s.y);
-        tmpQ.setFromAxisAngle(up, fixed ? (s.side === me ? Math.PI : 0) : Math.atan2(-hx * f, hy * f)); // a model's front is its -z side; a tower's door faces its own side
+        tmpQ.setFromAxisAngle(up, fixed ? (s.side === me ? Math.PI : 0) + ((s.u.barrierY || 0) > (s.u.barrier || 0) ? Math.PI / 2 : 0) : Math.atan2(-hx * f, hy * f)); // a model's front is its -z side; a tower's door faces its own side; a wall along y turns a quarter
         tmpP.set(wx, lift + bob, wz); tmpS.setScalar(sc);
         if (rollAt && s.b) { // turn the ball around its middle by how far it has rolled
           tmpQ.multiply(tmpQ2.setFromAxisAngle(xAxis, -(s.b.moved || 0) / (rollAt * sc)));
@@ -649,7 +654,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
         // a stealthed body is only its see-through model, as the dashed ghost on the 2D board: no markers, and no
         // ring under the opponent's
         const ghost = !!(s.b && s.b.hidden && !s.u.aloft);
-        if (!s.u.spire && !uiOff && !(ghost && s.side !== me)) rings.push([wx, wz, r * (s.u.structure || s.u.building ? 2.6 * (s.u.size > 1 ? 1.6 : 1) : 1), s.side]);
+        if (!s.u.spire && !s.u.barrier && !uiOff && !(ghost && s.side !== me)) rings.push([wx, wz, r * (s.u.structure || s.u.building ? 2.6 * (s.u.size > 1 ? 1.6 : 1) : 1), s.side]);
         const h = top * sc + lift;
         if (s.crest) icon(`arms|${s.crest}|${s.edge}`, wx, h + 1.2, wz, 1.5);
         if (s.b && !ghost) { bodyMarkers(s, f, me, wx, wz, r, h, clock); s.marked = true; }
@@ -681,7 +686,12 @@ const Render3D = (THREE, el, view, opts = {}) => {
     const isSpear = (p) => p.spear || p.owner.u.shape === 'spear'; // Truespear, and titanium spears
     const spears = ps.filter(isSpear), rest = ps.filter(p => !isSpear(p));
     const sg = group('projectiles', shotGeo, flatMat, rest.length);
-    rest.forEach((p, i) => { tmpP.set(p.x * f, 1.6, -p.y * f); tmpS.setScalar(fxWide() * 1.4); tmpQ.identity(); sg.setMatrixAt(i, tmpM.compose(tmpP, tmpQ, tmpS)); sg.setColorAt(i, tmpC.copy(teamColor(p.owner.side, me)).lerp(white, 0.45)); });
+    const LEAF = color('#7BE05A'), FLAME = color('#FF9A3D'); // a Leaf Wizard's leaves, a Leafblade missile's flame
+    rest.forEach((p, i) => {
+      tmpP.set(p.x * f, p.missile ? 2.2 : 1.6, -p.y * f); tmpS.setScalar(fxWide() * (p.missile ? 2 : 1.4)); tmpQ.identity(); sg.setMatrixAt(i, tmpM.compose(tmpP, tmpQ, tmpS));
+      sg.setColorAt(i, p.missile ? FLAME : p.owner.u.name === 'Leaf Wizard' ? tmpC.copy(LEAF).lerp(teamColor(p.owner.side, me), 0.25) : tmpC.copy(teamColor(p.owner.side, me)).lerp(white, 0.45));
+      if (p.missile) beam(p.x * f, 2.2, -p.y * f, (p.x - p.dirX * 2.5) * f, 2.0, -(p.y - p.dirY * 2.5) * f, 0.25 * fxWide(), FLAME, 0.8); // its trail
+    });
     finish(sg, rest.length);
     const sp = models.parts('spear'), spT = group('spear:tint', sp.tint, tintMat, spears.length), spF = group('spear:fixed', sp.fixed, fixedMat, spears.length);
     spears.forEach((p, i) => {
@@ -716,6 +726,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
     for (const e of v.fx || []) {
       const a = Math.max(0, 1 - e.age / e.life), team = teamColor(e.side, v.me);
       if (e.kind === 'death') { arc(e.x * f, -e.y * f, size(e.u) * (1 + e.age / e.life), team, 0.6 * a, 1, 0.1); continue; }
+      if (e.kind === 'roar') { arc(e.x * f, -e.y * f, e.r * (0.25 + 0.75 * e.age / e.life), team, 0.75 * a, 1, 0.18); continue; } // Berserkers: a ring sweeping out
       const x1 = e.x1 * f, z1 = -e.y1 * f, x2 = e.x2 * f, z2 = -e.y2 * f;
       if (e.kind === 'shot') {
         beam(x1, 1.1, z1, x2, 0.9, z2, k * Math.max(e.charged ? 0.28 : 0.1, 0.1 + ((e.spin || 1) - 1) * 0.16), team, 0.85 * a);
@@ -737,7 +748,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
         for (let sgm = 0; sgm < FAN_SEG; sgm++) {
           const a0 = ang - half + 2 * half * sgm / FAN_SEG, a1 = ang - half + 2 * half * (sgm + 1) / FAN_SEG, o = (nf * FAN_SEG + sgm) * 9;
           fanPos.set([x1, 0.3, z1, x1 + Math.cos(a0) * rr, 0.3, z1 + Math.sin(a0) * rr, x1 + Math.cos(a1) * rr, 0.3, z1 + Math.sin(a1) * rr], o);
-          fanCol.set(e.slam ? [0.42 * k, 0.33 * k, 0.2 * k, 0.12 * k, 0.09 * k, 0.05 * k, 0.12 * k, 0.09 * k, 0.05 * k] : [0.55 * k, 0.32 * k, 0.08 * k, 0.12 * k, 0.03 * k, 0, 0.12 * k, 0.03 * k, 0], o); // a ground slam is dust, not fire
+          fanCol.set(e.slam ? [0.42 * k, 0.33 * k, 0.2 * k, 0.12 * k, 0.09 * k, 0.05 * k, 0.12 * k, 0.09 * k, 0.05 * k] : e.spin ? [0.3 * k, 0.55 * k, 0.15 * k, 0.05 * k, 0.2 * k, 0.04 * k, 0.05 * k, 0.2 * k, 0.04 * k] : [0.55 * k, 0.32 * k, 0.08 * k, 0.12 * k, 0.03 * k, 0, 0.12 * k, 0.03 * k, 0], o); // a ground slam is dust, spinning blades are leaves, not fire
         }
         nf++;
       }
@@ -751,9 +762,10 @@ const Render3D = (THREE, el, view, opts = {}) => {
   const screenTile = (me, col, row) => me === 1 ? { col: Game.COLS - 1 - col, row: Game.ROWS - 1 - row } : { col, row };
   function tileOfGround(p, me) {
     if (!p) return null;
-    const c = Math.floor((p.x + BW / 2) / T), r = Math.floor((p.z + BD / 2) / T);
+    const x = (p.x + BW / 2) / T, z = (p.z + BD / 2) / T, c = Math.floor(x), r = Math.floor(z);
     if (c < 0 || r < 0 || c >= Game.COLS || r >= Game.ROWS) return null;
-    return screenTile(me, c, r);
+    const fx = x - c, fy = z - r; // where in the tile (for a wall's edge), in model terms
+    return { ...screenTile(me, c, r), fx: me === 1 ? 1 - fx : fx, fy: me === 1 ? 1 - fy : fy };
   }
 
   // ---------- what a finger points at ----------

@@ -455,10 +455,11 @@ const Models3D = (THREE) => {
     P(cone(1.8, 1.0, 4), 'team', [0, 4.6, 0], [0, Math.PI / 4, 0]), ...[[-1, -1], [1, 1]].map(([x, z]) => P(box(0.1, 1.2, 0.1), WOOD, [x * 1.05, 3.9, z * 1.05]))];
   BUILD.wall = () => [...[-1.5, -0.75, 0, 0.75, 1.5].map((x, k) => P(cyl(0.32, 0.32, 2.2 + (k % 2) * 0.3, 6), WOOD, [x, 1.1 + (k % 2) * 0.15, 0])),
     ...[-1.5, -0.75, 0, 0.75, 1.5].map((x, k) => P(cone(0.32, 0.6, 6), '#B79A6E', [x, 2.5 + (k % 2) * 0.3, 0])), P(box(3.6, 0.25, 0.2), 'team', [0, 1.4, -0.3])];
-  // the bastion's defensive wall: a block of stone filling its tile, battlements along the top and a band in the team colour
-  BUILD.stonewall = () => [P(box(5.6, 2.4, 5.6), STONE, [0, 1.2, 0]),
-    ...[-2.2, -0.73, 0.73, 2.2].flatMap(x => [P(box(0.8, 0.6, 0.8), STONE, [x, 2.7, -2.4]), P(box(0.8, 0.6, 0.8), STONE, [x, 2.7, 2.4])]),
-    P(box(5.7, 0.3, 5.7), 'team', [0, 1.9, 0])];
+  // the bastion's defensive wall: a stone wall along one edge of a tile (along x; the renderer turns one along y),
+  // battlements along the top and a band in the team colour
+  BUILD.stonewall = () => [P(box(6.0, 2.4, 1.2), STONE, [0, 1.2, 0]),
+    ...[-2.4, -1.2, 0, 1.2, 2.4].map(x => P(box(0.7, 0.6, 1.2), STONE, [x, 2.7, 0])),
+    P(box(6.1, 0.3, 1.3), 'team', [0, 1.9, 0])];
   // Core Awoken: the Mecha Tower on four big wheels
   BUILD['tower:f-mechites:awake'] = () => [...mechaTower(1.0),
     ...[[-1, -1], [1, -1], [-1, 1], [1, 1]].map(([x, z]) => P(cyl(0.95, 0.95, 0.55, 10), DARK, [x * 2.05, 0.95, z * 1.5], [0, 0, Math.PI / 2])),
@@ -503,6 +504,21 @@ const Models3D = (THREE) => {
     P(cyl(0.07, 0.07, 0.5, 5), IRON, [0.25, 1.3, 0.3])];
   BUILD.building = BUILD['building:factory']; // any other building, until it has a model of its own
 
+  // the Leafblade suit (an awakened Leaf Wizard): a leaf-green mech on thick legs, a glowing visor, missile pods on its
+  // shoulders and two long leaf blades held out from its arms
+  BUILD.leafmech = () => [
+    ...[-1, 1].flatMap(sd => [P(box(0.36, 0.9, 0.42), DARK, [sd * 0.32, 0.45, 0]), P(box(0.46, 0.18, 0.6), IRON, [sd * 0.32, 0.09, -0.06])]),
+    P(box(1.0, 0.85, 0.75), 'tint', [0, 1.35, 0]),
+    P(box(0.6, 0.3, 0.5), IRON, [0, 0.95, 0]),
+    P(box(0.5, 0.36, 0.45), 'tint', [0, 1.95, 0.02]),
+    P(box(0.42, 0.1, 0.06), GHOST, [0, 1.98, -0.22]),
+    ...[-1, 1].flatMap(sd => [
+      P(box(0.42, 0.34, 0.6), IRON, [sd * 0.72, 1.82, 0.08]), // missile pod
+      ...[-0.12, 0.12].map(o => P(cyl(0.07, 0.07, 0.12, 6), FIRE, [sd * 0.72 + o, 1.82, -0.24], [Math.PI / 2, 0, 0])),
+      P(box(0.34, 0.12, 0.5), 'team', [sd * 0.72, 2.03, 0.08]),
+      P(box(0.24, 0.62, 0.26), DARK, [sd * 0.68, 1.3, -0.05], [0.35, 0, 0]), // arm
+      P(box(0.14, 0.05, 2.0), '#7BE05A', [sd * 0.95, 1.05, -1.05], [0.1, sd * -0.35, sd * 0.25]), // a long leaf blade
+      P(box(0.06, 0.07, 1.6), '#2E8B2A', [sd * 0.95, 1.08, -0.95], [0.1, sd * -0.35, sd * 0.25])])];
   const NAMED = { 'Ether Golem': 'golem', 'Sun Priest': 'sunPriest', 'Meteor Caller': 'meteor', 'War Mammoth': 'mammoth', 'Necromancer': 'necro', 'Truespear': 'truespear',
     'Ent': 'ent', 'Rogue': 'rogue', 'Sniper': 'sniper', 'Slimeshots': 'slimeshot', 'Skeleton Archers': 'skeleton',
     'Rollers': 'roller', 'Cog Builder': 'cogBuilder', 'Mechite Guards': 'mechGuard', 'Cog Turret': 'cogTurret', 'Healbot': 'healbot',
@@ -517,6 +533,7 @@ const Models3D = (THREE) => {
     if (u.building) { const k = 'building:' + u.building; return u.awake && BUILD[k + ':awake'] ? k + ':awake' : BUILD[k] ? k : 'building'; } // Core Awoken: its walking version
     if (u.structure) { const k = TOWERS[u.kind] ? 'tower:' + u.kind : /^f-/.test(u.kind || '') ? 'tower:faction' : 'tower:keep'; return u.awake && BUILD[k + ':awake'] ? k + ':awake' : k; } // Core Awoken: the Mecha Tower on wheels
     if (u.aloft) return u.kind === 'drone' ? 'drone' : 'airship';
+    if (u.mech) return 'leafmech'; // the Leafblade suit
     if (NAMED[u.name]) { const k = NAMED[u.name]; return u.awake && BUILD[k + ':awake'] ? k + ':awake' : u.unfolded && BUILD[k + ':unfolded'] ? k + ':unfolded' : k; } // Core Awoken, Unfold: their own versions
     if (u.shape === 'horse') return 'horse';
     if (u.shape === 'spider') return 'spider';

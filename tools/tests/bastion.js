@@ -28,43 +28,56 @@ const add = (m, sd, name, col, row) => { const sq = { id: m.nextId[sd]++, unit: 
   assert.strictEqual(b2.u.bonusArmor || 0, W.towerArmor, 'Defensive walls: armor');
 }
 
-// placing walls: own half of the board only, free tiles, BWALL.count of them, this round's can be taken back
+// placing walls: along an edge of a tile of my own half of the board (not the board's outer edge), BWALL.count of
+// them, a wall takes no tile, this round's can be taken back
 {
   const m = at3('bastion', true, true);
   assert.strictEqual(Game.bwallsLeft(m, 0), W.count);
-  assert.ok(!Game.placeBwall(m, 0, 5, 7), 'not in their half of no man’s land');
-  assert.ok(!Game.placeBwall(m, 0, m.towers[0].col, m.towers[0].row), 'not on the tower');
-  assert.ok(Game.placeBwall(m, 0, 5, 8) && Game.placeBwall(m, 0, 6, 8), 'in my half of no man’s land');
-  assert.ok(!Game.placeBwall(m, 0, 6, 8), 'not twice on a tile');
-  assert.ok(Game.placeBwall(m, 0, 4, 12), 'in my zone');
-  assert.ok(!Game.placeBwall(m, 0, 3, 12), 'only three');
-  assert.ok(Game.occupied(m, 0, 4, 12), 'a squad can’t stand on a wall');
-  assert.ok(Game.unplaceBwall(m, 0, 4, 12) && Game.placeBwall(m, 0, 7, 8), 'taken back and placed again');
-  assert.ok(!Game.placeBwall(at3('bastion', true), 0, 5, 8), 'none without the skill');
+  assert.ok(!Game.placeBwall(m, 0, 5, 7, 's'), 'not from their half of no man’s land');
+  assert.ok(!Game.placeBwall(m, 0, 5, Game.ROWS - 1, 's') && !Game.placeBwall(m, 0, 0, 12, 'w'), 'not on the board’s outer edge');
+  assert.ok(Game.placeBwall(m, 0, 5, 8, 'n') && Game.placeBwall(m, 0, 6, 8, 'n'), 'on my half of no man’s land, along the middle line');
+  assert.ok(!Game.placeBwall(m, 0, 6, 8, 'n'), 'not twice on an edge');
+  assert.ok(Game.bwallOn(m, 0, 6, 7, 's') && Game.bwallOn(m, 0, 6, 8, 'n') && !Game.bwallOn(m, 0, 6, 8, 's'), 'an edge is the same from both its tiles');
+  assert.ok(Game.placeBwall(m, 0, 4, 12, 'e'), 'in my zone, along the side of a tile');
+  assert.ok(!Game.placeBwall(m, 0, 3, 12, 'n'), 'only three');
+  assert.ok(!Game.occupied(m, 0, 4, 12) && !Game.occupied(m, 0, 5, 12), 'a wall takes no tile: squads stand on both sides of it');
+  assert.ok(Game.unplaceBwall(m, 0, 5, 12, 'w') && Game.placeBwall(m, 0, 7, 8, 'n'), 'taken back (from either of its tiles) and placed again');
+  assert.ok(!Game.placeBwall(at3('bastion', true), 0, 5, 8, 'n'), 'none without the skill');
   const walls = Game.bodiesFor(m, 0).filter(b => b.u.barrier);
   assert.strictEqual(walls.length, W.count);
-  for (const b of walls) { assert.strictEqual(b.u.hp, W.hp); assert.strictEqual(b.u.defVal, W.armor); assert.ok(b.u.structure && b.u.lesser); }
+  for (const b of walls) {
+    assert.strictEqual(b.u.hp, W.hp); assert.strictEqual(b.u.defVal, W.armor); assert.ok(b.u.structure && b.u.lesser);
+    assert.ok(b.u.barrier === Game.TILE / 2 && b.u.barrierY === W.thick / 2, 'a long thin wall along x');
+    assert.strictEqual(b.y, Game.tileToWorld(5, 8).y + Game.TILE / 2, 'standing on the edge between rows 7 and 8');
+  }
+  const side = Game.bwallUnit('e');
+  assert.ok(side.barrier === W.thick / 2 && side.barrierY === Game.TILE / 2, 'one along y');
   assert.ok(!Game.bwallShown(m, 1, true, 0, m.bwalls[0][0]) && Game.bwallShown(m, 1, false, 0, m.bwalls[0][0]), 'hidden from the opponent until the fight');
   Game.undoTowerSkill2(m, 0);
   assert.strictEqual(Game.bwallsOf(m, 0).length, 0, 'undoing the skill takes its walls back');
-  // walls not placed go up by themselves at the fight
+  // walls not placed go up by themselves at the fight: in a line along the front edges two rows in front of the tower
   const m2 = at3('bastion', false, true);
   Game.startBattle(m2);
-  assert.strictEqual(Game.bwallsOf(m2, 0).length, W.count);
+  const auto = Game.bwallsOf(m2, 0), t = m2.towers[0];
+  assert.strictEqual(auto.length, W.count);
+  assert.ok(auto.every(w => w.edge === 'n' && w.row === t.row - 2 && Math.abs(w.col - t.col) <= 1), JSON.stringify(auto));
+  // an older wall (no edge) stands on its tile's front edge
+  const m3 = at3('bastion', true, true);
+  m3.bwalls = [[{ col: 5, row: 10, round: 2 }], []];
+  assert.ok(Game.bwallOn(m3, 0, 5, 10, 'n') && Game.bodiesFor(m3, 0).some(b => b.u.barrier && b.y === Game.tileToWorld(5, 10).y + Game.TILE / 2));
 }
 
 // in a fight: enemies can't walk into a wall, they hit it instead; the wall's own side walks through
 {
   const m = at3('bastion', true, true);
-  for (const c of [4, 5, 6, 7]) if (c !== 4) Game.placeBwall(m, 0, c, 8);
-  Game.placeBwall(m, 0, 4, 8);
+  for (const c of [4, 5, 6]) Game.placeBwall(m, 0, c, 8, 'n');
   add(m, 1, 'Brute', 5, 4); add(m, 1, 'Goblin Swarm', 6, 4);
   add(m, 0, 'Brute', 5, 10);
   const sim = Game.startBattle(m), walls = sim.bodies.filter(b => b.u.barrier);
   let inside = 0, allyIn = false;
   for (let k = 0; k < 600 && sim.step(); k++) for (const b of sim.bodies) {
     if (!b.alive || b.u.structure) continue;
-    for (const w of walls) if (w.alive && Math.abs(b.x - w.x) < w.u.barrier - 1e-6 && Math.abs(b.y - w.y) < w.u.barrier - 1e-6) { if (b.side === 1) inside++; else allyIn = true; }
+    for (const w of walls) if (w.alive && Math.abs(b.x - w.x) < w.u.barrier - 1e-6 && Math.abs(b.y - w.y) < w.u.barrierY - 1e-6) { if (b.side === 1) inside++; else allyIn = true; }
   }
   assert.strictEqual(inside, 0, 'no enemy inside a wall');
   assert.ok(walls.some(w => w.hp < w.u.hp), 'the enemy hit the walls');

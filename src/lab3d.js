@@ -35,7 +35,8 @@ function fight() {
 }
 // as the game's absorb(): this tick's shots and deaths become effects
 function absorb() {
-  for (const s of bt.lastShots()) if (s[8] > 0) fx.push({ kind: 'flame', x1: s[0], y1: s[1], x2: s[2], y2: s[3], side: s[4], half: s[8], slam: s[11] === 1, age: 0, life: s[11] === 1 ? 0.45 : 0.3 });
+  for (const s of bt.lastShots()) if (s[12] === 1) fx.push({ kind: 'roar', x: s[0], y: s[1], r: s[5], side: s[4], age: 0, life: 0.8 });
+  else if (s[8] > 0) fx.push({ kind: 'flame', x1: s[0], y1: s[1], x2: s[2], y2: s[3], side: s[4], half: s[8], slam: s[11] === 1, spin: s[11] === 2, age: 0, life: s[11] === 1 ? 0.45 : 0.3 });
   else if (s[10] === 1) fx.push({ kind: 'bolt', x1: s[0], y1: s[1], x2: s[2], y2: s[3], side: s[4], age: 0, life: 0.22 });
   else fx.push({ kind: s[7] === 1 ? 'heal' : 'shot', x1: s[0], y1: s[1], x2: s[2], y2: s[3], side: s[4], age: 0, life: s[7] === 1 ? 0.35 : 0.18 });
   for (const b of bt.bodies) if (!b.alive && !b._gone) { b._gone = true; fx.push({ kind: 'death', x: b.x, y: b.y, u: b.u, side: b.side, age: 0, life: 0.5 }); }

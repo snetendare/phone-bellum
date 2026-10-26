@@ -422,20 +422,25 @@ const Render2D = (cv, view) => {
     for (const side of [me, foe()]) { const ts = Game.treasurySpot(m, side); if (ts) drawLesser((scol(ts.col) + 0.5) * t, (srow(ts.row) + 0.5) * t, t, side, u, null, false, !Game.treasuryUp(m)); }
   }
   // a defensive wall (the bastion's): a block of stone filling its tile, edged in its side's colour
-  function drawStoneWall(x, y, t, side, hpr, fresh) {
-    const s = t - 2;
+  // a defensive wall along a tile's edge, centred on (x, y): lying across the screen, or up it (upright)
+  function drawStoneWall(x, y, t, side, hpr, fresh, upright) {
+    const L = t + 2, h = Math.max(4, t * Game.BWALL.thick / Game.TILE), w = upright ? h : L, hh = upright ? L : h;
     ctx.globalAlpha = 0.55 + 0.45 * hpr;
-    ctx.fillStyle = '#8E8676'; ctx.fillRect(x - s / 2, y - s / 2, s, s);
+    ctx.fillStyle = '#8E8676'; ctx.fillRect(x - w / 2, y - hh / 2, w, hh);
     ctx.strokeStyle = 'rgba(40, 36, 30, 0.55)'; ctx.lineWidth = 1;
-    for (let k = 1; k < 3; k++) { const yy = y - s / 2 + k * s / 3; ctx.beginPath(); ctx.moveTo(x - s / 2, yy); ctx.lineTo(x + s / 2, yy); ctx.stroke(); }
-    for (let k = 0; k < 3; k++) { const yy = y - s / 2 + k * s / 3, off = k % 2 ? s / 4 : s / 2; for (let xx = x - s / 2 + off; xx < x + s / 2 - 1; xx += s / 2) { ctx.beginPath(); ctx.moveTo(xx, yy); ctx.lineTo(xx, yy + s / 3); ctx.stroke(); } }
-    ctx.strokeStyle = teamCol(side); ctx.lineWidth = 2; ctx.setLineDash(fresh ? [3, 3] : []); ctx.strokeRect(x - s / 2, y - s / 2, s, s); ctx.setLineDash([]);
+    for (let k = 1; k < 4; k++) { ctx.beginPath(); if (upright) { ctx.moveTo(x - w / 2, y - hh / 2 + k * hh / 4); ctx.lineTo(x + w / 2, y - hh / 2 + k * hh / 4); } else { ctx.moveTo(x - w / 2 + k * w / 4, y - hh / 2); ctx.lineTo(x - w / 2 + k * w / 4, y + hh / 2); } ctx.stroke(); } // the blocks
+    ctx.strokeStyle = teamCol(side); ctx.lineWidth = 2; ctx.setLineDash(fresh ? [3, 3] : []); ctx.strokeRect(x - w / 2, y - hh / 2, w, hh); ctx.setLineDash([]);
     ctx.globalAlpha = 1;
+  }
+  // a wall's edge on the screen: the middle of it and whether it runs up the screen
+  function wallSpot(side, bw, t) {
+    const e = Game.edgeOf(side, bw), [dc, dr] = Game.EDGES[e], k = me === 1 ? -1 : 1;
+    return { x: (scol(bw.col) + 0.5 + dc * k / 2) * t, y: (srow(bw.row) + 0.5 + dr * k / 2) * t, upright: e === 'e' || e === 'w' };
   }
   // the bastions' walls while deploying (an opponent's new one only from the fight on)
   function drawBwalls() {
     const t = tilePx();
-    for (const side of [me, foe()]) for (const bw of Game.bwallsOf(m, side)) if (Game.bwallShown(m, me, true, side, bw)) drawStoneWall((scol(bw.col) + 0.5) * t, (srow(bw.row) + 0.5) * t, t, side, 1, side === me && bw.round === m.round);
+    for (const side of [me, foe()]) for (const bw of Game.bwallsOf(m, side)) if (Game.bwallShown(m, me, true, side, bw)) { const p = wallSpot(side, bw, t); drawStoneWall(p.x, p.y, t, side, 1, side === me && bw.round === m.round, p.upright); }
   }
   // a wall (spell): a row of stakes
   function drawWallBlock(x, y, t, side, hpr) {
@@ -481,7 +486,13 @@ const Render2D = (cv, view) => {
       ctx.strokeRect(c * t + 1.5, r0 * t + 1.5, t - 3, t - 3); ctx.setLineDash([]);
     }
     const r = radius(u);
-    for (const b of bodies) Shapes.body(ctx, u.shape, PX(b.x), PY(b.y), r, upOf(side), u.color, col, 0.95);
+    // an awakened squad (the opponent's from this round stays hidden): a gold ring round each body, the Leafblade suit's blades
+    const awake = sq.awaken > 0 && (side === me || phase !== 'deploy' || Game.seenAwake(m, sq)), mech = awake && Game.unitFor(m, side, sq.unit, sq).mech;
+    for (const b of bodies) {
+      Shapes.body(ctx, u.shape, PX(b.x), PY(b.y), r, upOf(side), u.color, col, 0.95);
+      if (mech) bladeMark(PX(b.x), PY(b.y), r, 0);
+      if (awake) { ctx.globalAlpha = 0.9; ctx.strokeStyle = css('--gold'); ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(PX(b.x), PY(b.y), r + 3, 0, Math.PI * 2); ctx.stroke(); }
+    }
     ctx.globalAlpha = 1;
     if (side === me && phase === 'deploy' && Game.isReady(m, sq)) { // ready to level up: gold plus badge
       const br = Math.max(5, t * 0.17), bx = (c + 1) * t - br - 2, by = r0 * t + br + 2;
@@ -509,6 +520,17 @@ const Render2D = (cv, view) => {
     }
   }
 
+  // the Leafblade suit: two long leaf blades held out from the body, turned by a (radians)
+  function bladeMark(x, y, r, a) {
+    ctx.globalAlpha = 1; ctx.fillStyle = '#7BE05A'; ctx.strokeStyle = '#1F5E1A'; ctx.lineWidth = 1;
+    for (const o of [0, Math.PI]) {
+      const c = Math.cos(a + o), s = Math.sin(a + o), L = r * 2.1, w = r * 0.32;
+      ctx.beginPath(); ctx.moveTo(x + c * r * 0.6, y + s * r * 0.6);
+      ctx.quadraticCurveTo(x + c * (r + L * 0.5) - s * w, y + s * (r + L * 0.5) + c * w, x + c * (r + L), y + s * (r + L));
+      ctx.quadraticCurveTo(x + c * (r + L * 0.5) + s * w, y + s * (r + L * 0.5) - c * w, x + c * r * 0.6, y + s * r * 0.6);
+      ctx.fill(); ctx.stroke();
+    }
+  }
   // bleeding: a red drop by the body and a pip per stack under it; at full stacks it throbs
   function bleedMark(x, y, r, n) {
     const dr = Math.max(2, r * 0.32), bx = x + r * 0.95, by = y + r * 0.6;
@@ -714,9 +736,12 @@ const Render2D = (cv, view) => {
       for (const row of Game.zoneRows(me)) for (let c = 0; c < Game.COLS; c++) if (Game.buildingSpotOk(m, me, c, row)) ctx.strokeRect(scol(c) * t + 3, srow(row) * t + 3, t - 6, t - 6);
       ctx.setLineDash([]); ctx.globalAlpha = 1;
     }
-    if (placingWall && editable) { // where a wall may go: any free tile of your half of the board
-      ctx.strokeStyle = teamCol(me); ctx.globalAlpha = 0.55; ctx.lineWidth = 1.5; ctx.setLineDash([4, 3]);
-      for (let row = 0; row < Game.ROWS; row++) for (let c = 0; c < Game.COLS; c++) if (Game.bwallSpotOk(m, me, c, row)) ctx.strokeRect(scol(c) * t + 3, srow(row) * t + 3, t - 6, t - 6);
+    if (placingWall && editable) { // where a wall may go: any free edge of a tile on your half of the board
+      ctx.strokeStyle = teamCol(me); ctx.globalAlpha = 0.55; ctx.lineWidth = 2; ctx.setLineDash([4, 3]);
+      for (let row = 0; row < Game.ROWS; row++) for (let c = 0; c < Game.COLS; c++) for (const e of ['n', 'w', 's', 'e']) if (Game.bwallSpotOk(m, me, c, row, e)) {
+        const p = wallSpot(me, { col: c, row, edge: e }, t), hl = t / 2 - 4;
+        ctx.beginPath(); if (p.upright) { ctx.moveTo(p.x, p.y - hl); ctx.lineTo(p.x, p.y + hl); } else { ctx.moveTo(p.x - hl, p.y); ctx.lineTo(p.x + hl, p.y); } ctx.stroke();
+      }
       ctx.setLineDash([]); ctx.globalAlpha = 1;
     }
     if (placingElf && editable) { // where the elf tower may go: any free tile of your zone
@@ -819,9 +844,14 @@ const Render2D = (cv, view) => {
         const ang = Math.atan2(ey - cy, ex - cx), half = e.half * Math.PI / 180, rr = Math.hypot(ex - cx, ey - cy);
         const grd = ctx.createRadialGradient(cx, cy, 0, cx, cy, rr);
         if (e.slam) { grd.addColorStop(0, 'rgba(205,175,120,0.65)'); grd.addColorStop(0.6, 'rgba(140,105,60,0.4)'); grd.addColorStop(1, 'rgba(90,70,40,0.05)'); } // a ground slam: dust and rock
+        else if (e.spin) { grd.addColorStop(0, 'rgba(170,240,120,0.55)'); grd.addColorStop(0.7, 'rgba(90,200,70,0.35)'); grd.addColorStop(1, 'rgba(40,140,40,0.05)'); } // spinning leaf blades
         else { grd.addColorStop(0, 'rgba(255,210,90,0.6)'); grd.addColorStop(0.6, 'rgba(255,120,40,0.35)'); grd.addColorStop(1, 'rgba(255,70,20,0.05)'); }
         ctx.fillStyle = grd; ctx.globalAlpha = 0.4 + 0.6 * a;
         ctx.beginPath(); ctx.moveTo(cx, cy); ctx.arc(cx, cy, rr, ang - half, ang + half); ctx.closePath(); ctx.fill();
+      }
+      if (e.kind === 'roar') { // Berserkers: a ring that sweeps out to the roar's reach
+        ctx.strokeStyle = teamCol(e.side); ctx.globalAlpha = 0.7 * a; ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.arc(PX(e.x), PY(e.y), e.r * S * (0.25 + 0.75 * e.age / e.life), 0, Math.PI * 2); ctx.stroke();
       }
       if (e.kind === 'death') {
         ctx.strokeStyle = teamCol(e.side); ctx.globalAlpha = 0.5 * a; ctx.lineWidth = 1;
@@ -861,7 +891,7 @@ const Render2D = (cv, view) => {
     for (const b of bt.bodies) {
       if (!b.alive || !b.u.structure) continue;
       const hpr = b.hp / b.u.hp, t = tilePx();
-      if (b.u.kind === 'wall') { if (b.u.barrier) drawStoneWall(PX(b.x), PY(b.y), t, b.side, hpr); else drawWallBlock(PX(b.x), PY(b.y), t, b.side, hpr); continue; }
+      if (b.u.kind === 'wall') { if (b.u.barrier) drawStoneWall(PX(b.x), PY(b.y), t, b.side, hpr, false, (b.u.barrierY || 0) > b.u.barrier); else drawWallBlock(PX(b.x), PY(b.y), t, b.side, hpr); continue; }
       if (b.u.lesser) { drawLesser(PX(b.x), PY(b.y), t, b.side, b.u, hpr, false); continue; }
       if (b.u.awake) { ctx.fillStyle = '#2B2F33'; for (const [dx, dy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) { ctx.beginPath(); ctx.arc(PX(b.x) + dx * t * 0.36, PY(b.y) + dy * t * 0.3, t * 0.12, 0, Math.PI * 2); ctx.fill(); } } // Core Awoken: the Mecha Tower on wheels
       drawKeep(PX(b.x), PY(b.y), t, b.side, hpr, b.u.kind, null, Game.charOf(battlePre || m, b.side));
@@ -904,6 +934,7 @@ const Render2D = (cv, view) => {
       const rattle = b.u.construct ? Math.sin(bt.time() * 47 + b.x * 3.1) * r * 0.08 : 0;
       const lk = b.mask && b.side !== me && !b.revealed ? b.mask : b.u; // a disguise, until its first attack (devtest)
       Shapes.body(ctx, lk.shape, PX(b.x) + rattle, PY(b.y), r, upOf(b.side), lk.color, c, (0.35 + 0.65 * hpr) * (b.delay > 0 ? 0.45 : 1));
+      if (b.u.mech) bladeMark(PX(b.x) + rattle, PY(b.y), r, bt.time() * (b.lastAtk > bt.time() - 0.4 ? 14 : 1.5) + b.x); // the Leafblade suit: its blades spin as it strikes
       if (b.u.unfolded) { ctx.fillStyle = 'rgba(30,24,20,0.75)'; for (const o of [-1, 1]) ctx.fillRect(PX(b.x) + o * r * 0.45 - r * 0.15, PY(b.y) + r * 0.75, r * 0.3, r * 0.45); } // an unfolded roller: two stumpy legs
       if (b.u.roll > 0) { // a roller: a seam across the ball turns as it rolls
         const a = (b.moved || 0) / Math.max(0.3, r / S);
@@ -1022,8 +1053,20 @@ const Render2D = (cv, view) => {
         ctx.lineCap = 'butt';
         continue;
       }
+      const dx = p.dirX * flip(), dy = -p.dirY * flip(), x = PX(p.x), y = PY(p.y);
+      if (p.missile) { // a Leafblade missile: a dark body with a flame behind it
+        ctx.strokeStyle = '#FF9A3D'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(x - dx * 4, y - dy * 4); ctx.lineTo(x - dx * 10, y - dy * 10); ctx.stroke();
+        ctx.strokeStyle = '#2B2F33'; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(x - dx * 4, y - dy * 4); ctx.lineTo(x + dx * 4, y + dy * 4); ctx.stroke();
+        ctx.fillStyle = teamCol(p.owner.side); ctx.beginPath(); ctx.arc(x + dx * 4, y + dy * 4, 2, 0, Math.PI * 2); ctx.fill();
+        continue;
+      }
+      if (p.owner.u.name === 'Leaf Wizard') { // a sharp leaf along its flight, in the team colour's edge
+        ctx.fillStyle = '#7BE05A'; ctx.strokeStyle = teamCol(p.owner.side); ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(x + dx * 5, y + dy * 5); ctx.quadraticCurveTo(x - dy * 3, y + dx * 3, x - dx * 5, y - dy * 5); ctx.quadraticCurveTo(x + dy * 3, y - dx * 3, x + dx * 5, y + dy * 5); ctx.fill(); ctx.stroke();
+        continue;
+      }
       ctx.fillStyle = teamCol(p.owner.side);
-      ctx.fillRect(PX(p.x) - 2.5, PY(p.y) - 2.5, 5, 5);
+      ctx.fillRect(x - 2.5, y - 2.5, 5, 5);
     }
     // a fallen tower cripples its army for a few seconds
     const crip = [me, foe()].filter(sd => bt.crippled(sd) > 0);
@@ -1051,10 +1094,11 @@ const Render2D = (cv, view) => {
   function tileAt(clientX, clientY) {
     pull();
     const r = cv.getBoundingClientRect();
-    const c = Math.floor((clientX - r.left) / r.width * Game.COLS);
-    const rw = Math.floor((clientY - r.top) / r.height * Game.ROWS);
+    const x = (clientX - r.left) / r.width * Game.COLS, y = (clientY - r.top) / r.height * Game.ROWS;
+    const c = Math.floor(x), rw = Math.floor(y);
     if (c < 0 || rw < 0 || c >= Game.COLS || rw >= Game.ROWS) return null;
-    return { col: scol(c), row: srow(rw) };
+    const fx = x - c, fy = y - rw; // where in the tile (for a wall's edge), in model terms
+    return { col: scol(c), row: srow(rw), fx: me === 1 ? 1 - fx : fx, fy: me === 1 ? 1 - fy : fy };
   }
 
   function floor(plain = false) { pull(); drawBoard(plain); }
