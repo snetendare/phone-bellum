@@ -1,42 +1,56 @@
 """Leaf Wizard: the low-poly model, built in Blender from this script (see docs/art-direction.md).
 
-Run it with Blender's Python (Blender itself, or the `bpy` module from pip):
+In the Blender you have open: Scripting tab > Open > this file > Run Script. It builds the wizard into a
+"LeafWizard" collection in the open .blend (running it again replaces that collection, nothing else is touched),
+and if the .blend is saved it also exports leaf_wizard.glb next to it.
+
+From a terminal (Blender, or the `bpy` module from pip):
   blender -b -P tools/blender/leaf_wizard.py -- [--out DIR] [--renders]
   python3 tools/blender/leaf_wizard.py [--out DIR] [--renders]
+writes DIR/leaf_wizard.glb and .blend (DIR defaults to models/), and with --renders DIR/leaf_wizard_sheet.png.
 
-It writes DIR/leaf_wizard.glb and DIR/leaf_wizard.blend (DIR defaults to models/), and with --renders also
-DIR/leaf_wizard_sheet.png: front, side, back, three-quarter and top views.
+The character: the most ninja of the wizards, and a cocky show-off about it. Emotion: smug. He stands in a
+ready stance with his chin up, one hand in a hand seal, half-lidded eyes squinting over a scarf pulled up as a
+mask. The hat is a low, wide leaf kasa pulled down over the eyes, with only a short wizard tip swept back.
+World detail: a scroll of leaf techniques strapped across his back. The emotion explains the mechanics: he
+can't just walk somewhere, he wind-walks there and strikes a pose.
 
-The character: a shy forest gardener hiding under a hat of autumn leaves. Only two glowing eyes show in the dark of
-the hat, glancing down and to the side. World detail: a little copper watering can on the belt.
-
-Parts are separate objects with their pivots at the joints, for code animation in three.js: body (pivot at the hips),
-head (neck), hat (top of the head), arm_L / arm_R (shoulders), leg_L / leg_R (hips), staff (in the right hand,
-parented to arm_R), cape (shoulders). Colours are vertex colours on one shared material. +Y is up and the wizard
-faces +Z in the GLB (Blender: faces -Y). About 2.6 units tall, feet at y = 0.
+Parts are separate objects with their pivots at the joints, for code animation in three.js: body (pivot at the
+hips), head (neck), hat (top of the head), scarf (neck, the two tails), arm_L / arm_R (shoulders), leg_L / leg_R
+(hips), staff (in the right hand, parented to arm_R). The pose is in the parts' rotations, so code can start from
+it. Colours are vertex colours on one shared material. +Y is up and he faces +Z in the GLB (Blender: faces -Y).
+About 2.4 units tall, feet at y = 0.
 """
 import math
 import os
-import random
 import sys
 
 import bpy  # first: it makes bmesh and mathutils importable
 import bmesh
 from mathutils import Euler, Matrix, Vector
 
-ARGS = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else sys.argv[1:]
-OUT = ARGS[ARGS.index('--out') + 1] if '--out' in ARGS else os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'models')
+ARGS = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []
+IN_UI = not bpy.app.background
 RENDERS = '--renders' in ARGS
-random.seed(7)
+
+
+def out_dir():
+    if '--out' in ARGS:
+        return ARGS[ARGS.index('--out') + 1]
+    if bpy.data.filepath:
+        return os.path.dirname(bpy.data.filepath)
+    if not IN_UI and os.path.isfile(__file__):
+        return os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'models')
+    return None  # an unsaved file in the UI: build only
+
 
 # dusty, pastel-ish palette (art direction rule 4)
 C = {
-    'leaf': '#7F9A4F', 'leafDark': '#5C763C', 'leafLight': '#A8BE6C', 'olive': '#8C8A4A',
-    'rust': '#B8653A', 'amber': '#D39A4C', 'ochre': '#C9AE62',
-    'cream': '#E4D8BF', 'scarf': '#C46A3E', 'scarfDark': '#9E5233',
-    'pants': '#4C4237', 'boot': '#6A4B34', 'bootCuff': '#8A6A4A', 'belt': '#5E4330',
-    'skin': '#3A3036', 'void': '#17161B', 'eye': '#FFF0B0',
-    'wood': '#6E5137', 'woodDark': '#4E3A29', 'orb': '#BFE3B4', 'copper': '#B07A4F', 'copperDark': '#7E5638',
+    'leaf': '#7F9A4F', 'leafDark': '#566F38', 'leafLight': '#A3BA68', 'hatUnder': '#3B4A2A',
+    'scarf': '#C0643C', 'scarfDark': '#97492C',
+    'pants': '#4A4536', 'wrap': '#DCCFB2', 'boot': '#4B3A2C', 'belt': '#3F3428',
+    'skin': '#33292E', 'void': '#141318', 'eye': '#FFEFA8',
+    'wood': '#5E4430', 'scroll': '#E2D3B0',
 }
 
 
@@ -50,44 +64,41 @@ def lin(c):  # sRGB -> linear, for the colour attribute
 
 
 # ---------- tiny mesh kit: every piece is a bmesh with a colour per face ----------
+COLS = []
+
+
 class Piece:
     def __init__(self):
         self.bm = bmesh.new()
         self.col = self.bm.faces.layers.int.new('col')  # index into COLS
-        self.shade = self.bm.faces.layers.float.new('shade')  # baked darkening, 1 = none
 
-
-COLS = []
-
-
-def cidx(hexc):
-    if hexc not in COLS:
-        COLS.append(hexc)
-    return COLS.index(hexc)
-
-
-def add(piece, bm_src, color, mat=Matrix(), shade=1.0):
-    """Copy bm_src into the piece, transformed by mat, painted color."""
-    bm_src.transform(mat) if mat is not None else None
-    vmap = {}
-    for v in bm_src.verts:
-        vmap[v] = piece.bm.verts.new(v.co)
-    ci = cidx(color)
-    for f in bm_src.faces:
-        nf = piece.bm.faces.new([vmap[v] for v in f.verts])
-        nf[piece.col] = ci
-        nf[piece.shade] = shade
-        nf.smooth = f.smooth
-    bm_src.free()
+    def add(self, src, color, mat=None):
+        """Copy the bmesh src into the piece, transformed by mat. color: one colour, or a list cycled per face."""
+        if mat is not None:
+            src.transform(mat)
+        vmap = {v: self.bm.verts.new(v.co) for v in src.verts}
+        colors = color if isinstance(color, list) else [color]
+        for i, f in enumerate(src.faces):
+            nf = self.bm.faces.new([vmap[v] for v in f.verts])
+            c = colors[i % len(colors)]
+            if c not in COLS:
+                COLS.append(c)
+            nf[self.col] = COLS.index(c)
+        src.free()
 
 
 def M(loc=(0, 0, 0), rot=(0, 0, 0), scale=(1, 1, 1)):
     return Matrix.LocRotScale(Vector(loc), Euler(rot), Vector(scale))
 
 
-def cone(r1, r2, depth, seg=6, cap=True):
+def aim(v):
+    """A rotation matrix turning +Z along v."""
+    return Vector(v).normalized().to_track_quat('Z', 'Y').to_matrix().to_4x4()
+
+
+def cone(r1, r2, depth, seg=6):
     bm = bmesh.new()
-    bmesh.ops.create_cone(bm, cap_ends=cap, cap_tris=False, segments=seg, radius1=r1, radius2=r2, depth=depth)
+    bmesh.ops.create_cone(bm, cap_ends=True, cap_tris=False, segments=seg, radius1=r1, radius2=r2, depth=depth)
     bm.transform(M((0, 0, depth / 2)))  # base at z = 0
     return bm
 
@@ -105,51 +116,15 @@ def cube(sx, sy, sz):
     return bm
 
 
-def leaf(length, width, fold=0.25, tip_curl=0.0):
-    """A folded leaf blade along +Y: base at the origin, a raised midrib, 4 triangles each side (8 tris)."""
-    bm = bmesh.new()
-    rib = width * fold
-    pts = [
-        (0, 0, 0),
-        (-width * 0.5, length * 0.35, 0), (0, length * 0.35, rib), (width * 0.5, length * 0.35, 0),
-        (-width * 0.32, length * 0.72, tip_curl * 0.5), (0, length * 0.72, rib * 0.7 + tip_curl * 0.5), (width * 0.32, length * 0.72, tip_curl * 0.5),
-        (0, length, tip_curl),
-    ]
-    v = [bm.verts.new(p) for p in pts]
-    for a, b, c in [(0, 2, 1), (0, 3, 2), (1, 2, 5), (1, 5, 4), (2, 3, 6), (2, 6, 5), (4, 5, 7), (5, 6, 7)]:
-        bm.faces.new((v[a], v[b], v[c]))
-    return bm
-
-
-def maple(size):
-    """A flat 5-point maple leaf (a fan of triangles), lying in XY, stem at the origin."""
-    bm = bmesh.new()
-    c = bm.verts.new((0, size * 0.35, size * 0.06))
-    ring = []
-    for i, a in enumerate([-100, -70, -45, -20, 0, 20, 45, 70, 100]):
-        r = size * (1.0 if i % 2 == 0 else 0.55) * (0.7 if abs(a) == 100 else 1)
-        t = math.radians(a)
-        ring.append(bm.verts.new((math.sin(t) * r, size * 0.35 + math.cos(t) * r, 0)))
-    stem = bm.verts.new((0, 0, 0))
-    ring = [stem] + ring
-    for i in range(len(ring)):
-        bm.faces.new((c, ring[i], ring[(i + 1) % len(ring)]))
-    return bm
-
-
 def tube(points, radii, seg=5):
-    """A bent tube through points (a branch, a scarf tail)."""
+    """A bent tube through points (limbs, the staff)."""
     bm = bmesh.new()
     rings = []
     for i, p in enumerate(points):
-        p = Vector(p)
-        d = (Vector(points[min(i + 1, len(points) - 1)]) - Vector(points[max(i - 1, 0)])).normalized()
-        q = d.to_track_quat('Z', 'Y')
-        ring = []
-        for s in range(seg):
-            a = 2 * math.pi * s / seg
-            ring.append(bm.verts.new(p + q @ Vector((math.cos(a) * radii[i], math.sin(a) * radii[i], 0))))
-        rings.append(ring)
+        d = Vector(points[min(i + 1, len(points) - 1)]) - Vector(points[max(i - 1, 0)])
+        q = d.normalized().to_track_quat('Z', 'Y')
+        rings.append([bm.verts.new(Vector(p) + q @ Vector((math.cos(a) * radii[i], math.sin(a) * radii[i], 0)))
+                      for a in (2 * math.pi * s / seg for s in range(seg))])
     for r0, r1 in zip(rings, rings[1:]):
         for s in range(seg):
             bm.faces.new((r0[s], r0[(s + 1) % seg], r1[(s + 1) % seg], r1[s]))
@@ -158,234 +133,234 @@ def tube(points, radii, seg=5):
     return bm
 
 
+def ribbon(points, widths, side=(1, 0, 0)):
+    """A flat strip through points, widths across `side` (the scarf tails)."""
+    bm = bmesh.new()
+    side = Vector(side).normalized()
+    rows = [(bm.verts.new(Vector(p) - side * w / 2), bm.verts.new(Vector(p) + side * w / 2)) for p, w in zip(points, widths)]
+    for (a0, b0), (a1, b1) in zip(rows, rows[1:]):
+        bm.faces.new((a0, b0, b1, a1))
+    return bm
+
+
+def leaf(length, width, fold=0.2):
+    """A big folded leaf blade along +Y, base at the origin, the midrib raised along +Z (6 triangles)."""
+    bm = bmesh.new()
+    v = [bm.verts.new(p) for p in [(0, 0, 0), (-width / 2, length * 0.4, 0), (0, length * 0.4, width * fold),
+                                   (width / 2, length * 0.4, 0), (0, length, 0)]]
+    for a, b, c in [(0, 2, 1), (0, 3, 2), (1, 2, 4), (2, 3, 4)]:
+        bm.faces.new((v[a], v[b], v[c]))
+    return bm
+
+
 # ---------- the parts ----------
-# Blender axes: +Z up, the wizard faces -Y, his right hand is -X.
-HIP = 0.78
-SHOULDER = 1.42
-NECK = 1.58
+# Blender axes: +Z up, he faces -Y, his right hand is -X. Pivots in world space; part geometry is relative to them.
+HIP = 0.74
+NECK = 1.36
+SHOULDER = 1.30
 
 
 def build_legs():
     legs = {}
     for side, sx in (('L', 1), ('R', -1)):
         p = Piece()
-        x = sx * 0.17
-        # baggy pants: wide at the knee, tucked into the boot
-        add(p, tube([(0, 0, 0), (sx * 0.02, 0, -0.3), (0, 0, -0.52)], [0.15, 0.17, 0.11], seg=6), C['pants'])
-        add(p, cone(0.13, 0.135, 0.12, seg=6), C['bootCuff'], M((0, 0, -0.62)))  # boot cuff
-        add(p, cube(0.24, 0.36, 0.16), C['boot'], M((0, -0.07, -0.70)))  # chunky boot
-        add(p, cube(0.2, 0.1, 0.1), C['boot'], M((0, -0.25, -0.73), (0.35, 0, 0)), shade=0.92)  # toe
-        legs[side] = (p, Vector((x, 0.02, HIP)))
+        p.add(tube([(0, 0, 0.04), (sx * 0.02, 0, -0.26), (0, 0, -0.46)], [0.15, 0.16, 0.1], seg=6), C['pants'])  # baggy
+        p.add(cone(0.1, 0.11, 0.17, seg=6), C['wrap'], M((0, 0, -0.62)))  # shin wraps
+        p.add(cube(0.17, 0.3, 0.13), C['boot'], M((0, -0.05, -0.675)))  # split-toe ninja boot
+        p.add(cone(0.085, 0.0, 0.12, seg=4), C['boot'], M((0, -0.2, -0.68), (math.radians(-90), 0, math.radians(45)), (1, 0.7, 1)))
+        legs[side] = (p, Vector((sx * 0.14, 0, HIP)))
     return legs
 
 
 def build_body():
     p = Piece()
-    # cream inner robe, a long skirt that flares out over the pants
-    add(p, cone(0.36, 0.22, 0.42, seg=8), C['cream'], M((0, 0, -0.35)))
-    add(p, cone(0.22, 0.2, 0.72, seg=8), C['cream'], M((0, 0, 0.0)))
-    # green tabard panels front and back, ending in a leaf point
-    for y, turn in ((-1, math.pi), (1, 0)):  # hanging down, the hem flaring out a little
-        add(p, leaf(0.95, 0.38, fold=0.12), C['leaf'], M((0, y * 0.215, 0.6), (math.radians(-82), 0, turn)), shade=0.95)
-    # belt, buckle and a seed pouch
-    add(p, cone(0.235, 0.225, 0.08, seg=8), C['belt'], M((0, 0, 0.06)))
-    add(p, cube(0.09, 0.03, 0.08), C['ochre'], M((0, -0.235, 0.1)))
-    add(p, cube(0.11, 0.08, 0.12), C['belt'], M((-0.2, -0.12, 0.0), (0, 0, 0.5)), shade=0.9)
-    # the world detail: a little copper watering can hanging on his left hip
-    can = Vector((0.26, -0.04, -0.06))
-    add(p, cone(0.075, 0.065, 0.14, seg=6), C['copper'], M(can))
-    add(p, cone(0.035, 0.012, 0.16, seg=4), C['copperDark'], M(can + Vector((0, -0.07, 0.04)), (math.radians(-60), 0, 0)))
-    add(p, cone(0.03, 0.03, 0.025, seg=6), C['copperDark'], M(can + Vector((0, -0.16, 0.12)), (math.radians(-60), 0, 0)))  # the rose
-    add(p, tube([can + Vector((0, 0.05, 0.12)), can + Vector((0, 0.07, 0.2)), can + Vector((0, -0.03, 0.2)), can + Vector((0, -0.05, 0.12))], [0.012] * 4, seg=3), C['copperDark'])
-    add(p, tube([can + Vector((0, 0, 0.14)), Vector((0.22, 0, 0.1))], [0.01, 0.01], seg=3), C['belt'])  # the cord
-    return p, Vector((0, 0, HIP))
-
-
-def build_cape():
-    """A collar of leaves around the shoulders, hanging down the back like a cape (green with autumn turns)."""
-    p = Piece()
-    palette = [C['leaf'], C['leafDark'], C['leafLight'], C['olive'], C['rust'], C['amber']]
-    n = 11
-    for i in range(n):
-        a = math.pi / 2 + math.pi * 0.8 * (2 * i / (n - 1) - 1)  # all round except the front (+Y is the back)
-        back = math.sin(a)  # 1 at the back
-        length = 0.4 + 0.5 * max(0, back) ** 0.7 + random.uniform(-0.04, 0.04)
-        col = palette[i % len(palette)] if i % 3 else C['leaf']
-        tilt = math.radians(-66 - 12 * max(0, back))  # hang down, flaring outwards, straighter at the back
-        mat = M((math.cos(a) * 0.2, math.sin(a) * 0.17, 0.02), (0, 0, a - math.pi / 2)) @ M(rot=(tilt, 0, 0))
-        add(p, leaf(length, 0.24 + 0.06 * (i % 2), fold=0.18, tip_curl=-0.05), col, mat)
-    # two shoulder leaves sticking out sideways, the silhouette's wings (seen from above)
+    p.add(cone(0.2, 0.23, 0.32, seg=8), C['leaf'], M((0, 0, -0.04)))  # tunic, wrapped round the waist
+    p.add(cone(0.23, 0.17, 0.32, seg=8), C['leaf'], M((0, 0, 0.28)))  # chest to shoulders
+    p.add(cone(0.215, 0.215, 0.08, seg=8), C['belt'], M((0, 0, 0.02)))  # a dark sash
+    # one big leaf flap hanging from the sash at the back
+    p.add(leaf(0.46, 0.34, 0.15), C['leafDark'], M((0, 0.2, 0.05), (math.radians(-80), 0, 0)))
+    # big leaf pauldrons: from above, they make the shoulders read wide and sharp
     for sx in (1, -1):
-        add(p, leaf(0.5, 0.2, fold=0.2, tip_curl=0.06), C['leafLight'], M((sx * 0.22, 0.05, 0.0), (0, 0, -sx * math.pi / 2)) @ M(rot=(math.radians(-25), 0, 0)))
-    return p, Vector((0, 0, SHOULDER))
-
-
-def build_arms():
-    arms = {}
-    for side, sx in (('L', 1), ('R', -1)):
-        p = Piece()
-        down = Vector((sx * 0.35, -0.04, -0.62)).normalized()  # a relaxed A-pose
-        q = down.to_track_quat('Z', 'Y')
-        rot = q.to_euler()
-        add(p, cone(0.085, 0.13, 0.42, seg=6), C['cream'], Matrix.Translation((0, 0, 0)) @ rot.to_matrix().to_4x4())  # wide sleeve
-        add(p, cone(0.135, 0.14, 0.07, seg=6), C['leafDark'], Matrix.Translation(down * 0.38) @ rot.to_matrix().to_4x4())  # cuff
-        hand = down * 0.53
-        add(p, ball(0.075, 1), C['skin'], M(hand, scale=(1, 0.9, 1.15)))
-        add(p, cube(0.04, 0.05, 0.08), C['skin'], M(hand + Vector((0, -0.07, 0.01)), (0.4, 0, 0)))  # thumb
-        arms[side] = (p, Vector((sx * 0.21, 0, SHOULDER)), hand)
-    return arms
+        p.add(leaf(0.36, 0.26, 0.25), C['leafLight'], M((sx * 0.15, 0, 0.6), (0, 0, -sx * math.pi / 2)) @ M(rot=(math.radians(-30), 0, 0)))
+    # the world detail: a scroll of leaf techniques strapped diagonally across his back
+    axis = Vector((1, 0.15, 0.75))
+    mid = Vector((0, 0.26, 0.36))
+    p.add(cone(0.075, 0.075, 0.62, seg=6), C['scroll'], Matrix.Translation(mid - axis.normalized() * 0.31) @ aim(axis))
+    for end in (-0.33, 0.3):
+        p.add(cone(0.085, 0.085, 0.03, seg=6), C['scarfDark'], Matrix.Translation(mid + axis.normalized() * end) @ aim(axis))
+    p.add(ribbon([(0.17, -0.2, 0.62), (0.0, -0.215, 0.3), (-0.17, -0.2, 0.0)], [0.06] * 3, side=(0, 1, 0)), C['belt'], M())  # strap
+    return p, Vector((0, 0, HIP))
 
 
 def build_head():
     p = Piece()
-    # the dark of the hood: a squashed ball that the hat sits over
-    add(p, ball(0.2, 1), C['void'], M((0, 0, 0.17), scale=(1, 0.95, 0.92)))
-    # scarf: a thick ring round the neck and a tail flapping out behind
-    add(p, tube([(math.cos(a) * 0.17, math.sin(a) * 0.15, 0.02 + 0.015 * math.sin(a * 2)) for a in [i * math.pi / 4 for i in range(9)]], [0.06] * 9, seg=4), C['scarf'])
-    add(p, tube([(0.08, 0.13, 0.02), (0.16, 0.3, -0.08), (0.12, 0.45, -0.24), (0.2, 0.55, -0.36)], [0.055, 0.05, 0.045, 0.03], seg=4), C['scarfDark'])
-    add(p, tube([(0.13, -0.08, 0.0), (0.16, -0.14, -0.14), (0.12, -0.16, -0.3)], [0.05, 0.045, 0.03], seg=4), C['scarf'], shade=0.92)
-    # shy eyes: tall pale ovals, low under the brim and glancing to his left
-    for ex in (-0.07, 0.08):
-        add(p, ball(0.055, 1), C['eye'], M((ex + 0.02, -0.165, 0.11), (0.15, 0.25, 0), (0.8, 0.45, 1.35)))
+    p.add(ball(0.2, 1), C['void'], M((0, 0, 0.18), scale=(1, 0.95, 0.95)))  # the dark under the hat
+    p.add(cone(0.215, 0.19, 0.15, seg=8), C['scarf'], M((0, -0.01, -0.02)))  # scarf pulled up as a mask
+    # smug eyes: narrow and half-lidded, the left one squinting harder (a cocky smirk without a mouth)
+    for ex, roll, h in ((-0.075, -0.32, 0.5), (0.08, 0.22, 0.75)):
+        p.add(ball(0.07, 1), C['eye'], M((ex, -0.165, 0.18), (0, roll, 0), (1.2, 0.4, h)))
     return p, Vector((0, 0, NECK))
 
 
 def build_hat():
+    """A low, wide kasa of one big leaf with a serrated edge, pulled down at the front; a short wizard tip swept back."""
     p = Piece()
-    seg = 8
-    # wide floppy brim, drooping at the front so the face stays in shadow
-    add(p, cone(0.48, 0.24, 0.12, seg=seg), C['leafDark'], M((0, -0.02, 0.0), (0.12, 0, 0)))
-    # the crown: two stacked cones, the top one bent back
-    add(p, cone(0.25, 0.14, 0.32, seg=seg), C['leaf'], M((0, 0.0, 0.1), (-0.08, 0, 0)))
-    add(p, cone(0.145, 0.0, 0.42, seg=seg), C['leaf'], M((0, 0.05, 0.4), (-0.45, 0, 0.15)))
-    # leaf shingles over the brim and crown
-    palette = [C['leaf'], C['leafLight'], C['olive'], C['amber'], C['rust'], C['leafDark']]
-    for i in range(9):
-        a = 2 * math.pi * i / 9 + 0.2
-        col = palette[i % len(palette)]
-        add(p, leaf(0.36, 0.22, fold=0.15, tip_curl=-0.04), col, M((math.cos(a) * 0.22, math.sin(a) * 0.22 - 0.02, 0.15), (0, 0, a - math.pi / 2)) @ M(rot=(math.radians(-25), 0, 0)))
-    # two maple leaves pinned to the crown, and a sprout at the tip
-    add(p, maple(0.17), C['rust'], M((0.12, -0.14, 0.3), (math.radians(70), 0.4, 0.5)))
-    add(p, maple(0.13), C['amber'], M((-0.15, -0.1, 0.36), (math.radians(80), -0.3, -0.6)))
-    tip = Vector((0, 0.05, 0.4)) + Euler((-0.45, 0, 0.15)).to_matrix() @ Vector((0, 0, 0.42))
-    add(p, leaf(0.2, 0.12, fold=0.2), C['leafLight'], M(tip, (math.radians(60), 0, 0.6)))
-    add(p, leaf(0.16, 0.1, fold=0.2), C['leafLight'], M(tip, (math.radians(50), 0, -2.4)))
-    return p, Vector((0, 0, NECK + 0.27))
+    bm = bmesh.new()
+    n, R, H = 16, 0.6, 0.24
+    apex, under = bm.verts.new((0, 0, H)), bm.verts.new((0, 0, H * 0.45))
+    rim = [bm.verts.new((math.cos(a) * r, math.sin(a) * r, 0))
+           for a, r in ((2 * math.pi * i / n, R if i % 2 == 0 else R * 0.8) for i in range(n))]
+    for i in range(n):
+        bm.faces.new((apex, rim[i], rim[(i + 1) % n]))
+    for i in range(n):
+        bm.faces.new((under, rim[(i + 1) % n], rim[i]))
+    p.add(bm, [C['leaf'], C['leafLight']] * 8 + [C['hatUnder']] * 16)  # ribbed top, dark underside
+    p.add(cone(0.11, 0.0, 0.34, seg=5), C['leafDark'], M((0, 0.03, H - 0.03), (math.radians(-55), 0, 0)))  # the tip
+    return p, Vector((0, 0, NECK + 0.3))
 
 
-def build_staff(hand_world):
-    """A crooked branch with a forked top cradling a pale orb with a leaf in it."""
+def build_scarf():
+    """Two long scarf tails streaming out behind: the motion lines of the silhouette."""
     p = Piece()
-    pts = [(0, 0, -0.92), (0.02, 0, -0.2), (-0.01, 0.01, 0.3), (0.02, -0.01, 0.75), (0.0, 0.0, 1.0)]
-    add(p, tube(pts, [0.03, 0.035, 0.035, 0.04, 0.045], seg=5), C['wood'])
-    for sx in (1, -1):  # the fork
-        add(p, tube([(0, 0, 0.98), (sx * 0.1, 0, 1.1), (sx * 0.08, 0, 1.25), (sx * 0.03, 0, 1.3)], [0.035, 0.03, 0.022, 0.012], seg=4), C['woodDark'])
-    add(p, ball(0.09, 1), C['orb'], M((0, 0, 1.17)))
-    add(p, leaf(0.09, 0.06, fold=0.25), C['leaf'], M((0, -0.02, 1.13), (0, 0, 0.3)), shade=0.9)
-    add(p, leaf(0.18, 0.1, fold=0.2), C['leafLight'], M((0.02, 0, 0.7), (0, math.radians(70), 0.4)))  # a leaf growing on the shaft
-    for z in (0.45, 0.52):  # a wrap of scarf cloth where he holds it
-        add(p, cone(0.05, 0.05, 0.05, seg=5), C['scarf'], M((0.0, 0, z)))
-    return p, hand_world
+    p.add(ribbon([(0.06, 0.18, 0.0), (0.12, 0.42, 0.04), (0.2, 0.66, -0.06), (0.26, 0.9, 0.02)], [0.2, 0.18, 0.15, 0.08], (1, 0, 0.3)), C['scarf'])
+    p.add(ribbon([(-0.02, 0.18, -0.02), (0.0, 0.38, -0.12), (0.06, 0.58, -0.08), (0.1, 0.74, -0.18)], [0.17, 0.15, 0.12, 0.06], (1, 0, -0.2)), C['scarfDark'])
+    return p, Vector((0, 0, NECK))
+
+
+def build_arms():
+    arms = {}
+    # left: up into a hand seal in front of his chest. right: low, holding the staff along his side
+    shapes = {'L': ((0.06, -0.1, -0.27), (-0.19, -0.13, 0.13)), 'R': ((-0.1, 0.02, -0.27), (-0.03, -0.06, -0.24))}
+    for side, sx in (('L', 1), ('R', -1)):
+        upper, fore = (Vector(v) for v in shapes[side])
+        elbow, hand = upper, upper + fore
+        p = Piece()
+        p.add(tube([(0, 0, 0), elbow, hand * 0.92 + elbow * 0.08], [0.075, 0.07, 0.065], seg=5), C['leaf'])
+        p.add(tube([elbow + (hand - elbow) * 0.35, hand - (hand - elbow) * 0.1], [0.075, 0.07], seg=5), C['wrap'])  # wrapped forearm
+        p.add(ball(0.07, 1), C['skin'], M(hand))
+        if side == 'L':  # two fingers up: the seal
+            p.add(cube(0.05, 0.04, 0.13), C['skin'], M(hand + Vector((0, -0.01, 0.09))))
+        arms[side] = (p, Vector((sx * 0.22, 0, SHOULDER)), hand)
+    return arms
+
+
+def build_staff():
+    """A straight wooden pole with a big leaf blade for a head: half staff, half weapon. Held trailing behind him."""
+    p = Piece()
+    d = Vector((-0.15, 0.75, 0.65)).normalized()  # bottom forward and down, blade up behind his shoulder
+    p.add(tube([d * -0.55, d * 1.1], [0.032, 0.035], seg=5), C['wood'])
+    p.add(cone(0.045, 0.045, 0.09, seg=5), C['scarf'], Matrix.Translation(d * 1.02) @ aim(d))  # a cloth wrap
+    p.add(leaf(0.5, 0.2, 0.18), C['leafLight'], Matrix.Translation(d * 1.08) @ aim(d) @ M(rot=(math.pi / 2, 0, 0)))
+    return p
 
 
 # ---------- into Blender ----------
-def make_material():
-    mat = bpy.data.materials.new('LeafWizard')
+def material():
+    mat = bpy.data.materials.get('LeafWizard') or bpy.data.materials.new('LeafWizard')
     mat.use_backface_culling = False  # the leaves are single sheets
     nt = mat.node_tree
     bsdf = nt.nodes.get('Principled BSDF')
-    attr = nt.nodes.new('ShaderNodeVertexColor')
+    attr = next((n for n in nt.nodes if n.type == 'VERTEX_COLOR'), None) or nt.nodes.new('ShaderNodeVertexColor')
     attr.layer_name = 'Col'
     nt.links.new(attr.outputs['Color'], bsdf.inputs['Base Color'])
     bsdf.inputs['Roughness'].default_value = 0.85
     return mat
 
 
-def to_object(name, piece, pivot, mat, parent=None):
-    """Make an object from a piece built around its pivot (piece coordinates are relative to the pivot)."""
+PIVOT = {}  # object -> its pivot in world space, for placing children
+
+
+def to_object(coll, name, piece, pivot, mat, parent=None):
+    """An object from a piece built around its pivot; pivot and parents are in world space, unrotated."""
     bm = piece.bm
     bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=1e-5)
+    bm.faces.ensure_lookup_table()
     me = bpy.data.meshes.new(name)
     bm.to_mesh(me)
-    bm.faces.ensure_lookup_table()
-    # colours per face corner: the face colour, darker towards the bottom (painted gradient) with a little grain
+    # one colour per face, darker towards the bottom (painted gradient, art direction rule 5)
     layer = me.color_attributes.new('Col', 'BYTE_COLOR', 'CORNER')
-    zs = [v.co.z + pivot.z for v in me.vertices]
     for poly in me.polygons:
-        f = bm.faces[poly.index]
-        base = rgb(COLS[f[piece.col]])
-        grain = random.uniform(-0.035, 0.035)
+        hexc = COLS[bm.faces[poly.index][piece.col]]
+        base = rgb(hexc)
         for li in poly.loop_indices:
-            z = zs[me.loops[li].vertex_index]
-            k = (0.78 + 0.3 * min(1.0, max(0.0, z / 2.4)) + grain) * f[piece.shade]
-            c = [min(1.0, x * k) for x in base] if COLS[f[piece.col]] not in (C['eye'], C['orb']) else base
-            layer.data[li].color = (*lin(c), 1.0)
+            z = me.vertices[me.loops[li].vertex_index].co.z + pivot.z
+            k = 1.0 if hexc == C['eye'] else 0.8 + 0.28 * min(1.0, max(0.0, z / 2.3))
+            layer.data[li].color = (*lin([min(1.0, x * k) for x in base]), 1.0)
     me.color_attributes.active_color = layer
     me.materials.append(mat)
     for poly in me.polygons:
         poly.use_smooth = True
     me.set_sharp_from_angle(angle=math.radians(40))  # chunky, faceted where it folds, soft where it's round
     ob = bpy.data.objects.new(name, me)
-    bpy.context.scene.collection.objects.link(ob)
-    if parent:
-        ob.parent = parent
-        ob.location = pivot - parent.matrix_world.translation
-    else:
-        ob.location = pivot
+    coll.objects.link(ob)
+    ob.parent = parent
+    ob.location = pivot - PIVOT.get(parent, Vector())
+    PIVOT[ob] = pivot
     bm.free()
-    bpy.context.view_layer.update()
     return ob
 
 
 def build():
-    bpy.ops.wm.read_factory_settings(use_empty=True)
-    mat = make_material()
+    COLS.clear()
+    PIVOT.clear()
+    old = bpy.data.collections.get('LeafWizard')
+    if old:
+        for ob in list(old.all_objects):
+            bpy.data.objects.remove(ob, do_unlink=True)
+        bpy.data.collections.remove(old)
+    for me in [m for m in bpy.data.meshes if m.users == 0]:
+        bpy.data.meshes.remove(me)
+    coll = bpy.data.collections.new('LeafWizard')
+    bpy.context.scene.collection.children.link(coll)
+    mat = material()
     root = bpy.data.objects.new('LeafWizard', None)
-    bpy.context.scene.collection.objects.link(root)
-    body = to_object('body', *build_body(), mat, root)
-    for side, (p, pivot) in build_legs().items():
-        to_object('leg_' + side, p, pivot, mat, root)
-    to_object('cape', *build_cape(), mat, body)
-    head = to_object('head', *build_head(), mat, body)
-    to_object('hat', *build_hat(), mat, head)
-    arms = build_arms()
-    arm_objs = {}
-    for side, (p, pivot, hand) in arms.items():
-        arm_objs[side] = (to_object('arm_' + side, p, pivot, mat, body), pivot + hand)
-    arm_r, hand_r = arm_objs['R']
-    to_object('staff', *build_staff(hand_r), mat, arm_r)
+    coll.objects.link(root)
+    body = to_object(coll, 'body', *build_body(), mat, root)
+    legs = {s: to_object(coll, 'leg_' + s, p, pv, mat, root) for s, (p, pv) in build_legs().items()}
+    head = to_object(coll, 'head', *build_head(), mat, body)
+    to_object(coll, 'hat', *build_hat(), mat, head)
+    to_object(coll, 'scarf', *build_scarf(), mat, body)
+    arms = {}
+    for s, (p, pv, hand) in build_arms().items():
+        arms[s] = to_object(coll, 'arm_' + s, p, pv, mat, body)
+        if s == 'R':
+            to_object(coll, 'staff', build_staff(), pv + hand, mat, arms[s])
+    # the pose: a ready stance, leaning in, chin up and turned a little: smug
+    legs['L'].rotation_euler = (math.radians(-12), math.radians(-15), 0)
+    legs['R'].rotation_euler = (math.radians(12), math.radians(15), 0)
+    body.rotation_euler = (math.radians(7), 0, math.radians(-8))
+    head.rotation_euler = (math.radians(-12), 0, math.radians(14))
     return root
 
 
 def tri_count():
-    n = 0
-    for ob in bpy.data.objects:
-        if ob.type == 'MESH':
-            n += sum(len(p.vertices) - 2 for p in ob.data.polygons)
-    return n
+    coll = bpy.data.collections['LeafWizard']
+    return sum(len(p.vertices) - 2 for ob in coll.objects if ob.type == 'MESH' for p in ob.data.polygons)
 
 
-def export(root):
-    os.makedirs(OUT, exist_ok=True)
-    bpy.ops.wm.save_as_mainfile(filepath=os.path.join(OUT, 'leaf_wizard.blend'))
-    bpy.ops.export_scene.gltf(filepath=os.path.join(OUT, 'leaf_wizard.glb'), export_format='GLB', export_yup=True,
-                              export_apply=False, export_vertex_color='ACTIVE', export_all_vertex_colors=False,
+def export(root, out):
+    os.makedirs(out, exist_ok=True)
+    for ob in bpy.context.selected_objects:
+        ob.select_set(False)
+    for ob in [root] + list(root.children_recursive):
+        ob.select_set(True)
+    bpy.ops.export_scene.gltf(filepath=os.path.join(out, 'leaf_wizard.glb'), export_format='GLB', use_selection=True,
+                              export_yup=True, export_vertex_color='ACTIVE', export_all_vertex_colors=False,
                               export_animations=False, export_cameras=False, export_lights=False)
+    if not IN_UI:
+        bpy.ops.wm.save_as_mainfile(filepath=os.path.join(out, 'leaf_wizard.blend'))
 
 
-def render_sheet():
+def render_sheet(out):
     from PIL import Image, ImageDraw
     scn = bpy.context.scene
     scn.render.engine = 'CYCLES'
     scn.cycles.device = 'CPU'
     scn.cycles.samples = 48
-    scn.cycles.use_denoising = True
     scn.render.resolution_x = scn.render.resolution_y = 520
-    scn.render.film_transparent = False
     scn.view_settings.view_transform = 'Standard'
     world = bpy.data.worlds.new('w')
     scn.world = world
-    world.use_nodes = True
     world.node_tree.nodes['Background'].inputs['Color'].default_value = (*lin(rgb('#9FB4C8')), 1)
     world.node_tree.nodes['Background'].inputs['Strength'].default_value = 0.9
     sun = bpy.data.objects.new('sun', bpy.data.lights.new('sun', 'SUN'))
@@ -393,47 +368,47 @@ def render_sheet():
     sun.data.angle = math.radians(25)
     sun.rotation_euler = Euler((math.radians(40), 0, math.radians(-35)))
     scn.collection.objects.link(sun)
-    ground = bpy.data.meshes.new('ground')
     bm = bmesh.new()
     bmesh.ops.create_circle(bm, cap_ends=True, segments=32, radius=3)
+    ground = bpy.data.meshes.new('ground')
     bm.to_mesh(ground)
-    gob = bpy.data.objects.new('ground', ground)
     gmat = bpy.data.materials.new('ground')
-    gmat.use_nodes = True
     gmat.node_tree.nodes['Principled BSDF'].inputs['Base Color'].default_value = (*lin(rgb('#B7C2A0')), 1)
     ground.materials.append(gmat)
-    scn.collection.objects.link(gob)
+    scn.collection.objects.link(bpy.data.objects.new('ground', ground))
     cam = bpy.data.objects.new('cam', bpy.data.cameras.new('cam'))
     cam.data.type = 'ORTHO'
-    cam.data.ortho_scale = 3.3
+    cam.data.ortho_scale = 3.0
     scn.collection.objects.link(cam)
     scn.camera = cam
-    target = Vector((0, 0, 1.3))
-    views = [('front', -90, 5), ('three-quarter', -55, 15), ('side', 0, 5), ('back', 90, 5), ('top (in game)', -90, 65)]
+    target = Vector((0, 0, 1.2))
     tiles = []
-    for name, az, el in views:
+    for name, az, el in [('front', -90, 5), ('three-quarter', -55, 15), ('side', 0, 5), ('back', 90, 5), ('in game, from above', -90, 65)]:
         a, e = math.radians(az), math.radians(el)
         d = Vector((math.cos(a) * math.cos(e), math.sin(a) * math.cos(e), math.sin(e)))
         cam.location = target + d * 8
         cam.rotation_euler = (-d).to_track_quat('-Z', 'Y').to_euler()
-        path = os.path.join(OUT, '_view.png')
-        scn.render.filepath = path
+        scn.render.filepath = os.path.join(out, '_view.png')
         bpy.ops.render.render(write_still=True)
-        im = Image.open(path).convert('RGB')
+        im = Image.open(scn.render.filepath).convert('RGB')
         ImageDraw.Draw(im).text((12, 10), name, fill=(40, 48, 56))
         tiles.append(im)
-        os.remove(path)
+        os.remove(scn.render.filepath)
     sheet = Image.new('RGB', (520 * len(tiles), 520))
     for i, im in enumerate(tiles):
         sheet.paste(im, (520 * i, 0))
     ImageDraw.Draw(sheet).text((12, 500), f'Leaf Wizard - {tri_count()} triangles', fill=(40, 48, 56))
-    sheet.save(os.path.join(OUT, 'leaf_wizard_sheet.png'))
+    sheet.save(os.path.join(out, 'leaf_wizard_sheet.png'))
 
 
 if __name__ == '__main__':
+    if not IN_UI:
+        bpy.ops.wm.read_factory_settings(use_empty=True)
     root = build()
-    print('triangles:', tri_count())
-    export(root)
-    if RENDERS:
-        render_sheet()
-    print('wrote', os.path.abspath(OUT))
+    print('Leaf Wizard built:', tri_count(), 'triangles')
+    out = out_dir()
+    if out:
+        export(root, out)
+        if RENDERS:
+            render_sheet(out)
+        print('wrote', os.path.abspath(out))
