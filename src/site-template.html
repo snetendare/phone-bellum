@@ -231,6 +231,62 @@ html.dock .shop .ucard { padding: 6px 8px 5px; }
 html.dock .panel.shut > :not(:last-child) { display: none; }
 html.dock .panel.shut > .bar:last-child { margin-top: 0; padding-top: 0; }
 .dock-gold, .dock-tab { display: none; }
+/* UI 2.0: the tray. One row for gold, deployments and Fight; a hint line; the shop as tier groups (a small tab, the
+   units you have unlocked, then + Unlock while that tier has units left). Cards are dragged up onto the board. */
+.trow { display: flex; align-items: center; gap: 8px; min-height: 44px; }
+.trow .g2 { font: 500 21px/1 var(--font-data); color: var(--gold); }
+.trow .g2 small { display: block; font: 11px var(--font-body); color: var(--muted); margin-top: 2px; }
+.trow .sp { flex: 1; }
+.trow .timer { font-size: 16px; }
+.pips { display: flex; gap: 4px; align-items: center; }
+.pips i { width: 11px; height: 11px; border-radius: 50%; border: 2px solid var(--you); }
+.pips i.on { background: var(--you); }
+.chip2 { border: 1px dashed var(--line); border-radius: 999px; padding: 3px 8px; font: 12px var(--font-body); color: var(--muted); background: none; margin-left: 2px; }
+.chip2 .num { color: var(--gold); }
+.chip2:disabled { opacity: 0.4; }
+.hint2 { font-size: 12px; line-height: 1.3; color: var(--muted); text-align: center; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.xrow { display: flex; gap: 5px; overflow-x: auto; scrollbar-width: none; }
+.xrow .btn.small { padding: 4px 8px; font-size: 12px; white-space: nowrap; flex: none; }
+.shop2 { display: flex; gap: 7px; overflow-x: auto; scrollbar-width: none; padding: 6px 0 4px; scroll-snap-type: x proximity; }
+.shop2::-webkit-scrollbar, .xrow::-webkit-scrollbar { display: none; }
+@media (hover: hover) and (pointer: fine) { /* a mouse: a thin scrollbar under the tray */
+  .shop2 { scrollbar-width: thin; scrollbar-color: var(--line) transparent; padding-bottom: 8px; }
+  .shop2::-webkit-scrollbar { display: block; height: 6px; }
+  .shop2::-webkit-scrollbar-thumb { background: var(--line); border-radius: 3px; }
+}
+.tier2 { flex: 0 0 22px; height: 104px; border-radius: 8px; display: grid; grid-template-rows: auto 1fr; justify-items: center; padding-block: 6px; scroll-snap-align: start;
+  background: color-mix(in srgb, var(--tier) 14%, var(--bg)); border: 1px solid color-mix(in srgb, var(--tier) 45%, transparent); }
+.tier2.gap { margin-left: 6px; }
+.tier2 b { font: 600 13px/1 var(--font-display); color: var(--tier); }
+.tier2 span { writing-mode: vertical-rl; transform: rotate(180deg); font: 11px var(--font-data); color: var(--muted); align-self: center; }
+.uc2 { flex: 0 0 74px; height: 104px; border-radius: 10px; background: var(--bg); border: 1px solid var(--line); border-top: 3px solid var(--tier); color: var(--ink);
+  display: grid; grid-template-rows: 40px auto auto; justify-items: center; align-content: start; padding: 6px 3px 4px; position: relative; scroll-snap-align: start;
+  touch-action: pan-x; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; cursor: grab; transition: transform 0.12s, opacity 0.12s; font: inherit; }
+.uc2 .ic { display: grid; place-items: center; }
+.uc2 .n { font-size: 11.5px; font-weight: 600; text-align: center; line-height: 1.15; max-width: 100%; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.uc2 .c { font: 13px var(--font-data); color: var(--gold); margin-top: 2px; }
+.uc2 .c.free { color: var(--win, #6FD08C); }
+.uc2 .st { position: absolute; top: 3px; right: 5px; font: 10px var(--font-data); color: var(--gold); }
+.uc2[aria-disabled="true"] { opacity: 0.45; }
+.uc2[aria-pressed="true"] { transform: translateY(-5px); border-color: var(--gold); box-shadow: 0 6px 16px rgba(0, 0, 0, 0.45); }
+.uc2.lift { opacity: 0.3; }
+.add2 { flex: 0 0 74px; height: 104px; border-radius: 10px; border: 1.5px dashed color-mix(in srgb, var(--tier) 60%, var(--line)); color: var(--tier); background: none;
+  display: grid; align-content: center; justify-items: center; gap: 2px; scroll-snap-align: start; font: inherit; }
+.add2 .p { font-size: 28px; line-height: 1; font-weight: 300; }
+.add2 .w { font-size: 12px; font-weight: 600; color: var(--ink); }
+.add2 .c { font: 11px var(--font-data); color: var(--muted); }
+.fly2 { position: fixed; z-index: 30; left: 0; top: 0; pointer-events: none; display: grid; justify-items: center; gap: 2px; transform: translate(-50%, -100%); }
+.fly2 .o { width: 50px; height: 50px; border-radius: 50%; background: var(--bg); border: 2px solid var(--you); display: grid; place-items: center; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5); }
+.fly2 .l { font: 12px var(--font-data); color: var(--gold); background: var(--bg); border: 1px solid var(--gold-dark); border-radius: 999px; padding: 1px 8px; }
+.drop2 { position: absolute; inset: 0; z-index: 5; border: 2px dashed var(--line); border-radius: 10px; background: rgba(13, 19, 21, 0.93); display: grid; place-items: center;
+  font: 600 17px var(--font-display); color: var(--muted); pointer-events: none; }
+.drop2.hot { border-color: var(--gold); color: var(--gold); }
+.panel { position: relative; }
+html.dock .panel { position: fixed; }
+.urow { display: grid; grid-template-columns: 34px 1fr auto; gap: 10px; align-items: center; padding: 8px 10px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; }
+.urow .info2 { text-align: left; min-width: 0; background: none; border: 0; color: inherit; padding: 0; font: inherit; }
+.urow .info2 b { display: block; font-size: 14px; }
+.urow .info2 span { font-size: 12px; color: var(--muted); }
 html.dock .dock-tab { position: fixed; left: 50%; bottom: var(--dock-h, 64px); transform: translateX(-50%); z-index: 4; display: inline-flex; align-items: center; justify-content: center; gap: 5px;
   height: 28px; min-width: 76px; padding: 0 16px; border: 0; border-radius: 14px 14px 0 0; background: var(--you); color: var(--bg); font: 600 13px var(--font-display);
   letter-spacing: 0.04em; touch-action: none; user-select: none; -webkit-user-select: none; box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.35); cursor: grab; }
@@ -873,10 +929,10 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
     root.classList.toggle('dock', on);
     const deploying = on && phase === 'deploy', picking = deploying && (choosingPack() || choosingTower());
     if (deploying && dockRound !== m.round && !picking && !placingTower()) { dockRound = m.round; dockOpen = true; }
-    const shut = deploying && (!!dockTask || picking || !dockOpen);
+    const shut = deploying && picking; // UI 2.0: the tray stays up and the board fits above it
     panel.classList.toggle('shut', shut);
     const tb = $('dock-toggle');
-    tb.hidden = !deploying || !!dockTask || picking || (mode === 'tutorial' && m.round < 3); // the tutorial's first drawers are a card or two: nothing to slide
+    tb.hidden = true; // UI 2.0: no pull tab // the tutorial's first drawers are a card or two: nothing to slide
     if (!tb.hidden && tb.dataset.shut !== String(shut)) { // up: arrows down; down: "Shop" and arrows up
       tb.dataset.shut = String(shut);
       tb.innerHTML = shut ? `Shop ${CHEVRONS(true)}` : CHEVRONS(false);
@@ -886,7 +942,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
     tb.style.bottom = on ? panel.offsetHeight + 'px' : '';
     // the task line: in the lowered drawer's last row, between the gold and Fight / Ready (it moves there each time the
     // panel is redrawn); over the board on a PC or with the panel below the board. No text: hidden (the tutorial's coach line says it)
-    const showTask = deploying && !!dockTask && !!dockTask.text, row = on && showTask && panel.lastElementChild;
+    const showTask = deploying && !!dockTask && !!dockTask.text, row = on && showTask && shut && panel.lastElementChild;
     if (row) { if (taskEl.parentNode !== row) row.insertBefore(taskEl, row.children[1] || null); }
     else if (taskEl.parentNode !== $('wrap')) $('wrap').appendChild(taskEl);
     taskEl.hidden = !showTask;
@@ -897,10 +953,10 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
     }
     let h = boardH;
     if (on) {
-      if (shut || phase !== 'deploy') dockH = panel.offsetHeight || dockH; // the drawer's height when down
+      dockH = panel.offsetHeight || dockH; // UI 2.0: the whole tray
       root.style.setProperty('--dock-h', dockH + 'px');
       const top = $('wrap').getBoundingClientRect().top + scrollY;
-      h = Math.max(240, Math.floor(innerHeight - top - dockH - (deploying ? TAB_H : 0) - 8));
+      h = Math.max(240, Math.floor(innerHeight - top - dockH - 8));
       root.style.setProperty('--board-h', h + 'px');
     }
     if (on !== was || h !== boardH) { boardH = h; size(); if (on !== was || !board3d) render(); }
@@ -1325,6 +1381,119 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
           <button class="info" data-info="${i}" aria-label="About ${esc(u.name)}">i</button>
         </div>`;
   }
+  // UI 2.0: a unit's card in the tray (disabled: it can't be bought now; a tap opens its sheet)
+  function shopCard2(i, disabled) {
+    const u = units[i], free = Game.freeLeft(m, me).filter(x => x === i).length, stars = Engine.SLOTS.filter(k => Game.hasSkill(m, me, i, k)).length;
+    return `<button class="uc2" data-i="${i}" style="--tier:${tierColor(tierOf(i))}" aria-pressed="${selected === i}" aria-disabled="${disabled}" aria-label="${esc(u.name)}, ${free ? `${free} free` : `${Game.shopCost(m, me, i)} gold`}">
+      ${stars ? `<span class="st">${'★'.repeat(stars)}</span>` : ''}
+      <span class="ic" style="color:${u.color}">${Shapes.svg(u.shape, 30)}</span>
+      <span class="n">${esc(u.name)}</span>
+      <span class="c${free ? ' free' : ''}">${free ? `Free ×${free}` : Game.shopCost(m, me, i)}</span></button>`;
+  }
+  let scrollTo2 = null; // a card to bring into view on the next panelDeploy (just unlocked)
+  // + Unlock: that tier's locked units, each with its unlock price; a name opens the unit's sheet
+  function openUnlockSheet(t) {
+    if (!m || phase !== 'deploy') return;
+    const list = units.map((u, i) => i).filter(i => tierOf(i) === t && !Game.isOff(m, i, me) && !Game.isUnlocked(m, me, i));
+    const can = editable();
+    $('sheet').innerHTML = `<div class="bar"><h3 id="sheet-h">Unlock a tier ${t} unit</h3><button class="btn small" id="close">Close</button></div>
+      <p class="hint" style="margin:0">Unlock once and field it for the rest of the match. The opponent sees it after the next fight.</p>
+      <div style="display:grid;gap:6px">${list.map(i => { const u = units[i], c = Game.unlockCost(m, i, me), d = ROLES[u.name] || '';
+        return `<div class="urow"><span style="color:${u.color};display:grid;place-items:center">${Shapes.svg(u.shape, 28)}</span>
+          <button class="info2" data-uinfo="${i}"><b>${esc(u.name)}</b><span>${esc(d.split('. ')[0].replace(/\.$/, ''))}.</span></button>
+          <button class="btn small primary" data-unl="${i}" ${can && m.gold[me] >= c ? '' : 'disabled'}>${c ? `Unlock · ${c}` : 'Unlock'}</button></div>`; }).join('')}</div>`;
+    $('sheet-back').hidden = false;
+    $('close').addEventListener('click', closeSheet);
+    $('sheet').querySelectorAll('[data-uinfo]').forEach(b => b.addEventListener('click', () => openSheet(+b.dataset.uinfo)));
+    $('sheet').querySelectorAll('[data-unl]').forEach(b => b.addEventListener('click', () => {
+      const i = +b.dataset.unl;
+      if (editable() && Game.unlock(m, me, i)) { closeSheet(); selected = i; scrollTo2 = i; changed(); }
+    }));
+  }
+  function askSell(sq) {
+    const u = units[sq.unit], v = Game.sellValue(m, sq);
+    $('sheet').innerHTML = `<div class="bar"><h3 id="sheet-h">Sell ${esc(u.name)}?</h3><button class="btn small" id="close">Cancel</button></div>
+      <p style="margin:0">You get ${v} gold back. Its levels and XP are lost; skills stay with the unit.</p>
+      <div class="btnrow"><button class="btn primary" id="sell-yes">Sell · +${v}</button></div>`;
+    $('sheet-back').hidden = false;
+    $('close').addEventListener('click', closeSheet);
+    $('sell-yes').addEventListener('click', () => { if (editable() && Game.sell(m, me, sq.id)) { closeSheet(); changed(); } });
+  }
+  // the tray as a drop zone while one of your squads is dragged (x, y: the finger; null: hide it)
+  function dropZone(pt) {
+    const pn = $('panel');
+    let z = pn.querySelector('.drop2');
+    if (!pt || !drag || drag.id == null) { if (z) z.remove(); if (drag) drag.toTray = false; return; }
+    const sq = m.armies[me].find(q => q.id === drag.id), r = pn.getBoundingClientRect(), over = pt.y > r.top;
+    drag.toTray = over;
+    if (!sq || (!drag.moved && !over)) { if (z) z.remove(); return; }
+    if (!z) { z = document.createElement('div'); z.className = 'drop2'; pn.appendChild(z); }
+    const text = sq.round === m.round ? `Drop here to take back${sq.cost ? ` +${sq.cost}` : ''}` : `Drop here to sell +${Game.sellValue(m, sq)}`;
+    if (z.textContent !== text) z.textContent = text;
+    z.classList.toggle('hot', over);
+  }
+  // dragging a card up onto the board (a tap picks it, a hold opens its sheet, a sideways swipe scrolls the tray)
+  let cpress = null, cdrag = null, cardDone = 0;
+  function cardPress(e, i, el) {
+    if (!m || phase !== 'deploy') return;
+    cpress = { x: e.clientX, y: e.clientY, i, el, id: e.pointerId, t: setTimeout(() => { if (cpress && !cdrag && !cpress.scroll) { cpress.held = true; cardDone = performance.now(); openSheet(i); } }, 450) };
+  }
+  function flyShow(i, x, y, hide, label, bad) {
+    let f = document.getElementById('fly2');
+    if (i == null) { if (f) f.remove(); return; }
+    if (!f) { f = document.createElement('div'); f.className = 'fly2'; f.id = 'fly2'; f.innerHTML = `<div class="o" style="color:${units[i].color}">${Shapes.svg(units[i].shape, 28)}</div><div class="l"></div>`; document.body.appendChild(f); }
+    f.hidden = hide; f.style.left = x + 'px'; f.style.top = y + 'px';
+    const l = f.querySelector('.l'); l.textContent = label; l.style.color = bad ? 'var(--foe)' : '';
+  }
+  function cardEnd(ok) {
+    const p = cpress, d = cdrag; cpress = null; cdrag = null; flyShow(null);
+    if (p) { clearTimeout(p.t); if (p.el) p.el.classList.remove('lift'); if (p.pan) cardDone = performance.now(); } // a sideways mouse drag ends without a tap
+    if (!d) return;
+    cardDone = performance.now(); hoverTile = null;
+    if (ok && d.t && m && phase === 'deploy' && editable() && (Game.canPlaceAt(m, me, d.t.col, d.t.row, d.i) || Game.boardable(m, me, d.t.col, d.t.row, d.i))) { selected = d.i; tapTile(d.t, null); }
+    if (selected === d.i && d.prev !== d.i) selected = d.prev;
+    if (phase === 'deploy') panelDeploy();
+    render();
+  }
+  addEventListener('pointermove', (e) => {
+    if (drag && drag.id != null && phase === 'deploy') dropZone({ x: e.clientX, y: e.clientY });
+    if (!cpress || e.pointerId !== cpress.id) return;
+    const dx = e.clientX - cpress.x, dy = e.clientY - cpress.y;
+    if (!cdrag) {
+      if (cpress.held || cpress.scroll) return;
+      if (cpress.pan) { const sh = $('shop'); if (sh) sh.scrollLeft = cpress.pan - dx; return; }
+      if (Math.abs(dx) > 8 && Math.abs(dx) > 1.5 * Math.abs(dy)) {
+        clearTimeout(cpress.t);
+        if (e.pointerType === 'mouse') { const sh = $('shop'); cpress.pan = sh ? sh.scrollLeft + dx || 0.01 : 0.01; cardDone = performance.now() + 1e9; return; } // a mouse drags the tray sideways
+        cpress.scroll = true; return;
+      }
+      if (!((-dy > 8 && -dy >= Math.abs(dx) * 0.7) || (e.pointerType === 'mouse' && Math.hypot(dx, dy) > 8))) return;
+      clearTimeout(cpress.t);
+      if (cpress.el.getAttribute('aria-disabled') === 'true' || !editable()) { cpress.scroll = true; return; }
+      cdrag = { i: cpress.i, prev: selected, touch: e.pointerType !== 'mouse', t: null };
+      selected = cpress.i; rangeOf = null; cpress.el.classList.add('lift');
+      try { cpress.el.setPointerCapture(e.pointerId); } catch (err) {}
+      render();
+    }
+    const over = e.clientY > $('panel').getBoundingClientRect().top;
+    const t = over ? null : (board3d || board).tileAt(e.clientX, e.clientY - (cdrag.touch ? 36 : 0));
+    const ok = !!t && (Game.canPlaceAt(m, me, t.col, t.row, cdrag.i) || !!Game.boardable(m, me, t.col, t.row, cdrag.i));
+    flyShow(cdrag.i, e.clientX, e.clientY - (cdrag.touch ? 22 : 6), ok, Game.freeLeft(m, me).includes(cdrag.i) ? 'Free' : String(Game.shopCost(m, me, cdrag.i)), !ok && !over && !!t);
+    if (!(t === cdrag.t || (t && cdrag.t && t.col === cdrag.t.col && t.row === cdrag.t.row))) { cdrag.t = t; hoverTile = ok ? t : null; render(); }
+  }, { passive: true });
+  addEventListener('pointerup', (e) => { if (cpress && e.pointerId === cpress.id) cardEnd(true); });
+  addEventListener('pointercancel', (e) => { if (cpress && e.pointerId === cpress.id) cardEnd(false); });
+  // phones decide early whether a touch scrolls: an upward pull on a card (and any card drag) is claimed here
+  {
+    let t0 = null;
+    document.addEventListener('touchstart', (e) => { const t = e.touches[0]; t0 = { x: t.clientX, y: t.clientY, card: !!(e.target.closest && e.target.closest('.uc2')) }; }, { passive: true });
+    document.addEventListener('touchmove', (e) => {
+      if (cdrag) { e.preventDefault(); return; }
+      if (!t0 || !t0.card || !e.touches[0]) return;
+      const dx = e.touches[0].clientX - t0.x, dy = e.touches[0].clientY - t0.y;
+      if (dy < 0 && Math.abs(dy) >= Math.abs(dx)) e.preventDefault();
+    }, { passive: false });
+  }
   function panelDeploy() {
     if (phase !== 'deploy') return;
     if (mode === 'tutorial') { panelTutorial(); return; }
@@ -1379,10 +1548,9 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
     helpTip = inline ? '' : hint;
     // phone: the task the next board tap is for, shown over the board while the drawer is down (dock())
     dockTask = !can ? null : placingTower() ? { text: hint, x: false }
-      : selected !== null || moveMode || (charmMode && Game.canGiveCharm(m, me)) || placingElf() || placingWall() || placingBuilding() || devTask ? { text: hint, x: !(bPlacing != null && Game.unplacedLesser(m, me)) } : null;
+      : moveMode || (charmMode && Game.canGiveCharm(m, me)) || placingElf() || placingWall() || placingBuilding() || devTask ? { text: hint, x: !(bPlacing != null && Game.unplacedLesser(m, me)) } : null;
     const news = can && selected === null && !fresh && !inline && (Game.hailRound(m) || Game.altarRound(m) || m.round === Game.FLANK.round || (tskillOffer() && m.round === Game.TOWER_PICK_ROUND));
     const extraBtns = `<span class="xbtns" style="display:flex;gap:6px;flex-wrap:wrap">
-        <button class="btn small" id="buy-deploy" ${can && Game.canBuyDeploy(m, me) ? '' : 'disabled'}>+1 deployment · ${Game.CONFIG.extraDeployCost}</button>
         ${loanOffer() ? (Game.loanNow(m, me) ? `<button class="btn small" id="loan-undo" ${can && m.gold[me] >= Game.LOAN.gold ? '' : 'disabled'}>Pay back loan · −${Game.LOAN.gold}</button>` : `<button class="btn small" id="loan" ${can && Game.canTakeLoan(m, me) ? '' : 'disabled'}${Game.investNow(m, me) ? ' title="Not this round: you made the Major investment"' : ''}>Loan · +${Game.LOAN.gold}</button>`) : ''}
         ${mageOffer() ? `<button class="btn small" id="mage-gen" ${can ? '' : 'disabled'}>${Game.mageGenOf(m, me) || Game.mageTpOf(m, me) ? [Game.mageGenOf(m, me), Game.mageTpOf(m, me) && 'teleport'].filter(Boolean).map(id => esc(Game.mageGenInfo(id).name)).join(' + ') : 'Mage general'}…</button>` : ''}
         ${tskillOffer() ? `<button class="btn small" id="buy-tskill" ${can && Game.canBuyTowerSkill(m, me) ? '' : 'disabled'}>${esc(Game.towerType(m, me).skill.name)} · ${Game.towerSkillCost(m, me)}</button>` : ''}
@@ -1396,9 +1564,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
         })() : ''}
         ${Game.charOf(m, me) !== 'matteo' ? '' : charmGivenNow() ? `<button class="btn small" id="charm-undo" ${can ? '' : 'disabled'}>Take back Charisma</button>`
           : Game.canGiveCharm(m, me) ? `<button class="btn small" id="charm-btn" aria-pressed="${charmMode}" ${can && m.armies[me].length ? '' : 'disabled'}>${charmMode ? 'Cancel' : 'Give Charisma'}</button>` : ''}
-        ${Game.movedId(m, me) != null
-          ? `<button class="btn small" id="undo-move" ${can ? '' : 'disabled'}>Undo move · +${Game.CONFIG.moveCost}</button>`
-          : `<button class="btn small" id="move-btn" aria-pressed="${moveMode}" ${(can && m.armies[me].some(s => s.round < m.round) && (moveMode || g >= Game.CONFIG.moveCost)) ? '' : 'disabled'}>${moveMode ? 'Cancel move' : `Move a squad · ${Game.CONFIG.moveCost}`}</button>`}
+        ${Game.movedId(m, me) != null ? `<button class="btn small" id="undo-move" ${can ? '' : 'disabled'}>Undo move · +${Game.CONFIG.moveCost}</button>` : ''}
       </span>`;
     let action, status;
     if (solo()) {
@@ -1410,32 +1576,59 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
       status = away ? 'Opponent is away. The clock is paused.' : ready[foe()] ? 'Opponent is ready.' : mode === 'host' && Game.needsTowerPick(m, 1) ? 'Opponent is picking their tower.' : 'Opponent is deploying.';
       action = `<button class="btn ${ready[me] ? '' : 'primary'}" id="ready" ${timeUp || choosingTower() ? 'disabled' : ''}>${ready[me] ? 'Not ready' : 'Ready'}</button>`;
     }
+    const showShop = !((choosingPack() || choosingTower() || devPicking()) && can);
+    const tip = inline || (selected !== null ? hint : !solo() ? status : !can ? hint
+      : left <= 0 ? 'No deployments left · tap a squad to level it up or buy skills'
+      : fresh ? 'Drag a squad to move it · drag it down here to take it back' : 'Drag a card up onto your zone · hold a card for details');
+    const pips = Array.from({ length: Math.max(allowed, 0) }, (_, k) => `<i class="${k < left ? 'on' : ''}"></i>`).join('');
+    const xb = showShop ? extraBtns : '';
+    const tiers = [...new Set(units.map((u, i) => Game.isOff(m, i, me) ? 0 : tierOf(i)))].filter(t => t > 0).sort((a, b) => a - b); // units left out of the match aren't in the shop
+    const shopHtml = tiers.map((t, n) => {
+      const idx = units.map((u, i) => i).filter(i => tierOf(i) === t && !Game.isOff(m, i, me));
+      const open = idx.filter(i => !locked(i) || freeN(i) > 0), rest = idx.filter(i => locked(i) && !freeN(i)).length;
+      return `<div class="tier2${n ? ' gap' : ''}" style="--tier:${tierColor(t)}" aria-label="Tier ${t}, ${price(idx[0])} gold"><b>T${t}</b><span>${price(idx[0])}</span></div>`
+        + open.map(i => shopCard2(i, !canBuy(i))).join('')
+        + (rest ? `<button class="add2" data-add="${t}" style="--tier:${tierColor(t)}" aria-label="Unlock a tier ${t} unit, ${rest} left"><span class="p">+</span><span class="w">Unlock</span><span class="c">${rest} more</span></button>` : '');
+    }).join('');
     $('panel').innerHTML = `
-      <div class="bar"><span class="gold num">${g} gold</span><span class="deploys num">${Math.max(0, left)} of ${allowed} deployments left</span><span class="timer" id="timer">${deadline ? fmtClock(deadline - now()) : ''}</span><button class="cog help${news && helpSeen !== m.round ? ' new' : ''}" id="help-btn" aria-label="${news && helpSeen !== m.round ? 'Help, news this round' : 'Help'}">?</button></div>
-      <div class="bar">${inline ? `<span class="hint">${inline}</span>` : ''}${(choosingPack() || choosingTower() || devPicking()) && can ? '' : extraBtns}</div>
-      ${(choosingPack() || choosingTower() || devPicking()) && can ? '' : (() => {
-        const tiers = [...new Set(units.map((u, i) => Game.isOff(m, i, me) ? 0 : tierOf(i)))].filter(t => t > 0).sort((a, b) => a - b); // units left out of the match aren't in the shop
-        if (!tiers.includes(shopTier)) shopTier = tiers[0];
-        return `<div class="tiers" role="tablist" aria-label="Unit tiers, higher is stronger" style="--n:${tiers.length}">${tiers.map(t => {
-          const idx = units.map((u, i) => i).filter(i => tierOf(i) === t && !Game.isOff(m, i, me)), open = idx.filter(i => !locked(i)).length, free = idx.some(i => freeN(i) > 0);
-          return `<button role="tab" data-tier="${t}" aria-selected="${t === shopTier}" aria-label="Tier ${t}, ${tierName(t)}, ${price(idx[0])} gold, ${open} of ${idx.length} unlocked${free ? ', has free squads' : ''}" style="--tier:${tierColor(t)}">T${t}<em>${tierName(t)}</em><small>${price(idx[0])}g · ${open}/${idx.length}</small></button>`;
-        }).join('')}</div>`;
-      })()}
-      ${(choosingPack() || choosingTower() || devPicking()) && can ? '' : `<div class="shop" id="shop">${units.map((u, i) => tierOf(i) !== shopTier || Game.isOff(m, i, me) ? '' : shopCard(i, !canBuy(i) && !(locked(i) && can))).join('')}</div>`}
-      <div class="bar"><span class="dock-gold gold num">${g}g</span><span class="hint">${status}</span>${action}</div>`;
+      <div class="trow">
+        <span class="g2 num">${g}<small>gold</small></span>
+        <span class="pips" aria-label="${Math.max(0, left)} of ${allowed} deployments left">${pips}</span>
+        ${Game.CONFIG.deployCap && m.extraDeploys[me] < Game.CONFIG.maxExtraDeploys ? `<button class="chip2" id="buy-deploy" ${can && Game.canBuyDeploy(m, me) ? '' : 'disabled'} aria-label="One more deployment for ${Game.CONFIG.extraDeployCost} gold">+1 <span class="num">${Game.CONFIG.extraDeployCost}</span></button>` : ''}
+        <span class="sp"></span>
+        <span class="timer" id="timer">${deadline ? fmtClock(deadline - now()) : ''}</span>
+        <button class="cog help${news && helpSeen !== m.round ? ' new' : ''}" id="help-btn" aria-label="${news && helpSeen !== m.round ? 'Help, news this round' : 'Help'}">?</button>
+        ${action}
+      </div>
+      <div class="hint2">${tip}</div>
+      ${xb.includes('<button') ? `<div class="xrow">${xb}</div>` : ''}
+      ${showShop ? `<div class="shop2" id="shop">${shopHtml}</div>` : ''}`;
     syncPick();
-    $('panel').querySelectorAll('[data-tier]').forEach(b => b.addEventListener('click', () => { shopTier = +b.dataset.tier; shopScroll = 0; panelDeploy(); }));
     const shop = $('shop') || document.createElement('div');
     shop.scrollLeft = shopScroll;
     shop.addEventListener('scroll', () => { shopScroll = shop.scrollLeft; }, { passive: true });
-    shop.querySelectorAll('.ucard').forEach(b => b.addEventListener('click', () => {
-      if (b.dataset.locked) { openSheet(+b.dataset.i); return; } // a locked unit opens its sheet, where it can be unlocked
-      if (b.getAttribute('aria-disabled') === 'true') return;
-      const i = +b.dataset.i;
-      selected = selected === i ? null : i;
-      panelDeploy(); render();
-    }));
-    shop.querySelectorAll('[data-info]').forEach(el => el.addEventListener('click', () => openSheet(+el.dataset.info)));
+    shop.querySelectorAll('.uc2').forEach(b => {
+      b.addEventListener('pointerdown', (e) => cardPress(e, +b.dataset.i, b));
+      b.addEventListener('contextmenu', (e) => e.preventDefault());
+      b.addEventListener('click', () => {
+        if (performance.now() - cardDone < 400) return; // the end of a drag or a hold, not a tap
+        const i = +b.dataset.i;
+        if (b.getAttribute('aria-disabled') === 'true') { openSheet(i); return; }
+        selected = selected === i ? null : i;
+        panelDeploy(); render();
+      });
+    });
+    shop.querySelectorAll('[data-add]').forEach(b => b.addEventListener('click', () => openUnlockSheet(+b.dataset.add)));
+    // a mouse: the wheel scrolls the tray sideways, and dragging its empty space or a tier tab moves it
+    shop.addEventListener('wheel', (e) => { if (Math.abs(e.deltaY) > Math.abs(e.deltaX) && shop.scrollWidth > shop.clientWidth) { shop.scrollLeft += e.deltaY; e.preventDefault(); } }, { passive: false });
+    shop.addEventListener('pointerdown', (e) => {
+      if (e.pointerType !== 'mouse' || e.target.closest('.uc2, .add2')) return;
+      const x0 = e.clientX, s0 = shop.scrollLeft;
+      const mv = (ev) => { shop.scrollLeft = s0 - (ev.clientX - x0); };
+      const up = () => { removeEventListener('pointermove', mv); removeEventListener('pointerup', up); };
+      addEventListener('pointermove', mv); addEventListener('pointerup', up);
+    });
+    if (scrollTo2 != null) { const c = shop.querySelector(`.uc2[data-i="${scrollTo2}"]`); scrollTo2 = null; if (c) c.scrollIntoView({ block: 'nearest', inline: 'center' }); }
     if ($('fight')) $('fight').addEventListener('click', runFight);
     if ($('ready')) $('ready').addEventListener('click', toggleReady);
     if ($('buy-deploy')) $('buy-deploy').addEventListener('click', () => { if (editable() && Game.buyDeploy(m, me)) changed(); });
@@ -2572,7 +2765,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (myB && myB.round === m.round) { guideDrag = null; drag = { bkey: myB.key, from: t, over: t, moved: false }; return true; } // drag a new building
     const sq = Game.squadAt(m, me, t.col, t.row);
     if (!sq) return false;
-    if (sq.round < m.round && !(moveMode || Game.movedId(m, me) === sq.id || Game.freeMover(m, me, sq))) return false;
+    if (sq.round < m.round && !(moveMode || Game.movedId(m, me) === sq.id || Game.freeMover(m, me, sq) || (Game.movedId(m, me) == null && m.gold[me] >= Game.CONFIG.moveCost))) return false;
     if (!Game.canMove(m, me, sq)) return false;
     drag = { id: sq.id, from: t, over: t, moved: false };
     return true;
@@ -2593,6 +2786,15 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       render(); return; // a press without a drag: the tap that follows picks the squad
     }
     if (!drag) return;
+    if (drag.id != null && drag.toTray) { // UI 2.0: dropped on the tray
+      const d = drag; drag = null; dropZone(null); dragEndAt = performance.now();
+      const sq = m.armies[me].find(q => q.id === d.id);
+      if (!ended || !sq) { render(); return; }
+      if (sq.round === m.round) { if (Game.unplaceSquad(m, me, sq.id)) { if (rangeOf && rangeOf.id === sq.id) rangeOf = null; changed(); } else render(); }
+      else { render(); askSell(sq); }
+      return;
+    }
+    dropZone(null);
     if (ended) boardDrag(t);
     const d = drag; drag = null;
     if (!ended || !d.moved || (d.over.col === d.from.col && d.over.row === d.from.row)) { render(); return; }
@@ -2817,8 +3019,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   function unplaceMarks(cinematic) {
     const box = $('unx');
     if (!box) return;
-    const list = phase === 'deploy' && m && editable() && !cinematic && !choosingPack() && !choosingTower()
-      ? m.armies[me].filter(s => s.round === m.round && !Game.isRider(s) && !(drag && drag.moved && drag.id === s.id)) : [];
+    const list = []; // UI 2.0: no ✕ marks; a squad is dragged down to the tray to take it back
     const keep = new Set();
     if (list.length) {
       const at = wrapMap(), T = Game.TILE;
