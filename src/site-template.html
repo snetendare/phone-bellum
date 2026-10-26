@@ -249,6 +249,11 @@ html.dock .panel.shut > .bar:last-child { margin-top: 0; padding-top: 0; }
 .xrow .btn.small { padding: 4px 8px; font-size: 12px; white-space: nowrap; flex: none; }
 .shop2 { display: flex; gap: 7px; overflow-x: auto; scrollbar-width: none; padding: 6px 0 4px; scroll-snap-type: x proximity; }
 .shop2::-webkit-scrollbar, .xrow::-webkit-scrollbar { display: none; }
+@media (hover: hover) and (pointer: fine) { /* a mouse: a thin scrollbar under the tray */
+  .shop2 { scrollbar-width: thin; scrollbar-color: var(--line) transparent; padding-bottom: 8px; }
+  .shop2::-webkit-scrollbar { display: block; height: 6px; }
+  .shop2::-webkit-scrollbar-thumb { background: var(--line); border-radius: 3px; }
+}
 .tier2 { flex: 0 0 22px; height: 104px; border-radius: 8px; display: grid; grid-template-rows: auto 1fr; justify-items: center; padding-block: 6px; scroll-snap-align: start;
   background: color-mix(in srgb, var(--tier) 14%, var(--bg)); border: 1px solid color-mix(in srgb, var(--tier) 45%, transparent); }
 .tier2.gap { margin-left: 6px; }
@@ -1442,7 +1447,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
   }
   function cardEnd(ok) {
     const p = cpress, d = cdrag; cpress = null; cdrag = null; flyShow(null);
-    if (p) { clearTimeout(p.t); if (p.el) p.el.classList.remove('lift'); }
+    if (p) { clearTimeout(p.t); if (p.el) p.el.classList.remove('lift'); if (p.pan) cardDone = performance.now(); } // a sideways mouse drag ends without a tap
     if (!d) return;
     cardDone = performance.now(); hoverTile = null;
     if (ok && d.t && m && phase === 'deploy' && editable() && (Game.canPlaceAt(m, me, d.t.col, d.t.row, d.i) || Game.boardable(m, me, d.t.col, d.t.row, d.i))) { selected = d.i; tapTile(d.t, null); }
@@ -1456,7 +1461,12 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
     const dx = e.clientX - cpress.x, dy = e.clientY - cpress.y;
     if (!cdrag) {
       if (cpress.held || cpress.scroll) return;
-      if (Math.abs(dx) > 8 && Math.abs(dx) > 1.5 * Math.abs(dy) && e.pointerType !== 'mouse') { clearTimeout(cpress.t); cpress.scroll = true; return; }
+      if (cpress.pan) { const sh = $('shop'); if (sh) sh.scrollLeft = cpress.pan - dx; return; }
+      if (Math.abs(dx) > 8 && Math.abs(dx) > 1.5 * Math.abs(dy)) {
+        clearTimeout(cpress.t);
+        if (e.pointerType === 'mouse') { const sh = $('shop'); cpress.pan = sh ? sh.scrollLeft + dx || 0.01 : 0.01; cardDone = performance.now() + 1e9; return; } // a mouse drags the tray sideways
+        cpress.scroll = true; return;
+      }
       if (!((-dy > 8 && -dy >= Math.abs(dx) * 0.7) || (e.pointerType === 'mouse' && Math.hypot(dx, dy) > 8))) return;
       clearTimeout(cpress.t);
       if (cpress.el.getAttribute('aria-disabled') === 'true' || !editable()) { cpress.scroll = true; return; }
@@ -1609,6 +1619,15 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
       });
     });
     shop.querySelectorAll('[data-add]').forEach(b => b.addEventListener('click', () => openUnlockSheet(+b.dataset.add)));
+    // a mouse: the wheel scrolls the tray sideways, and dragging its empty space or a tier tab moves it
+    shop.addEventListener('wheel', (e) => { if (Math.abs(e.deltaY) > Math.abs(e.deltaX) && shop.scrollWidth > shop.clientWidth) { shop.scrollLeft += e.deltaY; e.preventDefault(); } }, { passive: false });
+    shop.addEventListener('pointerdown', (e) => {
+      if (e.pointerType !== 'mouse' || e.target.closest('.uc2, .add2')) return;
+      const x0 = e.clientX, s0 = shop.scrollLeft;
+      const mv = (ev) => { shop.scrollLeft = s0 - (ev.clientX - x0); };
+      const up = () => { removeEventListener('pointermove', mv); removeEventListener('pointerup', up); };
+      addEventListener('pointermove', mv); addEventListener('pointerup', up);
+    });
     if (scrollTo2 != null) { const c = shop.querySelector(`.uc2[data-i="${scrollTo2}"]`); scrollTo2 = null; if (c) c.scrollIntoView({ block: 'nearest', inline: 'center' }); }
     if ($('fight')) $('fight').addEventListener('click', runFight);
     if ($('ready')) $('ready').addEventListener('click', toggleReady);
