@@ -44,6 +44,16 @@ Vilhelm's references: a voodoo doll with a wooden mask, a skull robot, a rock go
 - Role: a meatshield, not a counter unit.
 - Status: pilot v2 accepted as the right direction. To polish: wider lopsided mouth, visible bark grain and knots, fuller drooping leaf clumps, knobblier fingers and flatter root toes, legs that look more like a split trunk, a bigger nest and bird.
 
+### Leaf Wizard: the smug ninja
+
+- Emotion: smug. The most ninja of the wizards, and a cocky show-off about it.
+- World detail: a scroll of leaf techniques strapped across his back.
+- Look: a low, wide leaf kasa with a jagged edge pulled down over his eyes and a short wizard tip swept back; half-lidded glowing eyes (one squinting harder, a smirk without a mouth) over a scarf pulled up as a mask; long scarf tails streaming behind; fans of big leaves on the shoulders; a staff with a glowing leaf blade carried trailing behind; a ready stance, chin up, one hand in a hand seal with glowing leaves circling it. Few small details, big shapes.
+- Mechanics: he can't just walk somewhere, he wind-walks there and strikes a pose.
+- Style: Frutiger Aero, after the owner's references (2026-10-26): glossy, fresh lime and leaf greens, sky blue and white accents, leaves lighting up to a pale blue at the tips, emissive eyes and blade. This breaks rule 4 (dusty pastels, no bright saturated colours) and rule 5 (hand-painted, not plastic) on purpose. Open question: is this the new look for every unit, or only the Leaf Wizard?
+- Two materials instead of one: the glossy one and an emissive twin for the glowing parts.
+- Built by `tools/blender/leaf_wizard.py` (run it in the open Blender, or from a terminal). Status: v3, waiting for the owner's feedback.
+
 ### Ideas for later
 
 - Fake ent: a nervous goblin dressed up as a bush or ent, hiding a bomb inside. Its own unit, not a replacement for the Ent.
