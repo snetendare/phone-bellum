@@ -44,6 +44,17 @@ Vilhelm's references: a voodoo doll with a wooden mask, a skull robot, a rock go
 - Role: a meatshield, not a counter unit.
 - Status: pilot v2 accepted as the right direction. To polish: wider lopsided mouth, visible bark grain and knots, fuller drooping leaf clumps, knobblier fingers and flatter root toes, legs that look more like a split trunk, a bigger nest and bird.
 
+### Leaf Wizard: the giddy hedge wizard (v3, 2026-10-26)
+
+- Emotion: giddy. A wiry old hedge wizard far too excited about the fight: bouncing forward on bare tiptoes, hunched, eyes wide, big grin, one arm thrust out with a twig wand, the other cocked back with a leaf ready to flick.
+- The leaves are him: his beard, moustache, eyebrows and the cape down his back are leaves. The stream of sharp leaves he shoots is plucked from himself and always grows back.
+- World detail: a garden snail riding on his hat brim, the slowest thing on the battlefield, along for the ride.
+- Emotion explains mechanics: nimble and quick because he can't stand still.
+- Look: warm dusty tan robe with bell sleeves and a rope sash so the greens pop; a tall floppy leaf hat drooping back and to one side with a sprout at the tip; long nose, pointy ears, skinny legs and long bare feet.
+- Silhouette: hat droops backwards, nose and wand point forwards, so from above he reads as an arrow.
+- Script: tools/blender/leaf_wizard.py (about 1000 triangles). Parts: body, head, hat (with the snail), arm_L/arm_R, leg_L/leg_R, wand, throw_leaf (hide it while the leaf flies).
+- Replaces v2 (smug ninja with a leaf kasa, branch claude/gifted-babbage-72jthj): it read as a ninja rather than a wizard, had no face, and was a green disc from above.
+
 ### Ideas for later
 
 - Fake ent: a nervous goblin dressed up as a bush or ent, hiding a bomb inside. Its own unit, not a replacement for the Ent.
