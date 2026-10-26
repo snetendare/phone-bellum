@@ -111,6 +111,10 @@ button:focus-visible, .card:focus-visible { outline: 2px solid var(--gold); outl
 .card.poor { opacity: .45; }
 .card.sel { transform: translateY(-6px); border-color: var(--gold); box-shadow: 0 6px 18px rgba(0,0,0,.4); }
 .card.lift { opacity: .3; }
+.fly { position: fixed; z-index: 20; left: 0; top: 0; pointer-events: none; display: grid; justify-items: center; gap: 2px; transform: translate(-50%, -100%); }
+.fly .o { width: 52px; height: 52px; border-radius: 50%; background: var(--bg); border: 2px solid var(--you); display: grid; place-items: center; box-shadow: 0 6px 18px rgba(0,0,0,.5); }
+.fly .o svg { width: 30px; height: 30px; }
+.fly .l { font-family: var(--font-data); font-size: 12px; color: var(--gold); background: var(--bg); border: 1px solid var(--gold-dark); border-radius: 999px; padding: 1px 8px; }
 
 /* drop zone shown over the tray while a squad is dragged */
 .drop { position: absolute; inset: 0; border: 2px dashed var(--line); border-radius: 12px; background: rgba(13,19,21,.92); display: grid; place-items: center;
@@ -431,6 +435,10 @@ function lift(e) { return e.pointerType === 'mouse' ? 0 : 34; } // touch: the gh
 function startDrag() {
   drag.started = true;
   if (press.card) press.card.classList.add('lift');
+  // a floating copy follows the finger until it is over a tile, so the drag is visible from the first move
+  const f = document.createElement('div'); f.className = 'fly'; f.id = 'fly';
+  f.innerHTML = `<div class="o">${unitIcon(drag.u, 30)}</div><div class="l" id="fly-l"></div>`;
+  document.body.appendChild(f);
   if (drag.kind === 'squad') showDrop();
   S.sel = null; closeSheet(false);
 }
@@ -446,10 +454,18 @@ function updateDrag(e) {
     drag.label = free ? 'Move' : `Move · ${MOVE_COST}`; drag.labelBad = !free && (S.gold < MOVE_COST || (S.moved && S.moved !== drag.sq));
   } else drag.label = '';
   if (drag.kind === 'squad') { const z = $('drop'); if (z) z.classList.toggle('hot', drag.overTray); }
+  const f = $('fly');
+  if (f) {
+    const onTile = drag.tile && !drag.overTray;
+    f.hidden = onTile;
+    f.style.left = e.clientX + 'px'; f.style.top = (e.clientY - (e.pointerType === 'mouse' ? 8 : 24)) + 'px';
+    const l = $('fly-l'); l.textContent = drag.label || (drag.kind === 'squad' ? '' : ''); l.hidden = !drag.label;
+    l.style.color = drag.labelBad ? 'var(--foe)' : '';
+  }
   drawBoard();
 }
 function endDrag() {
-  const d = drag; drag = null; hideDrop();
+  const d = drag; drag = null; hideDrop(); const f = $('fly'); if (f) f.remove();
   if (press && press.card) press.card.classList.remove('lift');
   if (d.kind === 'card') { if (d.tile && !d.overTray) tryPlace(U.indexOf(d.u), d.tile.c, d.tile.r); }
   else {
@@ -495,8 +511,8 @@ window.addEventListener('pointermove', e => {
     if (press.card) {
       // horizontal moves scroll the tray; an upward pull starts a drag
       if (press.scroll || press.held) return;
-      if (Math.abs(dx) > SLOP && Math.abs(dx) > 2 * Math.abs(dy) && e.pointerType !== 'mouse') { clearTimeout(press.t); press.scroll = true; return; }
-      if (-dy > SLOP || (e.pointerType === 'mouse' && Math.hypot(dx, dy) > SLOP)) {
+      if (Math.abs(dx) > SLOP && Math.abs(dx) > 1.5 * Math.abs(dy) && e.pointerType !== 'mouse') { clearTimeout(press.t); press.scroll = true; return; }
+      if ((-dy > SLOP && -dy >= Math.abs(dx) * .7) || (e.pointerType === 'mouse' && Math.hypot(dx, dy) > SLOP)) {
         clearTimeout(press.t); drag = { kind: 'card', u: U[press.ui] };
         try { press.card.setPointerCapture(e.pointerId); } catch (_) {}
         startDrag();
@@ -523,7 +539,17 @@ window.addEventListener('pointerup', e => {
     S.sel = null; closeSheet(); render();
   }
 });
-window.addEventListener('pointercancel', () => { if (press) clearTimeout(press.t); if (drag) { drag = null; hideDrop(); render(); } press = null; });
+window.addEventListener('pointercancel', () => { if (press) clearTimeout(press.t); if (drag) { drag = null; hideDrop(); const f = $('fly'); if (f) f.remove(); render(); } if (press && press.card) press.card.classList.remove('lift'); press = null; });
+// Phones decide early whether a touch is a scroll. Claiming an upward pull on a card (and any drag in progress) here
+// stops the browser, or the app around the page, from taking the gesture and cancelling the drag.
+let t0 = null;
+document.addEventListener('touchstart', e => { const t = e.touches[0]; t0 = { x: t.clientX, y: t.clientY, card: !!e.target.closest('.card') }; }, { passive: true });
+document.addEventListener('touchmove', e => {
+  if (drag) { e.preventDefault(); return; }
+  if (!t0 || !t0.card) return;
+  const t = e.touches[0], dx = t.clientX - t0.x, dy = t.clientY - t0.y;
+  if (dy < 0 && Math.abs(dy) >= Math.abs(dx)) e.preventDefault();
+}, { passive: false });
 $('shop').addEventListener('contextmenu', e => e.preventDefault());
 $('shop').addEventListener('keydown', e => { const c = e.target.closest('.card'); if (c && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); openInfo(+c.dataset.u); } });
 
