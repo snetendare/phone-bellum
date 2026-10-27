@@ -13,7 +13,7 @@ const body = (u, side, x, y) => E.buildSquad(u, side, x, y, side * 10, 6)[0];
 const dummy = (hp, extra) => E.withTraits({ name: 'Dummy', cost: 1, bodies: 1, hp, hit: 0, aps: 1, range: 1, speed: 0, splash: 0, idle: true, ...extra });
 const steps = (bt, s) => { for (let k = 0; k < Math.round(s / G.dt); k++) bt.step(); };
 
-// bleed: every second knife on the same target is a stack; 2 health a pulse, doubled per stack
+// bleed: every second knife on the same target is a stack; 3 health a pulse for 2.5 s, doubled per stack
 {
   const shiv = body(unit('Shiv'), 0, 0, -10), d = body(dummy(100000), 1, 0, 5);
   const bt = E.createBattle([shiv], [d], G);
@@ -24,17 +24,18 @@ const steps = (bt, s) => { for (let k = 0; k < Math.round(s / G.dt); k++) bt.ste
   steps(bt, 8);
   assert.strictEqual(d.bleed.n, E.BLEED.max, 'stacks top out at ' + E.BLEED.max);
   assert.ok(d.bleed.t <= E.BLEED.secs + 1e-9, 'a stack lasts ' + E.BLEED.secs + ' s');
-  // a lone stack: 4 pulses of 2 over 2 s, then it is gone
+  assert.ok(E.BLEED.dmg === 3 && E.BLEED.secs === 2.5 && E.BLEED.pulse === 0.5, 'bleed: 3 a pulse, twice a second, for 2.5 s');
+  // a lone stack: 5 pulses of 3 over 2.5 s, then it is gone
   const v = body(dummy(1000), 1, 0, 0), src = body(dummy(1000), 0, 0, -30); // a source that never attacks: only the bleed hurts v
   const bt2 = E.createBattle([src], [v], G);
   const bleed = (n) => { v.bleed = { n, t: E.BLEED.secs, pulse: E.BLEED.pulse, src, noHeal: false }; };
-  bleed(1); steps(bt2, 2.5);
-  assert.ok(Math.abs(v.hp - 992) < 1e-6, `1 stack: 8 damage in all (${v.hp})`);
+  bleed(1); steps(bt2, 3.5);
+  assert.ok(Math.abs(v.hp - 985) < 1e-6, `1 stack: 15 damage in all (${v.hp})`);
   assert.strictEqual(v.bleed, null, 'and then it stops');
-  v.hp = 1000; bleed(4); steps(bt2, 2.5);
-  assert.ok(Math.abs(v.hp - (1000 - 4 * 16 - 2 * 2 / 100 * 1000)) < 1e-6, `4 stacks: 16 a pulse and 2% of max health a second (${v.hp})`);
-  v.hp = 1000; bleed(5); steps(bt2, 2.5);
-  assert.ok(Math.abs(v.hp - (1000 - 4 * 32 - 2 * 5 / 100 * 1000)) < 1e-6, `5 stacks: 32 a pulse and 5% of max health a second (${v.hp})`);
+  v.hp = 1000; bleed(4); steps(bt2, 3.5);
+  assert.ok(Math.abs(v.hp - (1000 - 5 * 24 - 2.5 * 2 / 100 * 1000)) < 1e-6, `4 stacks: 24 a pulse and 2% of max health a second (${v.hp})`);
+  v.hp = 1000; bleed(5); steps(bt2, 3.5);
+  assert.ok(Math.abs(v.hp - (1000 - 5 * 48 - 2.5 * 5 / 100 * 1000)) < 1e-6, `5 stacks: 48 a pulse and 5% of max health a second (${v.hp})`);
 }
 // Anemia stuns at 5 stacks; Too deep stops regeneration and lasts a second longer
 {
@@ -104,7 +105,8 @@ const steps = (bt, s) => { for (let k = 0; k < Math.round(s / G.dt); k++) bt.ste
 // Earth Wizard: Living armor slams a cone and stuns; Stone spikes shoots twice
 {
   const la = withSkills('Earth Wizard', ['livingArmor']);
-  assert.strictEqual(la.hit, 200); assert.strictEqual(la.range, unit('Earth Wizard').range - 10); assert.ok(la.flame > 0 && la.stunHit === 1 && la.bonusArmor === 8);
+  assert.strictEqual(la.hit, 200); assert.strictEqual(la.range, unit('Earth Wizard').range - 13);
+  assert.ok(la.flame === 25 && unit('Flame Wizard').flame === 30, 'Living armor: its own 25° cone, narrower than the Flame Wizard’s 30°'); assert.ok(la.flame > 0 && la.stunHit === 1 && la.bonusArmor === 8);
   const ew = body(la, 0, 0, -6), bru = E.buildSquad(unit('Brute'), 1, 0, 8, 1, 6);
   const bt = E.createBattle([ew], bru, G);
   let stun = false; while (bt.step()) if (bru.some(b => b.alive && b.stunT > 0)) stun = true;

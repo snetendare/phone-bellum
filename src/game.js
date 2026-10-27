@@ -6,7 +6,7 @@ const Game = (() => {
   // COLS, ROWS and ZONE while a match on it is in play (see useGrid); every other map keeps these.
   const TILE = 6, GRID = { cols: 12, rows: 16, zone: 6 };
   let COLS = GRID.cols, ROWS = GRID.rows, ZONE = GRID.zone;
-  const START_HP = 100, START_GOLD = 250, INCOME = 250, LOSER_BONUS = 50;
+  const START_HP = 100, MAX_ROUND_DMG = 35, START_GOLD = 250, INCOME = 250, LOSER_BONUS = 50;
   const SQUAD_COST = 100;
   const SETTINGS = { dt: 0.05, timeCap: 60, spacing: 3.5, minDmgPct: 15, absorbXp: 1, armorXp: 0.5, sight: 15, minSight: 18, drift: 15, flameReach: 1.2 }; // sight: metres beyond range a unit notices an enemy (at least minSight), drift: it leans toward one this much further out. flameReach: flame cones reach 1.2x the unit's range
   // XP a squad needs in total to reach level 1, 2, 3, as multiples of its own starting health.
@@ -357,7 +357,7 @@ const Game = (() => {
     { id: 'phil', name: 'Phil', ability: 'Tier 4 units are 100 gold cheaper to unlock and 50 gold cheaper to buy.' },
     { id: 'yotyot', name: 'Yot-Yot', ability: 'Every fight, Ember Imps pop up on random free tiles on your side of the board (your zone, no man’s land and, once open, your flank tiles): 1 in round 1, 2 in round 2, and so on. From round 3 they are level 2, from round 6 level 3. They get the skills you bought for Ember Imps.' },
     { id: 'mubarak', name: 'Mubarak - Slime Lord', ability: 'Your slime units (Slime Wizards and Slimeshots) get every skill you buy for any slime unit, not just their own.' },
-    { id: 'felix', name: 'Felix', ability: 'From round 3 on, you get 50 more gold every round, and 100 more from round 7 on.' },
+    { id: 'felix', name: 'Felix', ability: 'From round 3 on, you get 50 more gold every round, and 100 more from round 6 on.' },
     { id: 'enzo', name: 'Enzo', ability: 'You can’t buy unit skills, but each unit type comes with its first skill, for free, the same for all your squads of it all match (see it under the unit’s i button). The skill only works while you have 2 or more squads of that unit.' },
     { id: 'matteo', name: 'Matteo - the Gentleman', ability: 'Give one of your squads a stack of Charisma. When a squad with Charisma kills an enemy, it gains a stack and gives one to a squad of yours without any. At 5 stacks a squad is a Gentleman: the first enemy it would kill each fight joins your side for that fight instead, at half health.' },
   ];
@@ -371,7 +371,7 @@ const Game = (() => {
     chars: ['cage', 'zoe', 'emile', 'wilhelm', 'phil', 'felix'],
     offTowers: ['mage', 'slime'],
   };
-  const CHAR = { cageHp: 10, zoeTiles: 2, zoeDmg: [10, 20, 30, 40], zoeHp: [10, 20, 30, 40], zoeAps: [0, 5, 10, 15], wilhelmArmor: 4, wilhelmDelay: 0.5, noahLevel: 1, noahCut: 10, enzoMin: 2, philTier: 4, philOff: 100, philBuy: 50, yotUnit: 'Ember Imps', yotLv2: 3, yotLv3: 6, felixRound: 3, felixGold: 50, felixRound2: 7, felixGold2: 100 };
+  const CHAR = { cageHp: 10, zoeTiles: 2, zoeDmg: [10, 20, 30, 40], zoeHp: [10, 20, 30, 40], zoeAps: [0, 5, 10, 15], wilhelmArmor: 4, wilhelmDelay: 0.5, noahLevel: 1, noahCut: 10, enzoMin: 2, philTier: 4, philOff: 100, philBuy: 50, yotUnit: 'Ember Imps', yotLv2: 3, yotLv3: 6, felixRound: 3, felixGold: 50, felixRound2: 6, felixGold2: 100 };
   // ---------- Matteo's charisma ----------
   // sq.charm = Charisma stacks on a squad, kept between rounds; they grow in fights (see Engine: opts.charm).
   // Matteo gives the first stack to a squad of his choice (again whenever none of his squads has any, e.g. after
@@ -1861,7 +1861,8 @@ const Game = (() => {
   }
 
   // Damage a side deals = the damage of its squads' tiers, scaled by how much of each squad is still alive.
-  // TIER_DMG: damage a full squad of each tier deals (a tier past the table deals the top tier's)
+  // TIER_DMG: damage a full squad of each tier deals (a tier past the table deals the top tier's). A round costs a side
+  // at most MAX_ROUND_DMG health.
   const TIER_DMG = { 1: 3, 2: 6, 3: 8, 4: 12 };
   const tierDmg = (tier) => TIER_DMG[Math.min(Math.max(1, tier), 4)];
   function survivorDamage(m, res, side) {
@@ -1875,7 +1876,7 @@ const Game = (() => {
       if (sq && m.units[sq.unit].building) continue; // nor do buildings
       sum += (sq ? tierDmg(tierOf(m.units, sq.unit)) : tierDmg(1)) * s.alive / s.total;
     }
-    return sum > 0 ? Math.max(1, Math.round(sum)) : 0;
+    return sum > 0 ? Math.min(MAX_ROUND_DMG, Math.max(1, Math.round(sum))) : 0; // at most MAX_ROUND_DMG a round
   }
 
   // Apply a finished battle to the match. Returns a summary for the results screen.
@@ -2600,7 +2601,7 @@ const Game = (() => {
   }
 
   const api = {
-    TIER_DMG, bankBusy, seenAt, charShown, towerTypeShown, altarShown, elfOwnShown, shroomShown, removingShroom, movedId, canMove, moveSquad, undoMove,
+    MAX_ROUND_DMG, TIER_DMG, bankBusy, seenAt, charShown, towerTypeShown, altarShown, elfOwnShown, shroomShown, removingShroom, movedId, canMove, moveSquad, undoMove,
     COLS, ROWS, TILE, ZONE, START_HP, START_GOLD, INCOME, incomeFor, LOSER_BONUS, SQUAD_COST, SETTINGS, XP_STEPS, xpNeeded, unitCostOf,
     levelCost, isReady, levelUp, undoLevel, seenLevel, aiLevel, AI, CONFIG,
     deploysAllowed, deploysLeft, deployedThisRound, canBuyDeploy, buyDeploy, refundDeploy,

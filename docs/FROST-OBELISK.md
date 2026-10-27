@@ -4,7 +4,7 @@ Numbers came from headless simulations: equal-gold fights against every other un
 
 ## Frost Wizard (tier 3, 300 gold)
 
-900 health, 34 hit, 2 attacks a second (68 dps), 25 m beam, 2 m/s. You gave the mechanics (Frost 20/30/40%, a stack every 2.5 s, Deepfreeze 2 s, Multibeam, +5 m / +20% / healthiest, an 8 m storm). I chose only the base stats.
+900 health, 21 hit, 3.2 attacks a second (67 dps), 25 m beam, 2 m/s. (First proposed at 34 hit and 2 attacks a second; the hit came down so that one beam, even with Glacial gaze's +20%, can't kill a Goblin Swarm goblin (26 health) of the same level, with attack speed raised to keep its damage. Counter table: about the same score.) You gave the mechanics (Frost 20/30/40%, a stack every 2.5 s, Deepfreeze 2 s, Multibeam, +5 m / +20% / healthiest, an 8 m storm). I chose only the base stats.
 
 | Build | Score |
 |---|---|
@@ -22,7 +22,7 @@ Numbers came from headless simulations: equal-gold fights against every other un
 
 ## Obelisk (tier 3, 300 gold)
 
-A giant serpent. 1300 health, 90 hit, 0.7 attacks a second, melee (3 m), 4 m/s. Heals for 50% of the damage it deals (Devour). Glut: +6% health and hit per stack, up to 2 a round, 12 in all.
+A giant serpent. 1300 health, 90 hit, 0.7 attacks a second, melee (3 m), 4 m/s. Heals for 50% of the damage it deals (Devour). Glut: +6% health and hit per stack, up to 3 a round, 15 in all (raised from 2 and 12 after playtesting; the numbers below were measured at 2 and 12).
 
 **Strength by Glut** (base unit, no skills):
 

@@ -231,10 +231,18 @@
       "name": "Ember Mortar",
       "cost": 150,
       "params": {
-        "range": 15,
+        "range": 18,
         "min": 5,
         "aps": 0.1
-      }
+      },
+      "also": [
+        {
+          "type": "stats",
+          "params": {
+            "hit": -20
+          }
+        }
+      ]
     },
     {
       "id": "explode",
@@ -379,10 +387,10 @@
       "cost": 150,
       "params": {
         "armor": 8,
-        "range": 10,
+        "range": 13,
         "hit": 200,
         "stun": 1,
-        "cone": 30
+        "cone": 25
       }
     },
     {
@@ -577,7 +585,15 @@
         "range": 5,
         "hit": 20,
         "apsPct": -35
-      }
+      },
+      "also": [
+        {
+          "type": "pctHit",
+          "params": {
+            "pct": 5
+          }
+        }
+      ]
     },
     {
       "id": "assaultgunner",
@@ -586,7 +602,7 @@
       "cost": 150,
       "params": {
         "apsPct": 300,
-        "range": -5,
+        "range": -8,
         "hit": -50
       }
     },
@@ -649,7 +665,8 @@
             "pct": 25
           }
         }
-      ]
+      ],
+      "text": "Gain stealth"
     },
     {
       "id": "spiritWalk",
@@ -1050,7 +1067,7 @@
       "bodies": 1,
       "hp": 155,
       "hit": 33,
-      "aps": 0.75,
+      "aps": 0.68,
       "range": 20,
       "speed": 3,
       "splash": 4,
@@ -1293,10 +1310,10 @@
       "name": "Leaf Wizard",
       "cost": 200,
       "bodies": 1,
-      "hp": 210,
+      "hp": 185,
       "hit": 95,
       "aps": 1.2,
-      "range": 27,
+      "range": 22,
       "speed": 5,
       "splash": 0,
       "shape": "hexagon",
@@ -1520,7 +1537,7 @@
       "hp": 700,
       "hit": 480,
       "aps": 0.2,
-      "range": 22,
+      "range": 25,
       "speed": 2.5,
       "splash": 6,
       "shape": "ring",
@@ -1778,7 +1795,7 @@
       "name": "Ent",
       "cost": 100,
       "bodies": 2,
-      "hp": 400,
+      "hp": 360,
       "hit": 25,
       "aps": 1.1,
       "range": 4,
@@ -2058,7 +2075,7 @@
       "flame": 0,
       "trample": 0,
       "deathBlast": 0,
-      "pctHit": 20,
+      "pctHit": 8,
       "defense": "none",
       "defVal": 0,
       "level": 0,
@@ -2066,9 +2083,9 @@
       "name": "Truespear",
       "cost": 500,
       "bodies": 1,
-      "hp": 750,
-      "hit": 60,
-      "aps": 0.8,
+      "hp": 2000,
+      "hit": 150,
+      "aps": 0.9,
       "range": 25,
       "speed": 3,
       "splash": 0,
@@ -2116,7 +2133,7 @@
       "cost": 200,
       "bodies": 4,
       "hp": 150,
-      "hit": 15,
+      "hit": 13,
       "aps": 1.5,
       "range": 18,
       "speed": 3,
@@ -2126,7 +2143,7 @@
       "bleedEvery": 2,
       "trait": {
         "name": "Apply bleed",
-        "text": "Every second knife it lands on the same target gives it a stack of bleed: it loses 2 health twice a second for 2 s. Each new stack starts the 2 s again and doubles the damage, up to 5 stacks (32 each time); at 4 stacks it also loses 2% of its max health a second, and at 5 stacks 5%. Bleed goes past armor."
+        "text": "Every second knife it lands on the same target gives it a stack of bleed: it loses 3 health twice a second for 2.5 s. Each new stack starts the 2.5 s again and doubles the damage, up to 5 stacks (48 each time); at 4 stacks it also loses 2% of its max health a second, and at 5 stacks 5%. Bleed goes past armor."
       },
       "skills": [
         "aeroblades",
@@ -2307,8 +2324,8 @@
       "cost": 300,
       "bodies": 1,
       "hp": 900,
-      "hit": 34,
-      "aps": 2,
+      "hit": 21,
+      "aps": 3.2,
       "range": 25,
       "speed": 2,
       "splash": 0,
@@ -2398,8 +2415,8 @@
       "color": "#4E6B35",
       "tag": "OBE",
       "glut": {
-        "max": 12,
-        "cap": 2,
+        "max": 15,
+        "cap": 3,
         "hp": 6,
         "hit": 6,
         "speed": 0,
@@ -2412,7 +2429,7 @@
       },
       "trait": {
         "name": "Glut",
-        "text": "Eats the enemies it kills (not buildings or constructs): each one is a stack of Glut, up to 2 a round and 12 in all, kept for the whole match. Each stack gives +6% health and +6% hit, and it grows."
+        "text": "Eats the enemies it kills (not buildings or constructs): each one is a stack of Glut, up to 3 a round and 15 in all, kept for the whole match. Each stack gives +6% health and +6% hit, and it grows."
       },
       "skills": [
         "gluttony",

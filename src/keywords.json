@@ -96,6 +96,7 @@
     "freeMove": { "has": [] },
     "silent": { "has": ["Stealth"] },
     "firstHit": { "has": ["Damage boost"] },
+    "pctHit": { "has": ["Damage boost"] },
     "flurry": { "has": ["Damage boost"] },
     "lone": { "has": [] }
   },
