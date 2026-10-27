@@ -212,6 +212,10 @@ html.pc .panel { grid-column: 2; grid-row: 1 / span 3; min-width: 0; max-height:
 html.pc #wrap { width: min(calc(100vw - 32px - 460px), calc((100svh - 110px) * var(--board-ar, 0.75))); min-width: 360px; }
 html.pc .shop { display: grid; grid-template-columns: repeat(auto-fill, minmax(124px, 1fr)); overflow-x: visible; }
 html.pc .sheet { max-width: 640px; }
+html.pc .shop2 { flex-wrap: wrap; overflow-x: visible; row-gap: 10px; } /* a PC's side panel has the room: every tier group in sight, no sideways scrolling */
+.br2 { display: none; }
+html.pc .shop2 .br2 { display: block; flex: 0 0 100%; height: 0; }
+html.pc .shop2 .tier2.gap { margin-left: 0; }
 /* Phone in a match (html.dock, see dock()): the board fills the screen above a panel docked at the bottom. While
    deploying the panel is a drawer with a blue pull tab on its top edge: hold the tab and slide the drawer up over the
    bottom of the board or down to its last row (a tap on the tab works too; picking a unit also puts it down). A task on the board (placing a unit, Move, Charisma, a tower) shows in a line over the board, with an X. */
@@ -1357,7 +1361,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
         <li>Drag a squad you placed this round to move it, or tap the ✕ on its top right corner to take it back. Your round 1 package squads are free.</li>
         <li>A squad with a gold badge can level up: tap it. Tap an older squad, a tower or an enemy squad to see what it does.</li>
         ${document.documentElement.classList.contains('dock') ? '<li>Hold the blue tab on the deploy panel and slide it up or down (or tap it). Picking a unit puts it down so you can see every tile; the ✕ on the board stops placing.</li>' : ''}
-        ${board3d ? '<li>3D board: spread two fingers (or scroll) to go in a view: Strategic, Angled, Cinematic. Pinch (or press Esc) to go back. Pinch on from Strategic (or scroll back) for Tilted: the whole board from your side, still for placing.</li>' : ''}
+        ${board3d ? '<li>3D board: spread two fingers (or scroll) to go in a view: Strategic, Tilted (your side up close, still for placing), Angled, Cinematic. Pinch (or press Esc) to go back.</li>' : ''}
       </ul>
       <div class="bar"><span></span><button class="btn small" id="help-how">How to play</button></div>`;
     $('sheet-back').hidden = false;
@@ -1429,12 +1433,18 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
     $('close').addEventListener('click', closeSheet);
     $('sell-yes').addEventListener('click', () => { if (editable() && Game.sell(m, me, sq.id)) { closeSheet(); changed(); } });
   }
+  // whether a point (clientX, clientY) is over the tray: below its top edge on a phone, inside it on a PC (it stands beside the board)
+  const pcLayout = () => document.documentElement.classList.contains('pc');
+  function overTray(x, y) {
+    const r = $('panel').getBoundingClientRect();
+    return y > r.top && (!pcLayout() || (x >= r.left && x <= r.right && y <= r.bottom));
+  }
   // the tray as a drop zone while one of your squads is dragged (x, y: the finger; null: hide it)
   function dropZone(pt) {
     const pn = $('panel');
     let z = pn.querySelector('.drop2');
     if (!pt || !drag || drag.id == null) { if (z) z.remove(); if (drag) drag.toTray = false; return; }
-    const sq = m.armies[me].find(q => q.id === drag.id), r = pn.getBoundingClientRect(), over = pt.y > r.top;
+    const sq = m.armies[me].find(q => q.id === drag.id), over = overTray(pt.x, pt.y);
     drag.toTray = over;
     if (!sq || (!drag.moved && !over)) { if (z) z.remove(); return; }
     if (!z) { z = document.createElement('div'); z.className = 'drop2'; pn.appendChild(z); }
@@ -1485,7 +1495,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
       try { cpress.el.setPointerCapture(e.pointerId); } catch (err) {}
       render();
     }
-    const over = e.clientY > $('panel').getBoundingClientRect().top;
+    const over = overTray(e.clientX, e.clientY);
     const t = over ? null : (board3d || board).tileAt(e.clientX, e.clientY - (cdrag.touch ? 36 : 0));
     const ok = !!t && (Game.canPlaceAt(m, me, t.col, t.row, cdrag.i) || !!Game.boardable(m, me, t.col, t.row, cdrag.i));
     flyShow(cdrag.i, e.clientX, e.clientY - (cdrag.touch ? 22 : 6), ok, Game.freeLeft(m, me).includes(cdrag.i) ? 'Free' : String(Game.shopCost(m, me, cdrag.i)), !ok && !over && !!t);
@@ -1617,14 +1627,14 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
     const showShop = !((choosingPack() || choosingTower() || devPicking()) && can);
     const tip = inline || (selected !== null ? hint : !solo() ? status : !can ? hint
       : left <= 0 ? 'No deployments left · tap a squad to level it up or buy skills'
-      : fresh ? 'Drag a squad to move it · drag it down here to take it back' : 'Drag a card up onto your zone · hold a card for details');
+      : fresh ? `Drag a squad to move it · drag it ${pcLayout() ? 'onto the shop' : 'down here'} to take it back` : `Drag a card ${pcLayout() ? 'onto' : 'up onto'} your zone · hold a card for details`);
     const pips = Array.from({ length: Math.max(allowed, 0) }, (_, k) => `<i class="${k < left ? 'on' : ''}"></i>`).join('');
     const xb = showShop ? extraBtns : '';
     const tiers = [...new Set(units.map((u, i) => Game.isOff(m, i, me) ? 0 : tierOf(i)))].filter(t => t > 0).sort((a, b) => a - b); // units left out of the match aren't in the shop
     const shopHtml = tiers.map((t, n) => {
       const idx = units.map((u, i) => i).filter(i => tierOf(i) === t && !Game.isOff(m, i, me));
       const open = idx.filter(i => !locked(i) || freeN(i) > 0), rest = idx.filter(i => locked(i) && !freeN(i)).length;
-      return `<div class="tier2${n ? ' gap' : ''}" style="--tier:${tierColor(t)}" aria-label="Tier ${t}, ${price(idx[0])} gold"><b>T${t}</b><span>${price(idx[0])}</span></div>`
+      return (n ? '<i class="br2"></i>' : '') + `<div class="tier2${n ? ' gap' : ''}" style="--tier:${tierColor(t)}" aria-label="Tier ${t}, ${price(idx[0])} gold"><b>T${t}</b><span>${price(idx[0])}</span></div>`
         + open.map(i => shopCard2(i, !canBuy(i))).join('')
         + (rest ? `<button class="add2" data-add="${t}" style="--tier:${tierColor(t)}" aria-label="Unlock a tier ${t} unit, ${rest} left"><span class="p">+</span><span class="w">Unlock</span><span class="c">${rest} more</span></button>` : '');
     }).join('');

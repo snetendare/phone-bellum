@@ -968,8 +968,8 @@ const Render2D = (cv, view) => {
         ctx.fillStyle = '#FFD23F';
         for (let k = 0; k < 3; k++) { const a = bt.time() * 6 + k * 2.094; ctx.beginPath(); ctx.arc(PX(b.x) + Math.cos(a) * r * 0.8, PY(b.y) - r * 1.2 + Math.sin(a) * r * 0.3, Math.max(1.5, r * 0.2), 0, Math.PI * 2); ctx.fill(); }
       }
-      if (b.u.hp >= 500 && hpr < 1) {
-        ctx.strokeStyle = c; ctx.lineWidth = 1.5;
+      if (hpr < 1) { // every unit once it's hurt
+        ctx.strokeStyle = c; ctx.lineWidth = b.u.hp >= 500 ? 1.5 : 1;
         ctx.beginPath(); ctx.arc(PX(b.x), PY(b.y), r + 2.5, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * hpr); ctx.stroke();
       }
       if (b.windTarget && b.u.windUp > 0) {

@@ -111,10 +111,10 @@ const near = (a, b, eps = 1e-6) => Math.abs(a - b) < eps;
 {
   const units = roster.units.map(u => ({ ...u, cost: u.cost / 100, skillDefs: E.SLOTS.map(k => (u.skills || [])[k] ? skill(u.skills[k]) : null) }));
   const m = Game.createMatch(units, null, 3, 'standard');
-  const lw = units.findIndex(u => u.name === 'Leaf Wizard'), bi = units.findIndex(u => u.name === 'Brute'), sn = units.findIndex(u => u.name === 'Sniper'), ws = units.findIndex(u => u.name === 'Wisps');
+  const lw = units.findIndex(u => u.name === 'Leaf Wizard'), bi = units.findIndex(u => u.name === 'Brute'), sn = units.findIndex(u => u.name === 'Sniper'), ws = units.findIndex(u => u.name === 'Wisps'), en = units.findIndex(u => u.name === 'Ent');
   m.gold = [5000, 5000]; m.unlocks[0][lw] = 1; m.unlocks[0][bi] = 1;
   assert.ok(Game.isAwaken(m, lw, 3) && !Game.isMaster(m, lw, 3), 'Leafblade: an Awaken skill');
-  for (const [ui, k] of [[bi, 3], [sn, 3], [ws, 3]]) assert.ok(Game.isMaster(m, ui, k) && !Game.isAwaken(m, ui, k), `${units[ui].name}: a Master skill`);
+  for (const [ui, k] of [[bi, 3], [sn, 3], [ws, 3], [en, 3]]) assert.ok(Game.isMaster(m, ui, k) && !Game.isAwaken(m, ui, k), `${units[ui].name}: a Master skill`);
   const a = Game.place(m, 0, lw, 2, 13), b = Game.place(m, 0, lw, 3, 13);
   assert.ok(!Game.canBuySkill(m, 0, lw, 3), 'not bought for the unit');
   assert.ok(!Game.canAwaken(m, 0, a.id) && Game.awakenBlock(m, 0, a) === 'needs', 'needs Bouncing blade or Petalburst first');

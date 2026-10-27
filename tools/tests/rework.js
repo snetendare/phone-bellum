@@ -136,15 +136,26 @@ const near = (a, b, eps = 1e-6) => Math.abs(a - b) < eps;
   assert.ok(waited > 2.5, 'it walked a while first');
   assert.strictEqual(imp.burstLeft, Math.floor(Math.min(100, 10 * waited) / 25 + 1e-9), 'one extra shot per 25% stored');
 }
-// Summon hellfiend: one per squad of imps, levelled like it, walking out of a portal
+// Summon hellfiend: the imps hold still for 3 s at their portal, then sacrifice themselves and one hellfiend per
+// squad walks out, levelled like it
 {
   const u = withSkills('Ember Imps', ['hellfiend']);
-  const imps = E.buildSquad(u, 0, 0, -10, 1, 6, 0, 1);
-  const bt = E.createBattle(imps, [body(dummy(1e6), 1, 0, 30)], G);
-  const hf = bt.bodies.filter(b => b.u.name === 'Hellfiend');
-  assert.ok(hf.length === 1 && hf[0].u.hp === 4400 && hf[0].credit === imps[0], 'one level 2 hellfiend for a level 2 squad');
+  const imps = E.buildSquad(u, 0, 0, -10, 1, 6, 0, 1), y0 = imps.map(b => b.y);
+  const bt = E.createBattle(imps.slice(), [body(dummy(1e6), 1, 0, 30)], G); // the battle adds its summons to the list it's given
+  const hf = () => bt.bodies.filter(b => b.u.name === 'Hellfiend');
   bt.step(); assert.strictEqual(bt.portals().length, 1);
-  steps(bt, 3.1); assert.strictEqual(bt.portals().length, 0, 'the portal closes after 3 s');
+  assert.strictEqual(hf().length, 0, 'no hellfiend while the imps summon');
+  steps(bt, 2.5);
+  assert.ok(imps.every((b, i) => b.alive && Math.abs(b.y - y0[i]) < 0.5 && !(b.lastAtk > 0)), 'the imps hold still while they summon');
+  steps(bt, 0.6);
+  assert.strictEqual(bt.portals().length, 0, 'the portal closes after 3 s');
+  assert.ok(imps.every(b => !b.alive && b.sacrificed), 'the imps are sacrificed');
+  assert.ok(hf().length === 1 && hf()[0].u.hp === 4400 && hf()[0].credit === imps[0] && hf()[0].alive, 'one level 2 hellfiend for a level 2 squad');
+  // a squad that falls before the summon is done brings nothing
+  const imps2 = E.buildSquad(u, 0, 0, -10, 1, 6, 0, 0);
+  const bt2 = E.createBattle(imps2, [body(dummy(1e6), 1, 0, 30)], G);
+  bt2.step(); for (const b of imps2) { b.hp = 0; b.alive = false; }
+  steps(bt2, 3.5); assert.ok(!bt2.bodies.some(b => b.u.name === 'Hellfiend'), 'no hellfiend once the imps fell');
 }
 // either-or, Awaken: needs skill 2 or 3, always 300 gold, doesn't make the others dearer
 {
