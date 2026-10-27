@@ -786,14 +786,14 @@ const Render2D = (cv, view) => {
       ctx.strokeStyle = css('--you'); ctx.globalAlpha = 0.25; ctx.lineWidth = 1;
       const pu = placingUnit;
       for (let row = 0; row < Game.ROWS; row++) for (let c = 0; c < Game.COLS; c++) {
-        if (Game.canPlaceAt(m, me, c, row, pu) && Game.spotFree(m, me, c, row, pu)) ctx.strokeRect(scol(c) * t + 3, srow(row) * t + 3, t - 6, t - 6);
+        if (Game.canPlaceAt(m, me, c, row, pu, selected === null) && Game.spotFree(m, me, c, row, pu)) ctx.strokeRect(scol(c) * t + 3, srow(row) * t + 3, t - 6, t - 6);
       }
       // your carriers with room for this unit
       ctx.strokeStyle = css('--gold'); ctx.globalAlpha = 0.8; ctx.lineWidth = 1.5;
       if (pu != null) for (const sq of m.armies[me]) if (Game.boardable(m, me, sq.col, sq.row, pu) && !(drag && drag.id === sq.id)) ctx.strokeRect(scol(sq.col) * t + 2, srow(sq.row) * t + 2, t - 4, t - 4);
       ctx.globalAlpha = 1;
     }
-    if (hoverTile && (selected !== null || moving != null) && Game.canPlaceAt(m, me, hoverTile.col, hoverTile.row, placingUnit) && (Game.spotFree(m, me, hoverTile.col, hoverTile.row, placingUnit) || (placingUnit != null && Game.boardable(m, me, hoverTile.col, hoverTile.row, placingUnit)))) {
+    if (hoverTile && (selected !== null || moving != null) && Game.canPlaceAt(m, me, hoverTile.col, hoverTile.row, placingUnit, selected === null) && (Game.spotFree(m, me, hoverTile.col, hoverTile.row, placingUnit) || (placingUnit != null && Game.boardable(m, me, hoverTile.col, hoverTile.row, placingUnit)))) {
       ctx.fillStyle = css('--you'); ctx.globalAlpha = 0.18;
       for (const [c, r] of Game.blockOf(m, placingUnit, hoverTile.col, hoverTile.row)) ctx.fillRect(scol(c) * t, srow(r) * t, t, t); // a building's whole block
       ctx.globalAlpha = 1;
@@ -920,7 +920,7 @@ const Render2D = (cv, view) => {
       ctx.globalAlpha = 1;
     }
     for (const b of bt.bodies) {
-      if (b.alive || b.boarded) continue; // a rider still inside its carrier isn't a corpse
+      if (b.alive || b.boarded || b.removed) continue; // a rider still inside its carrier isn't a corpse, nor a watchtower taken down
       ctx.fillStyle = muted; ctx.globalAlpha = 0.18;
       ctx.beginPath(); ctx.arc(PX(b.x), PY(b.y), Math.max(1.5, radius(b.u) * 0.45), 0, Math.PI * 2); ctx.fill();
     }

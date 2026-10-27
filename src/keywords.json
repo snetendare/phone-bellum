@@ -89,6 +89,7 @@
     "roots": { "makes": ["Displace"] },
     "killStack": { "has": ["Move speed", "Attack speed"] },
     "killSpawn": { "makes": ["Spawn"] },
+    "bleedHit": { "has": [] },
     "bull": { "has": ["Run-through", "Armor"], "makes": ["Displace"] },
     "flare": { "has": ["Attack speed"] },
     "portal": { "makes": ["Spawn"] },

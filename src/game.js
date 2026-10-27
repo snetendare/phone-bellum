@@ -753,19 +753,24 @@ const Game = (() => {
   const reserved = (side, col, row) => isFlank(1 - side, col, row);
   // no man's land: the rows between the two zones. A unit with the Forward planting skill may be placed there.
   const inNoMans = (row) => row >= ZONE && row < ROWS - ZONE;
-  const hasSkillType = (m, side, ui, type) => !!m && ui != null && !!m.units[ui] && E.SLOTS.some(k => hasSkill(m, side, ui, k) && skillDef(m, ui, k).type === type);
+  // whether a player's unit has a skill of this type: bought or built in, or Enzo's free skill while it works (as in
+  // unitFor). adding: squads of the unit about to be placed, which count toward Enzo's CHAR.enzoMin (his 2nd Ent can
+  // be planted forward straight away)
+  const hasSkillType = (m, side, ui, type, adding = 0) => !!m && ui != null && !!m.units[ui] &&
+    E.SLOTS.some(k => (hasSkill(m, side, ui, k) || k === enzoSlot(m, side, ui, adding)) && skillDef(m, ui, k) && skillDef(m, ui, k).type === type);
   // A unit with a footprint (the Altar of Build: 2) takes a block of n x n tiles; its squad's col, row is the block's
   // first column and row (it stands where the four tiles meet).
   const footprint = (m, ui) => Math.max(1, Math.round(+((m && m.units && m.units[ui]) || {}).footprint || 1));
   const blockOf = (m, ui, col, row) => { const n = ui == null ? 1 : footprint(m, ui), out = []; for (let dr = 0; dr < n; dr++) for (let dc = 0; dc < n; dc++) out.push([col + dc, row + dr]); return out; };
   const covers = (m, s, col, row) => { const n = footprint(m, s.unit); return col >= s.col && col < s.col + n && row >= s.row && row < s.row + n; };
   // ui (optional): the unit being placed, for unit-specific tiles (all of a footprint's tiles must be allowed)
-  const canPlaceAt = (m, side, col, row, ui) => blockOf(m, ui, col, row).every(([c, r]) => canPlaceTile(m, side, c, r, ui));
+  // moving: the squad is already on the board (a move), not a new one
+  const canPlaceAt = (m, side, col, row, ui, moving) => blockOf(m, ui, col, row).every(([c, r]) => canPlaceTile(m, side, c, r, ui, moving));
   // no squad, tower or building on any tile the unit would take
   const spotFree = (m, side, col, row, ui) => blockOf(m, ui, col, row).every(([c, r]) => !occupied(m, side, c, r) || garrisonFree(m, side, c, r, ui));
-  const canPlaceTile = (m, side, col, row, ui) => col >= 0 && col < COLS && row >= 0 && row < ROWS && !reserved(side, col, row) && !(ui != null && isOff(m, ui, side)) &&
+  const canPlaceTile = (m, side, col, row, ui, moving) => col >= 0 && col < COLS && row >= 0 && row < ROWS && !reserved(side, col, row) && !(ui != null && isOff(m, ui, side)) &&
     !(ui != null && m && m.units[ui] && m.units[ui].noFlank && isFlank(side, col, row)) &&
-    (inZone(side, row) || (flankOpen(m) && isFlank(side, col, row)) || (inNoMans(row) && hasSkillType(m, side, ui, 'forward')) || garrisonFree(m, side, col, row, ui)) && !enemyHolds(m, side, col, row);
+    (inZone(side, row) || (flankOpen(m) && isFlank(side, col, row)) || (inNoMans(row) && hasSkillType(m, side, ui, 'forward', moving ? 0 : 1)) || garrisonFree(m, side, col, row, ui)) && !enemyHolds(m, side, col, row);
   // ---------- Overwatch (the Sniper's Master skill) ----------
   // A squad of a unit with Overwatch can stand in one of its player's buildings: the tower, the treasury (once it is
   // up) or a building (the Factory). One squad per building. In a fight it sits inside, safe until the
@@ -987,7 +992,9 @@ const Game = (() => {
     const k = E.SLOTS.find(j => skillDef(m, sq.unit, j) && !isInnate(m, sq.unit, j));
     return k == null ? null : k;
   }
-  const enzoActive = (m, side, ui) => charOf(m, side) === 'enzo' && m.armies[side].filter(s => s.unit === ui).length >= CHAR.enzoMin;
+  const enzoActive = (m, side, ui, adding = 0) => charOf(m, side) === 'enzo' && m.armies[side].filter(s => s.unit === ui).length + adding >= CHAR.enzoMin;
+  // the slot of Enzo's free skill for unit ui while it works (null otherwise); adding: squads of it about to be placed
+  const enzoSlot = (m, side, ui, adding = 0) => enzoActive(m, side, ui, adding) ? enzoSkill(m, side, { unit: ui }) : null;
   // sq (optional): the squad, for a skill of its own (Enzo's)
   function unitFor(m, side, ui, sq) {
     const base = m.units[ui], ek = enzoActive(m, side, ui) ? enzoSkill(m, side, sq) : null, ak = sq && sq.awaken > 0 ? awakenSlot(m, ui) : -1; // an awakened squad
@@ -1392,7 +1399,7 @@ const Game = (() => {
     // a squad can move onto a free tile, or into a carrier with room (a rider can also step out, or change carriers)
     const into = boardable(m, side, col, row, sq.unit);
     if (into && into.id === sq.in) return false;
-    if (!canPlaceAt(m, side, col, row, sq.unit) || (occupied(m, side, col, row) && !into && !garrisonFree(m, side, col, row, sq.unit))) return false;
+    if (!canPlaceAt(m, side, col, row, sq.unit, true) || (occupied(m, side, col, row) && !into && !garrisonFree(m, side, col, row, sq.unit))) return false;
     if (sq.round !== m.round && !freeMover(m, side, sq) && movedId(m, side) == null) {
       if (!m.moved) m.moved = [null, null];
       m.gold[side] -= CONFIG.moveCost;

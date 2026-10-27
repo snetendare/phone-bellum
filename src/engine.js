@@ -26,6 +26,11 @@ const Engine = (() => {
   // lone (Shadow hunter): a body hunts lone enemies, bodies with no other body of their side within LONE_R metres (a
   // tile shared with nobody); with none left for lone seconds it fights as usual, until it kills a lone one again
   const LONE_R = 3;
+  // noTower (Death Flurry and Shadow hunter give it): the body never picks the enemy tower (a structure that isn't a
+  // lesser one: not the treasury, a watchtower, a wall or a building) while any other enemy can be picked: it goes for
+  // units. With nothing else left to pick (only bodies it can't reach, like a Sniper safe in that tower or stealthed
+  // units) it attacks the tower after all, so a fight never stalls on it.
+  // bleedHit (the Assassin's Bloodrush): every hit it lands gives the target that many stacks of bleed (see BLEED).
   // burn (% of each hit): that share of a hit becomes burn instead of landing at once. A burning body takes, once a
   // second, BURN.share[k] of what is left to burn (half, then two thirds, then the rest: 50%, 33%, 17%); a new burn adds
   // to what is left and starts the three ticks again. Burn goes past armor and ward, like poison.
@@ -43,19 +48,26 @@ const Engine = (() => {
   // bldgPct: its hits on structures deal this % of the damage. portal = { unit, secs }: at the start of a fight each
   // squad opens a portal in front of it and holds still for secs s, then its bodies still standing sacrifice themselves
   // and unit (levelled like the squad) walks out (none if the whole squad fell first).
-  // windWalk (metres): when a hit misses it (Dodge), the body dashes that far straight back from where the hit came from.
+  // windWalk = { every, step } (Wind walk): it dodges the 1st, (every+1)th, (2*every+1)th ... attack aimed at it (each
+  // hit that would land on it counts, the dodged ones too; not poison, bleed or burn ticks), and dashes step metres on
+  // a dodge: away from the attacker and 45° to one side, the other side each time (no chance involved).
   // bounce = { n, pct, reach }: a shot that hits one body flies on to the nearest other enemy within reach metres,
   // pct % of the hit, up to n times (each body once per shot).
-  // missiles = { n, every, hit, splash, speed }: at the start of a fight and every `every` s after, it fires n homing
-  // missiles at the nearest enemies (different ones while there are enough): hit to everything within splash of where
-  // each lands. A shot with bounce bounces on from there. Their hit grows with the unit's level.
-  // spinBlade: its 360° attack (flame 180) is drawn as spinning blades. mech: drawn as the Leafblade suit.
+  // missiles = { n, every, hit, splash, speed, range }: at the start of a fight and every `every` s after, it fires n
+  // homing missiles at the nearest enemies within range metres (different ones while there are enough; none in range:
+  // it fires as soon as one comes within range): hit to everything within splash of where each lands. A shot with
+  // bounce bounces on from there. Their hit grows with the unit's level.
+  // spinBlade: its blade swipe (the Leafblade's: flame 90, a half circle facing its target) is drawn as leaf blades.
+  // mech: drawn as the Leafblade suit.
   // roar = { radius, attack, speed, max } (Berserkers): when the body starts fighting it roars once: enemies within
   // radius get attack % slower attacks and its allies there speed % faster moves, for the fight; both
   // stack from several roars up to max % per body. unstoppable: it can't be slowed or displaced (slows, roar debuffs,
   // knockback, Bullhead pushes and roots don't take).
   // A body with `inside` (Overwatch; the game sets it) sits in that structure: it can't be hit or targeted, doesn't
-  // move and shoots from there, until the structure falls.
+  // move and shoots from there, until the structure falls. When it sees no enemy (none it could pick within its
+  // sight: range + sight, at least the minimum sight) for WATCH_IDLE s in a row, it leaves and fights on foot; a
+  // watchtower (u.kind 'watchtower') is taken down once nobody is left in it (b.removed: gone, not destroyed).
+  const WATCH_IDLE = 10;
   // Roster rules (g.rules): optional mechanics a roster can switch off. Missing or true = on.
   //   vision: units march ahead until they spot an enemy (sight). Off: every unit knows where every enemy is from the start.
   //   stealth: the Stealth skill hides units. Off: stealth units can be targeted like any other.
@@ -254,6 +266,7 @@ const Engine = (() => {
     roots:   { label: 'Grasping roots', params: [['min', 'Least distance (m)', 5, 0.5], ['max', 'Most distance (m)', 13, 0.5], ['dps', 'Damage per second while dragged', 10, 1], ['pull', 'Drag speed (m/s)', 1.5, 0.1]] },
     killStack: { label: 'Stacks on kills', params: [['speed', 'Move speed per kill (+m/s)', 0.4, 0.1], ['aps', 'Attacks per second per kill (+)', 0.2, 0.05], ['max', 'Most stacks (0 = no limit)', 4, 1]] },
     killSpawn: { label: 'Spawn on kills', params: [['count', 'New bodies per kill', 1, 1]] },
+    bleedHit: { label: 'Bleed on every hit', params: [['n', 'Bleed stacks per hit', 2, 1]] },
     bull:    { label: 'Charge through', params: [['every', 'Every this many attacks (from the first)', 3, 1], ['hit', 'Charge damage', 100, 10], ['push', 'Knockback (m)', 6, 0.5], ['armor', 'Armor while charging (+)', 4, 1], ['run', 'Runs on past its target (m)', 6, 0.5]] },
     flare:   { label: 'Flare', params: [['per', 'Attack speed stored per second idle (%)', 10, 1], ['max', 'Most stored (%)', 100, 10], ['shot', 'Stored % per extra shot', 25, 5]] },
     portal:  { label: 'Summon portal', params: [['unit', 'Summons (unit name)', 'Brute', null], ['level', 'Its base level (0 = as bought)', 1, 1], ['speed', 'Its move speed (m/s)', 4.5, 0.1], ['cone', 'Its swipe (degrees each side)', 90, 5], ['secs', 'Portal stays (s)', 3, 0.5]] },
@@ -263,10 +276,10 @@ const Engine = (() => {
     firstHit: { label: 'Opening strike', params: [['pct', 'First attack hit size (+%)', 25, 5]] },
     flurry:  { label: 'Flurry', params: [['hits', 'Blows per attack', 3, 1], ['hit', 'Damage per blow (becomes)', 200, 10], ['gap', 'Time between blows (s)', 0.5, 0.05], ['aps', 'Attacks per second (becomes)', 0.2, 0.05], ['leap', 'Leaps to a new target within (m)', 10, 1]] },
     lone:    { label: 'Hunt lone targets', params: [['secs', 'Gives up after (s) without one', 5, 0.5]] },
-    windWalk: { label: 'Wind walk', params: [['pct', 'Chance to dodge a hit (%)', 33, 1], ['step', 'Dashes back after a dodge (m)', 6, 0.5]] },
+    windWalk: { label: 'Wind walk', params: [['every', 'Dodges every this many attacks at it (from the first)', 5, 1], ['step', 'Dashes after a dodge (m)', 4, 0.5]] },
     bounce:  { label: 'Bouncing shots', params: [['n', 'Most bounces per shot', 2, 1], ['pct', 'Damage per bounce (% of hit)', 30, 5], ['reach', 'Bounces to an enemy within (m)', 10, 1]] },
     leafblade: { label: 'Leafblade suit', params: [['hp', 'Health (+%)', 150, 10], ['armor', 'Armor (+)', 4, 1], ['hit', 'Hit size (+%)', 50, 5], ['range', 'Range (becomes, m)', 3, 0.5], ['dash', 'Dashes to enemies within (m)', 8, 1],
-      ['missiles', 'Missiles per salvo', 2, 1], ['every', 'Salvo every (s)', 10, 1], ['mhit', 'Missile damage', 150, 10], ['msplash', 'Missile blast (m)', 2.5, 0.5], ['mspeed', 'Missile speed (m/s)', 25, 1]] },
+      ['missiles', 'Missiles per salvo', 2, 1], ['every', 'Salvo every (s)', 10, 1], ['mhit', 'Missile damage', 150, 10], ['msplash', 'Missile blast (m)', 2.5, 0.5], ['mspeed', 'Missile speed (m/s)', 25, 1], ['mrange', 'Missile range (m)', 30, 1], ['cone', 'Blade swipe (degrees each side)', 90, 5]] },
     berserk: { label: 'Berserkers', params: [['radius', 'Roar reach (m)', 8, 1], ['attack', 'Enemy attack speed (−%)', 5, 1], ['speed', 'Ally move speed (+%)', 5, 1], ['max', 'Most per body from roars (%)', 25, 5]] },
     frost:   { label: 'Frost', params: [['every', 'Seconds between stacks', 2.5, 0.5], ['p1', 'Slow at 1 stack (%)', 20, 5], ['p2', 'Slow at 2 stacks (%)', 30, 5], ['p3', 'Slow at 3 stacks (%)', 40, 5], ['keep', 'Stacks melt after (s) without frost', 2, 0.5]] },
     deepfreeze: { label: 'Deepfreeze', params: [['secs', 'Frozen solid (s)', 2, 0.5]] },
@@ -354,6 +367,7 @@ const Engine = (() => {
       case 'roots': return `Each body grabs one enemy ${n('min')}–${n('max')} m away and drags it slowly toward itself (${n('pull')} m/s; it can still attack, but not walk), dealing ${n('dps')} damage a second. Once it is in reach the body attacks it and grabs another.`;
       case 'killStack': return `Each kill gives that body +${n('speed')} m/s move speed and +${n('aps')} attacks per second for the rest of the fight${+P('max') > 0 ? `, up to ${n('max')} stacks` : ''}.`;
       case 'killSpawn': return `Each kill brings ${+P('count') === 1 ? 'a new body' : `${n('count')} new bodies`} of it into the fight.`;
+      case 'bleedHit': return `Every hit it lands gives the target ${+P('n') === 1 ? 'a stack' : `${n('n')} stacks`} of bleed.`;
       case 'bull': return `Its first attack and every ${+P('every') === 3 ? 'third' : `${n('every')}th`} one after also send it charging through its target and ${n('run')} m on: ${n('hit')} damage to every enemy in its path, each knocked back ${n('push')} m. +${n('armor')} armor while it charges.`;
       case 'flare': return `Every second it doesn’t attack it stores ${n('per')}% attack speed (up to ${n('max')}%). Its next attack releases it as a burst: an extra shot in quick succession for every ${n('shot')}% stored.`;
       case 'portal': return `At the start of a fight each squad opens a portal and holds still for ${n('secs')} s, then sacrifices itself and a ${String(P('unit')) === 'Brute' ? 'Hellfiend' : String(P('unit'))} walks out to fight: a level ${+P('level') + 1} ${String(P('unit'))} with ${n('speed')} m/s move speed and a swipe in front of it, levelling up with the squad. If the whole squad falls first, nothing comes out.`;
@@ -361,12 +375,16 @@ const Engine = (() => {
       case 'freeMove': return 'Squads of it can be moved every round for free, as often as you like.';
       case 'silent': return 'Its first attack in a fight doesn’t give it away: it stays hidden.';
       case 'firstHit': return `Its first attack in a fight hits ${n('pct')}% harder.`;
-      case 'flurry': return `Each attack is ${n('hits')} blows of ${n('hit')} damage in quick succession (${n('aps')} attacks per second). When a blow kills, it leaps to the nearest enemy within ${n('leap')} m for the next one.`;
-      case 'windWalk': return `Each hit has a ${n('pct')}% chance to miss it completely. When one does, it dashes ${n('step')} m (a tile) straight back.`;
+      case 'flurry': return `Each attack is ${n('hits')} blows of ${n('hit')} damage in quick succession (${n('aps')} attacks per second). When a blow kills, it leaps to the nearest enemy within ${n('leap')} m for the next one. It ignores the enemy tower while there are units to go for.`;
+      case 'windWalk': {
+        const e = Math.max(1, Math.round(+P('every'))), ord = (k) => k + (k % 100 >= 11 && k % 100 <= 13 ? 'th' : ['th', 'st', 'nd', 'rd'][k % 10] || 'th');
+        return e === 1 ? `It dodges every attack aimed at it, and dashes ${n('step')} m away from the attacker, to one side, each time.`
+          : `It dodges the first attack aimed at it and every ${ord(e)} one after that (the ${ord(1)}, ${ord(e + 1)}, ${ord(2 * e + 1)}...), and dashes ${n('step')} m away from the attacker, to one side, when it does.`;
+      }
       case 'bounce': return `A shot that hits bounces on to the nearest other enemy within ${n('reach')} m for ${n('pct')}% of its damage, up to ${n('n')} ${+P('n') === 1 ? 'time' : 'times'}.`;
-      case 'leafblade': return `It becomes a leaf-mech suit with two long leaf blades: +${n('hp')}% health, +${n('armor')} armor, and its attack becomes a spin that hits every enemy within ${n('range')} m (+${n('hit')}% hit). It dashes at enemies within ${n('dash')} m. At the start of a fight and every ${n('every')} s it fires ${n('missiles')} homing missiles at the nearest enemies, ${n('mhit')} damage each in a ${n('msplash')} m blast.`;
+      case 'leafblade': return `It becomes a leaf-mech suit with two long leaf blades: +${n('hp')}% health, +${n('armor')} armor, and its attack becomes a ${Math.round(Math.min(180, +P('cone')) * 2)}° swipe that hits every enemy in front of it within ${n('range')} m (+${n('hit')}% hit). It dashes at enemies within ${n('dash')} m. At the start of a fight and every ${n('every')} s it fires ${n('missiles')} homing missiles at the nearest enemies within ${n('mrange')} m, ${n('mhit')} damage each in a ${n('msplash')} m blast.`;
       case 'berserk': return `Can’t be slowed or displaced (slows, knockback, pushes and roots don’t take). When the fight starts it roars: enemies within ${n('radius')} m attack ${n('attack')}% slower and allies there move ${n('speed')}% faster, for the fight. Roars stack, up to ${n('max')}% on any one unit.`;
-      case 'lone': return `Ignores enemies that share a tile with others and hunts lone ones. With no lone enemy left for ${n('secs')} s it fights as usual, until it kills a lone one again.`;
+      case 'lone': return `Ignores enemies that share a tile with others and hunts lone ones. With no lone enemy left for ${n('secs')} s it fights as usual, until it kills a lone one again. It ignores the enemy tower while there are units to go for.`;
       case 'frost': return `Its hits put Frost on the target: a stack on the first hit and one more every ${n('every')} s it stays on it, up to 3: ${n('p1')}% / ${n('p2')}% / ${n('p3')}% slower moves and attacks. The stacks melt ${n('keep')} s after the frost stops.`;
       case 'deepfreeze': return `A 4th stack of Frost freezes the enemy solid for ${n('secs')} s (not towers), then the stacks start over.`;
       case 'multibeam': return `${+P('beams') === 2 ? 'Another beam' : `${+P('beams') - 1} more beams`} at a different enemy in reach; no two beams on the same enemy, and each keeps to its enemy while it can.`;
@@ -464,6 +482,7 @@ const Engine = (() => {
         case 'roots': u.roots = { min: Math.max(0, P('min')), max: Math.max(P('min'), P('max')), dps: Math.max(0, P('dps')), pull: Math.max(0.1, P('pull')) }; break;
         case 'killStack': u.killStack = { speed: P('speed'), aps: P('aps'), max: Math.max(0, Math.round(P('max'))) }; break;
         case 'killSpawn': u.killSpawn = (u.killSpawn || 0) + Math.max(1, Math.round(P('count'))); break;
+        case 'bleedHit': u.bleedHit = Math.max(u.bleedHit || 0, Math.max(0, Math.round(P('n')))); break;
         case 'bull': u.bull = { every: Math.max(1, Math.round(P('every'))), hit: Math.max(0, P('hit')), push: Math.max(0, P('push')), armor: P('armor'), run: Math.max(0, P('run')) }; break;
         case 'flare': u.flare = { per: Math.max(0, P('per')), max: Math.max(0, P('max')), shot: Math.max(1, P('shot')) }; break;
         case 'portal': {
@@ -481,17 +500,17 @@ const Engine = (() => {
         case 'firstHit': u.firstHit = (u.firstHit || 0) + Math.max(0, P('pct')); break;
         case 'flurry':
           u.flurry = { hits: Math.max(1, Math.round(P('hits'))), gap: Math.max(0.05, P('gap')), leap: Math.max(0, P('leap')) };
-          u.hit = Math.max(0, P('hit')); u.aps = Math.max(0.05, P('aps')); u.burst = 1;
+          u.hit = Math.max(0, P('hit')); u.aps = Math.max(0.05, P('aps')); u.burst = 1; u.noTower = true;
           break;
-        case 'lone': u.lone = Math.max(0.5, P('secs')); break;
-        case 'windWalk': u.dodge = Math.min(90, Math.max(u.dodge || 0, P('pct'))); u.windWalk = Math.max(u.windWalk || 0, Math.max(0, P('step'))); break;
+        case 'lone': u.lone = Math.max(0.5, P('secs')); u.noTower = true; break;
+        case 'windWalk': u.windWalk = { every: Math.max(1, Math.round(P('every'))), step: Math.max(0, P('step')) }; break;
         case 'bounce': u.bounce = { n: Math.max(1, Math.round(P('n'))), pct: Math.max(0, P('pct')), reach: Math.max(1, P('reach')) }; break;
         case 'leafblade':
           u.hp = u.hp * (1 + P('hp') / 100); u.bonusArmor = (u.bonusArmor || 0) + P('armor'); u.hit = u.hit * (1 + P('hit') / 100);
-          u.range = Math.max(1, P('range')); u.flame = 180; u.spinBlade = true; u.mech = true; // a spin all around itself
+          u.range = Math.max(1, P('range')); u.flame = Math.max(1, Math.min(180, P('cone'))); u.spinBlade = true; u.mech = true; // a blade swipe in front of it (90: a half circle)
           u.projSpeed = 0; u.burst = 1; u.pellets = 1; u.pierce = 0; u.splash = 0; u.windUp = 0; u.minRange = 0;
           u.dash = Math.max(u.dash || 0, Math.max(0, P('dash')));
-          if (P('missiles') > 0) u.missiles = { n: Math.round(P('missiles')), every: Math.max(1, P('every')), hit: Math.max(0, P('mhit')), splash: Math.max(0, P('msplash')), speed: Math.max(2, P('mspeed')) };
+          if (P('missiles') > 0) u.missiles = { n: Math.round(P('missiles')), every: Math.max(1, P('every')), hit: Math.max(0, P('mhit')), splash: Math.max(0, P('msplash')), speed: Math.max(2, P('mspeed')), range: Math.max(1, P('mrange')) };
           break;
         case 'berserk': u.unstoppable = true; u.roar = { radius: Math.max(0, P('radius')), attack: Math.max(0, P('attack')), speed: Math.max(0, P('speed')), max: Math.max(0, P('max')) }; break;
         case 'frost': u.frost = { ...(u.frost || {}), every: Math.max(0.1, P('every')), pct: [P('p1'), P('p2'), P('p3')].map(x => Math.max(0, Math.min(90, x))), keep: Math.max(0.1, P('keep')) }; break;
@@ -916,8 +935,36 @@ const Engine = (() => {
       for (const a of sides[f.side]) if (a !== f && a.alive && !a.u.structure && !a.u.aloft && hyp(a.x - f.x, a.y - f.y) <= LONE_R) return false;
       return true;
     }
-    // a target b may pick: not hidden, not sheltered, and a lone one while it hunts
-    const pickable = (b, f) => f.alive && !f.hidden && !sheltered(f) && !(b.hunt && !isLone(f));
+    // Overwatch: a body sitting in a building counts the seconds it sees no enemy it could pick within its sight (range
+    // + sight, at least the minimum sight); after WATCH_IDLE s in a row it leaves (true), and a watchtower it leaves
+    // empty is taken down (not destroyed: no one gets anything for it and its side isn't crippled)
+    function watchIdle(b) {
+      const aware = Math.max(R(b) + sight, minSight);
+      let sees = false;
+      for (const f of sides[1 - b.side]) if (pickable(b, f) && !f.u.aloft && gap(f, b) <= aware) { sees = true; break; }
+      b.watchT = sees ? 0 : (b.watchT || 0) + dt;
+      if (b.watchT < WATCH_IDLE - 1e-9) return false;
+      const host = b.inside;
+      b.inside = null; b.watchT = 0;
+      if (host.u.kind === 'watchtower' && host.alive && !sides[b.side].some(x => x.alive && x.inside === host)) {
+        host.alive = false; host.hp = 0; host.removed = true; host.diedTick = tick;
+      }
+      return true;
+    }
+    // the side's tower (not a lesser structure: treasury, watchtower, wall, building)
+    const isTower = (f) => !!f.u.structure && !f.u.lesser;
+    // noTower: whether side s has any body an enemy could pick other than its tower (worked out once a tick)
+    const othersAt = [-1, -1], othersUp = [false, false];
+    function othersThan(s) {
+      if (othersAt[s] !== tick) {
+        othersAt[s] = tick; othersUp[s] = false;
+        for (const f of sides[s]) if (f.alive && !f.hidden && !f.turning && !f.u.aloft && !sheltered(f) && !isTower(f)) { othersUp[s] = true; break; }
+      }
+      return othersUp[s];
+    }
+    // a target b may pick: not hidden, not sheltered, a lone one while it hunts, and not the tower for a body that
+    // ignores it (noTower) while anything else is left to pick
+    const pickable = (b, f) => f.alive && !f.hidden && !sheltered(f) && !(b.hunt && !isLone(f)) && !(b.u.noTower && isTower(f) && othersThan(f.side));
     // damage that skips armor and ward (poison)
     function direct(owner, v, amount) {
       if (v.turning || v.u.aloft || sheltered(v)) return;
@@ -1013,19 +1060,28 @@ const Engine = (() => {
       if (v.u.aloft) return; // an airship can't be shot down
       if (sheltered(v)) return; // Overwatch: safe inside its building
       const st = stats[owner.side];
-      // Dodge: the whole hit misses (the same random numbers on every device)
-      if (v.u.dodge > 0 && rnd() * 100 < v.u.dodge) {
-        st.missed += hit;
-        if (v.u.windWalk > 0 && !v.u.structure && !v.u.anchored) { // Wind walk: a dash straight back from where the hit came from
-          let dx = v.x - fromX, dy = v.y - fromY, d = hyp(dx, dy);
-          if (d < 1e-6) { dx = 0; dy = v.side === 0 ? -1 : 1; d = 1; }
-          v.x += dx / d * v.u.windWalk; v.y += dy / d * v.u.windWalk; v.hx = -dx / d; v.hy = -dy / d;
-          if (g.bounds) { v.x = Math.max(g.bounds.x0, Math.min(g.bounds.x1, v.x)); v.y = Math.max(g.bounds.y0, Math.min(g.bounds.y1, v.y)); }
-          v.dashing = true;
-          if (v.u.windUp > 0) { v.setUp = false; v.windTarget = null; }
+      // Wind walk: the 1st, (every+1)th, ... attack aimed at it misses, and it dashes away to one side (see u.windWalk)
+      if (v.u.windWalk && owner.side !== v.side) {
+        const ww = v.u.windWalk, n = v.aimedAt = (v.aimedAt || 0) + 1;
+        if ((n - 1) % ww.every === 0) {
+          st.missed += hit;
+          if (ww.step > 0 && !v.u.structure && !v.u.anchored && !v.u.unstoppable) {
+            let dx = v.x - fromX, dy = v.y - fromY, d = hyp(dx, dy);
+            if (d < 1e-6) { dx = 0; dy = v.side === 0 ? -1 : 1; d = 1; }
+            dx /= d; dy /= d;
+            // 45° off straight back, to its left and right in turn (the same on every device)
+            const sgn = (v.wwDodges = (v.wwDodges || 0) + 1) % 2 ? 1 : -1, c = 0.7071067811865476;
+            const ux = (dx - sgn * dy) * c, uy = (dy + sgn * dx) * c;
+            v.x += ux * ww.step; v.y += uy * ww.step; v.hx = -dx; v.hy = -dy;
+            if (g.bounds) { v.x = Math.max(g.bounds.x0, Math.min(g.bounds.x1, v.x)); v.y = Math.max(g.bounds.y0, Math.min(g.bounds.y1, v.y)); }
+            v.dashing = true;
+            if (v.u.windUp > 0) { v.setUp = false; v.windTarget = null; }
+          }
+          return;
         }
-        return;
       }
+      // Dodge: the whole hit misses (the same random numbers on every device)
+      if (v.u.dodge > 0 && rnd() * 100 < v.u.dodge) { st.missed += hit; return; }
       // a guard (the keep's) that is attacked leaves its post and goes for its attacker
       if (v.guard && owner.alive && owner.side !== v.side && !owner.u.aloft && !(v.avenge && v.avenge.alive)) { v.holdT = 0; v.avenge = owner; v.engaged = true; }
       if (owner.u.bldgPct > 0 && v.u.structure) hit = hit * owner.u.bldgPct / 100; // weaker against buildings (the Assassin)
@@ -1071,6 +1127,7 @@ const Engine = (() => {
         kn.set(v, c);
         if (c % owner.u.bleedEvery === 0) bleedOn(owner, v, 1);
       }
+      if (owner.u.bleedHit > 0) bleedOn(owner, v, owner.u.bleedHit); // Bloodrush: stacks of bleed with every hit
       if (owner.u.stunHit > 0 && !v.u.structure) v.stunT = Math.max(v.stunT, owner.u.stunHit);
       if (owner.u.poisonPct > 0) {
         // poison: a share of the hit, spread over its duration. Each attacker keeps one dose on the target;
@@ -1172,7 +1229,7 @@ const Engine = (() => {
     // there are enough
     function salvo(b) {
       const ms = b.u.missiles, list = [];
-      for (const f of sides[1 - b.side]) if (pickable(b, f) && !f.u.aloft) list.push([(f.u.structure ? 1e6 : 0) + dist(f, b), f]);
+      for (const f of sides[1 - b.side]) if (pickable(b, f) && !f.u.aloft && !(gap(f, b) > ms.range + 1e-9)) list.push([(f.u.structure ? 1e6 : 0) + dist(f, b), f]); // only within its missile range
       if (!list.length) return false;
       list.sort((p, q) => p[0] - q[0]);
       for (let k = 0; k < ms.n; k++) {
@@ -1690,7 +1747,10 @@ const Engine = (() => {
         if (!b.alive || b.delay > 0) continue;
         b.dashing = false;
         if (b.u.roar && !b.roared) roar(b); // Berserkers roar as they start
-        if (b.inside) { if (b.inside.alive) { b.x = b.inside.x; b.y = b.inside.y; continue; } b.inside = null; } // Overwatch: it stays in its building while that stands
+        if (b.inside) { // Overwatch: it stays in its building while that stands, and while it sees enemies now and then
+          if (b.inside.alive && !watchIdle(b)) { b.x = b.inside.x; b.y = b.inside.y; continue; }
+          b.inside = null;
+        }
         if (b.stunT > 0) { b.stunT = Math.max(0, b.stunT - dt); continue; } // stunned: can't move (or attack, below)
         if (b.channel) continue; // summoning through its portal: it holds still (and doesn't attack, below)
         if (b.rootedBy && b.rootedBy.alive && b.rootedBy.rootTgt === b) continue; // dragged by roots: it can't walk (it still attacks)
@@ -2291,7 +2351,7 @@ const Engine = (() => {
         v.windTarget = null; v.windT = 0; v.setUp = false; v.firing = -1; v.burstLeft = 0; v.trampleLeft = 0; v.trampled = null;
         v.spinTarget = null; v.aims = null; v.lock = null; v.intent = null; v.march = null; v.guide = null; v.goal = null; v.spreadTo = null; v.engaged = false; v.holdT = 0; v.avenge = null; v.delay = 0; v.band = null; v.hidden = false;
         v.slowT = 0; v.slowMove = 0; v.slowAtk = 0; v.shrinkT = 0; v.shrinkM = 0; v.kids = null; v.stunT = 0; v.frenzy = 0; v.flow = 0; v.knives = null; v.atkN = 0; v.forgeT = 0; v.spearReady = false;
-        v.burn = null; v.kills = 0; v.flurryLeft = 0; v.flurryTgt = null; v.rootTgt = null; v.rootedBy = null; v.hunt = null; v.bullN = 0; v.charging = false; v.inside = null; v.missileT = 0; v.roarSpd = 0; v.roarAtk = 0; v.frost = null; v.frozenT = 0; v.beamAims = null; v.stormCd = 0;
+        v.burn = null; v.kills = 0; v.flurryLeft = 0; v.flurryTgt = null; v.rootTgt = null; v.rootedBy = null; v.hunt = null; v.bullN = 0; v.charging = false; v.inside = null; v.missileT = 0; v.roarSpd = 0; v.roarAtk = 0; v.frost = null; v.frozenT = 0; v.beamAims = null; v.stormCd = 0; v.aimedAt = 0; v.wwDodges = 0; v.watchT = 0;
         sides[v.side].push(v); stats[v.side].totalHp += v.hp;
         for (const b of all) {
           if (b.windTarget === v) { b.windTarget = null; b.windT = 0; }
@@ -2393,6 +2453,6 @@ const Engine = (() => {
     return m;
   }
 
-  return { DASH_SPEED, LONE_R, BURN, FROST_ON, EAT_R, glutUnit, TOWER_DOWN, RULES, ruleOn, STEALTH_BACK, SKILL_SLOTS, SLOTS, SKILL_TYPES, skillParam, describeSkill, applySkills, innateUnit, fairBudget, battle, makeArmy, matrix, createBattle, buildSquad, rawStrength, squadsFor, withTraits, leveled, TRAIT_DEFAULTS, SPIN_CAP, CHARGE_RUN, TRAMPLE_RUN, BLAST_RADIUS, BLEED, POISON_HEAL, RAM_REACH, ROLL_START, ROLL_PAST, BUILD_GAP, BUILD_COOP, SITE_REACH, MINE_TRIGGER, REPAIR_SECS, LEVEL_BONUS, MAX_LEVEL, CHARM_MAX, CONVERT_HP, CONVERT_SQUAD };
+  return { DASH_SPEED, LONE_R, WATCH_IDLE, BURN, FROST_ON, EAT_R, glutUnit, TOWER_DOWN, RULES, ruleOn, STEALTH_BACK, SKILL_SLOTS, SLOTS, SKILL_TYPES, skillParam, describeSkill, applySkills, innateUnit, fairBudget, battle, makeArmy, matrix, createBattle, buildSquad, rawStrength, squadsFor, withTraits, leveled, TRAIT_DEFAULTS, SPIN_CAP, CHARGE_RUN, TRAMPLE_RUN, BLAST_RADIUS, BLEED, POISON_HEAL, RAM_REACH, ROLL_START, ROLL_PAST, BUILD_GAP, BUILD_COOP, SITE_REACH, MINE_TRIGGER, REPAIR_SECS, LEVEL_BONUS, MAX_LEVEL, CHARM_MAX, CONVERT_HP, CONVERT_SQUAD };
 })();
 if (typeof module !== 'undefined') module.exports = Engine;

@@ -374,7 +374,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
     const { bt, me } = v, src = v.battlePre || v.m;
     const muted = color(css('--muted') || '#8DA1A1');
     for (const b of bt.bodies) {
-      if (!b.alive) { if (!b.boarded) { const [wx, wz] = world(f, b.x, b.y); scene_(() => disc(wx, wz, Math.max(0.3, size(b.u) * 0.45), muted, 0.18)); } continue; }
+      if (!b.alive) { if (!b.boarded && !b.removed) { const [wx, wz] = world(f, b.x, b.y); scene_(() => disc(wx, wz, Math.max(0.3, size(b.u) * 0.45), muted, 0.18)); } continue; }
       if (b.boarded) continue;
       const p = glide(b, dt);
       const look = b.u.aloft || (b.site && b.site.work < b.site.need) ? 'glass' : b.hidden ? (b.side === me ? 'ghost' : 'ghostFoe') : b.delay > 0 ? 'ghost' : 'solid'; // a building site is a see-through scaffold
@@ -491,11 +491,11 @@ const Render3D = (THREE, el, view, opts = {}) => {
     // where things may go
     if ((selected !== null || (drag && drag.moved) || moving != null) && deploying) {
       for (let row = 0; row < Game.ROWS; row++) for (let c = 0; c < Game.COLS; c++) {
-        if (Game.canPlaceAt(m, me, c, row, placingUnit) && Game.spotFree(m, me, c, row, placingUnit)) { const s = tileCenter(v, c, row); tileSq(s.c, s.r, you, 0.3, 0.05); }
+        if (Game.canPlaceAt(m, me, c, row, placingUnit, selected === null) && Game.spotFree(m, me, c, row, placingUnit)) { const s = tileCenter(v, c, row); tileSq(s.c, s.r, you, 0.3, 0.05); }
       }
       if (placingUnit != null) for (const sq of m.armies[me]) if (Game.boardable(m, me, sq.col, sq.row, placingUnit) && !(drag && drag.id === sq.id)) { const s = tileCenter(v, sq.col, sq.row); tileSq(s.c, s.r, gold, 0.85, 0.07, 0, 0.03); }
     }
-    if (hoverTile && (selected !== null || moving != null) && Game.canPlaceAt(m, me, hoverTile.col, hoverTile.row, placingUnit) && (Game.spotFree(m, me, hoverTile.col, hoverTile.row, placingUnit) || (placingUnit != null && Game.boardable(m, me, hoverTile.col, hoverTile.row, placingUnit)))) {
+    if (hoverTile && (selected !== null || moving != null) && Game.canPlaceAt(m, me, hoverTile.col, hoverTile.row, placingUnit, selected === null) && (Game.spotFree(m, me, hoverTile.col, hoverTile.row, placingUnit) || (placingUnit != null && Game.boardable(m, me, hoverTile.col, hoverTile.row, placingUnit)))) {
       for (const [c, r] of Game.blockOf(m, placingUnit, hoverTile.col, hoverTile.row)) { const s = tileCenter(v, c, r); tileSq(s.c, s.r, you, 0.2, 1, 0, 0); } // a building's whole block
     }
     if (v.placingWall && editable) for (let row = 0; row < Game.ROWS; row++) for (let c = 0; c < Game.COLS; c++) for (const e of ['n', 'w', 's', 'e']) if (Game.bwallSpotOk(m, me, c, row, e)) { // a free edge: a line along it

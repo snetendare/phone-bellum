@@ -1,4 +1,4 @@
-// Headless check of the Leaf Wizard rework (single sharp leaves, Wind walk, Bouncing blade, Petalburst, the Leafblade
+// Headless check of the Leaf Wizard rework (single sharp leaves, Wind walk (every 5th attack dodged), Bouncing blade, Petalburst, the Leafblade (180° swipe, 30 m missiles)
 // Awaken skill), Awaken skills bought one squad at a time, Master skills (Overwatch, Spirit walk, the Brute's
 // Berserkers) and Berserkers in a fight. Run from the repo root: node tools/tests/leaf-brute.js
 const assert = require('assert');
@@ -22,12 +22,14 @@ const near = (a, b, eps = 1e-6) => Math.abs(a - b) < eps;
   assert.deepStrictEqual(lw.skillOr, [[1, 2]], 'Bouncing blade or Petalburst');
   assert.deepStrictEqual(lw.skillNeedsAny, [null, null, null, [1, 2]], 'Leafblade needs one of them');
   assert.deepStrictEqual(['windWalk', 'bouncingBlade', 'petalburst', 'leafblade'].map(id => skill(id).cost), [100, 150, 150, 300]);
-  const ww = withSkills('Leaf Wizard', ['windWalk']); assert.ok(ww.dodge === 33 && ww.windWalk === 6, 'Wind walk: 33% dodge, a tile back');
+  const ww = withSkills('Leaf Wizard', ['windWalk']); assert.ok(!ww.dodge && ww.windWalk.every === 5 && ww.windWalk.step === 4, 'Wind walk: every 5th attack from the first, a 4 m dash');
+  assert.ok(/1st, 6th, 11th/.test(E.describeSkill(skill('windWalk'))), E.describeSkill(skill('windWalk')));
   const pb = withSkills('Leaf Wizard', ['petalburst']); assert.ok(near(pb.aps, 2.4) && near(pb.range, lw.range / 2), 'Petalburst: +100% attack speed, -50% range');
   const bb = withSkills('Leaf Wizard', ['bouncingBlade']); assert.deepStrictEqual(bb.bounce, { n: 2, pct: 30, reach: 10 });
   const lb = withSkills('Leaf Wizard', ['petalburst', 'leafblade']);
-  assert.ok(lb.mech && lb.spinBlade && lb.flame === 180 && lb.range === 3 && lb.projSpeed === 0 && lb.dash === 8 && near(lb.aps, 2.4), 'Leafblade: a 360 spin in melee that dashes, Petalburst still speeds it up');
-  assert.deepStrictEqual(lb.missiles, { n: 2, every: 10, hit: 150, splash: 2.5, speed: 25 });
+  assert.ok(lb.mech && lb.spinBlade && lb.flame === 90 && lb.range === 3 && lb.projSpeed === 0 && lb.dash === 8 && near(lb.aps, 2.4), 'Leafblade: a 180° swipe in melee that dashes, Petalburst still speeds it up');
+  assert.deepStrictEqual(lb.missiles, { n: 2, every: 10, hit: 150, splash: 2.5, speed: 25, range: 30 });
+  assert.ok(/180° swipe/.test(E.describeSkill(skill('leafblade'))) && /within 30 m/.test(E.describeSkill(skill('leafblade'))));
   assert.strictEqual(E.leveled(lb, 1).missiles.hit, 300, 'missiles grow with the level');
   assert.ok(E.describeSkill(skill('leafblade')).length > 50 && E.describeSkill(skill('berserkers')).length > 50 && E.describeSkill(skill('windWalk')) && E.describeSkill(skill('bouncingBlade')));
 }
@@ -40,18 +42,37 @@ const near = (a, b, eps = 1e-6) => Math.abs(a - b) < eps;
   assert.ok(most === 1, 'one leaf in the air at a time');
   assert.ok(near((d.u.hp - d.hp) % 95, 0, 1e-6) && d.hp < d.u.hp, 'whole leaves of 95');
 }
-// Wind walk: a dodged hit sends it a tile straight back from the attacker
+// Wind walk: it dodges attacks #1, #6, #11 ... aimed at it, no chance involved, and dashes 4 m away from the attacker
+// and to one side (the other side each time)
 {
-  const lw = body({ ...withSkills('Leaf Wizard', ['windWalk']), dodge: 90, speed: 0, aps: 0.01 }, 0, 0, 0);
-  const foe = body(E.withTraits({ name: 'F', cost: 1, bodies: 1, hp: 1e6, hit: 1, aps: 1, range: 30, speed: 0, splash: 0 }), 1, 0, 20);
+  const lw = body({ ...withSkills('Leaf Wizard', ['windWalk']), speed: 0, aps: 0.01 }, 0, 0, 0);
+  const foe = body(E.withTraits({ name: 'F', cost: 1, bodies: 1, hp: 1e6, hit: 1, aps: 1, range: 40, speed: 0, splash: 0 }), 1, 0, 20);
   const bt = E.createBattle([lw], [foe], G);
-  let y0 = lw.y;
-  for (let k = 0; k < 100 && lw.y === y0; k++) bt.step();
-  assert.ok(near(lw.y, y0 - 6, 1e-6) && near(lw.x, 0), `dashed 6 m back: ${lw.y}`);
-  // without Wind walk a dodge doesn't move it
-  const plain = body({ ...withSkills('Leaf Wizard', []), dodge: 90, speed: 0, aps: 0.01 }, 0, 0, 0), f2 = body(foe.u, 1, 0, 20);
-  const bt2 = E.createBattle([plain], [f2], G); steps(bt2, 3);
-  assert.ok(plain.y === 0 && bt2.result().stats[1].missed > 0);
+  const dodged = [], spots = [];
+  let n = 0;
+  for (let k = 0; k < 400 && n < 12; k++) {
+    const hp = lw.hp, x = lw.x, y = lw.y, before = lw.aimedAt || 0;
+    bt.step();
+    if ((lw.aimedAt || 0) > before) { n = lw.aimedAt; if (lw.hp === hp) { dodged.push(n); spots.push([lw.x - x, lw.y - y]); } }
+  }
+  assert.deepStrictEqual(dodged, [1, 6, 11], `dodges the 1st, 6th and 11th: ${dodged}`);
+  assert.ok(near(lw.u.hp - lw.hp, 9, 1e-6), `the other 9 land (${lw.u.hp - lw.hp})`);
+  const c = Math.SQRT1_2 * 4;
+  assert.ok(near(spots[0][0], c, 1e-6) && near(spots[0][1], -c, 1e-6), `1st dash: 4 m back and to one side (${spots[0]})`);
+  assert.ok(spots[1][0] < -1 && spots[1][1] < -1 && near(Math.hypot(...spots[1]), 4, 1e-6), `2nd: back and to the other side (${spots[1]})`);
+  assert.strictEqual(bt.result().stats[1].missed, 3);
+  // the same every run (no random numbers)
+  const again = body({ ...withSkills('Leaf Wizard', ['windWalk']), speed: 0, aps: 0.01 }, 0, 0, 0), f2 = body(foe.u, 1, 0, 20);
+  const bt2 = E.createBattle([again], [f2], G);
+  steps(bt2, 15);
+  const bt3b = body({ ...withSkills('Leaf Wizard', ['windWalk']), speed: 0, aps: 0.01 }, 0, 0, 0), f3 = body(foe.u, 1, 0, 20);
+  const bt3 = E.createBattle([bt3b], [f3], G);
+  steps(bt3, 15);
+  assert.ok(again.x === bt3b.x && again.y === bt3b.y && again.hp === bt3b.hp, 'deterministic');
+  // a plain Leaf Wizard dodges nothing
+  const plain = body({ ...withSkills('Leaf Wizard', []), speed: 0, aps: 0.01 }, 0, 0, 0), f4 = body(foe.u, 1, 0, 20);
+  const bt4 = E.createBattle([plain], [f4], G); steps(bt4, 3);
+  assert.ok(plain.y === 0 && bt4.result().stats[1].missed === 0);
 }
 // Bouncing blade: the leaf bounces on to two more enemies for 30% each, each body once
 {
@@ -64,7 +85,33 @@ const near = (a, b, eps = 1e-6) => Math.abs(a - b) < eps;
   assert.ok(took[0] >= 95 && took[1] > 0 && took[2] > 0 && took[3] === 0, `two bounces, no more: ${took}`);
   assert.ok(near(took[1] % 28.5, 0, 1e-6) || near(took[1] % 28.5, 28.5, 1e-6), `30% of 95 a bounce: ${took[1]}`);
 }
-// Leafblade: spins hit everything around it, it dashes the last 8 m, two missiles at the start and every 10 s
+// Leafblade: a 180° swipe: enemies in front of it and to its sides within reach, not those behind it
+{
+  const lb = body({ ...withSkills('Leaf Wizard', ['bouncingBlade', 'leafblade']), speed: 0, missiles: null, dash: 0 }, 0, 0, 0);
+  const front = body(dummy(1e6), 1, 0, 1.5, 70), side = body(dummy(1e6), 1, 2.5, 0.3, 71), back = body(dummy(1e6), 1, 0, -2.5, 72);
+  const bt = E.createBattle([lb], [front, side, back], G);
+  steps(bt, 3);
+  assert.ok(front.hp < 1e6 && side.hp < 1e6 && back.hp === 1e6, `front and side hit, not behind (${1e6 - front.hp}, ${1e6 - side.hp}, ${1e6 - back.hp})`);
+}
+// Leafblade missiles reach 30 m at most: none at an enemy 40 m away; it fires once one is within 30 m
+{
+  const lb = body({ ...withSkills('Leaf Wizard', ['bouncingBlade', 'leafblade']), speed: 4 }, 0, 0, -40);
+  const d = body(dummy(1e6), 1, 0, 0, 80);
+  const bt = E.createBattle([lb], [d], G);
+  bt.step();
+  assert.strictEqual(bt.projectiles().filter(p => p.missile).length, 0, 'nothing in range: no salvo');
+  let at = null;
+  for (let k = 0; k < 200 && at == null; k++) { bt.step(); if (bt.projectiles().some(p => p.missile)) at = Math.hypot(lb.x - d.x, lb.y - d.y); }
+  assert.ok(at != null && at <= 30 + 1e-6 && at > 29, `the first salvo once within 30 m (${at})`);
+  // two enemies, one in range and one far: both missiles go to the one in range
+  const lb2 = body({ ...withSkills('Leaf Wizard', ['bouncingBlade', 'leafblade']), speed: 0 }, 0, 0, 0);
+  const inR = body(dummy(1e6), 1, 0, 20, 81), out = body(dummy(1e6), 1, 0, 45, 82);
+  const bt2 = E.createBattle([lb2], [inR, out], G);
+  bt2.step();
+  const ms = bt2.projectiles().filter(p => p.missile);
+  assert.ok(ms.length === 2 && ms.every(p => p.homing === inR), 'only at enemies within 30 m');
+}
+// Leafblade: swipes hit both enemies in front of it, it dashes the last 8 m, two missiles at the start and every 10 s
 {
   const lb = body({ ...withSkills('Leaf Wizard', ['bouncingBlade', 'leafblade']), speed: 5 }, 0, 0, -20);
   const ds = [-1.5, 1.5].map((x, k) => body(dummy(1e6), 1, x, 0, 30 + k));

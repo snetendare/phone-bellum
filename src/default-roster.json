@@ -729,8 +729,8 @@
       "name": "Wind walk",
       "cost": 100,
       "params": {
-        "pct": 33,
-        "step": 6
+        "every": 5,
+        "step": 4
       }
     },
     {
@@ -2246,18 +2246,14 @@
       "stealth": true,
       "dash": 10,
       "bldgPct": 50,
-      "killStack": {
-        "speed": 0.1,
-        "aps": 0.1,
-        "max": 0
-      },
+      "bleedHit": 2,
       "trait": {
         "name": "Stealthed",
         "text": "Can't be targeted until it attacks, and hides again after 1.5 s without attacking. It dashes to a target within 10 m without being seen, and deals 50% less damage to buildings."
       },
       "trait2": {
         "name": "Bloodrush",
-        "text": "Every kill gives it +0.1 m/s move speed and +0.1 attacks per second for the rest of the fight."
+        "text": "Every hit it lands gives the target 2 stacks of bleed."
       },
       "skills": [
         "silentBlade",

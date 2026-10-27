@@ -457,7 +457,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
     'Ether Golem': 'A walking wall. Heavy armor shrugs off small hits while it holds its lane.',
     'Slimeshots': 'A pack of slime spitters lobbing small splashing globs. Shreds packed swarms. Poison heals them and speeds them up.',
     'Ent': 'Slow tree guardians whose blows crush everything within 2 m of where they land. Awakened, each one explodes when it falls, hurting everything around it.',
-    'Assassin': 'A lone killer that stays hidden, dashes the last 10 m to its target and strikes for 500. Every kill makes it faster. Weak against buildings.',
+    'Assassin': 'A lone killer that stays hidden, dashes the last 10 m to its target and strikes for 500, leaving its target bleeding. Weak against buildings.',
     'Sun Priest': 'Channels a beam that burns hotter the longer it holds one target. Melts giants.',
     'Meteor Caller': 'Drops slow meteors from far behind the lines. Helpless once something reaches it.',
     'War Mammoth': 'Charges straight through the enemy line, trampling every body in its path, then stands stunned for a moment before it turns to charge again.',
@@ -3154,7 +3154,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (phase !== 'deploy' || !m || choosingPack() || choosingTower() || placingTower()) return null;
     if (drag && drag.id != null && drag.moved && !drag.toTray) {
       const sq = m.armies[me].find(s => s.id === drag.id);
-      if (sq && !Game.isRider(sq) && Game.canPlaceAt(m, me, drag.over.col, drag.over.row, sq.unit)) return { q: { id: sq.id, col: drag.over.col, row: drag.over.row }, unit: sq.unit, col: drag.over.col, row: drag.over.row };
+      if (sq && !Game.isRider(sq) && Game.canPlaceAt(m, me, drag.over.col, drag.over.row, sq.unit, true)) return { q: { id: sq.id, col: drag.over.col, row: drag.over.row }, unit: sq.unit, col: drag.over.col, row: drag.over.row };
       return null;
     }
     const t = hoverTile;
@@ -3964,7 +3964,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (u.link) tr.push('Linked health');
     if (u.escort) tr.push(`Healbot: ${Math.round(u.escort.pct * 10) / 10}% health a second`);
     if (u.burst > 1) tr.push(`Burst ${u.burst}`);
-    if (u.flame > 0) tr.push(`${u.flame >= 180 ? 'Hits all around itself' : `${u.slam ? 'Slam' : 'Flame'} cone ${u.flame}°`}, reaches ${Math.round(u.range * (Game.SETTINGS.flameReach || 1) * 10) / 10} m`);
+    if (u.flame > 0) tr.push(`${u.flame >= 180 ? 'Hits all around itself' : u.spinBlade ? `Blade swipe ${Math.round(u.flame * 2)}° in front` : `${u.slam ? 'Slam' : 'Flame'} cone ${u.flame}°`}, reaches ${Math.round(u.range * (Game.SETTINGS.flameReach || 1) * 10) / 10} m`);
     if (u.stunHit > 0) tr.push(`Stuns ${u.stunHit} s`);
     else if (u.pellets > 1) tr.push(`Shotgun ${u.pellets}`);
     if (u.spinUp > 0) tr.push(`Spin-up ${u.spinUp}%/s`);
@@ -3979,6 +3979,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (u.pctHit > 0) tr.push(`Hits +${u.pctHit}% of target’s health, past armor`);
     if (u.deathBlast > 0) tr.push(`Death blast ${u.deathBlast}% health, ${u.blastAt > 0 ? u.blastAt : Engine.BLAST_RADIUS} m`);
     if (u.dodge > 0) tr.push(`Dodges ${u.dodge}% of hits`);
+    if (u.windWalk) tr.push(`Dodges every ${u.windWalk.every === 1 ? '' : u.windWalk.every + 'th '}attack at it, from the first`);
     if (u.windUp > 0) tr.push(`Wind-up ${u.windUp} s`);
     if (u.defense === 'armor') tr.push(`Armor ${u.defVal}`);
     if (u.defense === 'ward') tr.push(`Ward ${u.defVal}`);
