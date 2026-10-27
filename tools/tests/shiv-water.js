@@ -31,8 +31,10 @@ const steps = (bt, s) => { for (let k = 0; k < Math.round(s / G.dt); k++) bt.ste
   bleed(1); steps(bt2, 2.5);
   assert.ok(Math.abs(v.hp - 992) < 1e-6, `1 stack: 8 damage in all (${v.hp})`);
   assert.strictEqual(v.bleed, null, 'and then it stops');
+  v.hp = 1000; bleed(4); steps(bt2, 2.5);
+  assert.ok(Math.abs(v.hp - (1000 - 4 * 16 - 2 * 2 / 100 * 1000)) < 1e-6, `4 stacks: 16 a pulse and 2% of max health a second (${v.hp})`);
   v.hp = 1000; bleed(5); steps(bt2, 2.5);
-  assert.ok(Math.abs(v.hp - (1000 - 4 * 32 - 2 * 2 / 100 * 1000)) < 1e-6, `5 stacks: 32 a pulse and 2% of max health a second (${v.hp})`);
+  assert.ok(Math.abs(v.hp - (1000 - 4 * 32 - 2 * 5 / 100 * 1000)) < 1e-6, `5 stacks: 32 a pulse and 5% of max health a second (${v.hp})`);
 }
 // Anemia stuns at 5 stacks; Too deep stops regeneration and lasts a second longer
 {

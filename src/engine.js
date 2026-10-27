@@ -41,7 +41,8 @@ const Engine = (() => {
   // attack is hits blows gap s apart; when one kills, the next leaps to the nearest enemy within leap metres. silent:
   // its first attack in a fight doesn't give it away. firstHit (%): its first attack in a fight hits that much harder.
   // bldgPct: its hits on structures deal this % of the damage. portal = { unit, secs }: at the start of a fight each
-  // squad opens a portal in front of it (seen for secs s) and unit (levelled like the squad) walks out.
+  // squad opens a portal in front of it and holds still for secs s, then its bodies still standing sacrifice themselves
+  // and unit (levelled like the squad) walks out (none if the whole squad fell first).
   // windWalk (metres): when a hit misses it (Dodge), the body dashes that far straight back from where the hit came from.
   // bounce = { n, pct, reach }: a shot that hits one body flies on to the nearest other enemy within reach metres,
   // pct % of the hit, up to n times (each body once per shot).
@@ -123,12 +124,12 @@ const Engine = (() => {
   // pctHit: every hit also deals this share of the target's max health (not to structures); that part ignores armor (ward still caps the hit)
   // Bleed (u.bleedEvery = n: every n-th hit a body lands on the same target gives it a stack of bleed; Titanium spears
   // give one too). A bleeding body loses BLEED.dmg every BLEED.pulse s for BLEED.secs s (each new stack starts that time
-  // again); each stack doubles the damage, up to BLEED.max stacks, and at BLEED.max it also loses BLEED.maxPct % of its
-  // max health a second (not structures). Bleed skips armor and ward, like poison. The stacks belong to the target, so
+  // again); each stack doubles the damage, up to BLEED.max stacks, and from 4 stacks it also loses a share of its max
+  // health a second (BLEED.pct[n] %: 4 stacks, 5 stacks; not structures). Bleed skips armor and ward, like poison. The stacks belong to the target, so
   // every source adds to the same ones. u.bleedLonger: its stacks last that many seconds more; u.bleedNoHeal: a body
   // bleeding from it can't heal or regenerate until the bleed runs out; u.bleedStun: a body it brings to BLEED.max
   // stacks is stunned that many seconds.
-  const BLEED = { dmg: 2, pulse: 0.5, secs: 2, max: 5, maxPct: 2 };
+  const BLEED = { dmg: 2, pulse: 0.5, secs: 2, max: 5, pct: { 4: 2, 5: 5 } };
   // Poisoned bodies heal POISON_HEAL % as much (slime units drink poison and heal fully)
   const POISON_HEAL = 50;
   // waterHeal: allies inside the splash of its attacks heal for its hit; with no enemy in reach it shoots at the most
@@ -324,7 +325,7 @@ const Engine = (() => {
       case 'killSpawn': return `Each kill brings ${+P('count') === 1 ? 'a new body' : `${n('count')} new bodies`} of it into the fight.`;
       case 'bull': return `Its first attack and every ${+P('every') === 3 ? 'third' : `${n('every')}th`} one after also send it charging through its target and ${n('run')} m on: ${n('hit')} damage to every enemy in its path, each knocked back ${n('push')} m. +${n('armor')} armor while it charges.`;
       case 'flare': return `Every second it doesn’t attack it stores ${n('per')}% attack speed (up to ${n('max')}%). Its next attack releases it as a burst: an extra shot in quick succession for every ${n('shot')}% stored.`;
-      case 'portal': return `At the start of a fight each squad opens a portal for ${n('secs')} s and a ${String(P('unit')) === 'Brute' ? 'Hellfiend' : String(P('unit'))} walks out to fight: a level ${+P('level') + 1} ${String(P('unit'))} with ${n('speed')} m/s move speed and a swipe in front of it, levelling up with the squad.`;
+      case 'portal': return `At the start of a fight each squad opens a portal and holds still for ${n('secs')} s, then sacrifices itself and a ${String(P('unit')) === 'Brute' ? 'Hellfiend' : String(P('unit'))} walks out to fight: a level ${+P('level') + 1} ${String(P('unit'))} with ${n('speed')} m/s move speed and a swipe in front of it, levelling up with the squad. If the whole squad falls first, nothing comes out.`;
       case 'overwatch': return `Can be placed in one of your buildings (your tower, treasury or buildings; one each): there it can’t be hit until the building falls. Placed anywhere else it fights from a small watchtower (${n('hp')} health).`;
       case 'freeMove': return 'Squads of it can be moved every round for free, as often as you like.';
       case 'silent': return 'Its first attack in a fight doesn’t give it away: it stays hidden.';
@@ -642,7 +643,8 @@ const Engine = (() => {
       hb.follow = grp; hb.healPct = e.pct; hb.credit = lead;
       (lead.side === 0 ? A : B).push(hb);
     }
-    // a portal in front of each squad that summons (Ember Imps' Hellfiend): its unit walks out at once, levelled like the squad
+    // a portal in front of each squad that summons (Ember Imps' Hellfiend): the squad holds still (channel) for the
+    // portal's secs, then the bodies still standing are sacrificed and its unit, levelled like the squad, walks out
     const portals = [];
     for (const grp of groups) {
       const lead = grp[0], pt = lead.u.portal;
@@ -652,9 +654,9 @@ const Engine = (() => {
       cx /= grp.length; cy = cy / grp.length + (lead.side === 0 ? 1 : -1) * 3;
       if (g.bounds) { cx = Math.max(g.bounds.x0, Math.min(g.bounds.x1, cx)); cy = Math.max(g.bounds.y0, Math.min(g.bounds.y1, cy)); }
       const hf = newBody(leveled(pt.unit, lead.level), lead.side, cx, cy, escortIdx++, -1);
-      hf.credit = lead; hf.delay = lead.delay || 0; // a flank squad's portal opens when it arrives
-      (lead.side === 0 ? A : B).push(hf);
-      portals.push({ x: cx, y: cy, side: lead.side, t0: hf.delay, secs: pt.secs });
+      hf.credit = lead;
+      for (const x of grp) x.channel = true;
+      portals.push({ x: cx, y: cy, side: lead.side, t0: lead.delay || 0, secs: pt.secs, grp, hf, done: false }); // a flank squad's portal opens when it arrives
     }
     const all = A.concat(B);
     const sides = [A, B];
@@ -1592,6 +1594,7 @@ const Engine = (() => {
         if (b.u.roar && !b.roared) roar(b); // Berserkers roar as they start
         if (b.inside) { if (b.inside.alive) { b.x = b.inside.x; b.y = b.inside.y; continue; } b.inside = null; } // Overwatch: it stays in its building while that stands
         if (b.stunT > 0) { b.stunT = Math.max(0, b.stunT - dt); continue; } // stunned: can't move (or attack, below)
+        if (b.channel) continue; // summoning through its portal: it holds still (and doesn't attack, below)
         if (b.rootedBy && b.rootedBy.alive && b.rootedBy.rootTgt === b) continue; // dragged by roots: it can't walk (it still attacks)
         if (b.u.lone > 0) { // Shadow hunter: hunting while there are lone enemies; none for u.lone s and it gives up until its next lone kill
           if (b.hunt == null) { b.hunt = true; b.huntT = 0; }
@@ -1884,14 +1887,14 @@ const Engine = (() => {
           b.poison = b.poison.filter(p => p.t > 0);
           if (!b.alive) continue;
         }
-        if (b.bleed) { // every BLEED.pulse s: BLEED.dmg, doubled for each stack after the first, and a share of max health at BLEED.max
+        if (b.bleed) { // every BLEED.pulse s: BLEED.dmg, doubled for each stack after the first, and a share of max health at 4 and 5 stacks
           const bl = b.bleed;
           bl.pulse -= dt;
           if (bl.pulse <= 1e-9) {
             bl.pulse += BLEED.pulse;
             let dmg = BLEED.dmg;
             for (let k = 1; k < bl.n; k++) dmg *= 2;
-            if (bl.n >= BLEED.max && !b.u.structure) dmg += b.u.hp * BLEED.maxPct / 100 * BLEED.pulse;
+            if (BLEED.pct[bl.n] > 0 && !b.u.structure) dmg += b.u.hp * BLEED.pct[bl.n] / 100 * BLEED.pulse;
             direct(bl.src, b, dmg);
           }
           bl.t -= dt;
@@ -1971,7 +1974,7 @@ const Engine = (() => {
         if (b.u.roll > 0 || b.follow || b.buildT > 0 || b.siteJob || b.u.idle || b.u.bot) continue; // rollers hit by rolling; healbots, bots and buildings never attack; builders at work don't
         b.cd -= dt * (b.slowT > 0 ? 1 - b.slowAtk / 100 : 1); // slowed units reload slower
         if (b.firing >= 0) b.firing += dt;
-        if (b.stunT > 0) continue; // stunned
+        if (b.stunT > 0 || b.channel) continue; // stunned, or summoning
         if (b.flurryLeft > 0) { if (b.alive) flurryStep(b); else b.flurryLeft = 0; continue; } // Death flurry: the rest of its blows
         if (b.u.spear && b.alive) forgeSpear(b); // Titanium spears: forged and thrown apart from its own attack
         if (b.u.missiles && b.alive) { // Leafblade: a salvo at the start and every missiles.every s
@@ -2178,6 +2181,16 @@ const Engine = (() => {
         }
       }
       turning.length = 0;
+      // a portal's summoning is done: the squad's bodies still standing are sacrificed and its unit walks out
+      for (const pt of portals) {
+        if (pt.done || t < pt.t0 + pt.secs - 1e-9) continue;
+        pt.done = true;
+        const live = pt.grp.filter(x => x.alive);
+        for (const x of pt.grp) x.channel = false;
+        if (!live.length) continue; // the whole squad fell first: nothing comes out
+        for (const x of live) { x.hp = 0; x.alive = false; x.diedTick = tick; x.sacrificed = true; }
+        pendingKids.push(pt.hf);
+      }
       // bodies spawned by deaths this tick join the fight
       for (const kid of pendingKids) { all.push(kid); sides[kid.side].push(kid); if (counts(kid)) stats[kid.side].totalHp += kid.u.hp; }
       pendingKids.length = 0;

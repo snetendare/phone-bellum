@@ -85,14 +85,14 @@ const dock = require('./dock');
 
   // 3D: the Tilted view, and the battle cam
   const p = await open('3d', 390, 664, true);
-  // the wheel steps a level back (out): Strategic -> Tilted
+  // the wheel steps a level in: Strategic -> Tilted
   const cv = await p.evaluate(() => { const r = document.querySelector('.board3d canvas').getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; });
-  await p.mouse.move(...cv); await p.mouse.wheel(0, 100);
+  await p.mouse.move(...cv); await p.mouse.wheel(0, -100);
   await p.waitForFunction(() => window.__pb().board3d.camera.handsOn() && window.__pb().board3d.camera.level() === 1, null, { timeout: 15000 }).catch(() => {}); await p.waitForTimeout(300);
-  check(await p.evaluate(() => window.__pb().board3d.camera.level() === 1), 'one step back from Strategic is the Tilted view');
+  check(await p.evaluate(() => window.__pb().board3d.camera.level() === 1), 'one step in from Strategic is the Tilted view');
   const corners = await p.evaluate(() => { const bd = window.__pb().board3d, r = document.querySelector('.board3d canvas').getBoundingClientRect();
-    return [[0, 0], [11, 0], [0, 15], [11, 15]].map(([c, w]) => bd.screenAt(c, w, 0)).every(([x, y]) => x >= r.left && x <= r.right && y >= r.top && y <= r.bottom); });
-  check(corners, 'the tilted view shows the whole board');
+    return [[0, 8], [11, 8], [0, 15], [11, 15]].map(([c, w]) => bd.screenAt(c, w, 0)).every(([x, y]) => x >= r.left && x <= r.right && y >= r.top && y <= r.bottom); });
+  check(corners, 'the tilted view shows your whole half');
   const far = await p.evaluate(() => { const bd = window.__pb().board3d; return bd.screenAt(5, 0, 0)[1] < bd.screenAt(5, 15, 0)[1] && Math.abs(bd.screenAt(0, 0, 0)[0] - bd.screenAt(11, 0, 0)[0]) < Math.abs(bd.screenAt(0, 15, 0)[0] - bd.screenAt(11, 15, 0)[0]); });
   check(far, 'tilted from your side: the enemy end is farther (narrower, higher)');
   const card = p.locator('#shop .ucard[aria-disabled="false"]:not([data-locked])').first(), ui = +(await card.getAttribute('data-i'));
@@ -120,7 +120,8 @@ const dock = require('./dock');
   check(Math.abs(await span() - s0) < 2, 'battle cam: back to the home view after');
   await p.keyboard.press('Escape'); await settle();
   await p.waitForTimeout(300); await p.mouse.move(...cv); await p.mouse.wheel(0, -100); await settle();
-  check(await p.evaluate(() => window.__pb().board3d.camera.level() === 2), 'one step in from Strategic is Angled');
+  await p.waitForTimeout(300); await p.mouse.wheel(0, -100); await settle();
+  check(await p.evaluate(() => window.__pb().board3d.camera.level() === 2), 'two steps in from Strategic is Angled');
   await p.keyboard.press('Escape'); await settle();
   check(await p.evaluate(() => window.__pb().board3d.camera.strategic()), 'Esc goes back to Strategic');
 

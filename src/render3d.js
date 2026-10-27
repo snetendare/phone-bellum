@@ -353,8 +353,13 @@ const Render3D = (THREE, el, view, opts = {}) => {
       const [wx, wz] = world(f, x, y);
       if (strong) scene_(() => disc(wx, wz, 4.5, color('#FFD65A'), 0.45, 1));
     };
-    spire(e.x, e.y, 2, lead < 0 ? '#F4F1E6' : Art.teamCol(lead, v.me), lead < 0 ? null : arms(lead), 1);
-    if (deploying) { const [wx, wz] = world(f, e.x, e.y); arc(wx, wz, Game.ELF_TOWER.range, color(ELF_COL), 0.3, 1, 0.012, 90); }
+    const lc = lead < 0 ? '#F4F1E6' : Art.teamCol(lead, v.me), [ex, ez] = world(f, e.x, e.y);
+    spire(e.x, e.y, 2, lc, lead < 0 ? null : arms(lead), 1);
+    // whose side the elves are on, at a glance: a ring in that side's colour (dashed white while level) and a label under it
+    arc(ex, ez, 2.7, color(lc), 0.95, 1, 0.16, lead < 0 ? 12 : 0);
+    const ls = viewMode === 'strategic' ? 3 : viewMode === 'tilted' ? 2.4 : 1.7;
+    icon('tag|' + (lead < 0 ? 'LEVEL' : lead === v.me ? 'ALLY' : 'ENEMY'), ex + camDown.x * (3.2 + ls * 0.3), 0.3, ez + camDown.z * (3.2 + ls * 0.3), ls, color(lc), 0.95);
+    if (deploying) arc(ex, ez, Game.ELF_TOWER.range, color(ELF_COL), 0.3, 1, 0.012, 90);
     for (const sd of [v.me, 1 - v.me]) {
       const own = Game.elfOwnOf(src, sd);
       if (!own || !Game.elfOwnShown(src, v.me, deploying, sd)) continue;
@@ -551,11 +556,12 @@ const Render3D = (THREE, el, view, opts = {}) => {
     const hpr = Math.max(0, b.hp / u.hp);
     let y = top + 0.45;
     const big = u.structure || u.building;
-    if (big || (u.hp >= 500 && hpr < 1)) {
+    if (big || hpr < 1) { // every unit once it's hurt (small ones get a thinner ring or bar)
+      const small = !big && u.hp < 500;
       if (viewMode === 'strategic') { // a ring around it, as on the 2D board (dark where the health is gone)
-        const rr = big ? 3.1 * (u.size > 1 ? 1.5 : 1) : r * 1.42, th = big ? 0.11 : 0.1;
+        const rr = big ? 3.1 * (u.size > 1 ? 1.5 : 1) : r * 1.42, th = big ? 0.11 : small ? 0.08 : 0.1;
         arc(wx, wz, rr, color('#0B0F11'), 0.6, 1, th, 0, 0, 0.065); arc(wx, wz, rr, team, 1, hpr, th);
-      } else { const w = big ? 4.2 : Math.max(1.6, r * 1.5); bar(wx, y, wz, w, big ? 0.42 : 0.3, hpr, team); y += 0.55; }
+      } else { const w = big ? 4.2 : small ? Math.max(1, r * 1.4) : Math.max(1.6, r * 1.5); bar(wx, y, wz, w, big ? 0.42 : small ? 0.2 : 0.3, hpr, team); y += small ? 0.4 : 0.55; }
     }
     if (u.building) { // how far the site is built, and the unit it is making
       const gold = color(css('--gold') || '#E6B84A');
@@ -818,7 +824,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
     camDown.setFromMatrixColumn(camera.matrixWorld, 1).negate(); camDown.y = 0;
     if (camDown.lengthSq() < 1e-6) camDown.set(0, 0, 1); camDown.normalize();
     const z = cam.zoom();
-    viewMode = z < -0.5 ? 'tilted' : z < 0.5 ? 'strategic' : z < 1.5 ? 'angled' : 'ground'; uiOff = viewMode === 'ground';
+    viewMode = z < 0.5 ? 'strategic' : z < 1.5 ? 'tilted' : z < 2.5 ? 'angled' : 'ground'; uiOff = viewMode === 'ground';
     paintFloor(v, dt);
     used.clear(); ns = 0;
     placeBodies(v, dt);
@@ -829,7 +835,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
     sprGeo.instanceCount = ns;
     for (const a of Object.values(sprAttr)) { a.clearUpdateRanges(); a.addUpdateRange(0, ns * a.itemSize); a.needsUpdate = true; }
     showNote(uiOff ? {} : v);
-    const near = Math.max(0, Math.min(1, cam.zoom() / 2)); // fog only at the ground view: the strategic, tilted and angled views see the whole board
+    const near = Math.max(0, Math.min(1, (cam.zoom() - 1) / 2)); // fog only at the ground view: the strategic, tilted and angled views see the whole board
     scene.fog.near = 400 - 310 * near; scene.fog.far = 600 - 380 * near;
     renderer.render(scene, camera);
   }

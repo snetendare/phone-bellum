@@ -29,7 +29,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
     await tapSq(3);
     let sheet = (await p.locator('#sheet').innerText()).replace(/\s+/g, ' ');
     assert.ok(/Awaken: Leafblade/.test(sheet) && /Awaken · 300 gold/.test(sheet), sheet.slice(0, 600));
-    assert.ok(/one squad at a time/.test(sheet));
+    assert.ok(/one squad at a time/.test(await p.locator('#sheet').textContent())); // in the row's details (shown when held)
     await p.click('[data-act="awaken"]'); await sleep(200);
     const st = await p.evaluate(([a, c]) => { const { m, me } = window.__pb(), sa = m.armies[me].find(s => s.id === a), sc = m.armies[me].find(s => s.id === c); return { a: sa.awaken, c: sc.awaken || 0, mech: Game.unitFor(m, me, sa.unit, sa).mech, gold: m.gold[me] }; }, [ids.a, ids.c]);
     console.log(board, 'after awaken:', JSON.stringify(st));
@@ -39,7 +39,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
     await p.click('#sheet #close'); await sleep(200);
     // the Brute's sheet: Berserkers is a Master skill
     await tapSq(7);
-    sheet = (await p.locator('#sheet').innerText()).replace(/\s+/g, ' ');
+    sheet = (await p.locator('#sheet').textContent()).replace(/\s+/g, ' '); // with the rows' details (shown when held)
     assert.ok(/Master: Berserkers/.test(sheet) && /all your squads/.test(sheet), sheet.slice(0, 600));
     await p.click('#sheet #close'); await sleep(200);
     await p.screenshot({ path: `awaken-${board}-deploy.png` });

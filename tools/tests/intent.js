@@ -114,12 +114,12 @@ console.log(`preview = real fight for ${compared} squads (${split} split; ${name
 {
   const m = Game.createMatch(units, null, 9, 'standard');
   m.round = 2; m.gold = [9000, 9000]; m.armies = [[], []]; m.chars = [null, null];
-  const lw = ix('Leaf Wizard'), ent = ix('Ent');
-  for (const i of [lw, ent]) m.unlocks[0][i] = 1;
+  const lw = ix('Leaf Wizard'), imps = ix('Ember Imps');
+  for (const i of [lw, imps]) m.unlocks[0][i] = 1;
   m.extraDeploys = [Game.CONFIG.maxExtraDeploys, 0];
-  const a = Game.place(m, 0, lw, 2, 11), b = Game.place(m, 0, lw, 4, 11), c = Game.place(m, 0, ent, 6, 11);
-  assert.ok(Game.awakenSlot(m, lw) >= 0 && Game.awakenSlot(m, ent) >= 0, 'both units have an Awaken skill');
-  Game.buySkill(m, 0, lw, 2); Game.buySkill(m, 0, ent, 2);
+  const a = Game.place(m, 0, lw, 2, 11), b = Game.place(m, 0, lw, 4, 11), c = Game.place(m, 0, imps, 6, 11);
+  assert.ok(Game.awakenSlot(m, lw) >= 0 && Game.awakenSlot(m, imps) >= 0, 'both units have an Awaken skill');
+  Game.buySkill(m, 0, lw, 2); Game.buySkill(m, 0, imps, 2);
   assert.ok(Game.canAwaken(m, 0, a.id) && Game.canAwaken(m, 0, c.id), 'either type, before any awakening');
   assert.ok(Game.awaken(m, 0, a.id));
   assert.strictEqual(Game.wokeUnit(m, 0), lw);

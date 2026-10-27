@@ -358,7 +358,7 @@ const Game = (() => {
     { id: 'yotyot', name: 'Yot-Yot', ability: 'Every fight, Ember Imps pop up on random free tiles on your side of the board (your zone, no man’s land and, once open, your flank tiles): 1 in round 1, 2 in round 2, and so on. From round 3 they are level 2, from round 6 level 3. They get the skills you bought for Ember Imps.' },
     { id: 'mubarak', name: 'Mubarak - Slime Lord', ability: 'Your slime units (Slime Wizards and Slimeshots) get every skill you buy for any slime unit, not just their own.' },
     { id: 'felix', name: 'Felix', ability: 'From round 3 on, you get 50 more gold every round, and 100 more from round 7 on.' },
-    { id: 'enzo', name: 'Enzo', ability: 'You can’t buy unit skills, but each unit type comes with one random skill, for free, picked at the start of the match and the same for all your squads of it all match (see it under the unit’s i button). The skill only works while you have 2 or more squads of that unit.' },
+    { id: 'enzo', name: 'Enzo', ability: 'You can’t buy unit skills, but each unit type comes with its first skill, for free, the same for all your squads of it all match (see it under the unit’s i button). The skill only works while you have 2 or more squads of that unit.' },
     { id: 'matteo', name: 'Matteo - the Gentleman', ability: 'Give one of your squads a stack of Charisma. When a squad with Charisma kills an enemy, it gains a stack and gives one to a squad of yours without any. At 5 stacks a squad is a Gentleman: the first enemy it would kill each fight joins your side for that fight instead, at half health.' },
   ];
   // ---------- the Standard pack ----------
@@ -979,13 +979,13 @@ const Game = (() => {
   const hasSkill = (m, side, ui, k) => isInnate(m, ui, k) || !!(m.tech && m.tech[side] && m.tech[side][ui] && m.tech[side][ui][k] > 0);
   // a skill bought this round is hidden from the opponent until the fight
   const skillVisible = (m, side, ui, k) => isInnate(m, ui, k) || (hasSkill(m, side, ui, k) && m.tech[side][ui][k] < m.round);
-  // Enzo: each of his unit types has one random non-built-in skill (slot index, or null if the unit has none), the same
-  // for all his squads of it. Drawn from the match seed and the unit, so both phones get the same one without sending it.
+  // Enzo: each of his unit types has its first upgrade: the first skill that isn't built in (slot index, or null if the
+  // unit has none), the same for all his squads of it, so both phones know it without sending it.
   // It only works while he has CHAR.enzoMin or more squads of that unit on the board (enzoActive).
   function enzoSkill(m, side, sq) {
     if (!sq || charOf(m, side) !== 'enzo' || !m.units[sq.unit]) return null;
-    const ks = E.SLOTS.filter(k => skillDef(m, sq.unit, k) && !isInnate(m, sq.unit, k));
-    return ks.length ? ks[Math.floor(rng(m.seed + side * 6151 + sq.unit * 7919 + 313)() * ks.length)] : null;
+    const k = E.SLOTS.find(j => skillDef(m, sq.unit, j) && !isInnate(m, sq.unit, j));
+    return k == null ? null : k;
   }
   const enzoActive = (m, side, ui) => charOf(m, side) === 'enzo' && m.armies[side].filter(s => s.unit === ui).length >= CHAR.enzoMin;
   // sq (optional): the squad, for a skill of its own (Enzo's)

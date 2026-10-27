@@ -556,7 +556,8 @@
         "pct": 30,
         "radius": 5
       },
-      "flat": true
+      "flat": true,
+      "master": true
     },
     {
       "id": "rangerScope",
@@ -2040,7 +2041,7 @@
       "bleedEvery": 2,
       "trait": {
         "name": "Apply bleed",
-        "text": "Every second knife it lands on the same target gives it a stack of bleed: it loses 2 health twice a second for 2 s. Each new stack starts the 2 s again and doubles the damage, up to 5 stacks (32 each time); at 5 stacks it also loses 2% of its max health a second. Bleed goes past armor."
+        "text": "Every second knife it lands on the same target gives it a stack of bleed: it loses 2 health twice a second for 2 s. Each new stack starts the 2 s again and doubles the damage, up to 5 stacks (32 each time); at 4 stacks it also loses 2% of its max health a second, and at 5 stacks 5%. Bleed goes past armor."
       },
       "skills": [
         "aeroblades",
