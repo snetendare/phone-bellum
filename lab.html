@@ -1903,6 +1903,7 @@ const Engine = (() => {
       for (const f of foes) if (f.alive && f.u.structure) { const d = dist(f, b); if (d < td) { td = d; tgt = f; } }
       if (!tgt) for (const f of foes) if (pickable(b, f)) { const d = dist(f, b); if (d < td) { td = d; tgt = f; } }
       if (!tgt) return;
+      b.intent = tgt;
       if (td > RAM_REACH) {
         const mv = Math.min(td - RAM_REACH * 0.5, spd(b) * (b.slowT > 0 ? 1 - b.slowMove / 100 : 1) * (cripple[b.side] > 0 ? 1 - towerDown.move / 100 : 1) * dt);
         b.hx = (tgt.x - b.x) / td; b.hy = (tgt.y - b.y) / td;
@@ -1940,6 +1941,7 @@ const Engine = (() => {
         }
         // once engaged it stays on its target until that dies or hides, like any unit
         const tgt = b.engaged ? (b.lock && pickable(b, b.lock) ? b.lock : (b.lock = near)) : null;
+        b.intent = tgt;
         let wx = mx, wy = my;
         if (tgt) { const d = dist(tgt, b) || 1; wx = (tgt.x - b.x) / d; wy = (tgt.y - b.y) / d; }
         // standing still it can set off any way; rolling, it swings round like a walking body
@@ -1957,7 +1959,7 @@ const Engine = (() => {
         }
       }
       b.rollV = Math.min(top, b.rollV + (top - start) / b.u.roll * dt);
-      if (b.rollPast > 0) { b.hx = b.rollDir[0]; b.hy = b.rollDir[1]; }
+      if (b.rollPast > 0) { b.hx = b.rollDir[0]; b.hy = b.rollDir[1]; if (b.lock && b.lock.alive) b.intent = b.lock; } // running through and past its target
       const mv = b.rollV * moveMul(b) * dt;
       b.x += b.hx * mv; b.y += b.hy * mv; b.moved += mv;
       let stop = false;
@@ -2182,9 +2184,15 @@ const Engine = (() => {
             if (b.huntT >= b.u.lone - 1e-9) b.hunt = false;
           }
         }
+        // b.intent: the enemy body it is walking to (its movement target), set below each tick; null while it marches
+        // ahead, holds its ground or doesn't walk. Not the same as b.lock, the enemy it attacks (see locked): a body can
+        // shoot one enemy while it walks to another. Kept through a stun, roots and a charge's run-through.
+        const was = b.intent;
+        b.intent = null;
         if (b.holdT > 0) { b.holdT -= dt; continue; } // holding its ground (it still shoots)
         const foes = sides[1 - b.side];
         if (b.trampleLeft > 0) {
+          b.intent = was && was.alive ? was : null;
           // running through after a charge: straight on, hitting each body it runs over once
           // a Bullhead charge runs at twice its speed, hits for bull.hit and knocks each body it hits back along its path
           const mv = Math.min(b.trampleLeft, spd(b) * (b.charging ? 2 : 1) * (b.slowT > 0 ? 1 - b.slowMove / 100 : 1) * (cripple[b.side] > 0 ? 1 - towerDown.move / 100 : 1) * dt);
@@ -2268,6 +2276,8 @@ const Engine = (() => {
         }
         if (g.aware2 && b.engaged && near) { const gl = goalOf(b, rg); if (gl) { near = gl; nd = gap(gl, b); } }
         if (b.avenge) { if (b.avenge.alive && !b.avenge.hidden) { near = b.avenge; nd = gap(near, b); } else b.avenge = null; } // a guard going for its attacker
+        // its movement target: whom it goes for once engaged (or a guard's attacker), or whom it stands at in reach
+        if (near && (b.engaged || b.avenge || nd <= (g.stopPct > 0 && g.stopPct < 1 && b.engaged ? stopAt(rg) : rg))) b.intent = near;
         if (near && nd > (g.stopPct > 0 && g.stopPct < 1 && b.engaged ? stopAt(rg) : rg)) {
           b.dashing = b.u.dash > 0 && b.engaged && nd <= b.u.dash; // dash: the last metres to its target in a flash
           const step = (b.dashing ? Math.max(DASH_SPEED, spd(b)) : spd(b)) * (b.slowT > 0 ? 1 - b.slowMove / 100 : 1) * (cripple[b.side] > 0 ? 1 - towerDown.move / 100 : 1) * dt;
@@ -2286,7 +2296,7 @@ const Engine = (() => {
               spotted = true;
               for (const f of foes) if (pickable(b, f) && (f.x - b.x) * mx + (f.y - b.y) * my > 0) { spotted = false; break; }
             }
-            if (spotted) b.engaged = true;
+            if (spotted) { b.engaged = true; b.intent = near; }
           }
           // where it wants to go: straight ahead, or at the nearest enemy
           let wx = mx, wy = my;
@@ -2740,7 +2750,7 @@ const Engine = (() => {
         v.convert = { side: v.side, squad: v.squad, xp: v.xp, dealt: v.dealt || 0 }; // what it earned for its old squad
         v.side = 1 - v.side; v.squad = CONVERT_SQUAD; v.xp = 0; v.dealt = 0; v.turning = false;
         v.windTarget = null; v.windT = 0; v.setUp = false; v.firing = -1; v.burstLeft = 0; v.trampleLeft = 0; v.trampled = null;
-        v.spinTarget = null; v.aims = null; v.lock = null; v.march = null; v.guide = null; v.goal = null; v.spreadTo = null; v.engaged = false; v.holdT = 0; v.avenge = null; v.delay = 0; v.band = null; v.hidden = false;
+        v.spinTarget = null; v.aims = null; v.lock = null; v.intent = null; v.march = null; v.guide = null; v.goal = null; v.spreadTo = null; v.engaged = false; v.holdT = 0; v.avenge = null; v.delay = 0; v.band = null; v.hidden = false;
         v.slowT = 0; v.slowMove = 0; v.slowAtk = 0; v.shrinkT = 0; v.shrinkM = 0; v.kids = null; v.stunT = 0; v.frenzy = 0; v.flow = 0; v.knives = null; v.atkN = 0; v.forgeT = 0; v.spearReady = false;
         v.burn = null; v.kills = 0; v.flurryLeft = 0; v.flurryTgt = null; v.rootTgt = null; v.rootedBy = null; v.hunt = null; v.bullN = 0; v.charging = false; v.inside = null; v.missileT = 0; v.roarSpd = 0; v.roarAtk = 0;
         sides[v.side].push(v); stats[v.side].totalHp += v.hp;

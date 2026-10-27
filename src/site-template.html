@@ -336,6 +336,16 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
 .unx button { position: absolute; pointer-events: auto; width: 16px; height: 16px; margin: -8px 0 0 -8px; padding: 0; border-radius: 50%; border: 1.5px solid var(--you); background: var(--bg); color: var(--ink); font: 700 9px/1 var(--font-body, sans-serif); display: grid; place-items: center; cursor: pointer; box-shadow: 0 1px 3px rgba(0,0,0,0.5); }
 .unx button::before { content: ''; position: absolute; inset: -5px -5px -3px -3px; } /* a bigger target for a finger, reaching out from the tile more than into it */
 .marks .range { fill: none; stroke-width: 2; stroke-linecap: round; stroke-dasharray: 0.1 6; opacity: 0.9; }
+/* intent: where a squad means to go (arrows to the enemy squads it heads for, dashed straight ahead with nothing in sight yet), whom it attacks in a fight (small rings) */
+.marks .intent, .marks .intent-under { fill: none; stroke-linecap: round; }
+.marks .intent { stroke-width: 2.6; }
+.marks .intent.ahead { stroke-dasharray: 5 5; opacity: 0.85; }
+.marks .intent-under { stroke: rgba(8, 12, 14, 0.55); stroke-width: 5.5; }
+.marks .intent-head { stroke: rgba(8, 12, 14, 0.55); stroke-width: 1; }
+.marks .intent-ring { fill: none; stroke-width: 1.8; stroke-dasharray: 3 3; opacity: 0.9; }
+.marks .intent-hit { fill: none; stroke-width: 1.6; opacity: 0.9; }
+.marks .intent-n circle { fill: rgba(13, 19, 21, 0.85); stroke-width: 1.2; }
+.marks .intent-n text { fill: var(--ink); font: 700 10px/1 var(--font-body, sans-serif); text-anchor: middle; }
 @media (prefers-reduced-motion: reduce) { .coach, .coach-ring, .tut-glow, .marks .tut-tile { animation: none; } .tut-glow { box-shadow: inset 0 0 0 2px var(--gold); } }
 </style>
 <script>
@@ -2162,7 +2172,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
       const need = (k) => Game.skillNeeds(m, i, k).map(j => `"${u.skillDefs[j].name}"`).join(' and ');
       const either = (k) => Game.skillOr(m, i, k).map(j => `"${u.skillDefs[j].name}"`).join(' or ');
       const anyNeed = (k) => Game.skillNeedsAny(m, i, k).map(j => `"${u.skillDefs[j].name}"`).join(' or ');
-      const sk = (u.skillDefs || []).map((d, k) => d ? `skill ${k + 1} "${d.name}" (${Game.isInnate(m, i, k) ? 'BUILT IN: always on for both players, free' : `${Game.isAwaken(m, i, k) ? 'AWAKEN SKILL: bought for ONE squad at a time with "awaken": [squad id], ' : Game.isMaster(m, i, k) ? 'MASTER SKILL: for all your squads of it, ' : ''}${Game.skillCost(m, i, k, 1)} gold${Game.hasSkill(m, 1, i, k) ? ', YOU OWN IT' : need(k) ? `, needs ${need(k)} first` : anyNeed(k) ? `, needs ${anyNeed(k)} first` : ''}${either(k) ? `, EITHER OR: can't be owned together with ${either(k)}` : ''}`}): ${Engine.describeSkill(d)}` : null).filter(Boolean);
+      const sk = (u.skillDefs || []).map((d, k) => d ? `skill ${k + 1} "${d.name}" (${Game.isInnate(m, i, k) ? 'BUILT IN: always on for both players, free' : `${Game.isAwaken(m, i, k) ? `AWAKEN SKILL: bought for ONE squad at a time with "awaken": [squad id], only ONE unit type a match${Game.wokeUnit(m, 1) != null ? ` (yours: ${units[Game.wokeUnit(m, 1)].name})` : ''}, ` : Game.isMaster(m, i, k) ? 'MASTER SKILL: for all your squads of it, ' : ''}${Game.skillCost(m, i, k, 1)} gold${Game.hasSkill(m, 1, i, k) ? ', YOU OWN IT' : need(k) ? `, needs ${need(k)} first` : anyNeed(k) ? `, needs ${anyNeed(k)} first` : ''}${either(k) ? `, EITHER OR: can't be owned together with ${either(k)}` : ''}`}): ${Engine.describeSkill(d)}` : null).filter(Boolean);
       const lock = Game.isUnlocked(m, 1, i) ? (Game.unlockCost(m, i, 1) ? ' [unlocked]' : '') : ` [LOCKED: unlock once for ${Game.unlockCost(m, i, 1)} gold before you can place it]`;
       return `- ${u.name}${lock}: price ${Game.shopCost(m, 1, i)}${Game.startLevel(m, 1) ? ` (squads start at level ${Game.startLevel(m, 1) + 1})` : ''}, ${u.bodies} ${u.bodies === 1 ? 'body' : 'bodies'} x ${n1(u.hp, 0)} hp each, hit ${n1(u.hit)} x ${n1(u.aps, 2)}/s, range ${u.range} m, speed ${u.speed} m/s${t.length ? ', ' + t.join(', ') : ''}. Level-up cost ${Game.levelCost(u)}.${sk.length ? '\n    ' + sk.join('\n    ') : ''}`;
     };
@@ -2646,7 +2656,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   }
 
   function enterDeploy(ms) {
-    phase = 'deploy'; bt = null; battlePre = null; fx = []; selected = null; rangeOf = null; timeUp = false; resultShownAt = 0; elfPlacing = false; wallPlacing = false; buildPlacing = null;
+    phase = 'deploy'; bt = null; watchSq = null; battlePre = null; fx = []; selected = null; rangeOf = null; timeUp = false; resultShownAt = 0; elfPlacing = false; wallPlacing = false; buildPlacing = null;
     ready = [false, false];
     heldMs = ms > 0 && mode !== 'guest' && picksPending() ? ms : 0;
     deadline = ms > 0 && !heldMs ? now() + ms : 0;
@@ -2711,7 +2721,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   }
 
   function playBattle(pre) {
-    phase = 'battle'; selected = null; deadline = 0; timeUp = false;
+    phase = 'battle'; selected = null; deadline = 0; timeUp = false; watchSq = null;
     battlePre = withUnits(pre);
     bt = Game.startBattle(battlePre);
     fx = []; acc = 0; lastTs = 0;
@@ -2859,6 +2869,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   // a tap on a tile (2D or 3D board). It clears the range ring; tapping a squad shows its range and its sheet (a squad
   // of yours from this round is taken back with the X at its top right corner, see unplaceMarks)
   function boardTap(t) {
+    if (phase === 'battle') { fightTap(t); return; }
     const had = rangeOf;
     rangeOf = null;
     tapTile(t, had);
@@ -3021,6 +3032,146 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     const en = m.armies[foe()].find(s => { const p = Game.seenAt(m, s); return !Game.hiddenFromFoe(m, s) && p.col === t.col && p.row === t.row && s.round < m.round; });
     return en ? { x: w.x, y: w.y, r: reachOf(units[en.unit], true), side: foe() } : null;
   }
+  // ---------- intent: where a squad means to go (its movement target, not whom it attacks) ----------
+  // While deploying: Game.intentPreview, for the squad last tapped (rangeOf, yours), the one you drag to another tile, or
+  // a unit picked in the shop over a tile it can go on. Worked out once per board state and kept (intentCache); a
+  // tapped squad's at once (its sheet says it too), a tile under the finger or mouse after a short pause.
+  // In a fight: the squad tapped (watchSq), from what the fight's bodies are walking to right now (b.intent; b.lock,
+  // whom they attack, shows apart as small rings).
+  const intentCache = new Map();
+  let intentWait = null, watchSq = null;
+  // what the arrows are for now: { q (for Game.intentPreview), col, row (where the squad stands, or would) } or null
+  function intentAsk() {
+    if (phase !== 'deploy' || !m || choosingPack() || choosingTower() || placingTower()) return null;
+    if (drag && drag.id != null && drag.moved && !drag.toTray) {
+      const sq = m.armies[me].find(s => s.id === drag.id);
+      if (sq && !Game.isRider(sq) && Game.canPlaceAt(m, me, drag.over.col, drag.over.row, sq.unit)) return { q: { id: sq.id, col: drag.over.col, row: drag.over.row }, unit: sq.unit, col: drag.over.col, row: drag.over.row };
+      return null;
+    }
+    const t = hoverTile;
+    if (selected !== null && t && editable() && Game.canPlaceAt(m, me, t.col, t.row, selected) && Game.spotFree(m, me, t.col, t.row, selected)) return { q: { unit: selected, col: t.col, row: t.row }, unit: selected, col: t.col, row: t.row };
+    const sq = rangeOf && rangeOf.side === me && m.armies[me].find(s => s.id === rangeOf.id);
+    return sq && !Game.isRider(sq) ? { q: { id: sq.id }, unit: sq.unit, col: sq.col, row: sq.row } : null;
+  }
+  // the board state the preview reads (everything a fight is made from); the key changes whenever any of it does
+  const intentKey = (q) => JSON.stringify([q, me, m.round, m.armies, m.tech, m.towers, m.towerSkill, m.towerSkill2, m.bwalls, m.chars, m.buff, m.elfOwn, m.bribe, m.altar, m.mageGen, m.tround, m.buildings, m.dev]);
+  function intentRun(q, key) {
+    let r = null;
+    try { r = Game.intentPreview(m, me, q); } catch (e) { console.warn('No Mans Land: intent preview failed', e); }
+    intentCache.set(key, r);
+    if (intentCache.size > 60) intentCache.delete(intentCache.keys().next().value);
+    return r;
+  }
+  // the preview for q: the result, or undefined while it is still to come (now: work it out at once)
+  function intentFor(q, now) {
+    const key = intentKey(q);
+    if (intentCache.has(key)) return intentCache.get(key);
+    if (now) return intentRun(q, key);
+    if (!intentWait || intentWait.key !== key) {
+      if (intentWait) clearTimeout(intentWait.t);
+      intentWait = { key, t: setTimeout(() => {
+        intentWait = null;
+        if (m && phase === 'deploy' && intentKey(q) === key) { intentRun(q, key); boardMarks(); }
+      }, q.id != null && q.col == null ? 0 : 120) };
+    }
+    return undefined;
+  }
+  // its first pick in words, for its sheet: "Brute (8), Fire Mage (4)"
+  function intentWords(r) {
+    if (!r) return '';
+    if (!r.moves) return 'Holds its ground: it doesn’t walk.';
+    const name = (g) => g.unit != null ? units[g.unit].name : g.name || 'Enemy';
+    const parts = r.groups.map(g => `${esc(name(g))}${r.total > 1 ? ` (${g.n})` : ''}`);
+    if (r.marching) parts.push(`${r.total > 1 ? `${r.marching} ` : ''}straight ahead, nothing in sight yet`);
+    return parts.length ? `Heads for ${parts.join(', ')} first.` : '';
+  }
+  // the squad tapped in a fight: what its bodies walk to now, by enemy squad (live), and whom they attack
+  function fightIntent(w) {
+    const mine = bt.bodies.filter(b => b.alive && b.side === w.side && b.squad === w.id && !b.boarded && !(b.hidden && b.side !== me));
+    if (!mine.length) return null;
+    let x = 0, y = 0;
+    for (const b of mine) { x += b.x; y += b.y; }
+    const by = new Map(), hits = new Set();
+    let marching = 0;
+    for (const b of mine) {
+      if (b.lock && b.lock.alive && !(b.lock.hidden && b.lock.side !== me)) hits.add(b.lock);
+      const f = b.intent;
+      if (!f || !f.alive || (f.hidden && f.side !== me)) { if (!(b.u.idle || b.inside)) marching++; continue; }
+      const k = f.side + ':' + f.squad;
+      if (!by.has(k)) by.set(k, { side: f.side, squad: f.squad, n: 0, got: new Set() });
+      const e = by.get(k); e.n++; e.got.add(f);
+    }
+    const groups = [...by.values()].sort((a, b) => b.n - a.n).slice(0, Game.INTENT.groups).map(e => {
+      let gx = 0, gy = 0;
+      for (const f of e.got) { gx += f.x; gy += f.y; }
+      return { side: e.side, n: e.n, x: gx / e.got.size, y: gy / e.got.size };
+    });
+    const b0 = mine[0], fwd = b0.side === 0 ? 1 : -1;
+    return { from: { x: x / mine.length, y: y / mine.length }, total: mine.length, groups, marching, march: b0.march || [0, fwd], hits: [...hits].slice(0, 6) };
+  }
+  // SVG for one arrow from a to b (screen points), bent a little (bend: -1..1) so two branches stay apart, with an
+  // optional count at its middle
+  function arrowSvg(a, b, col, opt = {}) {
+    const dx = b[0] - a[0], dy = b[1] - a[1], len = Math.hypot(dx, dy);
+    if (len < 18) return '';
+    const ux = dx / len, uy = dy / len, s0 = Math.min(10, len * 0.15), s1 = opt.short == null ? 14 : opt.short;
+    const p0 = [a[0] + ux * s0, a[1] + uy * s0], p1 = [b[0] - ux * s1, b[1] - uy * s1];
+    const bend = (opt.bend || 0) * Math.min(40, len * 0.22), c = [(p0[0] + p1[0]) / 2 - uy * bend, (p0[1] + p1[1]) / 2 + ux * bend];
+    const tx = p1[0] - c[0], ty = p1[1] - c[1], tl = Math.hypot(tx, ty) || 1, hx = tx / tl, hy = ty / tl, hw = 6.5, hl = 11;
+    const head = [[p1[0] + hx * 2, p1[1] + hy * 2], [p1[0] - hx * hl - hy * hw, p1[1] - hy * hl + hx * hw], [p1[0] - hx * hl + hy * hw, p1[1] - hy * hl - hx * hw]];
+    const f = (p) => p[0].toFixed(1) + ',' + p[1].toFixed(1);
+    const d = `M${f(p0)} Q${f(c)} ${f([p1[0] - hx * 6, p1[1] - hy * 6])}`;
+    let html = `<path class="intent-under" d="${d}"/><path class="intent${opt.dash ? ' ahead' : ''}" style="stroke:${col}" d="${d}"/><polygon class="intent-head" style="fill:${col}" points="${head.map(f).join(' ')}"/>`;
+    if (opt.count) { const m2 = [(p0[0] + 2 * c[0] + p1[0]) / 4, (p0[1] + 2 * c[1] + p1[1]) / 4]; html += `<g class="intent-n"><circle cx="${m2[0].toFixed(1)}" cy="${m2[1].toFixed(1)}" r="8.5" style="stroke:${col}"/><text x="${m2[0].toFixed(1)}" y="${(m2[1] + 3.5).toFixed(1)}">${opt.count}</text></g>`; }
+    return html;
+  }
+  // the arrows (deploying or in a fight): from where the squad is to each enemy squad it goes for (two at most), a
+  // dashed one straight ahead for bodies with nothing in sight yet, and in a fight small rings on whom it attacks
+  function intentMarks(at) {
+    let it = null, from = null, march = null;
+    if (phase === 'battle' && bt && watchSq) {
+      it = fightIntent(watchSq);
+      if (!it) { watchSq = null; return ''; }
+      from = it.from; march = it.march;
+    } else if (phase === 'deploy') {
+      const ask = intentAsk();
+      if (!ask) return '';
+      const r = intentFor(ask.q, false);
+      if (!r || !r.moves) return '';
+      const n = Game.footprint(m, ask.unit);
+      from = Game.tileToWorld(ask.col + (n - 1) / 2, ask.row + (n - 1) / 2);
+      march = Game.isFlank(me, ask.col, ask.row) ? [from.x < 0 ? 1 : -1, 0] : [0, me === 0 ? 1 : -1];
+      it = r;
+    }
+    if (!it) return '';
+    const col = teamCol(watchSq && phase === 'battle' ? watchSq.side : me), split = it.groups.length + (it.marching ? 1 : 0) > 1;
+    const a = at(from.x, from.y);
+    let html = '';
+    it.groups.forEach((g, k) => {
+      const b = at(g.x, g.y), fc = teamCol(g.side), e = at(g.x + Game.TILE / 2, g.y), r = Math.max(11, Math.hypot(e[0] - b[0], e[1] - b[1]) * 0.85); // a ring round the squad it heads for
+      html += `<circle class="intent-ring" cx="${b[0].toFixed(1)}" cy="${b[1].toFixed(1)}" r="${r.toFixed(1)}" style="stroke:${fc}"/>`;
+      html += arrowSvg(a, b, col, { bend: it.groups.length > 1 ? (k ? -0.6 : 0.6) : 0.15, count: split && it.total > 1 ? g.n : 0, short: r + 2 });
+    });
+    if (it.marching) {
+      const T = Game.TILE * 1.6, b = at(from.x + march[0] * T, from.y + march[1] * T);
+      html += arrowSvg(a, b, col, { dash: true, short: 0, count: split && it.total > 1 ? it.marching : 0 });
+    }
+    if (it.hits) for (const h of it.hits) { const p = at(h.x, h.y); html += `<circle class="intent-hit" cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="6" style="stroke:${col}"/>`; }
+    return html;
+  }
+  // a tap in a fight: the squad of the body nearest the tap shows where it is heading (a tap on it again, or away, hides it)
+  function fightTap(t) {
+    if (!t || !bt || !m) return;
+    const w = Game.tileToWorld(t.col, t.row), x = t.fx >= 0 ? w.x + (t.fx - 0.5) * Game.TILE : w.x, y = t.fy >= 0 ? w.y - (t.fy - 0.5) * Game.TILE : w.y;
+    let best = null, bd = Game.TILE * 0.9;
+    for (const b of bt.bodies) {
+      if (!b.alive || b.squad < 0 || b.u.structure || b.u.idle || b.inside || (b.hidden && b.side !== me)) continue;
+      const d = Math.hypot(b.x - x, b.y - y);
+      if (d < bd) { bd = d; best = b; }
+    }
+    watchSq = !best || (watchSq && watchSq.side === best.side && watchSq.id === best.squad) ? null : { side: best.side, id: best.squad };
+    boardMarks();
+  }
   // board metres -> a point in #wrap
   function wrapMap() {
     const w = $('wrap').getBoundingClientRect(), T = Game.TILE, C = Game.COLS, R = Game.ROWS;
@@ -3038,6 +3189,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     const h = hoverRange(), tiles = mode === 'tutorial' ? tutTiles() : [], ring = mode === 'tutorial' ? tutTarget() : null;
     const cinematic = board3d && board3d.camera.level() >= 3; // the ground view shows no markers
     let html = '';
+    if (!cinematic && m && (phase === 'deploy' || phase === 'battle')) html += intentMarks(wrapMap());
     if ((h || tiles.length || ring) && !cinematic) {
       const at = wrapMap(), pt = (x, y) => at(x, y).map(v => v.toFixed(1)).join(',');
       for (const t of tiles) {
@@ -3326,7 +3478,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       const anyOf = Game.skillNeedsAny(m, i, k).map(j => defs[j].name), label = wake ? 'Awaken' : Game.isMaster(m, i, k) ? 'Master' : '';
       return `<div style="display:grid;gap:4px;border-top:1px solid var(--line);padding-top:8px">
         <div class="bar"><b style="font-family:var(--font-display)">${label ? `<span style="color:var(--gold)">${label}:</span> ` : ''}${esc(d.name)}</b><span>${act}</span></div>
-        <span class="hint">${esc(Engine.describeSkill(d))}${or.length ? ` <b style="color:#A493DE">Either or:</b> you can have this or ${esc(or.join(' or '))}, not both.` : ''}${anyOf.length ? ` <b style="color:var(--gold)">Needs</b> ${esc(anyOf.join(' or '))} first.` : ''}${wake ? ' Bought for one squad at a time, on its own sheet.' : label ? ' For all your squads of this unit.' : ''}${Game.isFlat(m, i, k) ? ' Always this price.' : ''}</span></div>`;
+        <span class="hint">${esc(Engine.describeSkill(d))}${or.length ? ` <b style="color:#A493DE">Either or:</b> you can have this or ${esc(or.join(' or '))}, not both.` : ''}${anyOf.length ? ` <b style="color:var(--gold)">Needs</b> ${esc(anyOf.join(' or '))} first.` : ''}${wake ? ' Bought for one squad at a time, on its own sheet. You can awaken only one unit type a match.' : label ? ' For all your squads of this unit.' : ''}${Game.isFlat(m, i, k) ? ' Always this price.' : ''}</span></div>`;
     });
     return `<div style="display:grid;gap:8px"><h4 style="margin:0;font-size:12px;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted)">Skills${enzo ? ` · Enzo: one random skill per unit, free with ${Game.CHAR.enzoMin}+ squads of it` : mine ? ' · for all your squads of this unit' : ''}</h4>${rows.join('')}</div>`;
   }
@@ -3335,10 +3487,11 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     const chip = (txt, col) => `<span class="chip" style="color:${col};border:1px solid currentColor;border-radius:99px;padding:1px 8px;font-size:12px">${txt}</span>`;
     const mine = side === undefined || side === me, cost = Game.skillCost(m, i, k);
     if (!mine) return sq && (Game.seenAwake(m, sq) || (phase !== 'deploy' && sq.awaken > 0)) ? chip('Awakened', 'var(--foe)') : `<span class="hint">${sq ? 'Not awakened' : 'Per squad'}</span>`;
-    if (!sq) { const n = m.armies[me].filter(q => q.unit === i && q.awaken > 0).length; return `<span class="hint">${n ? `${n} awakened · ` : ''}${cost} gold a squad</span>`; }
+    const woke = Game.wokeUnit(m, me), other = woke != null && woke !== i; // one unit type a match
+    if (!sq) { const n = m.armies[me].filter(q => q.unit === i && q.awaken > 0).length; return `<span class="hint">${other ? `You awakened ${esc(units[woke].name)}` : `${n ? `${n} awakened · ` : ''}${cost} gold a squad`}</span>`; }
     if (sq.awaken > 0) return chip('Awakened', 'var(--gold)') + (phase === 'deploy' && editable() && sq.awaken === m.round ? ` <button class="btn small" data-act="unawaken">Undo</button>` : '');
     if (phase !== 'deploy') return `<span class="hint">${cost} gold</span>`;
-    const why = { enzo: 'Not with Enzo', needs: `Needs ${Game.skillNeedsMissing(m, me, i, k).map(j => units[i].skillDefs[j].name).join(' or ')}`, or: 'Not with your skills', gold: `Need ${cost} gold` }[Game.awakenBlock(m, me, sq)] || '';
+    const why = { enzo: 'Not with Enzo', type: other ? `Only ${esc(units[woke].name)} this match` : '', needs: `Needs ${Game.skillNeedsMissing(m, me, i, k).map(j => units[i].skillDefs[j].name).join(' or ')}`, or: 'Not with your skills', gold: `Need ${cost} gold` }[Game.awakenBlock(m, me, sq)] || '';
     return why || !editable() ? `<button class="btn small" disabled>${why || `Awaken · ${cost} gold`}</button>` : `<button class="btn small primary" data-act="awaken">Awaken · ${cost} gold</button>`;
   }
 
@@ -3708,6 +3861,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       <p class="role" style="margin:0">${ROLES[u.name] && !customSet ? ROLES[u.name] : customSet ? `From a Counter Lab roster · ${Game.unitCostOf(base)} gold` : ''}</p>
       ${[u.trait, u.trait2].filter(x => x && x.name).map(x => `<p style="margin:0"><b style="color:var(--gold)">Trait: ${esc(x.name)}</b>${x.text ? ` · ${esc(x.text)}` : ''}</p>`).join('')}
       ${lvl}
+      ${sq && m && side === me && phase === 'deploy' && !Game.isRider(sq) && !units[i].building ? (() => { const w = intentWords(intentFor({ id: sq.id }, true)); return w ? `<p class="hint" style="margin:0"><b style="color:var(--you)">Intent:</b> ${w} From what you can see now; the arrow on the board shows where it means to go, not how the fight ends.</p>` : ''; })() : ''}
       ${sq && m && !compact ? (() => { const q = side === me ? sq : Game.seenAt(m, sq); return shroomBlock(q.col, q.row); })() : ''}
       ${tr.length ? `<div class="traits">${tr.map(x => `<span>${x}</span>`).join('')}</div>` : ''}
       ${skillBlock(i, side, sq)}
@@ -4137,6 +4291,9 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (!m.moved) m.moved = [null, null];
     m.moved[1] = null;
     for (const q of m.armies[1]) if (q.movedRound === m.round && !Game.freeMover(m, 1, q)) { if (m.moved[1] == null) m.moved[1] = q.id; else { delete q.from; delete q.movedRound; } }
+    // one unit type a match: this round's awakenings of any other type than the one they may awaken don't count
+    const woke = Game.wokeUnit(m, 1);
+    for (const q of m.armies[1]) if (q.awaken === m.round && woke != null && q.unit !== woke) delete q.awaken;
     m.gold[1] = Math.max(0, +d.gold || 0);
     m.extraDeploys[1] = Math.max(0, Math.min(Game.CONFIG.maxExtraDeploys, d.extra | 0));
     m.nextId[1] = Math.max(m.nextId[1], d.nextId | 0);
