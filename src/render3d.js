@@ -353,8 +353,13 @@ const Render3D = (THREE, el, view, opts = {}) => {
       const [wx, wz] = world(f, x, y);
       if (strong) scene_(() => disc(wx, wz, 4.5, color('#FFD65A'), 0.45, 1));
     };
-    spire(e.x, e.y, 2, lead < 0 ? '#F4F1E6' : Art.teamCol(lead, v.me), lead < 0 ? null : arms(lead), 1);
-    if (deploying) { const [wx, wz] = world(f, e.x, e.y); arc(wx, wz, Game.ELF_TOWER.range, color(ELF_COL), 0.3, 1, 0.012, 90); }
+    const lc = lead < 0 ? '#F4F1E6' : Art.teamCol(lead, v.me), [ex, ez] = world(f, e.x, e.y);
+    spire(e.x, e.y, 2, lc, lead < 0 ? null : arms(lead), 1);
+    // whose side the elves are on, at a glance: a ring in that side's colour (dashed white while level) and a label under it
+    arc(ex, ez, 2.7, color(lc), 0.95, 1, 0.16, lead < 0 ? 12 : 0);
+    const ls = viewMode === 'strategic' ? 3 : viewMode === 'tilted' ? 2.4 : 1.7;
+    icon('tag|' + (lead < 0 ? 'LEVEL' : lead === v.me ? 'ALLY' : 'ENEMY'), ex + camDown.x * (3.2 + ls * 0.3), 0.3, ez + camDown.z * (3.2 + ls * 0.3), ls, color(lc), 0.95);
+    if (deploying) arc(ex, ez, Game.ELF_TOWER.range, color(ELF_COL), 0.3, 1, 0.012, 90);
     for (const sd of [v.me, 1 - v.me]) {
       const own = Game.elfOwnOf(src, sd);
       if (!own || !Game.elfOwnShown(src, v.me, deploying, sd)) continue;

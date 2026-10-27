@@ -606,8 +606,15 @@ const Render2D = (cv, view) => {
       ctx.globalAlpha = 1;
     }
     // the flag on the roof: the coat of arms of whoever is ahead in the bribe-off, edged in their colour; plain white while it's level
-    const lead = bribeLeadShown(v);
-    drawSpire(x, y, tilePx() * 1.25, lead < 0 ? '#F4F1E6' : teamCol(lead), Game.elfPowered(v), lead < 0 ? null : armsShown(v, lead));
+    const lead = bribeLeadShown(v), lc = lead < 0 ? '#F4F1E6' : teamCol(lead), t = tilePx();
+    // whose side the elves are on, at a glance: a ring in that side's colour (dashed white while level) and a label under it
+    ctx.strokeStyle = lc; ctx.lineWidth = Math.max(2, t * 0.07); ctx.globalAlpha = 0.95; if (lead < 0) ctx.setLineDash([4, 3]);
+    ctx.beginPath(); ctx.ellipse(x, y + t * 0.3, t * 0.55, t * 0.22, 0, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1;
+    drawSpire(x, y, t * 1.25, lc, Game.elfPowered(v), lead < 0 ? null : armsShown(v, lead));
+    ctx.font = `600 ${Math.max(8, Math.round(t * 0.26))}px "IBM Plex Mono", monospace`; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+    ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(8,12,14,0.9)'; ctx.fillStyle = lc;
+    const lab = lead < 0 ? 'LEVEL' : lead === me ? 'ALLY' : 'ENEMY';
+    ctx.strokeText(lab, x, y + t * 0.56); ctx.fillText(lab, x, y + t * 0.56);
     for (const sd of [me, foe()]) {
       const own = Game.elfOwnOf(v, sd);
       if (!own || !elfOwnShown(v, sd)) continue;
@@ -638,8 +645,8 @@ const Render2D = (cv, view) => {
     ctx.strokeStyle = '#3F5A35'; ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(x, py); ctx.lineTo(x, py - s * 0.28); ctx.stroke();
     if (arms) { Art.armsFlag(ctx, arms, x, py - s * 0.28, Math.max(10, s * 0.3), flagCol); return; }
-    ctx.fillStyle = flagCol;
-    ctx.beginPath(); ctx.moveTo(x, py - s * 0.28); ctx.lineTo(x + s * 0.2, py - s * 0.23); ctx.lineTo(x, py - s * 0.18); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = flagCol; ctx.strokeStyle = 'rgba(8,12,14,0.8)'; // a big pennant: whose side the elves are on
+    ctx.beginPath(); ctx.moveTo(x, py - s * 0.28); ctx.lineTo(x + s * 0.32, py - s * 0.2); ctx.lineTo(x, py - s * 0.12); ctx.closePath(); ctx.fill(); ctx.stroke();
   }
 
   // a building (the Mechites' Factory) at (x, y), s = tile size in px: a brick workshop with a sawtooth roof, a chimney

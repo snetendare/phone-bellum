@@ -399,8 +399,8 @@ const Models3D = (THREE) => {
       P(cyl(0.7, 1.0, 5.2, 6), '#CFC6A8', [0, 2.6, 0]),
       P(cone(1.2, 2.2, 6), 'tint', [0, 6.3, 0]),
       P(box(0.35, 0.6, 0.1), '#FFE27A', [0, 3.8, -0.75]),
-      P(cyl(0.04, 0.04, 1.6, 4), WOOD, [0, 8.0, 0]),
-      P(box(0.05, 0.5, 0.9), 'team', [0, 8.5, 0.45])],
+      P(cyl(0.05, 0.05, 2.4, 4), WOOD, [0, 8.4, 0]),
+      P(box(0.06, 0.9, 1.6), 'team', [0, 9.1, 0.8])], // a big flag: whose side the elves are on
   };
 
   // the tower types (Game.TOWER_TYPES and the outpost): the walls take the type's colour, as on the 2D board

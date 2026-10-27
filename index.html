@@ -283,6 +283,38 @@ html.pc .panel > .bar:last-child { margin: -6px -12px -12px; padding: 6px 12px 1
 .pick .opt .sub { font-size: 11px; line-height: 1.3; color: var(--muted); overflow-wrap: anywhere; }
 .pick .opt .who { font-size: 12px; color: var(--gold); font-weight: 600; }
 .btn.either { background: #A493DE; border-color: #A493DE; color: var(--bg); } /* a choice that replaces another (one mage general at a time) */
+/* an upgrade (unit skill, tower skill, general, building skill...): its name and button on one line, a one-line summary
+   under it; press and hold the row (or Enter on it) for the whole text and details (upRow) */
+.up { display: grid; gap: 1px; border-top: 1px solid var(--line); padding: 6px 4px 2px; margin: 0 -4px; border-radius: 6px; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; transition: background 0.15s; }
+.up-h { display: flex; align-items: center; gap: 8px; min-height: 30px; }
+.up-h > b { flex: 1; min-width: 0; font: 600 14px/1.2 var(--font-display); }
+.up-h > b .lab { color: var(--gold); }
+.up-h > .up-a { flex: none; display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.up-h .btn.small { padding: 5px 10px; font-size: 12.5px; }
+.up-s { font-size: 12px; line-height: 1.35; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.up-more { display: none; font-size: 12px; line-height: 1.35; color: var(--ink); }
+.up.open .up-s { white-space: normal; }
+.up.open .up-more { display: block; }
+.up.held { background: color-mix(in srgb, var(--ink) 8%, transparent); }
+.up:focus-visible { outline: 2px solid var(--you); outline-offset: -2px; }
+.up-k { font-size: 11px; color: var(--muted); font-weight: 400; letter-spacing: 0; text-transform: none; }
+/* either-or upgrades: boxed together with an OR between them (owning one rules out the others) */
+/* a fight: the card of the body tapped (inspectCard), live while it fights */
+.bcard { position: absolute; top: 8px; left: 8px; z-index: 3; width: min(250px, calc(100% - 16px)); padding: 8px 10px; border: 1px solid var(--line); border-left: 3px solid var(--c); border-radius: 8px;
+  background: rgba(13, 19, 21, 0.92); color: var(--ink); font-size: 12px; line-height: 1.35; display: grid; gap: 5px; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45); }
+.bcard .bh { display: flex; align-items: center; gap: 6px; }
+.bcard .bh b { flex: 1; min-width: 0; font: 600 14px var(--font-display); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bcard .bx { width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--line); background: none; color: var(--muted); font-size: 13px; line-height: 1; padding: 0; }
+.bcard .hpb { height: 6px; border-radius: 3px; background: color-mix(in srgb, var(--c) 18%, var(--bg)); overflow: hidden; }
+.bcard .hpb i { display: block; height: 100%; background: var(--c); }
+.bcard .bs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px 8px; font-family: var(--font-data); }
+.bcard .bs span { color: var(--muted); font-family: var(--font-body); font-size: 10.5px; display: block; }
+.bcard .st { color: var(--muted); }
+.orgrp { border: 1px dashed color-mix(in srgb, #A493DE 60%, transparent); border-radius: 10px; padding: 2px 8px 4px; display: grid; }
+.orgrp > .or-h { font: 600 10.5px var(--font-display); letter-spacing: 0.08em; text-transform: uppercase; color: #A493DE; padding-top: 4px; }
+.orgrp > .up { border-top: 0; }
+.or-div { display: flex; align-items: center; gap: 8px; color: #A493DE; font: 600 10.5px var(--font-display); letter-spacing: 0.1em; }
+.or-div::before, .or-div::after { content: ''; flex: 1; height: 1px; background: color-mix(in srgb, #A493DE 40%, transparent); }
 .pick .det { min-height: 3.6em; font-size: 12px; line-height: 1.4; color: var(--muted); text-align: left; background: rgba(21, 33, 37, 0.85); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; }
 .pick .det b { color: var(--ink); }
 .pick .row { display: flex; gap: 8px; justify-content: center; }
@@ -6161,8 +6193,15 @@ const Render2D = (cv, view) => {
       ctx.globalAlpha = 1;
     }
     // the flag on the roof: the coat of arms of whoever is ahead in the bribe-off, edged in their colour; plain white while it's level
-    const lead = bribeLeadShown(v);
-    drawSpire(x, y, tilePx() * 1.25, lead < 0 ? '#F4F1E6' : teamCol(lead), Game.elfPowered(v), lead < 0 ? null : armsShown(v, lead));
+    const lead = bribeLeadShown(v), lc = lead < 0 ? '#F4F1E6' : teamCol(lead), t = tilePx();
+    // whose side the elves are on, at a glance: a ring in that side's colour (dashed white while level) and a label under it
+    ctx.strokeStyle = lc; ctx.lineWidth = Math.max(2, t * 0.07); ctx.globalAlpha = 0.95; if (lead < 0) ctx.setLineDash([4, 3]);
+    ctx.beginPath(); ctx.ellipse(x, y + t * 0.3, t * 0.55, t * 0.22, 0, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1;
+    drawSpire(x, y, t * 1.25, lc, Game.elfPowered(v), lead < 0 ? null : armsShown(v, lead));
+    ctx.font = `600 ${Math.max(8, Math.round(t * 0.26))}px "IBM Plex Mono", monospace`; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+    ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(8,12,14,0.9)'; ctx.fillStyle = lc;
+    const lab = lead < 0 ? 'LEVEL' : lead === me ? 'ALLY' : 'ENEMY';
+    ctx.strokeText(lab, x, y + t * 0.56); ctx.fillText(lab, x, y + t * 0.56);
     for (const sd of [me, foe()]) {
       const own = Game.elfOwnOf(v, sd);
       if (!own || !elfOwnShown(v, sd)) continue;
@@ -6193,8 +6232,8 @@ const Render2D = (cv, view) => {
     ctx.strokeStyle = '#3F5A35'; ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(x, py); ctx.lineTo(x, py - s * 0.28); ctx.stroke();
     if (arms) { Art.armsFlag(ctx, arms, x, py - s * 0.28, Math.max(10, s * 0.3), flagCol); return; }
-    ctx.fillStyle = flagCol;
-    ctx.beginPath(); ctx.moveTo(x, py - s * 0.28); ctx.lineTo(x + s * 0.2, py - s * 0.23); ctx.lineTo(x, py - s * 0.18); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = flagCol; ctx.strokeStyle = 'rgba(8,12,14,0.8)'; // a big pennant: whose side the elves are on
+    ctx.beginPath(); ctx.moveTo(x, py - s * 0.28); ctx.lineTo(x + s * 0.32, py - s * 0.2); ctx.lineTo(x, py - s * 0.12); ctx.closePath(); ctx.fill(); ctx.stroke();
   }
 
   // a building (the Mechites' Factory) at (x, y), s = tile size in px: a brick workshop with a sawtooth roof, a chimney
@@ -6823,6 +6862,7 @@ const Render2D = (cv, view) => {
   try { if (/[?&]test\b/.test(location.search)) window.__pb = () => ({ m, me, board3d, board, bt }); } catch (e) {} // read-only peek for UI tests
   let selected = null;      // unit index chosen in the shop
   let rangeOf = null;       // { side, id }: the squad last tapped on the board; its range shows as a dotted ring
+  let inspect = null, inspectHtml = ''; // a fight: the body tapped (its card shows, see inspectCard), and what the card shows now
   let bt = null;            // battle being played back
   let battlePre = null;     // match as it stood when the running battle began (for the HUD)
   let speed = 1, lastTs = 0, acc = 0, raf = 0;
@@ -7315,6 +7355,7 @@ const Render2D = (cv, view) => {
     syncMusic();
     cv.style.touchAction = phase === 'deploy' ? 'none' : ''; // so a finger can drag squads without scrolling the page
     if (board3d) wake3d(); else { board.draw(); boardMarks(); }
+    if (inspect || inspectHtml) inspectCard(); // the tapped unit's card in a fight (gone once the fight is)
   }
   const teamCol = (side) => Art.teamCol(side, me);
   const { SHROOM_COL, CHARM_COL, armsImg } = Art;
@@ -9062,6 +9103,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       console.warn('No Mans Land: this screen’s replay differs from the host’s result; the host’s result counts.');
     }
     battlePre = null;
+    inspect = null;
     render();
     showResult(lastSummary);
   }
@@ -9140,6 +9182,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   // a tap on a tile (2D or 3D board). It clears the range ring; tapping a squad shows its range and its sheet (a squad
   // of yours from this round is taken back with the X at its top right corner, see unplaceMarks)
   function boardTap(t) {
+    if (phase === 'battle') { const b = t && bodyAt(t); inspect = b && b !== inspect ? b : null; inspectCard(); return; } // a fight: a tap on a unit shows its card
     const had = rangeOf;
     rangeOf = null;
     tapTile(t, had);
@@ -9263,6 +9306,60 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
         changed();
       }
     }
+  }
+
+  // ---------- a fight: tap a unit to see its stats ----------
+  // the battle body nearest a tapped tile (t.fx, t.fy: where in the tile, when the board knows), as this screen may
+  // show it: no stealthed enemy, no elf spire
+  function bodyAt(t) {
+    if (!bt) return null;
+    const a = Game.tileToWorld(t.col, t.row);
+    let x = a.x, y = a.y;
+    if (t.fx >= 0 && t.fy >= 0) { const bx = Game.tileToWorld(t.col + 1, t.row), by = Game.tileToWorld(t.col, t.row + 1); x += (bx.x - a.x) * (t.fx - 0.5) + (by.x - a.x) * (t.fy - 0.5); y += (bx.y - a.y) * (t.fx - 0.5) + (by.y - a.y) * (t.fy - 0.5); }
+    let best = null, bd = Game.TILE * 0.9;
+    for (const b of bt.bodies) {
+      if (!b.alive || b.u.spire || (b.hidden && b.side !== me)) continue;
+      const d = Math.hypot(b.x - x, b.y - y) - (b.u.structure ? Game.TILE * 0.4 : 0);
+      if (d < bd) { bd = d; best = b; }
+    }
+    return best;
+  }
+  // the card of the tapped body, top left of the board: health now, level, attack, range, speed, defence, what's on it.
+  // Redrawn every frame of the fight (only when it changes); gone when the body falls, is hidden, or the fight ends.
+  function inspectCard() {
+    let el = $('bcard');
+    const b = inspect;
+    if (!b || phase !== 'battle' || !b.alive || (b.hidden && b.side !== me)) {
+      inspect = null; inspectHtml = '';
+      if (el) el.remove();
+      return;
+    }
+    const u = b.u, r2 = (v) => Math.round(v * 100) / 100, mine = b.side === me;
+    const name = u.structure && !u.lesser ? `${mine ? 'Your' : `${foeName()}’s`} tower` : u.name || 'Unit';
+    const mates = b.squad >= 0 && !u.structure ? bt.bodies.filter(x => x.side === b.side && x.squad === b.squad && x.u.name === u.name) : [];
+    const st = [];
+    if (b.stunT > 0) st.push('Stunned');
+    if (b.poison && b.poison.length) st.push('Poisoned');
+    if (b.bleed) st.push(`Bleeding ×${b.bleed.n}`);
+    if (b.burn) st.push('Burning');
+    if (b.slowT > 0) st.push('Slowed');
+    if (b.channel) st.push('Summoning');
+    if (b.delay > 0) st.push(`Arrives in ${b.delay.toFixed(1)} s`);
+    if (b.inside && b.inside.alive) st.push('Sheltered');
+    const def = u.defense === 'armor' && u.defVal ? `<div><span>Armor</span>${r2(u.defVal)}</div>` : u.defense === 'ward' && u.defVal ? `<div><span>Ward</span>${r2(u.defVal)}</div>` : '';
+    const html = `<div class="bh"><span style="color:${u.color || 'var(--ink)'};display:inline-flex">${Shapes.svg(u.shape || 'circle', 16)}</span><b>${esc(name)}</b><button class="bx" id="bcard-x" aria-label="Close">✕</button></div>
+      <div class="st">${mine ? 'Yours' : esc(foeName()) + '’s'}${b.level > 0 ? ` · level ${b.level + 1}` : ''}${mates.length > 1 ? ` · ${mates.filter(x => x.alive).length} of ${mates.length} bodies left` : ''}</div>
+      <div class="hpb"><i style="width:${Math.max(0, Math.min(100, b.hp / u.hp * 100)).toFixed(1)}%"></i></div>
+      <div class="bs"><div><span>Health</span>${Math.max(0, Math.min(Math.round(u.hp), Math.ceil(b.hp)))} / ${Math.round(u.hp)}</div>${u.hit > 0 ? `<div><span>Hit</span>${Math.round(u.hit)}</div><div><span>Attacks/s</span>${r2(u.aps)}</div>` : ''}
+        ${u.range > 0 ? `<div><span>Range</span>${r2(reachOf(u, false))} m</div>` : ''}${u.speed > 0 && !u.structure ? `<div><span>Speed</span>${r2(u.speed)} m/s</div>` : ''}${def}</div>
+      ${st.length ? `<div class="st">${st.join(' · ')}</div>` : ''}`;
+    if (!el) {
+      el = document.createElement('div'); el.className = 'bcard'; el.id = 'bcard'; el.setAttribute('role', 'status');
+      el.addEventListener('click', (e) => { if (e.target.closest('#bcard-x')) { inspect = null; inspectCard(); } });
+      $('wrap').appendChild(el); inspectHtml = '';
+    }
+    el.style.setProperty('--c', Art.teamCol(b.side, me));
+    if (html !== inspectHtml) { el.innerHTML = html; inspectHtml = html; }
   }
 
   // ---------- marks over the board: a unit's range under the mouse, the tutorial's tiles and ring ----------
@@ -9578,7 +9675,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (!defs.some(Boolean) || !m) return '';
     const mine = side === undefined || side === me, owner = mine ? me : side;
     const enzo = Game.charOf(m, owner) === 'enzo' && (mine || charVisible(owner)), ek = Game.enzoSkill(m, owner, sq || { unit: i }); // the same for every squad of the unit, all match
-    const rows = Engine.SLOTS.filter(k => defs[k]).map(k => {
+    const row = (k) => {
       const d = defs[k], cost = Game.skillCost(m, i, k, owner);
       let act = '';
       const wake = Game.isAwaken(m, i, k); // bought for one squad at a time
@@ -9603,13 +9700,20 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
         act = Game.skillVisible(m, side, i, k) || (phase !== 'deploy' && Game.hasSkill(m, side, i, k))
           ? `<span class="chip" style="color:var(--foe);border:1px solid currentColor;border-radius:99px;padding:1px 8px;font-size:12px">${foeName()} has it</span>` : `<span class="hint">Not bought</span>`;
       }
-      const or = Game.skillOr(m, i, k).map(j => defs[j].name); // either-or: owning one rules out the other
       const anyOf = Game.skillNeedsAny(m, i, k).map(j => defs[j].name), label = wake ? 'Awaken' : Game.isMaster(m, i, k) ? 'Master' : '';
-      return `<div style="display:grid;gap:4px;border-top:1px solid var(--line);padding-top:8px">
-        <div class="bar"><b style="font-family:var(--font-display)">${label ? `<span style="color:var(--gold)">${label}:</span> ` : ''}${esc(d.name)}</b><span>${act}</span></div>
-        <span class="hint">${esc(Engine.describeSkill(d))}${or.length ? ` <b style="color:#A493DE">Either or:</b> you can have this or ${esc(or.join(' or '))}, not both.` : ''}${anyOf.length ? ` <b style="color:var(--gold)">Needs</b> ${esc(anyOf.join(' or '))} first.` : ''}${wake ? ' Bought for one squad at a time, on its own sheet.' : label ? ' For all your squads of this unit.' : ''}${Game.isFlat(m, i, k) ? ' Always this price.' : ''}</span></div>`;
-    });
-    return `<div style="display:grid;gap:8px"><h4 style="margin:0;font-size:12px;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted)">Skills${enzo ? ` · Enzo: one random skill per unit, free with ${Game.CHAR.enzoMin}+ squads of it` : mine ? ' · for all your squads of this unit' : ''}</h4>${rows.join('')}</div>`;
+      const more = [anyOf.length ? `<b style="color:var(--gold)">Needs</b> ${esc(anyOf.join(' or '))} first.` : '',
+        wake ? 'Bought for one squad at a time, on its own sheet.' : label ? 'For all your squads of this unit.' : '', Game.isFlat(m, i, k) ? 'Always this price.' : ''].filter(Boolean).join(' ');
+      return upRow({ name: d.name, label, act, text: esc(Engine.describeSkill(d)), more });
+    };
+    // in slot order; either-or skills (owning one rules out the others) boxed together where the first of them comes
+    const ks = Engine.SLOTS.filter(k => defs[k]), done = new Set(), parts = [];
+    for (const k of ks) {
+      if (done.has(k)) continue;
+      const grp = [k, ...Game.skillOr(m, i, k)].filter(j => defs[j] && !done.has(j)).sort((a, b) => a - b);
+      grp.forEach(j => done.add(j));
+      parts.push(grp.length > 1 ? orGroup(grp.map(row), 'Pick one · either or') : row(k));
+    }
+    return `<div style="display:grid;gap:6px"><h4 style="margin:0;font-size:12px;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted)">Skills${enzo ? ` · Enzo: one random skill per unit, free with ${Game.CHAR.enzoMin}+ squads of it` : mine ? ' · for all your squads of this unit' : ''}${HOLD_HINT}</h4>${parts.join('')}</div>`;
   }
   // an Awaken skill's row: this squad's (sq; from the shop, how many of yours have it). Buttons carry data-act, bound by bindPane.
   function awakenAct(i, k, side, sq) {
@@ -9665,14 +9769,14 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       else if (mine && phase === 'deploy') { const ok = editable() && Game.canBuyBuildingSkill(m, me, key, sk.id); act = `<button class="btn small${ok ? ' either' : ''}" data-bskill="${esc(sk.id)}" data-bkey="${esc(key)}" ${ok ? '' : 'disabled'}>${!b.built ? 'Not built' : cur ? 'Swap' : 'Buy'} · ${Game.bskillCost(id, sk.id)} gold</button>`; }
       else act = `<span class="hint">${Game.bskillCost(id, sk.id)} gold</span>`;
       const t = r2((sk.time || 0) * (1 - cb.faster / 100));
-      return abilityRow(sk.name, act, sk.unit ? `${made(sk.unit)}. Ready ${t} s into the fight.` : esc(sk.text || ''));
+      return sk.unit ? abilityRow(sk.name, act, `Ready ${t} s into the fight.`, `${made(sk.unit)}.`) : abilityRow(sk.name, act, esc(sk.text || ''));
     });
     const status = b.built ? 'Built' : b.progress > 0 ? `${Math.round(b.progress * 100)}% built` : 'Not built yet';
     const how = info.survive ? 'If it is still standing at the end of that fight, it is built.' : `${info.buildSecs} s of work in all, over as many fights as it takes${info.selfBuild > 0 ? `; with no builder free it builds itself, ${Math.round(1 / info.selfBuild)} times slower` : ''}.`;
     return `<div style="display:grid;gap:8px">
       <p style="margin:0"><b>${status}</b>${b.built ? '' : ` · ${mine ? `your nearest free Cog Builder walks over and builds it during fights (faster with Master engineering). ${how} If it falls, the work done is kept.` : 'being built.'}`}</p>
       ${b.built ? `<p class="hint" style="margin:0">If it is destroyed in a fight, it starts the next round ${info.rebuild == null ? 50 : info.rebuild}% built and has to be built again.</p>` : ''}
-      <h4 style="margin:0;font-size:12px;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted)">${mine ? 'One a round, bought each round, once it is built' : 'Their choice stays hidden until the fight'}</h4>${rows.join('')}</div>`;
+      <h4 style="margin:0;font-size:12px;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted)">${mine ? 'One a round, bought each round, once it is built' : 'Their choice stays hidden until the fight'}${HOLD_HINT}</h4>${rows.length > 1 ? orGroup(rows, 'One a round') : rows.join('')}</div>`;
   }
   function bindBuildingBlock(root, again) {
     root.querySelectorAll('[data-bskill]').forEach(x => x.addEventListener('click', () => { if (editable() && Game.buyBuildingSkill(m, me, x.dataset.bkey, x.dataset.bskill)) again(); }));
@@ -9703,9 +9807,33 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if ($('blvl')) $('blvl').addEventListener('click', () => { if (editable() && Game.levelBuilding(m, me, id)) again(); });
     if ($('blvl-undo')) $('blvl-undo').addEventListener('click', () => { if (editable() && Game.undoLevelBuilding(m, me, id)) again(); });
   }
-  const abilityRow = (name, act, text) => `<div style="display:grid;gap:4px;border-top:1px solid var(--line);padding-top:8px">
-      <div class="bar"><b style="font-family:var(--font-display)">${esc(name)}</b><span>${act}</span></div>
-      <span class="hint">${text}</span></div>`;
+  // an upgrade's row (see .up): name (esc'd here; label: a gold prefix like Master), act: its button or chip (HTML),
+  // text: what it does (HTML, cut to one line until the row is held), more: details shown only once held (HTML)
+  const upRow = ({ name, label = '', act = '', text = '', more = '' }) => `<div class="up" tabindex="0" aria-expanded="false" aria-label="${esc(name)}: hold for details">
+      <div class="up-h"><b>${label ? `<span class="lab">${label}:</span> ` : ''}${esc(name)}</b><span class="up-a">${act}</span></div>
+      ${text ? `<span class="up-s">${text}</span>` : ''}${more ? `<span class="up-more">${more}</span>` : ''}</div>`;
+  const abilityRow = (name, act, text, more) => upRow({ name, act, text, more });
+  // rows that rule each other out (either-or), boxed with an OR between them
+  const orGroup = (rows, head = 'Pick one') => `<div class="orgrp"><span class="or-h">${head}</span>${rows.join('<div class="or-div" aria-hidden="true">OR</div>')}</div>`;
+  const HOLD_HINT = '<span class="up-k"> · hold one for details</span>';
+  // press and hold an upgrade row to open (or close) its whole text; Enter or Space does the same
+  {
+    let hold = null;
+    const toggle = (r) => { const on = r.classList.toggle('open'); r.setAttribute('aria-expanded', String(on)); };
+    const end = () => { if (!hold) return; clearTimeout(hold.t); hold.r.classList.remove('held'); hold = null; };
+    document.addEventListener('pointerdown', (e) => {
+      const r = e.target.closest && e.target.closest('.up');
+      if (!r || e.target.closest('button, a, input, select')) return;
+      end();
+      r.classList.add('held');
+      hold = { r, x: e.clientX, y: e.clientY, id: e.pointerId, t: setTimeout(() => { if (hold && hold.r === r) { toggle(r); r.classList.remove('held'); hold = null; } }, 380) };
+    });
+    document.addEventListener('pointermove', (e) => { if (hold && e.pointerId === hold.id && Math.hypot(e.clientX - hold.x, e.clientY - hold.y) > 10) end(); }, { passive: true });
+    document.addEventListener('pointerup', end);
+    document.addEventListener('pointercancel', end);
+    document.addEventListener('contextmenu', (e) => { if (e.target.closest && e.target.closest('.up')) e.preventDefault(); }); // a long press on a phone
+    document.addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target.classList && e.target.classList.contains('up')) { e.preventDefault(); toggle(e.target); } });
+  }
   // the bank tower's loan: take one this round (yours), or whether they took one (theirs, once the fight is on)
   function loanBlock(side, tt) {
     if (!tt.loan) return '';
@@ -9716,7 +9844,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     else if (phase === 'deploy' && Game.investNow(m, me)) act = `<button class="btn small" disabled>Not with the investment</button>`;
     else if (phase === 'deploy') act = `<button class="btn small${editable() ? ' primary' : ''}" id="tloan" ${editable() ? '' : 'disabled'}>Take · +${L.gold} gold</button>`;
     else act = '';
-    return abilityRow('Loan', act, esc(loanText()) + (side === me && took ? ` Next round: −${L.payback}.` : '') + (side === me && tt.skill2 ? ` The bank does one thing a round: a loan or the ${esc(tt.skill2.name)}, not both.` : ''));
+    return abilityRow('Loan', act, esc(loanText()) + (side === me && took ? ` Next round: −${L.payback}.` : ''), side === me && tt.skill2 ? `The bank does one thing a round: a loan or the ${esc(tt.skill2.name)}, not both.` : '');
   }
   // tower skills bought every round (the Mecha Tower's bots): buy any of them for this round's fight (yours), or the
   // ones they bought (theirs, once the fight is on)
@@ -9732,7 +9860,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       else act = `<span class="hint">${cost} gold</span>`;
       return abilityRow(x.name, act, esc(x.text || ''));
     });
-    return `<div style="display:grid;gap:8px"><h4 style="margin:0;font-size:12px;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted)">${side === me ? 'Every round, for that round’s fight' : phase === 'deploy' ? 'Hidden until the fight' : 'This fight'}</h4>${rows.join('')}</div>`;
+    return `<div style="display:grid;gap:6px"><h4 style="margin:0;font-size:12px;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted)">${side === me ? 'Every round, for that round’s fight' : phase === 'deploy' ? 'Hidden until the fight' : 'This fight'}${HOLD_HINT}</h4>${rows.join('')}</div>`;
   }
   // an always-on tower ability (slime tower: the slime skills it gets)
   function passiveBlock(side, tt) {
@@ -9762,12 +9890,10 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       else if (phase === 'deploy') { const ok = editable() && Game.canBuyMageGen(m, me, g.id); act = `<button class="btn small${ok ? (g.extra ? ' primary' : ' either') : ''}" data-mgen="${g.id}" ${ok ? '' : 'disabled'}>${g.extra ? 'Add' : cur ? 'Swap' : 'Call'} · ${g.cost} gold</button>`; }
       else act = `<span class="hint">${g.cost} gold</span>`;
       const u = Game.generalUnit(m, tt.unit, g.extra ? cur : g.id);
-      return `<div style="display:grid;gap:4px;border-top:1px solid var(--line);padding-top:8px">
-        <div class="bar"><b style="font-family:var(--font-display)">${esc(g.name)}</b><span>${act}</span></div>
-        <span class="hint">${esc(g.text)}</span>
-        <span class="hint" style="color:var(--ink)">${g.extra ? `With it: ${cur ? `the ${esc(Game.mageGenInfo(cur).name)}’s attack. ` : ''}` : ''}${stats(u)}</span></div>`;
+      return { extra: !!g.extra, html: upRow({ name: g.name, act, text: esc(g.text), more: `${g.extra ? `With it: ${cur ? `the ${esc(Game.mageGenInfo(cur).name)}’s attack. ` : ''}` : ''}${stats(u)}` }) };
     });
-    return `<div style="display:grid;gap:8px"><h4 style="margin:0;font-size:12px;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted)">Mage generals · ${side === me ? 'one per round (purple buttons swap it), plus teleport if you like, for this round’s fight' : phase === 'deploy' ? 'hidden until the fight' : 'this fight'}</h4>${rows.join('')}</div>`;
+    const swaps = rows.filter(r => !r.extra).map(r => r.html), adds = rows.filter(r => r.extra).map(r => r.html);
+    return `<div style="display:grid;gap:6px"><h4 style="margin:0;font-size:12px;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted)">Mage generals · ${side === me ? 'one per round, plus teleport if you like, for this round’s fight' : phase === 'deploy' ? 'hidden until the fight' : 'this fight'}${HOLD_HINT}</h4>${swaps.length > 1 ? orGroup(swaps, 'One a round · calling another swaps it') : swaps.join('')}${adds.join('')}</div>`;
   }
   // the tower's one skill: buy it (yours), or whether they have it (theirs, once it's no longer hidden)
   function towerSkillBlock(side, tt) {
@@ -9778,9 +9904,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     else if (owned) act = `<span class="chip" style="color:var(--gold);border:1px solid currentColor;border-radius:99px;padding:1px 8px;font-size:12px">Owned</span>${phase === 'deploy' && editable() && m.towerSkill[me] === m.round ? ' <button class="btn small" id="tskill-undo">Undo</button>' : ''}`;
     else if (phase === 'deploy') act = editable() && m.gold[me] >= cost ? `<button class="btn small primary" id="tskill">Buy · ${cost} gold</button>` : `<button class="btn small" disabled>${m.gold[me] < cost ? `Need ${cost} gold` : `Buy · ${cost} gold`}</button>`;
     else act = `<span class="hint">${cost} gold</span>`;
-    return `<div style="display:grid;gap:4px;border-top:1px solid var(--line);padding-top:8px">
-      <div class="bar"><b style="font-family:var(--font-display)">${esc(sk.name)}</b><span>${act}</span></div>
-      <span class="hint">${esc(sk.text)}${side === me && !owned ? ' Once per match; your opponent sees it after the next fight.' : ''}</span></div>`;
+    return upRow({ name: sk.name, act, text: esc(sk.text), more: side === me && !owned ? 'Once per match; your opponent sees it after the next fight.' : '' });
   }
   // the tower's second skill (keep, bastion, bank), like the first
   function towerSkill2Block(side, tt) {
@@ -9793,7 +9917,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     else if (phase === 'deploy') act = editable() && Game.canBuyTowerSkill2(m, me) ? `<button class="btn small primary" id="tskill2">Buy · ${cost} gold</button>` : `<button class="btn small" disabled>${blocked ? `Needs ${esc(tt.skill.name)}` : Game.bankBusy(m, me, 'invest') ? 'Not with a loan this round' : m.gold[me] < cost ? `Need ${cost} gold` : `Buy · ${cost} gold`}</button>`;
     else act = `<span class="hint">${cost} gold</span>`;
     if (side === me && owned && tt.id === 'bastion' && phase === 'deploy') act += Game.bwallsLeft(m, me) ? ` <button class="btn small primary" id="bwall" ${editable() ? '' : 'disabled'}>Place walls · ${Game.bwallsLeft(m, me)} left</button>` : ' <span class="hint">All walls placed</span>';
-    return abilityRow(sk.name, act, esc(sk.text) + (side === me && !owned ? ' Once per match; your opponent sees it after the next fight.' : ''));
+    return abilityRow(sk.name, act, esc(sk.text), side === me && !owned ? 'Once per match; your opponent sees it after the next fight.' : '');
   }
   const towerStats = (T0) => { const T = towerAttack(T0); return `<div class="stats"><div><span>Health</span><b class="num">${T0.hp}</b></div><div><span>${T0.drone ? 'Drone hit' : 'Hit'}</span><b class="num">${T.hit}</b></div><div><span>Attacks/s</span><b class="num">${T.aps}</b></div><div><span>Range</span><b class="num">${T.range} m</b></div>${T.splash ? `<div><span>Splash</span><b class="num">${T.splash} m</b></div>` : ''}</div>`; };
   // what a tower shoots with: itself, or its drone (the Mecha Tower)
@@ -9821,16 +9945,12 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     const extra = { walls: '', push: `The storm band is ${off === 0 ? 'in no man’s land' : `${Math.abs(off)} rows toward ${off > 0 ? esc(foeName()) : 'you'}`}.`, snowgre: `Your next Snowgre: ${strength}% as strong as an Ether Golem.${nSnow ? ` You have ${nSnow}.` : ''}` };
     $('sheet').innerHTML = `
       <div class="bar"><h3 id="sheet-h">Altar of ice</h3><button class="btn small" id="close">Close</button></div>
-      <p class="role" style="margin:0">The altar rises every even round. Ice walls and a Snowgre can be bought once per altar round, the push as often as you like, and your opponent doesn’t see what you bought until the fight.</p>
+      <p class="role" style="margin:0">The altar rises every even round. Ice walls and a Snowgre can be bought once per altar round, the push as often as you like, and your opponent doesn’t see what you bought until the fight. <span class="up-k">Hold one for details.</span></p>
       ${Game.ALTAR.map(a => {
         const n = Game.altarCount(m, me, a.id), cost = Game.altarCost(m, me, a.id), room = a.id !== 'push' || Game.pushRoom(m, me);
-        const buy = `<button class="btn primary" data-altar="${a.id}" ${editable() && m.gold[me] >= cost && room ? '' : 'disabled'}>${!room ? 'The storm is at the edge' : m.gold[me] >= cost ? `Buy${n ? ' another' : ''} · ${cost} gold` : `Need ${cost} gold`}</button>`;
-        return `<div class="confirm" style="border-color:var(--line)">
-          <b>${esc(a.name)} · ${cost} gold</b>
-          <span class="hint">${esc(a.text)} ${extra[a.id]}</span>
-          ${n ? `<div class="bar"><span class="hint" style="color:var(--you)">Bought this round${n > 1 ? ` ×${n}` : ''}.</span><button class="btn small" data-unaltar="${a.id}" ${editable() ? '' : 'disabled'}>Take ${n > 1 ? 'one' : 'it'} back · +${Game.altarRefund(m, me, a.id)}</button></div>` : ''}
-          ${!n || a.repeat ? buy : ''}
-        </div>`;
+        const buy = `<button class="btn small primary" data-altar="${a.id}" ${editable() && m.gold[me] >= cost && room ? '' : 'disabled'}>${!room ? 'At the edge' : m.gold[me] >= cost ? `Buy${n ? ' another' : ''} · ${cost} gold` : `Need ${cost} gold`}</button>`;
+        const act = (n ? `<span class="chip" style="color:var(--you);border:1px solid currentColor;border-radius:99px;padding:1px 8px;font-size:12px">Bought${n > 1 ? ` ×${n}` : ''}</span> <button class="btn small" data-unaltar="${a.id}" ${editable() ? '' : 'disabled'}>Undo · +${Game.altarRefund(m, me, a.id)}</button>` : '') + (!n || a.repeat ? ' ' + buy : '');
+        return upRow({ name: a.name, act, text: esc(a.text), more: extra[a.id] });
       }).join('')}`;
     $('sheet-back').hidden = false;
     $('close').addEventListener('click', closeSheet);
@@ -9854,7 +9974,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       <p class="role" style="margin:0">Each half has ${Game.SHROOM_SPLIT.purple} purple, ${Game.SHROOM_SPLIT.yellow} yellow and ${Game.SHROOM_SPLIT.green} green ${Game.SHROOM_SPLIT.green === 1 ? "tile" : "tiles"}, mirrored. They work for both sides. Either player can remove one for ${Game.SHROOM_REMOVE} gold (tap it, or a squad standing on it): it’s gone from the next fight on for the rest of the match. Your removal stays hidden from your opponent until the fight.</p>`; })() : ''}
       ${mp.elfTower ? `<p class="role" style="margin:0">The elf tower stands in the middle of no man’s land, the same distance from both zones, and stays there all match. It can’t be attacked. It sides with whoever has bribed the elves the most times over the match: it never shoots their units and heals them, and shoots the nearest of the other player’s units in range. With bribes level (or none at all) it shoots both sides in turn.${Game.elfPowered(m) ? ' <b style="color:var(--gold)">From round ' + Game.ELF_POWER.fromRound + ' on, the elves hit and heal twice as hard.</b>' : ` After round ${Game.ELF_POWER.fromRound - 1} the elves hit and heal twice as hard.`}</p>
       <div class="stats"><div><span>Hit</span><b class="num">${Game.elfUnit(m).hit}</b></div><div><span>Attacks/s</span><b class="num">${T.aps}</b></div><div><span>Range</span><b class="num">${T.range} m</b></div></div>
-      <p style="margin:0"><span style="color:var(--gold)">Bribe the elves</span> as often as you like: the first bribe in a round costs ${Game.BRIBE_COST} gold, and each further one that round ${Game.BRIBE_COST} more (${[1, 2, 3].map(k => k * Game.BRIBE_COST).join(', ')}, …). The bribe-off counts bribes, not gold. The tower heals the units of the player ahead (${Game.elfUnit(m).healHit} health, ${Math.round(Game.elfUnit(m).healHit * (mp.healMul || 1))} on this map, to every unit within ${T.healSplash} m, every ${Math.round(10 / T.healAps) / 10} s). How often each player bribed stays secret: the flag on the tower only shows who is ahead (white when level), and this round’s bribes don’t move it until the fight. Bet on how much your opponent is willing to pay.</p>
+      <p style="margin:0"><span style="color:var(--gold)">Bribe the elves</span> as often as you like: the first bribe in a round costs ${Game.BRIBE_COST} gold, and each further one that round ${Game.BRIBE_COST} more (${[1, 2, 3].map(k => k * Game.BRIBE_COST).join(', ')}, …). The bribe-off counts bribes, not gold. The tower heals the units of the player ahead (${Game.elfUnit(m).healHit} health, ${Math.round(Game.elfUnit(m).healHit * (mp.healMul || 1))} on this map, to every unit within ${T.healSplash} m, every ${Math.round(10 / T.healAps) / 10} s). How often each player bribed stays secret: the tower’s flag, its ring and its label (ALLY, ENEMY or LEVEL) only show who is ahead (white when level), and this round’s bribes don’t move it until the fight. Bet on how much your opponent is willing to pay.</p>
       <p style="margin:0"><span style="color:var(--gold)">Your own elf tower</span>: once ${Game.ELF_OWN.unlock} bribes have been paid in all (both players, counted at the end of each round), each player who has bribed the elves at least once can buy one elf tower for ${Game.ELF_OWN.cost} gold and place it on a free tile of their zone. It stays all match, can’t be attacked, shoots only your opponent’s units and heals yours. Your opponent doesn’t see it until the fight.</p>
       ${(() => {
         const own = Game.elfOwnOf(m, me);

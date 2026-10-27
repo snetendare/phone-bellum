@@ -5833,8 +5833,15 @@ const Render2D = (cv, view) => {
       ctx.globalAlpha = 1;
     }
     // the flag on the roof: the coat of arms of whoever is ahead in the bribe-off, edged in their colour; plain white while it's level
-    const lead = bribeLeadShown(v);
-    drawSpire(x, y, tilePx() * 1.25, lead < 0 ? '#F4F1E6' : teamCol(lead), Game.elfPowered(v), lead < 0 ? null : armsShown(v, lead));
+    const lead = bribeLeadShown(v), lc = lead < 0 ? '#F4F1E6' : teamCol(lead), t = tilePx();
+    // whose side the elves are on, at a glance: a ring in that side's colour (dashed white while level) and a label under it
+    ctx.strokeStyle = lc; ctx.lineWidth = Math.max(2, t * 0.07); ctx.globalAlpha = 0.95; if (lead < 0) ctx.setLineDash([4, 3]);
+    ctx.beginPath(); ctx.ellipse(x, y + t * 0.3, t * 0.55, t * 0.22, 0, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1;
+    drawSpire(x, y, t * 1.25, lc, Game.elfPowered(v), lead < 0 ? null : armsShown(v, lead));
+    ctx.font = `600 ${Math.max(8, Math.round(t * 0.26))}px "IBM Plex Mono", monospace`; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+    ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(8,12,14,0.9)'; ctx.fillStyle = lc;
+    const lab = lead < 0 ? 'LEVEL' : lead === me ? 'ALLY' : 'ENEMY';
+    ctx.strokeText(lab, x, y + t * 0.56); ctx.fillText(lab, x, y + t * 0.56);
     for (const sd of [me, foe()]) {
       const own = Game.elfOwnOf(v, sd);
       if (!own || !elfOwnShown(v, sd)) continue;
@@ -5865,8 +5872,8 @@ const Render2D = (cv, view) => {
     ctx.strokeStyle = '#3F5A35'; ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(x, py); ctx.lineTo(x, py - s * 0.28); ctx.stroke();
     if (arms) { Art.armsFlag(ctx, arms, x, py - s * 0.28, Math.max(10, s * 0.3), flagCol); return; }
-    ctx.fillStyle = flagCol;
-    ctx.beginPath(); ctx.moveTo(x, py - s * 0.28); ctx.lineTo(x + s * 0.2, py - s * 0.23); ctx.lineTo(x, py - s * 0.18); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = flagCol; ctx.strokeStyle = 'rgba(8,12,14,0.8)'; // a big pennant: whose side the elves are on
+    ctx.beginPath(); ctx.moveTo(x, py - s * 0.28); ctx.lineTo(x + s * 0.32, py - s * 0.2); ctx.lineTo(x, py - s * 0.12); ctx.closePath(); ctx.fill(); ctx.stroke();
   }
 
   // a building (the Mechites' Factory) at (x, y), s = tile size in px: a brick workshop with a sawtooth roof, a chimney
@@ -7046,8 +7053,8 @@ const Models3D = (THREE) => {
       P(cyl(0.7, 1.0, 5.2, 6), '#CFC6A8', [0, 2.6, 0]),
       P(cone(1.2, 2.2, 6), 'tint', [0, 6.3, 0]),
       P(box(0.35, 0.6, 0.1), '#FFE27A', [0, 3.8, -0.75]),
-      P(cyl(0.04, 0.04, 1.6, 4), WOOD, [0, 8.0, 0]),
-      P(box(0.05, 0.5, 0.9), 'team', [0, 8.5, 0.45])],
+      P(cyl(0.05, 0.05, 2.4, 4), WOOD, [0, 8.4, 0]),
+      P(box(0.06, 0.9, 1.6), 'team', [0, 9.1, 0.8])], // a big flag: whose side the elves are on
   };
 
   // the tower types (Game.TOWER_TYPES and the outpost): the walls take the type's colour, as on the 2D board
@@ -7570,8 +7577,13 @@ const Render3D = (THREE, el, view, opts = {}) => {
       const [wx, wz] = world(f, x, y);
       if (strong) scene_(() => disc(wx, wz, 4.5, color('#FFD65A'), 0.45, 1));
     };
-    spire(e.x, e.y, 2, lead < 0 ? '#F4F1E6' : Art.teamCol(lead, v.me), lead < 0 ? null : arms(lead), 1);
-    if (deploying) { const [wx, wz] = world(f, e.x, e.y); arc(wx, wz, Game.ELF_TOWER.range, color(ELF_COL), 0.3, 1, 0.012, 90); }
+    const lc = lead < 0 ? '#F4F1E6' : Art.teamCol(lead, v.me), [ex, ez] = world(f, e.x, e.y);
+    spire(e.x, e.y, 2, lc, lead < 0 ? null : arms(lead), 1);
+    // whose side the elves are on, at a glance: a ring in that side's colour (dashed white while level) and a label under it
+    arc(ex, ez, 2.7, color(lc), 0.95, 1, 0.16, lead < 0 ? 12 : 0);
+    const ls = viewMode === 'strategic' ? 3 : viewMode === 'tilted' ? 2.4 : 1.7;
+    icon('tag|' + (lead < 0 ? 'LEVEL' : lead === v.me ? 'ALLY' : 'ENEMY'), ex + camDown.x * (3.2 + ls * 0.3), 0.3, ez + camDown.z * (3.2 + ls * 0.3), ls, color(lc), 0.95);
+    if (deploying) arc(ex, ez, Game.ELF_TOWER.range, color(ELF_COL), 0.3, 1, 0.012, 90);
     for (const sd of [v.me, 1 - v.me]) {
       const own = Game.elfOwnOf(src, sd);
       if (!own || !Game.elfOwnShown(src, v.me, deploying, sd)) continue;
