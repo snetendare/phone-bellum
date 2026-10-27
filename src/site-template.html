@@ -3435,7 +3435,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       grp.forEach(j => done.add(j));
       parts.push(grp.length > 1 ? orGroup(grp.map(row), 'Pick one · either or') : row(k));
     }
-    return `<div style="display:grid;gap:6px"><h4 style="margin:0;font-size:12px;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted)">Skills${enzo ? ` · Enzo: one random skill per unit, free with ${Game.CHAR.enzoMin}+ squads of it` : mine ? ' · for all your squads of this unit' : ''}${HOLD_HINT}</h4>${parts.join('')}</div>`;
+    return `<div style="display:grid;gap:6px"><h4 style="margin:0;font-size:12px;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted)">Skills${enzo ? ` · Enzo: each unit’s first skill, free with ${Game.CHAR.enzoMin}+ squads of it` : mine ? ' · for all your squads of this unit' : ''}${HOLD_HINT}</h4>${parts.join('')}</div>`;
   }
   // an Awaken skill's row: this squad's (sq; from the shop, how many of yours have it). Buttons carry data-act, bound by bindPane.
   function awakenAct(i, k, side, sq) {

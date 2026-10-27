@@ -40,7 +40,7 @@ const Art = (() => {
     felix: { field: '#3E6B2F', charge: '#F2C94C', draw(g) { // a stack of coins: more gold
       for (const dy of [0.3, 0.12, -0.06]) { g.beginPath(); g.ellipse(0, dy, 0.28, 0.1, 0, 0, Math.PI * 2); g.fill(); }
       g.lineWidth = 0.035; g.strokeStyle = '#3E6B2F'; for (const dy of [0.3, 0.12, -0.06]) { g.beginPath(); g.ellipse(0, dy, 0.28, 0.1, 0, 0, Math.PI * 2); g.stroke(); } } },
-    enzo: { field: '#5A2E6E', charge: '#EDEFF2', draw(g) { // a die: a random skill
+    enzo: { field: '#5A2E6E', charge: '#EDEFF2', draw(g) { // a die
       g.beginPath(); g.roundRect(-0.3, -0.26, 0.6, 0.6, 0.08); g.fill();
       g.fillStyle = '#5A2E6E'; for (const [px, py] of [[-0.15, -0.11], [0, 0.04], [0.15, 0.19]]) { g.beginPath(); g.arc(px, py, 0.06, 0, Math.PI * 2); g.fill(); } } },
     matteo: { field: '#5B1F3A', charge: '#EDEFF2', draw(g) { // a top hat with a pink band: the Gentleman
