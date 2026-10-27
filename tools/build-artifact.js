@@ -7,7 +7,7 @@ const head = game.slice(game.indexOf('<title>'), game.indexOf('</head>'));
 const body = game.slice(game.indexOf('<body>') + 6, game.lastIndexOf('</body>'));
 let art = head + '\n' + body;
 art = art.replace('<script src="peerjs.min.js"></script>', '<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>')
-  .replace(/<a class="btn small" id="lab-link"[^>]*>Counter Lab<\/a>/, '');
+  .replace(/<a class="btn small" id="lab-link"[^>]*>Counter Lab<\/a>/, '').replace(/<a class="btn small" id="editor-link"[^>]*>Map Editor<\/a>/, '');
 if (art.includes('id="lab-link"') || !art.includes('jsdelivr')) throw new Error('artifact build failed');
 // The 3D board (the Board setting): its code inlined (about 75 KB; it only defines functions, so the 2D game opens
 // as before), three.js imported from jsDelivr only when 3D starts.

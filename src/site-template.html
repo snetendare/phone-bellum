@@ -1900,7 +1900,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
         </div>` : ''}
         <div class="bar">
           <span class="hint">${customSet ? `Your ${units.length} Counter Lab units` : `${units.length} built-in units`}${reportDb ? '. Matches are saved for Claude to review.' : ''}</span>
-          <span class="btnrow"><button class="btn small" id="load-units">Load units</button><a class="btn small" id="lab-link" href="lab.html" style="text-decoration:none;color:inherit;display:inline-block">Counter Lab</a></span>
+          <span class="btnrow"><button class="btn small" id="load-units">Load units</button><a class="btn small" id="lab-link" href="lab.html" style="text-decoration:none;color:inherit;display:inline-block">Counter Lab</a><a class="btn small" id="editor-link" href="editor.html" style="text-decoration:none;color:inherit;display:inline-block">Map Editor</a></span>
         </div>`)}`;
     $('how').addEventListener('click', openHowTo);
     $('tutorial').addEventListener('click', startTutorial);

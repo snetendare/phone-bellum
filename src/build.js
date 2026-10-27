@@ -1,4 +1,4 @@
-// Builds index.html (the game) and lab.html (Counter Lab) into the repo root.
+// Builds index.html (the game), lab.html (Counter Lab), lab3d.html and editor.html (the map editor) into the repo root.
 // Run from the repo root:  node src/build.js
 const fs = require('fs'), path = require('path');
 const src = (f) => fs.readFileSync(path.join(__dirname, f), 'utf8');
@@ -49,4 +49,8 @@ const lab3d = src('lab3d-template.html').replace('/*BASECSS*/', () => src('game.
   .replace('/*MODELS3D*/', () => src('models3d.js')).replace('/*RENDER3D*/', () => src('render3d.js'))
   .replace('/*DATA*/', () => src('demo-units.json')).replace('/*LAB3D*/', () => src('lab3d.js'));
 fs.writeFileSync('lab3d.html', lab3d);
-console.log('built index.html, lab.html and lab3d.html');
+// Map editor (stands alone: no game code)
+const editor = src('editor-template.html');
+editor.split('<script>').slice(1).map(s => s.split('</script>')[0]).forEach(s => new Function(s));
+fs.writeFileSync('editor.html', editor);
+console.log('built index.html, lab.html, lab3d.html and editor.html');

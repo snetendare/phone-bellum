@@ -1,0 +1,639 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0D1315">
+<link rel="icon" href="icon.png">
+<link rel="apple-touch-icon" href="icon.png">
+<title>Map Editor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: the board on the left (on top on a phone), the tools beside it (under it on a phone). Same night palette as the game. */
+:root {
+  --bg: #0D1315;
+  --panel: #152125;
+  --board: #13201F;
+  --line: #27393D;
+  --ink: #E5ECE9;
+  --muted: #8DA1A1;
+  --you: #5CC6DF;
+  --foe: #EE6E5C;
+  --gold: #E6B84A;
+  --solid: #1F3A60;
+  --water: #4FCBEA;
+  --objective: #22C55E;
+  --raise: #F2C318;
+  --lower: #E5483F;
+  --font-display: "Chakra Petch", "Arial Narrow", system-ui, sans-serif;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-data: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { background: var(--bg); color: var(--ink); margin: 0; }
+body { font-family: var(--font-body); font-size: 14px; line-height: 1.45; padding: 12px 16px 32px; -webkit-tap-highlight-color: transparent; }
+h1, h2, h3 { font-family: var(--font-display); margin: 0; letter-spacing: 0.02em; }
+button, input, select { font: inherit; color: inherit; }
+button { cursor: pointer; }
+button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+a { color: var(--you); }
+.num { font-family: var(--font-data); font-variant-numeric: tabular-nums; }
+
+.app { max-width: 1180px; margin: 0 auto; display: grid; gap: 12px; }
+header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+header h1 { font-size: 24px; text-transform: uppercase; }
+header .eyebrow { font-family: var(--font-data); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+.layout { display: grid; gap: 14px; grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 860px) { .layout { grid-template-columns: minmax(0, 1fr) 340px; align-items: start; } .side { position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow: auto; } }
+
+.boardwrap { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px; display: grid; gap: 8px; }
+.boardhead { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.boardhead input { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; min-width: 0; width: 220px; max-width: 100%; font-family: var(--font-display); font-weight: 600; font-size: 16px; }
+.boardhead .info { color: var(--muted); font-size: 12px; }
+#board { display: block; margin: 0 auto; touch-action: none; border-radius: 6px; max-width: 100%; }
+.status { min-height: 20px; font-size: 12px; color: var(--muted); text-align: center; }
+
+.side { display: grid; gap: 12px; align-content: start; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; display: grid; gap: 10px; }
+.card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); font-weight: 600; }
+.tools { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 6px; }
+.tool { display: grid; grid-template-columns: 22px 1fr; align-items: center; gap: 6px; text-align: left; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 7px; font-size: 12px; line-height: 1.15; min-height: 40px; }
+.tool[aria-pressed="true"] { border-color: var(--gold); box-shadow: inset 0 0 0 1px var(--gold); background: #1B2A2E; }
+.tool .sw { width: 20px; height: 20px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.18); }
+.tool small { display: block; color: var(--muted); font-size: 10.5px; }
+.tool kbd { font-family: var(--font-data); font-size: 10px; color: var(--muted); }
+.hint { font-size: 12px; color: var(--muted); }
+
+.row { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.stepper { display: inline-flex; align-items: center; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.stepper button { background: var(--bg); border: 0; width: 32px; height: 30px; font-size: 16px; }
+.stepper button:disabled { opacity: 0.35; cursor: default; }
+.stepper span { min-width: 34px; text-align: center; font-family: var(--font-data); }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg button { background: var(--bg); border: 0; padding: 5px 10px; font-size: 12px; }
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button[aria-pressed="true"] { background: #2A3A3E; color: var(--gold); }
+.btn { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; font-size: 13px; }
+.btn.primary { background: var(--gold); border-color: var(--gold); color: #1A1406; font-weight: 600; }
+.btn:disabled { opacity: 0.4; cursor: default; }
+.btnrow { display: flex; flex-wrap: wrap; gap: 6px; }
+.saved { display: grid; gap: 4px; }
+.saved .item { display: flex; align-items: center; gap: 6px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 4px 4px 4px 10px; }
+.saved .item span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.saved .item small { color: var(--muted); font-family: var(--font-data); }
+.saved .item button { padding: 3px 8px; font-size: 12px; }
+.legend { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 4px 10px; font-size: 12px; color: var(--muted); }
+.legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -2px; margin-right: 6px; border: 1px solid rgba(255,255,255,0.2); }
+.counts { font-family: var(--font-data); font-size: 12px; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div>
+      <div class="eyebrow"><a href="./" style="color:inherit">No Mans Land</a> · map editor</div>
+      <h1>Map Editor</h1>
+    </div>
+    <div class="btnrow">
+      <button class="btn" id="undo" title="Undo (Ctrl+Z)">Undo</button>
+      <button class="btn" id="redo" title="Redo (Ctrl+Y)">Redo</button>
+    </div>
+  </header>
+  <div class="layout">
+    <section class="boardwrap" aria-label="Board">
+      <div class="boardhead">
+        <input id="name" aria-label="Map name" maxlength="40">
+        <span class="info num" id="info"></span>
+      </div>
+      <canvas id="board"></canvas>
+      <div class="status" id="status"></div>
+    </section>
+    <aside class="side">
+      <div class="card">
+        <h2>Paint</h2>
+        <div class="tools" id="tools"></div>
+        <p class="hint">Drag across the board to paint. Drag a tower or building to move it, whatever tool is picked.</p>
+      </div>
+      <div class="card">
+        <h2>Board</h2>
+        <div class="row"><span>Mirror</span>
+          <div class="seg" id="sym">
+            <button data-s="point" title="Rotated, as on Test Grid and Mushroom Cavern: a tile on your right is a tile on their right">Rotate</button>
+            <button data-s="mirror" title="Straight across, as on Standard">Across</button>
+            <button data-s="none">Off</button>
+          </div>
+        </div>
+        <div class="row"><span>Columns</span><span class="stepper"><button data-k="cols" data-d="-1" aria-label="Fewer columns">−</button><span id="v-cols"></span><button data-k="cols" data-d="1" aria-label="More columns">+</button></span></div>
+        <div class="row"><span>Zone rows (each side)</span><span class="stepper"><button data-k="zone" data-d="-1" aria-label="Fewer zone rows">−</button><span id="v-zone"></span><button data-k="zone" data-d="1" aria-label="More zone rows">+</button></span></div>
+        <div class="row"><span>No man’s land rows</span><span class="stepper"><button data-k="nml" data-d="-2" aria-label="Fewer no man's land rows">−</button><span id="v-nml"></span><button data-k="nml" data-d="2" aria-label="More no man's land rows">+</button></span></div>
+        <div class="row"><span>Buildings</span>
+          <span class="btnrow">
+            <button class="btn" id="t-treasury" aria-pressed="false">Treasuries</button>
+            <button class="btn" id="t-elf" aria-pressed="false">Elf tower</button>
+          </span>
+        </div>
+        <div class="btnrow">
+          <button class="btn" id="flank-reset">Default flanks</button>
+          <button class="btn" id="clear">Clear tiles</button>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Start from</h2>
+        <div class="btnrow">
+          <button class="btn" data-base="standard">Standard map</button>
+          <button class="btn" data-base="testgrid">Test map</button>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Save</h2>
+        <div class="btnrow">
+          <button class="btn primary" id="save">Save map</button>
+          <button class="btn" id="export">Download .json</button>
+          <button class="btn" id="import">Open .json</button>
+          <button class="btn" id="copy">Copy JSON</button>
+          <input type="file" id="file" accept=".json,application/json" hidden>
+        </div>
+        <div class="saved" id="saved"></div>
+      </div>
+      <div class="card">
+        <h2>Key</h2>
+        <div class="legend" id="legend"></div>
+        <div class="counts" id="counts"></div>
+      </div>
+    </aside>
+  </div>
+</div>
+<script>
+// ===== Map editor: tiles, flanks, ground height and buildings, saved on this device or as a .json file =====
+// side 0 is the bottom player (you, rows ROWS-ZONE .. ROWS-1), side 1 the top one, as in src/game.js.
+// A map: { format, version, name, base, cols, rows, zone, symmetry, tiles, height, flank, buildings }
+//   tiles:  one string per row, a char per column: '.' open, '#' solid wall, '~' water, 'O' objective,
+//           'p' / 'y' / 'g' purple / yellow / green mushroom tile
+//   height: one string per row: 'L' -2, 'l' -1, '.' 0, 'h' +1, 'H' +2
+//   flank:  one string per row: 'F' a flank tile (the player whose half it is NOT on may deploy there), '.' not
+//   buildings: [{ kind: 'tower' | 'treasury' | 'elf', side: 0 | 1 | 2, col, row }]
+const $ = (id) => document.getElementById(id);
+const STORE = 'nml.maps.v1';
+const LIMITS = { cols: [6, 24], zone: [3, 10], nml: [2, 12] };
+const HCH = { '-2': 'L', '-1': 'l', '0': '.', '1': 'h', '2': 'H' }, CHH = { L: -2, l: -1, '.': 0, h: 1, H: 2 };
+const SHROOM_COL = { purple: '#B57BFF', yellow: '#F2D25C', green: '#7BD66A' };
+const FEATURE = { // tile char -> how it looks and what it is
+  '#': { name: 'Solid wall', sub: 'Blocks shots and sight', col: '#1F3A60' },
+  '~': { name: 'Water', sub: 'Shots and sight pass', col: '#4FCBEA' },
+  'O': { name: 'Objective', sub: 'Rules to come', col: '#22C55E' },
+  'p': { name: 'Purple shroom', sub: '+dmg, +health', col: SHROOM_COL.purple },
+  'y': { name: 'Yellow shroom', sub: 'Speed', col: SHROOM_COL.yellow },
+  'g': { name: 'Green shroom', sub: 'Poison', col: SHROOM_COL.green },
+};
+const TOOLS = [
+  { id: '#', key: '1' }, { id: '~', key: '2' }, { id: 'O', key: '3' },
+  { id: 'raise', key: '4', name: 'Raise ground', sub: 'Up to +2', col: '#F2C318' },
+  { id: 'lower', key: '5', name: 'Lower ground', sub: 'Down to −2', col: '#E5483F' },
+  { id: 'flank', key: '6', name: 'Flank tiles', sub: 'Add or remove', col: '#3C6E74' },
+  { id: 'p', key: '7' }, { id: 'y', key: '8' }, { id: 'g', key: '9' },
+  { id: 'erase', key: '0', name: 'Erase', sub: 'Tile and ground', col: '#13201F' },
+];
+TOOLS.forEach(t => { if (FEATURE[t.id]) Object.assign(t, FEATURE[t.id]); });
+
+// ---------- the starting maps: the game's Standard board and Test Grid (see MAPS, TOWER_SPOT, treasurySpot in src/game.js) ----------
+const BASES = {
+  standard: { name: 'Standard', cols: 12, zone: 6, nml: 4, symmetry: 'mirror', towers: [{ col: 8, row: 14 }, { col: 8, row: 1 }], treasury: false },
+  testgrid: { name: 'Test map', cols: 14, zone: 7, nml: 4, symmetry: 'point', towers: [{ col: 10, row: 16 }, { col: 3, row: 1 }], treasury: true },
+};
+// the game's treasury spot: the other side of the zone from the tower, one column in toward the middle, one row forward
+const treasuryFor = (cols, t, side) => { const c = cols - 1 - t.col; return { col: c + (c < (cols - 1) / 2 ? 1 : -1), row: t.row + (side === 0 ? -1 : 1) }; };
+function fromBase(id) {
+  const b = BASES[id], rows = b.zone * 2 + b.nml;
+  const m = { format: 'nml-map', version: 1, name: 'New ' + b.name.toLowerCase(), base: id, cols: b.cols, rows, zone: b.zone, symmetry: b.symmetry,
+    tiles: [], height: [], flank: [], buildings: [] };
+  for (let r = 0; r < rows; r++) { m.tiles.push('.'.repeat(b.cols)); m.height.push('.'.repeat(b.cols)); m.flank.push(defaultFlankRow(b.cols)); }
+  b.towers.forEach((t, side) => m.buildings.push({ kind: 'tower', side, col: t.col, row: t.row }));
+  if (b.treasury) b.towers.forEach((t, side) => m.buildings.push({ kind: 'treasury', side, ...treasuryFor(b.cols, t, side) }));
+  return m;
+}
+// the game's flanks: the two edge columns, the whole way down (each half is the other player's)
+const defaultFlankRow = (cols) => Array.from({ length: cols }, (_, c) => c === 0 || c === cols - 1 ? 'F' : '.').join('');
+
+// ---------- state ----------
+let map = fromBase('standard'), tool = '#', undoStack = [], redoStack = [], dirty = false;
+const snap = () => JSON.stringify(map);
+const setAt = (arr, c, r, ch) => { arr[r] = arr[r].slice(0, c) + ch + arr[r].slice(c + 1); };
+const tileAt = (c, r) => map.tiles[r][c], hAt = (c, r) => CHH[map.height[r][c]], flankAt = (c, r) => map.flank[r][c] === 'F';
+const buildingAt = (c, r) => map.buildings.find(b => b.col === c && b.row === r) || null;
+const inside = (c, r) => c >= 0 && r >= 0 && c < map.cols && r < map.rows;
+const halfOf = (r) => r >= map.rows / 2 ? 0 : 1; // the side whose half a row is on
+const zoneOf = (r) => r >= map.rows - map.zone ? 0 : r < map.zone ? 1 : null;
+// the tile mirrored onto the other half, or null with the mirror off
+function mirrorOf(c, r, sym = map.symmetry) {
+  if (sym === 'point') return { col: map.cols - 1 - c, row: map.rows - 1 - r };
+  if (sym === 'mirror') return { col: c, row: map.rows - 1 - r };
+  return null;
+}
+function withMirror(c, r) {
+  const out = [{ col: c, row: r }], m = mirrorOf(c, r);
+  if (m && (m.col !== c || m.row !== r)) out.push(m);
+  return out;
+}
+
+// ---------- undo ----------
+function remember(before) {
+  if (before === snap()) return;
+  undoStack.push(before); if (undoStack.length > 200) undoStack.shift();
+  redoStack = []; dirty = true; refresh();
+}
+function undo() { if (!undoStack.length) return; redoStack.push(snap()); map = JSON.parse(undoStack.pop()); dirty = true; refresh(); }
+function redo() { if (!redoStack.length) return; undoStack.push(snap()); map = JSON.parse(redoStack.pop()); dirty = true; refresh(); }
+
+// ---------- painting ----------
+// stroke: the tiles already touched (ground goes up or down once per tile a stroke) and the flank tool's mode
+let stroke = null;
+function paint(c, r) {
+  for (const p of withMirror(c, r)) {
+    const k = p.col + ',' + p.row;
+    if (stroke.done.has(k)) continue;
+    stroke.done.add(k);
+    paintOne(p.col, p.row);
+  }
+}
+function paintOne(c, r) {
+  if (tool === 'raise' || tool === 'lower') {
+    const h = Math.max(-2, Math.min(2, hAt(c, r) + (tool === 'raise' ? 1 : -1)));
+    setAt(map.height, c, r, HCH[h]);
+  } else if (tool === 'flank') {
+    setAt(map.flank, c, r, stroke.flank ? 'F' : '.');
+  } else if (tool === 'erase') {
+    setAt(map.tiles, c, r, '.'); setAt(map.height, c, r, '.');
+  } else if (FEATURE[tool]) {
+    if ((tool === '#' || tool === '~') && buildingAt(c, r)) { say('Walls can’t go under a building. Move it first.'); return; }
+    setAt(map.tiles, c, r, tool);
+  }
+}
+
+// ---------- buildings ----------
+// a player's tower and treasury stay on their own half; nothing stands on a wall or on another building
+function spotOk(b, c, r, ignore) {
+  if (!inside(c, r)) return false;
+  if (b.side !== 2 && halfOf(r) !== b.side) return false;
+  if ('#~'.includes(tileAt(c, r))) return false;
+  const o = buildingAt(c, r);
+  return !o || o === b || (ignore && ignore.includes(o));
+}
+// its partner on the other half (the other player's tower / treasury), moved along with it while the mirror is on
+const partnerOf = (b) => b.side === 2 ? null : map.buildings.find(o => o.kind === b.kind && o.side === 1 - b.side) || null;
+function moveBuilding(b, c, r) {
+  const p = map.symmetry !== 'none' ? partnerOf(b) : null, m = p && mirrorOf(c, r);
+  if (m && m.col === c && m.row === r) return false; // the mirror would put both on one tile
+  if (!spotOk(b, c, r, p ? [p] : null) || (p && !spotOk(p, m.col, m.row, [b]))) return false;
+  b.col = c; b.row = r;
+  if (p) { p.col = m.col; p.row = m.row; }
+  return true;
+}
+// a free tile for a building near (c, r), on the right half
+function nearestFree(b, c, r) {
+  let best = null, bd = Infinity;
+  for (let rr = 0; rr < map.rows; rr++) for (let cc = 0; cc < map.cols; cc++) {
+    if (!spotOk(b, cc, rr)) continue;
+    const d = Math.abs(cc - c) + Math.abs(rr - r) * 1.01;
+    if (d < bd) { bd = d; best = { col: cc, row: rr }; }
+  }
+  return best;
+}
+function toggleTreasuries() {
+  const before = snap(), had = map.buildings.some(b => b.kind === 'treasury');
+  if (had) map.buildings = map.buildings.filter(b => b.kind !== 'treasury');
+  else for (const side of [0, 1]) {
+    const t = map.buildings.find(b => b.kind === 'tower' && b.side === side) || { col: 0, row: side ? 0 : map.rows - 1 };
+    const want = treasuryFor(map.cols, t, side), b = { kind: 'treasury', side, col: 0, row: 0 };
+    const at = nearestFree(b, want.col, want.row);
+    if (at) { Object.assign(b, at); map.buildings.push(b); }
+  }
+  remember(before);
+}
+function toggleElf() {
+  const before = snap(), had = map.buildings.find(b => b.kind === 'elf');
+  if (had) map.buildings = map.buildings.filter(b => b !== had);
+  else { const b = { kind: 'elf', side: 2, col: 0, row: 0 }, at = nearestFree(b, Math.floor(map.cols / 2) - 1, map.rows / 2); if (at) { Object.assign(b, at); map.buildings.push(b); } }
+  remember(before);
+}
+
+// ---------- resizing ----------
+// Each half keeps its back edge and each side keeps its outer edge: rows are counted from the back of their half
+// (zone rows from the back, no man's land rows from the zone's front), columns from their own edge. New tiles are
+// open and flat, with the game's flanks on the edge columns.
+function resize(cols, zone, nml) {
+  const o = map, rows = zone * 2 + nml;
+  const mapRow = (r) => {
+    const top = r < o.rows / 2, d = top ? r : o.rows - 1 - r; // depth from the back of its half
+    const nd = d < o.zone ? (d < zone ? d : -1) : d - o.zone + zone;
+    if (nd < 0 || nd >= rows / 2) return -1;
+    return top ? nd : rows - 1 - nd;
+  };
+  const mapCol = (c) => {
+    const left = c < o.cols / 2, d = left ? c : o.cols - 1 - c;
+    if (d >= Math.floor(cols / 2) + (cols % 2 && left ? 1 : 0)) return -1;
+    return left ? d : cols - 1 - d;
+  };
+  const n = { ...o, cols, rows, zone, tiles: [], height: [], flank: [] };
+  for (let r = 0; r < rows; r++) { n.tiles.push('.'.repeat(cols)); n.height.push('.'.repeat(cols)); n.flank.push(defaultFlankRow(cols)); }
+  for (let r = 0; r < o.rows; r++) for (let c = 0; c < o.cols; c++) {
+    const nr = mapRow(r), nc = mapCol(c);
+    if (nr < 0 || nc < 0) continue;
+    setAt(n.tiles, nc, nr, o.tiles[r][c]); setAt(n.height, nc, nr, o.height[r][c]);
+    const edge = nc === 0 || nc === cols - 1, wasEdge = c === 0 || c === o.cols - 1;
+    if (!(edge && !wasEdge)) setAt(n.flank, nc, nr, wasEdge && !edge ? '.' : o.flank[r][c]); // edges stay edges
+  }
+  map = n;
+  // buildings: same rule, then the nearest free tile on their half if that one is gone or taken
+  const placed = [];
+  map.buildings = o.buildings.map(b => {
+    const nb = { ...b }, nr = mapRow(b.row), nc = mapCol(b.col);
+    const wantC = nc < 0 ? Math.min(cols - 1, b.col) : nc, wantR = nr < 0 ? (b.side === 0 ? rows - 1 : 0) : nr;
+    map.buildings = placed;
+    const at = spotOk(nb, wantC, wantR) ? { col: wantC, row: wantR } : nearestFree(nb, wantC, wantR);
+    if (at) { Object.assign(nb, at); placed.push(nb); }
+    return nb;
+  }).filter(b => placed.includes(b));
+}
+function step(k, d) {
+  const cur = { cols: map.cols, zone: map.zone, nml: map.rows - map.zone * 2 }, v = cur[k] + d;
+  if (v < LIMITS[k][0] || v > LIMITS[k][1]) return;
+  const before = snap();
+  cur[k] = v;
+  resize(cur.cols, cur.zone, cur.nml);
+  remember(before);
+}
+
+// ---------- drawing ----------
+const cv = $('board'), g = cv.getContext('2d');
+let T = 32, hover = null, drag = null;
+function fit() {
+  const wrap = cv.parentElement, availW = wrap.clientWidth - 20;
+  const availH = Math.max(320, window.innerHeight - (window.innerWidth >= 860 ? 150 : 200));
+  T = Math.max(14, Math.floor(Math.min(availW / map.cols, availH / map.rows)));
+  const dpr = window.devicePixelRatio || 1, w = T * map.cols, h = T * map.rows;
+  cv.style.width = w + 'px'; cv.style.height = h + 'px';
+  cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  draw();
+}
+function rrect(x, y, w, h, r) { g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r); g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath(); }
+function block(x, y, s, fill, alpha = 1) { // a raised square tile, like a game piece
+  const p = Math.max(1.5, s * 0.06);
+  g.globalAlpha = alpha;
+  g.fillStyle = fill; rrect(x + p, y + p, s - 2 * p, s - 2 * p, s * 0.1); g.fill();
+  g.fillStyle = 'rgba(255,255,255,0.14)'; rrect(x + p, y + p, s - 2 * p, (s - 2 * p) * 0.35, s * 0.1); g.fill();
+  g.strokeStyle = 'rgba(255,255,255,0.22)'; g.lineWidth = 1; rrect(x + p + 0.5, y + p + 0.5, s - 2 * p - 1, s - 2 * p - 1, s * 0.1); g.stroke();
+  g.globalAlpha = 1;
+}
+function shroom(x, y, s, col) {
+  const cx = x + s / 2, cy = y + s / 2;
+  g.fillStyle = col; g.globalAlpha = 0.22; g.fillRect(x + 1, y + 1, s - 2, s - 2); g.globalAlpha = 1;
+  g.shadowColor = col; g.shadowBlur = s * 0.35;
+  g.fillStyle = '#EDE6D6'; g.fillRect(cx - s * 0.07, cy - s * 0.02, s * 0.14, s * 0.26);
+  g.fillStyle = col; g.beginPath(); g.ellipse(cx, cy, s * 0.28, s * 0.2, 0, Math.PI, 0); g.closePath(); g.fill();
+  g.shadowBlur = 0;
+  g.fillStyle = 'rgba(255,255,255,0.7)'; g.beginPath(); g.arc(cx - s * 0.1, cy - s * 0.09, s * 0.035, 0, 7); g.arc(cx + s * 0.08, cy - s * 0.12, s * 0.03, 0, 7); g.fill();
+}
+function drawBuilding(b, x, y, s, ghost) {
+  const cx = x + s / 2, cy = y + s / 2, col = b.side === 0 ? '#5CC6DF' : b.side === 1 ? '#EE6E5C' : '#D8E68C';
+  g.globalAlpha = ghost ? 0.45 : 1;
+  if (b.kind === 'tower') {
+    g.strokeStyle = col; g.lineWidth = Math.max(2, s * 0.08);
+    g.fillStyle = 'rgba(13,19,21,0.75)'; g.beginPath(); g.arc(cx, cy, s * 0.42, 0, 7); g.fill(); g.stroke();
+    g.fillStyle = col; rrect(cx - s * 0.2, cy - s * 0.2, s * 0.4, s * 0.4, s * 0.05); g.fill();
+    g.fillStyle = 'rgba(255,255,255,0.35)'; g.fillRect(cx - s * 0.2, cy - s * 0.2, s * 0.4, s * 0.12);
+  } else if (b.kind === 'treasury') {
+    block(x, y, s, '#3A4A40', 1);
+    g.strokeStyle = col; g.lineWidth = Math.max(1.5, s * 0.06); rrect(x + s * 0.12, y + s * 0.12, s * 0.76, s * 0.76, s * 0.1); g.stroke();
+    g.fillStyle = '#E6B84A'; g.beginPath(); g.arc(cx, cy, s * 0.2, 0, 7); g.fill();
+    g.fillStyle = '#8A6A1E'; g.font = `700 ${Math.round(s * 0.26)}px "Chakra Petch", sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('$', cx, cy + 1);
+  } else {
+    g.fillStyle = 'rgba(13,19,21,0.7)'; g.beginPath(); g.arc(cx, cy, s * 0.42, 0, 7); g.fill();
+    g.fillStyle = col; g.beginPath(); g.moveTo(cx, cy - s * 0.32); g.lineTo(cx + s * 0.26, cy + s * 0.26); g.lineTo(cx - s * 0.26, cy + s * 0.26); g.closePath(); g.fill();
+  }
+  g.globalAlpha = 1;
+}
+function draw() {
+  const W = T * map.cols, H = T * map.rows, half = map.rows / 2;
+  g.clearRect(0, 0, W, H);
+  // halves and zones
+  for (let r = 0; r < map.rows; r++) {
+    const z = zoneOf(r);
+    g.fillStyle = z === 1 ? '#231C1A' : z === 0 ? '#11262A' : r < half ? '#151B1B' : '#111D1F';
+    g.fillRect(0, r * T, W, T);
+  }
+  // ground height under everything else
+  for (let r = 0; r < map.rows; r++) for (let c = 0; c < map.cols; c++) {
+    const h = hAt(c, r); if (!h) continue;
+    g.fillStyle = h > 0 ? '#F2C318' : '#E5483F';
+    g.globalAlpha = Math.abs(h) === 2 ? 0.85 : 0.38; g.fillRect(c * T, r * T, T, T); g.globalAlpha = 1;
+    g.fillStyle = h > 0 ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.28)'; g.fillRect(c * T, r * T, T, Math.max(2, T * 0.1));
+  }
+  // flank tiles: a stripe in the colour of the player who may deploy there (the other half's)
+  for (let r = 0; r < map.rows; r++) for (let c = 0; c < map.cols; c++) {
+    if (!flankAt(c, r)) continue;
+    const who = halfOf(r) === 0 ? '#EE6E5C' : '#5CC6DF';
+    g.fillStyle = who; g.globalAlpha = 0.13; g.fillRect(c * T, r * T, T, T);
+    g.globalAlpha = 0.35; g.save(); g.beginPath(); g.rect(c * T, r * T, T, T); g.clip();
+    g.strokeStyle = who; g.lineWidth = 1;
+    for (let k = -T; k < T; k += Math.max(5, T / 4)) { g.beginPath(); g.moveTo(c * T + k, r * T + T); g.lineTo(c * T + k + T, r * T); g.stroke(); }
+    g.restore(); g.globalAlpha = 1;
+  }
+  // grid
+  g.strokeStyle = 'rgba(141,161,161,0.12)'; g.lineWidth = 1;
+  for (let c = 1; c < map.cols; c++) { g.beginPath(); g.moveTo(c * T + 0.5, 0); g.lineTo(c * T + 0.5, H); g.stroke(); }
+  for (let r = 1; r < map.rows; r++) { g.beginPath(); g.moveTo(0, r * T + 0.5); g.lineTo(W, r * T + 0.5); g.stroke(); }
+  // zone fronts (dashed) and the centre line
+  g.setLineDash([6, 5]); g.lineWidth = 1.5;
+  g.strokeStyle = 'rgba(238,110,92,0.7)'; g.beginPath(); g.moveTo(0, map.zone * T); g.lineTo(W, map.zone * T); g.stroke();
+  g.strokeStyle = 'rgba(92,198,223,0.7)'; g.beginPath(); g.moveTo(0, (map.rows - map.zone) * T); g.lineTo(W, (map.rows - map.zone) * T); g.stroke();
+  g.strokeStyle = 'rgba(229,236,233,0.18)'; g.setLineDash([2, 6]); g.beginPath(); g.moveTo(0, half * T); g.lineTo(W, half * T); g.stroke();
+  g.setLineDash([]);
+  // tiles
+  for (let r = 0; r < map.rows; r++) for (let c = 0; c < map.cols; c++) {
+    const ch = tileAt(c, r), x = c * T, y = r * T;
+    if (ch === '#') block(x, y, T, '#1F3A60');
+    else if (ch === '~') {
+      block(x, y, T, '#4FCBEA', 0.72);
+      g.strokeStyle = 'rgba(255,255,255,0.55)'; g.lineWidth = Math.max(1, T * 0.05);
+      for (const fy of [0.45, 0.66]) { g.beginPath(); for (let k = 0; k <= 8; k++) { const px = x + T * (0.2 + k * 0.075), py = y + T * fy + Math.sin(k * 1.6) * T * 0.035; k ? g.lineTo(px, py) : g.moveTo(px, py); } g.stroke(); }
+    } else if (ch === 'O') {
+      g.fillStyle = 'rgba(34,197,94,0.22)'; g.fillRect(x - T * 0.3, y - T * 0.3, T * 1.6, T * 1.6);
+      g.shadowColor = '#22C55E'; g.shadowBlur = T * 0.5; block(x + T * 0.12, y + T * 0.12, T * 0.76, '#22C55E'); g.shadowBlur = 0;
+    } else if (ch === 'p') shroom(x, y, T, SHROOM_COL.purple);
+    else if (ch === 'y') shroom(x, y, T, SHROOM_COL.yellow);
+    else if (ch === 'g') shroom(x, y, T, SHROOM_COL.green);
+    const h = hAt(c, r);
+    if (h && T >= 22) { g.fillStyle = 'rgba(13,19,21,0.75)'; g.font = `600 ${Math.round(T * 0.26)}px "IBM Plex Mono", monospace`; g.textAlign = 'right'; g.textBaseline = 'bottom'; g.fillText((h > 0 ? '+' : '−') + Math.abs(h), c * T + T - 3, r * T + T - 2); }
+  }
+  // buildings (a dragged one at its new spot as a ghost)
+  for (const b of map.buildings) drawBuilding(b, b.col * T, b.row * T, T, drag && drag.b === b && drag.moved);
+  if (drag && drag.moved && drag.at) drawBuilding(drag.b, drag.at.col * T, drag.at.row * T, T, false);
+  // hover: the tile under the pointer and its mirror
+  if (hover && !drag) {
+    const spots = buildingAt(hover.col, hover.row) ? [hover] : withMirror(hover.col, hover.row);
+    spots.forEach((p, i) => { g.strokeStyle = i ? 'rgba(230,184,74,0.5)' : '#E6B84A'; g.lineWidth = 2; g.setLineDash(i ? [4, 3] : []); g.strokeRect(p.col * T + 1, p.row * T + 1, T - 2, T - 2); });
+    g.setLineDash([]);
+  }
+}
+
+// ---------- pointer ----------
+const tileOf = (e) => { const b = cv.getBoundingClientRect(); return { col: Math.floor((e.clientX - b.left) / (b.width / map.cols)), row: Math.floor((e.clientY - b.top) / (b.height / map.rows)) }; };
+cv.addEventListener('pointerdown', (e) => {
+  const p = tileOf(e); if (!inside(p.col, p.row)) return;
+  cv.setPointerCapture(e.pointerId);
+  const b = buildingAt(p.col, p.row);
+  if (b) { drag = { b, from: p, at: p, moved: false }; draw(); return; }
+  stroke = { before: snap(), done: new Set(), flank: !flankAt(p.col, p.row) };
+  paint(p.col, p.row); draw();
+});
+cv.addEventListener('pointermove', (e) => {
+  const p = tileOf(e);
+  hover = inside(p.col, p.row) ? p : null;
+  if (drag) { if (hover && (hover.col !== drag.at.col || hover.row !== drag.at.row)) { drag.at = hover; drag.moved = true; } }
+  else if (stroke && hover) paint(p.col, p.row);
+  showHover(); draw();
+});
+function endPointer() {
+  if (drag) {
+    const { b, at, moved } = drag; drag = null;
+    if (moved) {
+      const before = snap();
+      if (moveBuilding(b, at.col, at.row)) remember(before);
+      else say(b.side === 2 ? 'Can’t stand there.' : 'A ' + (b.kind === 'tower' ? 'tower' : 'treasury') + ' stays on its own half, off walls and water' + (map.symmetry !== 'none' ? ', and its mirror spot must be free too.' : '.'));
+    } else say(buildingName(b) + ': drag it to move it.');
+    draw();
+  }
+  if (stroke) { const s = stroke; stroke = null; remember(s.before); }
+}
+cv.addEventListener('pointerup', endPointer);
+cv.addEventListener('pointercancel', endPointer);
+cv.addEventListener('pointerleave', () => { hover = null; if (!stroke && !drag) { showHover(); draw(); } });
+const buildingName = (b) => b.kind === 'elf' ? 'Elf tower' : (b.side === 0 ? 'Your ' : 'Enemy ') + b.kind;
+let sayTimer = 0;
+function say(t) { $('status').textContent = t; clearTimeout(sayTimer); sayTimer = setTimeout(showHover, 2600); }
+function showHover() {
+  if (!hover) { $('status').textContent = ''; return; }
+  const { col, row } = hover, ch = tileAt(col, row), h = hAt(col, row), b = buildingAt(col, row), z = zoneOf(row);
+  const bits = [`col ${col}, row ${row}`, z === 0 ? 'your zone' : z === 1 ? 'enemy zone' : 'no man’s land'];
+  if (b) bits.push(buildingName(b));
+  if (ch !== '.') bits.push(FEATURE[ch].name.toLowerCase());
+  if (h) bits.push((h > 0 ? 'raised ' : 'lowered ') + Math.abs(h));
+  if (flankAt(col, row)) bits.push('flank for ' + (halfOf(row) === 0 ? 'the enemy' : 'you'));
+  $('status').textContent = bits.join(' · ');
+}
+
+// ---------- panels ----------
+function buildTools() {
+  $('tools').innerHTML = TOOLS.map(t => `<button class="tool" data-tool="${t.id}" aria-pressed="${t.id === tool}" title="${t.name} (${t.key})">
+    <span class="sw" style="background:${t.col}"></span><span>${t.name}<small>${t.sub}</small></span></button>`).join('');
+  $('legend').innerHTML = [
+    ['#1F3A60', 'Solid wall: blocks shots and sight'], ['#4FCBEA', 'Water: shots and sight pass'], ['#22C55E', 'Objective'],
+    ['#F2C318', 'Raised ground'], ['#E5483F', 'Lowered ground'], ['#3C6E74', 'Flank tile (stripes: who may deploy)'],
+    [SHROOM_COL.purple, 'Purple shroom: +10% dmg, hp'], [SHROOM_COL.yellow, 'Yellow shroom: +30% speed'], [SHROOM_COL.green, 'Green shroom: poison, slow'],
+  ].map(([c, t]) => `<span><i style="background:${c}"></i>${t}</span>`).join('');
+}
+function pickTool(id) { tool = id; document.querySelectorAll('.tool').forEach(b => b.setAttribute('aria-pressed', b.dataset.tool === id)); }
+$('tools').addEventListener('click', (e) => { const b = e.target.closest('.tool'); if (b) pickTool(b.dataset.tool); });
+document.querySelectorAll('.stepper button').forEach(b => b.addEventListener('click', () => step(b.dataset.k, +b.dataset.d)));
+$('sym').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; const before = snap(); map.symmetry = b.dataset.s; remember(before); refresh(); });
+$('t-treasury').addEventListener('click', toggleTreasuries);
+$('t-elf').addEventListener('click', toggleElf);
+$('flank-reset').addEventListener('click', () => { const before = snap(); map.flank = Array.from({ length: map.rows }, () => defaultFlankRow(map.cols)); remember(before); });
+$('clear').addEventListener('click', () => { const before = snap(); map.tiles = map.tiles.map(r => '.'.repeat(r.length)); map.height = map.height.map(r => '.'.repeat(r.length)); remember(before); });
+$('undo').addEventListener('click', undo);
+$('redo').addEventListener('click', redo);
+$('name').addEventListener('input', () => { map.name = $('name').value; dirty = true; });
+document.querySelectorAll('[data-base]').forEach(b => b.addEventListener('click', () => {
+  if (dirty && !confirm('Start over from the ' + BASES[b.dataset.base].name + '? Unsaved changes are lost (Undo brings them back).')) return;
+  const before = snap(); map = fromBase(b.dataset.base); remember(before); dirty = false; refresh();
+}));
+document.addEventListener('keydown', (e) => {
+  if (e.target.matches('input')) return;
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); return; }
+  const t = TOOLS.find(t => t.key === e.key); if (t && !e.ctrlKey && !e.metaKey && !e.altKey) pickTool(t.id);
+});
+
+// ---------- saving ----------
+const readSaved = () => { try { return JSON.parse(localStorage.getItem(STORE) || '{}') || {}; } catch (e) { return {}; } };
+const writeSaved = (all) => { try { localStorage.setItem(STORE, JSON.stringify(all)); return true; } catch (e) { return false; } };
+function validMap(m) {
+  if (!m || m.format !== 'nml-map' || !(m.cols > 0) || !(m.rows > 0) || !(m.zone > 0)) return false;
+  for (const k of ['tiles', 'height', 'flank']) if (!Array.isArray(m[k]) || m[k].length !== m.rows || m[k].some(r => typeof r !== 'string' || r.length !== m.cols)) return false;
+  return Array.isArray(m.buildings);
+}
+function save() {
+  const name = (map.name || '').trim() || 'Untitled map';
+  map.name = name; $('name').value = name;
+  const all = readSaved();
+  if (all[name] && !confirm(`Replace the saved map “${name}”?`)) return;
+  all[name] = { ...JSON.parse(snap()), saved: Date.now() };
+  if (writeSaved(all)) { dirty = false; say('Saved “' + name + '” on this device.'); } else say('Couldn’t save on this device. Use Download .json instead.');
+  renderSaved();
+}
+function renderSaved() {
+  const all = readSaved(), names = Object.keys(all).sort((a, b) => (all[b].saved || 0) - (all[a].saved || 0));
+  $('saved').innerHTML = names.length ? names.map(n => `<div class="item"><span>${esc(n)}</span><small>${all[n].cols}×${all[n].rows}</small>
+    <button class="btn" data-load="${esc(n)}">Open</button><button class="btn" data-del="${esc(n)}" aria-label="Delete ${esc(n)}">✕</button></div>`).join('')
+    : '<p class="hint">Saved maps on this device show up here.</p>';
+}
+const esc = (s) => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+$('saved').addEventListener('click', (e) => {
+  const all = readSaved(), l = e.target.closest('[data-load]'), d = e.target.closest('[data-del]');
+  if (l && all[l.dataset.load]) {
+    if (dirty && !confirm('Open “' + l.dataset.load + '”? Unsaved changes are lost (Undo brings them back).')) return;
+    const before = snap(); const { saved, ...m } = all[l.dataset.load]; map = m; remember(before); dirty = false; refresh();
+  }
+  if (d && confirm('Delete the saved map “' + d.dataset.del + '”?')) { delete all[d.dataset.del]; writeSaved(all); renderSaved(); }
+});
+$('save').addEventListener('click', save);
+$('export').addEventListener('click', () => {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(map, null, 1)], { type: 'application/json' }));
+  a.download = ((map.name || 'map').trim().replace(/[^\w-]+/g, '-').toLowerCase() || 'map') + '.json';
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+});
+$('import').addEventListener('click', () => $('file').click());
+$('file').addEventListener('change', async () => {
+  const f = $('file').files[0]; $('file').value = ''; if (!f) return;
+  try {
+    const m = JSON.parse(await f.text());
+    if (!validMap(m)) throw new Error('bad');
+    const before = snap(); delete m.saved; map = m; remember(before); dirty = false; refresh(); say('Opened ' + f.name + '.');
+  } catch (e) { say('That file isn’t a map from this editor.'); }
+});
+$('copy').addEventListener('click', async () => {
+  try { await navigator.clipboard.writeText(JSON.stringify(map)); say('Map JSON copied.'); } catch (e) { say('Couldn’t copy here. Use Download .json.'); }
+});
+
+// ---------- refresh ----------
+function refresh() {
+  if (document.activeElement !== $('name')) $('name').value = map.name || '';
+  $('v-cols').textContent = map.cols; $('v-zone').textContent = map.zone; $('v-nml').textContent = map.rows - map.zone * 2;
+  const nml = map.rows - map.zone * 2;
+  for (const b of document.querySelectorAll('.stepper button')) { const v = { cols: map.cols, zone: map.zone, nml }[b.dataset.k] + +b.dataset.d; b.disabled = v < LIMITS[b.dataset.k][0] || v > LIMITS[b.dataset.k][1]; }
+  document.querySelectorAll('#sym button').forEach(b => b.setAttribute('aria-pressed', b.dataset.s === map.symmetry));
+  $('t-treasury').setAttribute('aria-pressed', map.buildings.some(b => b.kind === 'treasury'));
+  $('t-treasury').textContent = map.buildings.some(b => b.kind === 'treasury') ? 'Remove treasuries' : 'Add treasuries';
+  $('t-elf').textContent = map.buildings.some(b => b.kind === 'elf') ? 'Remove elf tower' : 'Add elf tower';
+  $('undo').disabled = !undoStack.length; $('redo').disabled = !redoStack.length;
+  $('info').textContent = `${map.cols}×${map.rows} · zones ${map.cols}×${map.zone}`;
+  const n = {}; map.tiles.join('').split('').forEach(ch => { n[ch] = (n[ch] || 0) + 1; });
+  const hs = map.height.join(''), fl = map.flank.join('');
+  $('counts').textContent = [`${n['#'] || 0} solid`, `${n['~'] || 0} water`, `${n.O || 0} objective`, `${(n.p || 0) + (n.y || 0) + (n.g || 0)} shrooms`,
+    `${(hs.match(/[hH]/g) || []).length} raised`, `${(hs.match(/[lL]/g) || []).length} lowered`, `${(fl.match(/F/g) || []).length} flank`].join(' · ');
+  fit();
+}
+window.addEventListener('resize', fit);
+window.addEventListener('beforeunload', (e) => { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
+buildTools(); renderSaved(); refresh();
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(draw);
+// for tests and the console
+window.Editor = { get map() { return map; }, set map(m) { map = m; refresh(); }, fromBase, resize: (c, z, n) => { resize(c, z, n); refresh(); }, validMap, pickTool };
+</script>
+</body>
+</html>
