@@ -34,7 +34,7 @@
 }
 * { box-sizing: border-box; }
 html, body { background: var(--bg); color: var(--ink); margin: 0; }
-body { font-family: var(--font-body); font-size: 14px; line-height: 1.45; padding: 12px 16px 32px; -webkit-tap-highlight-color: transparent; }
+body { font-family: var(--font-body); font-size: 14px; line-height: 1.45; padding-block: 12px 32px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); -webkit-tap-highlight-color: transparent; }
 h1, h2, h3 { font-family: var(--font-display); margin: 0; letter-spacing: 0.02em; }
 button, input, select { font: inherit; color: inherit; }
 button { cursor: pointer; }
@@ -81,6 +81,8 @@ header .eyebrow { font-family: var(--font-data); font-size: 11px; letter-spacing
 .btn:disabled { opacity: 0.4; cursor: default; }
 .btnrow { display: flex; flex-wrap: wrap; gap: 6px; }
 .saved { display: grid; gap: 4px; }
+.ask { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; border: 1px solid var(--gold); border-radius: 8px; padding: 6px 6px 6px 10px; font-size: 13px; }
+#json { width: 100%; min-height: 120px; resize: vertical; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px; font-family: var(--font-data); font-size: 11px; color: var(--ink); }
 .saved .item { display: flex; align-items: center; gap: 6px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 4px 4px 4px 10px; }
 .saved .item span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .saved .item small { color: var(--muted); font-family: var(--font-data); }
@@ -151,10 +153,16 @@ header .eyebrow { font-family: var(--font-data); font-size: 11px; letter-spacing
         <h2>Save</h2>
         <div class="btnrow">
           <button class="btn primary" id="save">Save map</button>
-          <button class="btn" id="export">Download .json</button>
-          <button class="btn" id="import">Open .json</button>
           <button class="btn" id="copy">Copy JSON</button>
+          <button class="btn" id="show-json" aria-expanded="false">Show JSON</button>
+          <button class="btn" id="import">Open .json file</button>
           <input type="file" id="file" accept=".json,application/json" hidden>
+        </div>
+        <div id="ask" class="ask" hidden></div>
+        <div id="json-box" hidden>
+          <textarea id="json" aria-label="Map JSON" spellcheck="false"></textarea>
+          <div class="btnrow"><button class="btn" id="load-json">Load this JSON</button></div>
+          <p class="hint">Paste a map here and load it, or copy this text to keep the map somewhere else.</p>
         </div>
         <div class="saved" id="saved"></div>
       </div>
@@ -548,8 +556,8 @@ $('undo').addEventListener('click', undo);
 $('redo').addEventListener('click', redo);
 $('name').addEventListener('input', () => { map.name = $('name').value; dirty = true; });
 document.querySelectorAll('[data-base]').forEach(b => b.addEventListener('click', () => {
-  if (dirty && !confirm('Start over from the ' + BASES[b.dataset.base].name + '? Unsaved changes are lost (Undo brings them back).')) return;
   const before = snap(); map = fromBase(b.dataset.base); remember(before); dirty = false; refresh();
+  say('Started from the ' + BASES[b.dataset.base].name + '. Undo brings back what was here.');
 }));
 document.addEventListener('keydown', (e) => {
   if (e.target.matches('input')) return;
@@ -566,13 +574,21 @@ function validMap(m) {
   for (const k of ['tiles', 'height', 'flank']) if (!Array.isArray(m[k]) || m[k].length !== m.rows || m[k].some(r => typeof r !== 'string' || r.length !== m.cols)) return false;
   return Array.isArray(m.buildings);
 }
-function save() {
+// a question in the Save panel, in place of a dialog (the page may run where dialogs are blocked)
+function ask(text, yes, onYes) {
+  const box = $('ask');
+  box.innerHTML = `<span>${esc(text)}</span><span class="btnrow"><button class="btn primary" data-a="y">${esc(yes)}</button><button class="btn" data-a="n">Cancel</button></span>`;
+  box.hidden = false;
+  box.onclick = (e) => { const b = e.target.closest('[data-a]'); if (!b) return; box.hidden = true; box.onclick = null; if (b.dataset.a === 'y') onYes(); };
+  box.querySelector('[data-a="y"]').focus();
+}
+function save(force) {
   const name = (map.name || '').trim() || 'Untitled map';
   map.name = name; $('name').value = name;
   const all = readSaved();
-  if (all[name] && !confirm(`Replace the saved map “${name}”?`)) return;
+  if (all[name] && !force) { ask(`Replace the saved map “${name}”?`, 'Replace', () => save(true)); return; }
   all[name] = { ...JSON.parse(snap()), saved: Date.now() };
-  if (writeSaved(all)) { dirty = false; say('Saved “' + name + '” on this device.'); } else say('Couldn’t save on this device. Use Download .json instead.');
+  if (writeSaved(all)) { dirty = false; say('Saved “' + name + '” on this device.'); } else say('Couldn’t save on this device. Use Copy JSON instead.');
   renderSaved();
 }
 function renderSaved() {
@@ -585,29 +601,31 @@ const esc = (s) => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt
 $('saved').addEventListener('click', (e) => {
   const all = readSaved(), l = e.target.closest('[data-load]'), d = e.target.closest('[data-del]');
   if (l && all[l.dataset.load]) {
-    if (dirty && !confirm('Open “' + l.dataset.load + '”? Unsaved changes are lost (Undo brings them back).')) return;
     const before = snap(); const { saved, ...m } = all[l.dataset.load]; map = m; remember(before); dirty = false; refresh();
+    say('Opened “' + l.dataset.load + '”. Undo brings back what was here.');
   }
-  if (d && confirm('Delete the saved map “' + d.dataset.del + '”?')) { delete all[d.dataset.del]; writeSaved(all); renderSaved(); }
+  if (d) { const n = d.dataset.del; ask(`Delete the saved map “${n}”?`, 'Delete', () => { const a = readSaved(); delete a[n]; writeSaved(a); renderSaved(); say('Deleted “' + n + '”.'); }); }
 });
-$('save').addEventListener('click', save);
-$('export').addEventListener('click', () => {
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([JSON.stringify(map, null, 1)], { type: 'application/json' }));
-  a.download = ((map.name || 'map').trim().replace(/[^\w-]+/g, '-').toLowerCase() || 'map') + '.json';
-  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+$('save').addEventListener('click', () => save(false));
+function openMap(m, from) {
+  if (!validMap(m)) { say(from + ' isn’t a map from this editor.'); return; }
+  const before = snap(); delete m.saved; map = m; remember(before); dirty = false; refresh(); say('Opened ' + from + '.');
+}
+$('show-json').addEventListener('click', () => {
+  const box = $('json-box'), open = box.hidden;
+  box.hidden = !open; $('show-json').setAttribute('aria-expanded', open); $('show-json').textContent = open ? 'Hide JSON' : 'Show JSON';
+  if (open) $('json').value = JSON.stringify(map);
 });
+$('load-json').addEventListener('click', () => { let m = null; try { m = JSON.parse($('json').value); } catch (e) {} openMap(m, 'the pasted JSON'); });
 $('import').addEventListener('click', () => $('file').click());
 $('file').addEventListener('change', async () => {
   const f = $('file').files[0]; $('file').value = ''; if (!f) return;
-  try {
-    const m = JSON.parse(await f.text());
-    if (!validMap(m)) throw new Error('bad');
-    const before = snap(); delete m.saved; map = m; remember(before); dirty = false; refresh(); say('Opened ' + f.name + '.');
-  } catch (e) { say('That file isn’t a map from this editor.'); }
+  let m = null; try { m = JSON.parse(await f.text()); } catch (e) {}
+  openMap(m, f.name);
 });
 $('copy').addEventListener('click', async () => {
-  try { await navigator.clipboard.writeText(JSON.stringify(map)); say('Map JSON copied.'); } catch (e) { say('Couldn’t copy here. Use Download .json.'); }
+  try { await navigator.clipboard.writeText(JSON.stringify(map)); say('Map JSON copied.'); }
+  catch (e) { if ($('json-box').hidden) $('show-json').click(); $('json').select(); say('Couldn’t copy here. The JSON is selected below: copy it from there.'); }
 });
 
 // ---------- refresh ----------
@@ -620,6 +638,7 @@ function refresh() {
   $('t-treasury').setAttribute('aria-pressed', map.buildings.some(b => b.kind === 'treasury'));
   $('t-treasury').textContent = map.buildings.some(b => b.kind === 'treasury') ? 'Remove treasuries' : 'Add treasuries';
   $('t-elf').textContent = map.buildings.some(b => b.kind === 'elf') ? 'Remove elf tower' : 'Add elf tower';
+  if (!$('json-box').hidden && document.activeElement !== $('json')) $('json').value = JSON.stringify(map);
   $('undo').disabled = !undoStack.length; $('redo').disabled = !redoStack.length;
   $('info').textContent = `${map.cols}×${map.rows} · zones ${map.cols}×${map.zone}`;
   const n = {}; map.tiles.join('').split('').forEach(ch => { n[ch] = (n[ch] || 0) + 1; });
@@ -629,7 +648,6 @@ function refresh() {
   fit();
 }
 window.addEventListener('resize', fit);
-window.addEventListener('beforeunload', (e) => { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
 buildTools(); renderSaved(); refresh();
 if (document.fonts && document.fonts.ready) document.fonts.ready.then(draw);
 // for tests and the console
