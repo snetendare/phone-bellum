@@ -60,14 +60,14 @@ const { chromium } = require('playwright-core');
     check(await coach() === '' && await p.locator('[data-s="1"][aria-pressed="true"]').count() === 1, `${board}: no coach during the fight, which plays at 1x`);
     await p.click('#skip'); await wait(p);
     s = await st();
-    check(s.round === 2 && s.hp[0] < 60 && /Round lost/.test(await coach()) && /\+300 gold/.test(await coach()), `${board}: round 1 is lost (${s.hp}), and the gold for next round is explained`);
+    check(s.round === 2 && s.hp[0] < 100 && /Round lost/.test(await coach()) && /\+300 gold/.test(await coach()), `${board}: round 1 is lost (${s.hp}), and the gold for next round is explained`);
     await p.click('#coach-btns .btn'); await wait(p);
     await p.click('#shop .ucard >> nth=1'); await wait(p);
     check(/Try Fire Mage/.test(await coach()), `${board}: Sniper is turned away with a hint`);
     await p.click('#shop .ucard >> nth=0'); await wait(p); await tap(4, 12);
     await p.click('#fight'); await wait(p, 600); await p.click('#skip'); await wait(p);
     s = await st();
-    check(s.round === 3 && s.hp[1] < 60 && /Round won/.test(await coach()), `${board}: round 2 is won (${s.hp}), on to round 3`);
+    check(s.round === 3 && s.hp[1] < 100 && /Round won/.test(await coach()), `${board}: round 2 is won (${s.hp}), on to round 3`);
     // round 3: the tower, the deployment cap
     await p.click('#coach-btns .btn'); await wait(p);
     s = await st();

@@ -2623,8 +2623,8 @@ const Game = (() => {
   // COLS, ROWS and ZONE while a match on it is in play (see useGrid); every other map keeps these.
   const TILE = 6, GRID = { cols: 12, rows: 16, zone: 6 };
   let COLS = GRID.cols, ROWS = GRID.rows, ZONE = GRID.zone;
-  const START_HP = 60, MAX_ROUND_DMG = 20, START_GOLD = 250, INCOME = 250, LOSER_BONUS = 50;
-  const SQUAD_COST = 100, SQUAD_POINTS = 2;
+  const START_HP = 100, START_GOLD = 250, INCOME = 250, LOSER_BONUS = 50;
+  const SQUAD_COST = 100;
   const SETTINGS = { dt: 0.05, timeCap: 60, spacing: 3.5, minDmgPct: 15, absorbXp: 1, armorXp: 0.5, sight: 15, minSight: 18, drift: 15, flameReach: 1.2 }; // sight: metres beyond range a unit notices an enemy (at least minSight), drift: it leans toward one this much further out. flameReach: flame cones reach 1.2x the unit's range
   // XP a squad needs in total to reach level 1, 2, 3, as multiples of its own starting health.
   // XP = damage dealt + damage absorbed + bounty for killing leveled bodies.
@@ -4332,22 +4332,22 @@ const Game = (() => {
     return E.createBattle(bodiesFor(m, 0), bodiesFor(m, 1), g, { record: true, tiles, strikes: fx.strikes, neutrals, charm: [charmMap(m, 0), charmMap(m, 1)] });
   }
 
-  // Damage a side deals = points of its squads, scaled by how much of each squad is still alive.
-  // TIER_DMG: a share for the squads of a tier (tier 3 squads deal 25% less than their price would)
-  const TIER_DMG = { 3: 0.75 };
+  // Damage a side deals = the damage of its squads' tiers, scaled by how much of each squad is still alive.
+  // TIER_DMG: damage a full squad of each tier deals (a tier past the table deals the top tier's)
+  const TIER_DMG = { 1: 3, 2: 6, 3: 8, 4: 12 };
+  const tierDmg = (tier) => TIER_DMG[Math.min(Math.max(1, tier), 4)];
   function survivorDamage(m, res, side) {
     let sum = 0;
     for (const k in res.squads) {
       const s = res.squads[k];
       if (s.side !== side || s.alive <= 0) continue;
-      if (s.squad <= -10 && s.squad > YOT_SQUAD) { const sg = snowgres(m, side)[-10 - s.squad]; if (sg) sum += SQUAD_POINTS * GOLEM.cost * sg.strength * s.alive / s.total; continue; } // a Snowgre
+      if (s.squad <= -10 && s.squad > YOT_SQUAD) { const sg = snowgres(m, side)[-10 - s.squad]; if (sg) sum += tierDmg(4) * sg.strength * s.alive / s.total; continue; } // a Snowgre: an Ether Golem (tier 4)
       if (s.squad < 0) continue; // spawned bodies don't count
       const sq = m.armies[side].find(q => q.id === s.squad);
       if (sq && m.units[sq.unit].building) continue; // nor do buildings
-      const value = sq ? (m.units[sq.unit].cost || 1) * (TIER_DMG[tierOf(m.units, sq.unit)] || 1) : 1; // pricier squads hit harder, like their price
-      sum += SQUAD_POINTS * value * s.alive / s.total;
+      sum += (sq ? tierDmg(tierOf(m.units, sq.unit)) : tierDmg(1)) * s.alive / s.total;
     }
-    return sum > 0 ? Math.min(MAX_ROUND_DMG, Math.max(1, Math.round(sum))) : 0; // at most MAX_ROUND_DMG per round
+    return sum > 0 ? Math.max(1, Math.round(sum)) : 0;
   }
 
   // Apply a finished battle to the match. Returns a summary for the results screen.
@@ -5062,8 +5062,8 @@ const Game = (() => {
   }
 
   const api = {
-    MAX_ROUND_DMG, TIER_DMG, bankBusy, seenAt, charShown, towerTypeShown, altarShown, elfOwnShown, shroomShown, removingShroom, movedId, canMove, moveSquad, undoMove,
-    COLS, ROWS, TILE, ZONE, START_HP, START_GOLD, INCOME, incomeFor, LOSER_BONUS, SQUAD_COST, SQUAD_POINTS, SETTINGS, XP_STEPS, xpNeeded, unitCostOf,
+    TIER_DMG, bankBusy, seenAt, charShown, towerTypeShown, altarShown, elfOwnShown, shroomShown, removingShroom, movedId, canMove, moveSquad, undoMove,
+    COLS, ROWS, TILE, ZONE, START_HP, START_GOLD, INCOME, incomeFor, LOSER_BONUS, SQUAD_COST, SETTINGS, XP_STEPS, xpNeeded, unitCostOf,
     levelCost, isReady, levelUp, undoLevel, seenLevel, aiLevel, AI, CONFIG,
     deploysAllowed, deploysLeft, deployedThisRound, canBuyDeploy, buyDeploy, refundDeploy,
     PACKAGE, allPackages, packOf, needsPack, freeLeft, choosePack, ensurePack,
