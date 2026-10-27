@@ -3,7 +3,7 @@
 // kindOf picks a figure from a unit's stats (rosters are custom, so names can't be relied on): towers (one per tower
 // type), the elf spire, airships (aloft), the horse and spider shapes, fliers, then archers / casters for ranged
 // units and goblins / brutes / soldiers for melee ones. The default roster's tier 4 units, the wizards and a few more
-// (Ent, Rogue, Shiv, Assassin, Sniper, Slimeshots, Skeleton Archers, the Hellfiend) have their own models, by name (NAMED); a custom unit with one of
+// (Ent, Rogue, Shiv, Assassin, Obelisk, Sniper, Slimeshots, Skeleton Archers, the Hellfiend) have their own models, by name (NAMED); a custom unit with one of
 // those names gets that model too. A faction's tower (Factions mode) is one tower model in the faction's colour. height(kind): the top of the model, for markers above it.
 // parts(kind) gives up to three geometries, drawn as separate instanced meshes so each can be coloured per body:
 //   tint  - takes the unit's own colour (its clothes or hide), as the 2D board fills the shape with it
@@ -13,6 +13,7 @@
 const Models3D = (THREE) => {
   const SKIN = '#D9A27A', DARK = '#2B2F33', METAL = '#B8C0C8', WOOD = '#8A5A32', BONE = '#E9E3CF', GLOW = '#FFE9A8';
   const BRASS = '#C9A24A', IRON = '#55595E', PAPER = '#E8DFC4', HEAL = '#6FD08C';
+  const ICE = '#BFEFFF', GLUT = '#B07CFF';
   const STONE = '#6E6A64', ETHER = '#8FE3FF', SUN = '#F7D154', FIRE = '#FF8A3D', EMBER = '#FFD27A', ROCK = '#5A4A42', GHOST = '#7CFF6B';
   const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), v = new THREE.Vector3(), s = new THREE.Vector3(1, 1, 1);
   const box = (w, h, d) => new THREE.BoxGeometry(w, h, d);
@@ -41,6 +42,13 @@ const Models3D = (THREE) => {
     out.computeBoundingSphere();
     return out;
   }
+  const obeliskParts = () => [
+    P(box(1.6, 0.35, 1.6), STONE, [0, 0.18, 0]), P(box(1.66, 0.12, 1.66), 'team', [0, 0.42, 0]),
+    P(cyl(0.42, 0.64, 2.8, 4), 'tint', [0, 1.85, 0], [0, Math.PI / 4, 0]),
+    P(cone(0.42, 0.7, 4), 'tint', [0, 3.6, 0], [0, Math.PI / 4, 0]),
+    ...[1.5, 2.0, 2.55].map((y, k) => P(box(0.08 + (k % 2) * 0.1, 0.32, 0.05), GLUT, [k === 1 ? 0.1 : -0.06, y, -0.4 + (y - 1.85) * 0.07])),
+    P(box(0.52, 0.12, 0.06), DARK, [0, 1.08, -0.47]),
+    P(box(0.28, 0.28, 0.28), 'tint', [0.95, 2.3, 0.2], [0.5, 0.5, 0]), P(box(0.2, 0.2, 0.2), 'tint', [-0.85, 1.7, -0.25], [0.3, 0.8, 0])];
   const legs = (h = 0.8, gap = 0.2, w = 0.24) => [P(box(w, h, w), DARK, [-gap, h / 2, 0]), P(box(w, h, w), DARK, [gap, h / 2, 0])];
 
   const BUILD = {
@@ -197,6 +205,8 @@ const Models3D = (THREE) => {
       steel: () => [P(box(0.3, 0.3, 0.3), METAL, [0.55, 2.3, -0.15], [0.6, 0.6, 0]), ...[-1, 1].map(sd => P(cone(0.06, 0.2, 4), METAL, [0.55 + sd * 0.2, 2.3, -0.15], [0, 0, -sd * Math.PI / 2]))],
       slime: () => [P(ball(0.2), '#7BD93F', [0.55, 2.3, -0.15]), P(cone(0.07, 0.25, 5), '#7BD93F', [0.55, 2.1, -0.15], [Math.PI, 0, 0])],
       water: () => [P(ball(0.19), '#5FB4F0', [0.55, 2.28, -0.15]), P(cone(0.13, 0.32, 6), '#5FB4F0', [0.55, 2.5, -0.15]), P(ball(0.07), '#BDE3FF', [0.3, 2.55, -0.1])],
+      frost: () => [P(cone(0.13, 0.6, 4), ICE, [0.55, 2.5, -0.15]), P(cone(0.13, 0.3, 4), ICE, [0.55, 2.06, -0.15], [Math.PI, 0, 0]),
+        ...[-1, 1].map(sd => P(cone(0.07, 0.32, 4), ICE, [0.55 + sd * 0.17, 2.3, -0.15], [0, 0, -sd * 1.1])), P(ball(0.06), '#FFFFFF', [0.3, 2.6, -0.1])],
     }).map(([k, top]) => ['wizard:' + k, () => [
       P(cone(0.6, 1.5, 7), 'tint', [0, 0.75, 0]),
       P(ball(0.25), SKIN, [0, 1.6, 0]),
@@ -205,6 +215,11 @@ const Models3D = (THREE) => {
       P(cone(0.32, 0.8, 7), 'tint', [0, 2.2, 0.05], [0.15, 0, 0]),
       P(cyl(0.05, 0.05, 2.2, 5), WOOD, [0.55, 1.1, -0.15]),
       ...top()]])),
+    // Obelisk: a tapering stone pillar in the unit's colour on a plinth, a band in the team colour, violet runes and a
+    // mouth on its front, a pointed cap and two stones floating round it
+    obelisk: () => obeliskParts(),
+    // ...awakened (Eye of the Obelisk): a great glowing eye on its front and a crystal on its cap
+    'obelisk:eye': () => [...obeliskParts(), P(ball(0.26), GLUT, [0, 2.35, -0.42], [0, 0, 0], [1, 0.7, 0.5]), P(ball(0.11), '#2A0F4A', [0, 2.35, -0.53]), P(cone(0.16, 0.6, 4), GLUT, [0, 3.95, 0])],
     // ---------- the tier 4 units (NAMED) ----------
     // Ether Golem: a hunched heap of boulders in the unit's colour, a glowing core and eye slit, rune shards floating
     golem: () => [
@@ -524,7 +539,7 @@ const Models3D = (THREE) => {
     'Rollers': 'roller', 'Cog Builder': 'cogBuilder', 'Mechite Guards': 'mechGuard', 'Cog Turret': 'cogTurret', 'Healbot': 'healbot',
     'Minebot': 'minebot', 'Repairbot': 'repairbot', 'Cogbot Fighter': 'cogFighter', 'Cogbot Machinegunner': 'cogGunner', 'CogMech': 'cogMech',
     'Fire Mage': 'wizard:fire', 'Flame Wizard': 'wizard:flame', 'Leaf Wizard': 'wizard:leaf', 'Earth Wizard': 'wizard:earth', 'Steel Wizard': 'wizard:steel', 'Slime Wizard': 'wizard:slime',
-    'Water Mage': 'wizard:water', 'Shiv': 'shiv', 'Assassin': 'assassin', 'Hellfiend': 'hellfiend' };
+    'Water Mage': 'wizard:water', 'Frost Wizard': 'wizard:frost', 'Obelisk': 'obelisk', 'Shiv': 'shiv', 'Assassin': 'assassin', 'Hellfiend': 'hellfiend' };
   const RANGED = 12; // metres: from this range on, a unit is drawn as an archer or a caster
   function kindOf(u) {
     if (u.spire) return 'spire';
@@ -534,7 +549,7 @@ const Models3D = (THREE) => {
     if (u.structure) { const k = TOWERS[u.kind] ? 'tower:' + u.kind : /^f-/.test(u.kind || '') ? 'tower:faction' : 'tower:keep'; return u.awake && BUILD[k + ':awake'] ? k + ':awake' : k; } // Core Awoken: the Mecha Tower on wheels
     if (u.aloft) return u.kind === 'drone' ? 'drone' : 'airship';
     if (u.mech) return 'leafmech'; // the Leafblade suit
-    if (NAMED[u.name]) { const k = NAMED[u.name]; return u.awake && BUILD[k + ':awake'] ? k + ':awake' : u.unfolded && BUILD[k + ':unfolded'] ? k + ':unfolded' : k; } // Core Awoken, Unfold: their own versions
+    if (NAMED[u.name]) { const k = NAMED[u.name]; return u.awake && BUILD[k + ':awake'] ? k + ':awake' : u.eye && BUILD[k + ':eye'] ? k + ':eye' : u.unfolded && BUILD[k + ':unfolded'] ? k + ':unfolded' : k; } // Core Awoken, Unfold: their own versions
     if (u.shape === 'horse') return 'horse';
     if (u.shape === 'spider') return 'spider';
     if (u.shape === 'imp' || u.shape === 'ring') return 'flier';

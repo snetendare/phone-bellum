@@ -770,6 +770,91 @@
       "params": {},
       "flat": true,
       "master": true
+    },
+    {
+      "id": "deepfreeze",
+      "type": "deepfreeze",
+      "name": "Deepfreeze",
+      "cost": 150,
+      "params": {
+        "secs": 2
+      }
+    },
+    {
+      "id": "multibeam",
+      "type": "multibeam",
+      "name": "Multibeam",
+      "cost": 150,
+      "params": {
+        "beams": 2
+      }
+    },
+    {
+      "id": "glacialGaze",
+      "type": "stats",
+      "name": "Glacial gaze",
+      "cost": 150,
+      "params": {
+        "range": 5,
+        "hit": 20
+      },
+      "also": [
+        {
+          "type": "healthiest",
+          "params": {}
+        }
+      ]
+    },
+    {
+      "id": "snowStorm",
+      "type": "storm",
+      "name": "Snow storm",
+      "cost": 300,
+      "params": {
+        "radius": 8
+      },
+      "flat": true,
+      "master": true
+    },
+    {
+      "id": "gluttony",
+      "type": "glutCap",
+      "name": "Gluttony",
+      "cost": 150,
+      "params": {
+        "add": 1
+      }
+    },
+    {
+      "id": "hungerHaste",
+      "type": "glutSpeed",
+      "name": "Hunger’s haste",
+      "cost": 150,
+      "params": {
+        "speed": 0.1,
+        "aps": 1.5
+      }
+    },
+    {
+      "id": "crushingMaw",
+      "type": "stats",
+      "name": "Crushing maw",
+      "cost": 150,
+      "params": {
+        "splash": 3
+      }
+    },
+    {
+      "id": "obeliskEye",
+      "type": "ranged",
+      "name": "Eye of the Obelisk",
+      "cost": 300,
+      "params": {
+        "range": 18,
+        "speed": 25
+      },
+      "flat": true,
+      "needs": "glutMax"
     }
   ],
   "units": [
@@ -2190,6 +2275,160 @@
         false
       ],
       "skillMods": [
+        null,
+        null,
+        null
+      ],
+      "skillOr": [
+        [
+          1,
+          2
+        ]
+      ]
+    },
+    {
+      "burst": 1,
+      "pellets": 1,
+      "spinUp": 0,
+      "pierce": 0,
+      "minRange": 0,
+      "charge": 1,
+      "knockback": 0,
+      "windUp": 0,
+      "flame": 0,
+      "trample": 0,
+      "deathBlast": 0,
+      "defense": "none",
+      "defVal": 0,
+      "level": 0,
+      "projSpeed": 0,
+      "unlock": 100,
+      "name": "Frost Wizard",
+      "cost": 300,
+      "bodies": 1,
+      "hp": 900,
+      "hit": 34,
+      "aps": 2,
+      "range": 25,
+      "speed": 2,
+      "splash": 0,
+      "shape": "snowflake",
+      "color": "#9ED8F5",
+      "tag": "FRO",
+      "frost": {
+        "every": 2.5,
+        "pct": [
+          20,
+          30,
+          40
+        ],
+        "keep": 2
+      },
+      "trait": {
+        "name": "Frost",
+        "text": "Its beam puts Frost on the target: a stack on the first hit and one more every 2.5 s the beam stays on it, up to 3 stacks: 20% / 30% / 40% slower moves and attacks. The stacks melt 2 s after the frost stops."
+      },
+      "skills": [
+        "deepfreeze",
+        "multibeam",
+        "glacialGaze",
+        "snowStorm"
+      ],
+      "skillsOn": [
+        false,
+        false,
+        false,
+        false
+      ],
+      "skillsInnate": [
+        false,
+        false,
+        false,
+        false
+      ],
+      "skillMods": [
+        null,
+        null,
+        null,
+        null
+      ],
+      "skillOr": [
+        [
+          1,
+          2
+        ]
+      ],
+      "skillNeedsAny": [
+        null,
+        null,
+        null,
+        [
+          1,
+          2
+        ]
+      ]
+    },
+    {
+      "burst": 1,
+      "pellets": 1,
+      "spinUp": 0,
+      "pierce": 0,
+      "minRange": 0,
+      "charge": 1,
+      "knockback": 0,
+      "windUp": 0,
+      "flame": 0,
+      "trample": 0,
+      "deathBlast": 0,
+      "defense": "none",
+      "defVal": 0,
+      "level": 0,
+      "projSpeed": 0,
+      "unlock": 100,
+      "name": "Obelisk",
+      "cost": 300,
+      "bodies": 1,
+      "hp": 1550,
+      "hit": 100,
+      "aps": 0.7,
+      "range": 3,
+      "speed": 4,
+      "splash": 0,
+      "shape": "obelisk",
+      "color": "#5B4B7A",
+      "tag": "OBE",
+      "glut": {
+        "max": 12,
+        "cap": 2,
+        "hp": 6,
+        "hit": 6,
+        "speed": 0,
+        "aps": 0
+      },
+      "trait": {
+        "name": "Glut",
+        "text": "Eats the enemies it kills (not buildings or constructs): each one is a stack of Glut, up to 2 a round and 12 in all, kept for the whole match. Each stack gives +6% health and +6% hit, and it grows."
+      },
+      "skills": [
+        "gluttony",
+        "hungerHaste",
+        "crushingMaw",
+        "obeliskEye"
+      ],
+      "skillsOn": [
+        false,
+        false,
+        false,
+        false
+      ],
+      "skillsInnate": [
+        false,
+        false,
+        false,
+        false
+      ],
+      "skillMods": [
+        null,
         null,
         null,
         null

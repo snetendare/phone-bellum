@@ -1080,7 +1080,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
     if (inspect || inspectHtml) inspectCard(); // the tapped unit's card in a fight (gone once the fight is)
   }
   const teamCol = (side) => Art.teamCol(side, me);
-  const { SHROOM_COL, CHARM_COL, armsImg } = Art;
+  const { SHROOM_COL, CHARM_COL, GLUT_COL, armsImg } = Art;
   // A small picture of each map for the map picker, drawn once per map
   const thumbs = {};
   function mapThumb(id) {
@@ -1930,6 +1930,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
     if (mode === 'claude' && claude.note) lvLines.push(`<p>${esc(claude.note)}</p>`);
     if (sum.gentlemen && sum.gentlemen[me].length) lvLines.push(`<p><span style="color:${CHARM_COL}">Now Gentlemen (5 Charisma):</span> ${sum.gentlemen[me].map(x => esc(units[x.unit].name)).join(', ')}.</p>`);
     if (sum.converted && (sum.converted[me] || sum.converted[foe()])) lvLines.push(`<p><span style="color:${CHARM_COL}">Won over:</span> ${[sum.converted[me] ? `your Gentlemen charmed ${sum.converted[me]} enemy ${sum.converted[me] === 1 ? 'body' : 'bodies'}` : '', sum.converted[foe()] ? `${sum.converted[foe()]} of yours went over to ${esc(them)}` : ''].filter(Boolean).join('; ')}.</p>`);
+    if (sum.glut && sum.glut[me].length) lvLines.push(`<p><span style="color:${GLUT_COL}">Glut:</span> ${sum.glut[me].map(x => `${esc(units[x.unit].name)} ate ${x.gained} (${x.glut}${x.full ? ', full: it can be awakened' : ''})`).join(', ')}.</p>`);
     if (sum.newlyReady[me].length) lvLines.push(`<p><span style="color:var(--gold)">Ready to level up:</span> ${lv(sum.newlyReady[me])}.</p>`);
     for (const x of (sum.buildings && sum.buildings[me]) || []) lvLines.push(`<p><span style="color:var(--gold)">${esc(buildingName(x.id))}:</span> ${x.built ? 'built. From now on you can buy one of its units each round (tap it).' : x.lost ? 'destroyed. It starts the next round half built, and your Cog Builder builds it again.' : `${Math.round(x.progress * 100)}% built; it carries on next fight.`}</p>`);
     for (const x of (sum.buildings && sum.buildings[foe()]) || []) if (x.built || x.lost) lvLines.push(`<p><span style="color:var(--foe)">${esc(them)}’s ${esc(buildingName(x.id))}</span> ${x.built ? 'is built.' : 'was destroyed.'}</p>`);
@@ -2214,7 +2215,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
     const matrix = units.map((u, i) => `${tag(u)}: ` + units.map((v, j) => i === j ? null : `${tag(v)} ${M[i][j] > 0 ? '+' : ''}${Math.round(M[i][j] * 100)}`).filter(Boolean).join(', ')).join('\n');
     const mine = m.armies[1].map(s => {
       const u = units[s.unit], need = s.level < Engine.MAX_LEVEL ? Math.round(Game.xpNeeded(u, s.level)) : null;
-      return `- id ${s.id}: ${u.name} at col ${s.col}, row ${s.row}${Game.isRider(s) ? ` (riding inside your ${units[(Game.carrierOf(m, 1, s) || s).unit].name}, id ${s.in})` : ''}, level ${s.level + 1}${need ? `, XP ${Math.round(s.xp)}/${need}` : ', max level'}${Game.isReady(m, s) ? ', READY TO LEVEL UP' : ''}${s.awaken > 0 ? ', AWAKENED' : ''}${s.round < m.round ? `, sells for ${Game.sellValue(m, s)}` : ''}${Game.enzoSkill(m, 1, s) != null ? `, has skill "${u.skillDefs[Game.enzoSkill(m, 1, s)].name}" (Enzo${Game.enzoActive(m, 1, s.unit) ? '' : `; off until you have ${Game.CHAR.enzoMin} squads of this unit`})` : ''}${Game.charmOf(s) ? `, charisma ${Game.charmOf(s)}/${Engine.CHARM_MAX}${Game.isGentleman(s) ? ' (Gentleman)' : ''}` : ''}`;
+      return `- id ${s.id}: ${u.name} at col ${s.col}, row ${s.row}${Game.isRider(s) ? ` (riding inside your ${units[(Game.carrierOf(m, 1, s) || s).unit].name}, id ${s.in})` : ''}, level ${s.level + 1}${need ? `, XP ${Math.round(s.xp)}/${need}` : ', max level'}${Game.isReady(m, s) ? ', READY TO LEVEL UP' : ''}${s.awaken > 0 ? ', AWAKENED' : ''}${s.round < m.round ? `, sells for ${Game.sellValue(m, s)}` : ''}${Game.enzoSkill(m, 1, s) != null ? `, has skill "${u.skillDefs[Game.enzoSkill(m, 1, s)].name}" (Enzo${Game.enzoActive(m, 1, s.unit) ? '' : `; off until you have ${Game.CHAR.enzoMin} squads of this unit`})` : ''}${Game.charmOf(s) ? `, charisma ${Game.charmOf(s)}/${Engine.CHARM_MAX}${Game.isGentleman(s) ? ' (Gentleman)' : ''}` : ''}${Game.glutMax(m, 1, s) ? `, Glut ${Game.glutOf(s)}/${Game.glutMax(m, 1, s)}${Game.glutFull(m, 1, s) ? ' (full: can be awakened)' : ''}` : ''}`;
     });
     const theirs = m.armies[0].filter(s => s.round < m.round && !Game.hiddenFromFoe(m, s)).map(s => { const p = Game.seenAt(m, s); return `- ${units[s.unit].name} at col ${p.col}, row ${p.row}, level ${Game.seenLevel(m, s) + 1}${Game.seenAwake(m, s) ? ', awakened' : ''}`; });
     const theirSkills = [];
@@ -2767,7 +2768,10 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   }
 
   function absorb() {
-    for (const s of bt.lastShots()) if (s[12] === 1) fx.push({ kind: 'roar', x: s[0], y: s[1], r: s[5], side: s[4], age: 0, life: 0.8 });
+    for (const s of bt.lastShots()) if (s[13] === 1) fx.push({ kind: 'frost', x1: s[0], y1: s[1], x2: s[2], y2: s[3], side: s[4], age: 0, life: 0.2 }); // a frost beam
+    else if (s[13] === 2) fx.push({ kind: 'freeze', x: s[0], y: s[1], side: s[4], age: 0, life: 0.6 }); // frozen solid
+    else if (s[13] === 3) fx.push({ kind: 'eat', x1: s[0], y1: s[1], x2: s[2], y2: s[3], side: s[4], age: 0, life: 0.6 }); // eaten by the Obelisk
+    else if (s[12] === 1) fx.push({ kind: 'roar', x: s[0], y: s[1], r: s[5], side: s[4], age: 0, life: 0.8 });
     else if (s[8] > 0) fx.push({ kind: 'flame', x1: s[0], y1: s[1], x2: s[2], y2: s[3], side: s[4], half: s[8], slam: s[11] === 1, spin: s[11] === 2, age: 0, life: s[11] === 1 ? 0.45 : 0.3 });
     else if (s[10] === 1) fx.push({ kind: 'bolt', x1: s[0], y1: s[1], x2: s[2], y2: s[3], side: s[4], age: 0, life: 0.22, seed: Math.random() });
     else fx.push({ kind: s[7] === 1 ? 'heal' : 'shot', x1: s[0], y1: s[1], x2: s[2], y2: s[3], side: s[4], splash: s[5], charged: s[6], spin: s[9] || 1, age: 0, life: s[7] === 1 ? 0.35 : 0.18 });
@@ -3060,7 +3064,9 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     const name = u.structure && !u.lesser ? `${mine ? 'Your' : `${foeName()}’s`} tower` : u.name || 'Unit';
     const mates = b.squad >= 0 && !u.structure ? bt.bodies.filter(x => x.side === b.side && x.squad === b.squad && x.u.name === u.name) : [];
     const st = [];
-    if (b.stunT > 0) st.push('Stunned');
+    if (b.frozenT > 0) st.push('Frozen solid'); else if (b.stunT > 0) st.push('Stunned');
+    if (b.frost && b.frost.n > 0) st.push(`Frost ×${b.frost.n}`);
+    if (b.u.glut) st.push(`Glut ${b.glutN || 0} / ${b.u.glut.max}${b.glutGain ? ` (+${b.glutGain} this fight)` : ''}`);
     if (b.poison && b.poison.length) st.push('Poisoned');
     if (b.bleed) st.push(`Bleeding ×${b.bleed.n}`);
     if (b.burn) st.push('Burning');
@@ -3445,7 +3451,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (!sq) { const n = m.armies[me].filter(q => q.unit === i && q.awaken > 0).length; return `<span class="hint">${n ? `${n} awakened · ` : ''}${cost} gold a squad</span>`; }
     if (sq.awaken > 0) return chip('Awakened', 'var(--gold)') + (phase === 'deploy' && editable() && sq.awaken === m.round ? ` <button class="btn small" data-act="unawaken">Undo</button>` : '');
     if (phase !== 'deploy') return `<span class="hint">${cost} gold</span>`;
-    const why = { enzo: 'Not with Enzo', needs: `Needs ${Game.skillNeedsMissing(m, me, i, k).map(j => units[i].skillDefs[j].name).join(' or ')}`, or: 'Not with your skills', gold: `Need ${cost} gold` }[Game.awakenBlock(m, me, sq)] || '';
+    const why = { enzo: 'Not with Enzo', glut: `Needs ${Game.glutMax(m, me, sq)} Glut (${Game.glutOf(sq)} now)`, needs: `Needs ${Game.skillNeedsMissing(m, me, i, k).map(j => units[i].skillDefs[j].name).join(' or ')}`, or: 'Not with your skills', gold: `Need ${cost} gold` }[Game.awakenBlock(m, me, sq)] || '';
     return why || !editable() ? `<button class="btn small" disabled>${why || `Awaken · ${cost} gold`}</button>` : `<button class="btn small primary" data-act="awaken">Awaken · ${cost} gold</button>`;
   }
 
@@ -3771,7 +3777,8 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       const next = sq.level < Engine.MAX_LEVEL ? Math.round(Game.xpNeeded(base, sq.level)) : null;
       const shown = next ? Math.min(Math.round(sq.xp), next) : 0;
       const charmLine = Game.charmOf(sq) > 0 ? `<p style="margin:0"><span style="color:${CHARM_COL}">Charisma ${Game.charmOf(sq)} / ${Engine.CHARM_MAX}${Game.isGentleman(sq) ? ' · Gentleman' : ''}</span> · ${Game.isGentleman(sq) ? 'the first enemy it would kill each fight joins its side for that fight, at half health' : `kills add a stack and give one to a squad without any; at ${Engine.CHARM_MAX} it becomes a Gentleman`}</p>` : '';
-      lvl = charmLine + `<p style="margin:0"><span style="color:var(--gold)">Level ${sq.level + 1}${sq.level ? ` · ${sq.level + 1}× health and attack` : ''}</span> · ${next ? `${shown.toLocaleString('en-US')} / ${next.toLocaleString('en-US')} XP to level ${sq.level + 2}` : 'max level'}</p>`;
+      const glutMax = u.glut ? u.glut.max : 0, glutLine = glutMax ? `<p style="margin:0"><span style="color:${GLUT_COL}">Glut ${Game.glutOf(sq)} / ${glutMax}${Game.glutOf(sq) >= glutMax ? ' · full' : ''}</span> · ${Game.glutOf(sq) >= glutMax ? 'it can be awakened now' : `eats up to ${u.glut.cap} a round, kept all match`}</p>` : '';
+      lvl = charmLine + glutLine + `<p style="margin:0"><span style="color:var(--gold)">Level ${sq.level + 1}${sq.level ? ` · ${sq.level + 1}× health and attack` : ''}</span> · ${next ? `${shown.toLocaleString('en-US')} / ${next.toLocaleString('en-US')} XP to level ${sq.level + 2}` : 'max level'}</p>`;
       if (side === me && phase === 'deploy') {
         const cost = Game.levelCost(base);
         const boughtNow = sq.boughtLevels && sq.boughtLevels[m.round] > 0;
@@ -4252,6 +4259,8 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       if (!c || c.in != null || !Game.isCarrier(m, c.unit) || Game.isCarrier(m, q.unit) || c.col !== q.col || c.row !== q.row || full.has(c.id)) return false;
       full.add(c.id); return true;
     });
+    // the guest's Glut (the Obelisk): stacks come from the fights played here
+    for (const q of m.armies[1]) { const h = had.get(q.id); if (h && h.glut > 0 && h.unit === q.unit) q.glut = h.glut; }
     // the guest's charisma (Matteo): stacks come from the fights played here; the guest only gives the first stack
     for (const q of m.armies[1]) { const h = had.get(q.id); if (h && h.charm > 0 && h.charmGiven !== m.round) { q.charm = h.charm; if (h.charmGiven) q.charmGiven = h.charmGiven; } }
     const gave = d.army.find(s => s && s.charm > 0 && (s.charmGiven | 0) === m.round);

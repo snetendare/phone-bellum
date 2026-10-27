@@ -995,6 +995,7 @@ const Game = (() => {
     // Mubarak: a slime unit also gets the skills bought for the other slime units
     if (charOf(m, side) === 'mubarak' && base && SLIME_UNITS.includes(base.name)) defs.push(...slimeSkillDefs(m, side, ui));
     let u = defs.length ? E.applySkills(base, defs, m.units) : base;
+    if (sq && u.glut && glutOf(sq) > 0) u = E.glutUnit(u, glutOf(sq)); // the Obelisk's Glut, kept between rounds
     u = withFactionTrait(u, base && base.faction);
     u = withPowers(m, side, u, base);
     if (base && SLIME_UNITS.includes(base.name)) u = { ...u, slime: true }; // poison heals slime units
@@ -1109,18 +1110,27 @@ const Game = (() => {
     return true;
   }
 
+  // ---------- Glut (the Obelisk) ----------
+  // sq.glut = the Glut stacks a squad has eaten, kept for the whole match (see Engine: u.glut). They are in its stats
+  // through unitFor, the fight adds what it eats (up to the unit's cap a round), and resolve keeps them on the squad.
+  const glutOf = (sq) => (sq && sq.glut) || 0;
+  const glutMax = (m, side, sq) => { const u = sq && m.units[sq.unit] ? unitFor(m, side, sq.unit) : null; return u && u.glut ? u.glut.max : 0; };
+  const glutFull = (m, side, sq) => glutMax(m, side, sq) > 0 && glutOf(sq) >= glutMax(m, side, sq);
+
   // ---------- Awaken skills (one squad at a time) ----------
   // A squad of a unit with an Awaken skill can be awakened on its own sheet: it needs the skills the Awaken skill needs
   // (bought for the unit), costs the skill's own price, and only that squad gets it. Hidden from the opponent until
   // the fight, like a skill; taken back this round for a refund.
   const squadOf = (m, side, id) => m.armies[side].find(s => s.id === id) || null;
   const awakenCost = (m, ui) => awakenSlot(m, ui) >= 0 ? skillCost(m, ui, awakenSlot(m, ui)) : 0;
-  // why a squad can't be awakened now ('' = it can): 'none' (no Awaken skill or already awake), 'enzo', 'needs', 'or', 'gold'
+  // why a squad can't be awakened now ('' = it can): 'none' (no Awaken skill or already awake), 'enzo', 'needs', 'glut',
+  // 'or', 'gold'. An Awaken skill with needs: 'glutMax' (the Obelisk's) needs the squad at its most Glut
   function awakenBlock(m, side, sq) {
     const k = sq ? awakenSlot(m, sq.unit) : -1;
     if (k < 0 || sq.awaken > 0) return 'none';
     if (charOf(m, side) === 'enzo') return 'enzo'; // Enzo's squads come with their skill instead
     if (skillNeedsMissing(m, side, sq.unit, k).length) return 'needs';
+    if (skillDef(m, sq.unit, k).needs === 'glutMax' && !glutFull(m, side, sq)) return 'glut';
     if (skillOrTaken(m, side, sq.unit, k).length) return 'or';
     return m.gold[side] >= awakenCost(m, sq.unit) ? '' : 'gold';
   }
@@ -1498,6 +1508,7 @@ const Game = (() => {
       const aura = isDev(m) ? auraFor(m, side, sq.col, sq.row) : null; // devtest: a building's aura
       if (aura) u = modUnit(u, aura);
       const b = E.buildSquad(u, side, w.x, w.y, sq.id, TILE, idx, sq.level);
+      if (u.glut) for (const x of b) x.glutN = glutOf(sq); // Glut it has eaten (already in its stats): it eats on from there
       if (aura) for (const x of b) x.aura = true;
       const dis = isDev(m) && m.units[sq.unit].disguise ? m.units.find(x => x.name === m.units[sq.unit].disguise) : null; // devtest: a disguise, until its first attack
       if (dis) { const mask = { name: dis.name, shape: dis.shape, color: dis.color, bodies: dis.bodies, range: dis.range }; for (const x of b) x.mask = mask; }
@@ -1764,6 +1775,15 @@ const Game = (() => {
       const r = res.squads[side + ':' + sq.id];
       if (r) squads[side].push({ id: sq.id, unit: sq.unit, level: sq.level, left: r.alive / r.total, dealt: Math.round(r.dealt || 0) });
     }
+    // the Obelisk: what it ate this fight is its own for the rest of the match (up to its most)
+    const glut = [[], []];
+    for (let side = 0; side < 2; side++) for (const sq of m.armies[side]) {
+      const r = res.squads[side + ':' + sq.id], max = glutMax(m, side, sq);
+      if (!r || !(r.glut > 0) || !max) continue;
+      const was = glutOf(sq);
+      sq.glut = Math.min(max, was + r.glut);
+      if (sq.glut > was) glut[side].push({ id: sq.id, unit: sq.unit, gained: sq.glut - was, glut: sq.glut, full: sq.glut >= max });
+    }
     const towerFell = [0, 1].map(sd => { const q = res.squads[sd + ':-2']; return !!(q && q.alive === 0); });
     const treasuryFell = [0, 1].map(sd => { const q = res.squads[sd + ':' + TREASURY_SQ]; return q ? q.alive === 0 : null; }); // null: no treasury in this fight
     const buildingNews = settleBuildings(m, res);
@@ -1795,7 +1815,7 @@ const Game = (() => {
       }
       return Object.keys(by).map(key => ({ key, dealt: Math.round(by[key]), ...(key === 'tower' ? { name: towerType(m, sd).name } : key.startsWith('b:') ? { name: (buildingInfo(key.slice(2)) || {}).name || 'Building' } : {}) }));
     });
-    const summary = { round: m.round, winner: roundWinner, timeout: res.timeout, dmg, time: res.time, newlyReady, squads, towerFell, treasuryFell, gentlemen, converted: res.converted || [0, 0], dealtBy, buildings: buildingNews };
+    const summary = { round: m.round, winner: roundWinner, timeout: res.timeout, dmg, time: res.time, newlyReady, squads, towerFell, treasuryFell, gentlemen, glut, converted: res.converted || [0, 0], dealtBy, buildings: buildingNews };
     // devtest: buildings destroyed in the fight cost their owner what their onDestroyed says (health now, gold below)
     if (isDev(m)) {
       summary.devLoss = [0, 1].map(sd => {
@@ -2451,7 +2471,7 @@ const Game = (() => {
     deploysAllowed, deploysLeft, deployedThisRound, canBuyDeploy, buyDeploy, refundDeploy,
     PACKAGE, allPackages, packOf, needsPack, freeLeft, choosePack, ensurePack,
     unlockCost, tierOf, startLevel, shopCost, mapFreeOf, mapFreeLeft, isUnlocked, unlockVisible, unlock, undoUnlock,
-    skillDef, skillCost, SKILL_STEP, skillsBought, isInnate, hasSkill, skillVisible, skillNeeds, skillNeedsAny, skillNeedsMissing, skillHeldUp, isFlat, isMaster, isAwaken, awakenSlot, awakenCost, awakenBlock, canAwaken, awaken, undoAwaken, seenAwake, skillOr, skillOrTaken, unitFor, withCharacter,
+    skillDef, skillCost, SKILL_STEP, skillsBought, isInnate, hasSkill, skillVisible, skillNeeds, skillNeedsAny, skillNeedsMissing, skillHeldUp, isFlat, isMaster, isAwaken, awakenSlot, awakenCost, awakenBlock, canAwaken, awaken, undoAwaken, seenAwake, glutOf, glutMax, glutFull, skillOr, skillOrTaken, unitFor, withCharacter,
     footprint, blockOf, spotFree, buildingRecords, recordOf, recordWorld, buildingEffects,
     setBuildings, BUILDINGS: () => BUILDINGS, buildingInfo, BUILDING_SQUAD, isBuildingSkill, buildingIdOf, buildingsOf, buildingOf, buildingAt, buildingShown, buildingSpotOk,
     canBuyBuilding, buyBuilding, buildingSkills, buildingSkillInfo, bskillOf, bskillCost, canBuyBuildingSkill, buyBuildingSkill, undoBuildingSkill,

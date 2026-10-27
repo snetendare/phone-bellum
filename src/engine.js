@@ -145,6 +145,21 @@ const Engine = (() => {
   // throws it at the nearest enemy in reach (speed m/s): hit damage to the first body it reaches and bleed stacks.
   // It forges only while it has armor left and an enemy in reach. The spear's hit grows with the unit's level.
   // stunHit: every hit stuns the target this many seconds (not structures)
+  // frost = { every, pct: [..], keep, stun } (the Frost Wizard): its hits put Frost on the target. The first hit gives a
+  // stack; while the target keeps being hit with frost (a hit at least every FROST_ON s) it gets another every `every` s,
+  // up to pct.length stacks: pct[n - 1] % slower moves and attacks at n stacks. With no frost hit for `keep` s the stacks
+  // melt. The stacks are the target's own, so every Frost source adds to the same ones (two beams don't stack faster).
+  // stun (Deepfreeze): the stack after the last freezes it solid for that many seconds instead (not structures) and the
+  // stacks start over. Units that can't be slowed keep their speed, but can still be frozen solid.
+  // beamLock (Multibeam): its extra beams keep to the enemies they are on while those stay in reach.
+  // healthiest: it picks the enemy in reach with the most health (units before structures), and keeps to it.
+  // storm = { radius }: a snow storm around it: every 1/aps s, its hit and its frost to every enemy within radius.
+  const FROST_ON = 1;
+  const EAT_R = 6; // metres (a tile): the Obelisk also eats enemy bodies that fall this close to it, whoever killed them
+  // glut = { max, cap, hp, hit, speed, aps } (the Obelisk): each enemy body (not a structure or a construct) it kills,
+  // or that falls within EAT_R of it, is eaten: a Glut stack, up to `cap` per fight and `max` in all; each stack gives +hp % health, +hit % hit, +speed m/s
+  // and +aps % attack speed. b.glutN = the stacks the body starts with (kept by the game between rounds, already in
+  // its stats: see glutUnit); result().squads[..].glut = the stacks the squad ate this fight.
   const BLAST_RADIUS = 4;      // a body with deathBlast explodes when it dies, hitting enemies within this distance
   const PIERCE_DEPTH = 10;     // metres a piercing shot travels past its target
   const PIERCE_WIDTH = 1;      // half-width of the pierce corridor (m)
@@ -181,6 +196,13 @@ const Engine = (() => {
     if (!L) return { ...u, level: 0 };
     const k = 1 + LEVEL_BONUS * L;
     return { ...u, level: L, hp: u.hp * k, hit: u.hit * k, ...(u.spear ? { spear: { ...u.spear, hit: u.spear.hit * k } } : {}), ...(u.missiles ? { missiles: { ...u.missiles, hit: u.missiles.hit * k } } : {}) };
+  }
+
+  // a unit with u.glut at n stacks of Glut (from its stats at none): more health, hit, move and attack speed
+  function glutUnit(u, n) {
+    const g = u && u.glut;
+    if (!g || !(n > 0)) return u;
+    return { ...u, hp: u.hp * (1 + n * (g.hp || 0) / 100), hit: u.hit * (1 + n * (g.hit || 0) / 100), speed: u.speed + n * (g.speed || 0), aps: u.aps * (1 + n * (g.aps || 0) / 100) };
   }
 
   // ---------- skills ----------
@@ -246,6 +268,15 @@ const Engine = (() => {
     leafblade: { label: 'Leafblade suit', params: [['hp', 'Health (+%)', 150, 10], ['armor', 'Armor (+)', 4, 1], ['hit', 'Hit size (+%)', 50, 5], ['range', 'Range (becomes, m)', 3, 0.5], ['dash', 'Dashes to enemies within (m)', 8, 1],
       ['missiles', 'Missiles per salvo', 2, 1], ['every', 'Salvo every (s)', 10, 1], ['mhit', 'Missile damage', 150, 10], ['msplash', 'Missile blast (m)', 2.5, 0.5], ['mspeed', 'Missile speed (m/s)', 25, 1]] },
     berserk: { label: 'Berserkers', params: [['radius', 'Roar reach (m)', 8, 1], ['attack', 'Enemy attack speed (−%)', 5, 1], ['speed', 'Ally move speed (+%)', 5, 1], ['max', 'Most per body from roars (%)', 25, 5]] },
+    frost:   { label: 'Frost', params: [['every', 'Seconds between stacks', 2.5, 0.5], ['p1', 'Slow at 1 stack (%)', 20, 5], ['p2', 'Slow at 2 stacks (%)', 30, 5], ['p3', 'Slow at 3 stacks (%)', 40, 5], ['keep', 'Stacks melt after (s) without frost', 2, 0.5]] },
+    deepfreeze: { label: 'Deepfreeze', params: [['secs', 'Frozen solid (s)', 2, 0.5]] },
+    multibeam: { label: 'Multibeam', params: [['beams', 'Beams (each on a different enemy)', 2, 1]] },
+    healthiest: { label: 'Target the healthiest', params: [] },
+    storm:   { label: 'Snow storm', params: [['radius', 'Storm radius (m)', 8, 1]] },
+    glut:    { label: 'Glut', params: [['max', 'Most stacks', 12, 1], ['cap', 'Most stacks eaten per round', 2, 1], ['hp', 'Health per stack (+%)', 5, 1], ['hit', 'Hit per stack (+%)', 5, 1]] },
+    glutCap: { label: 'Bigger appetite', params: [['add', 'More stacks eaten per round (+)', 1, 1]] },
+    glutSpeed: { label: 'Glut speed', params: [['speed', 'Move speed per stack (+m/s)', 0.05, 0.01], ['aps', 'Attack speed per stack (+%)', 1, 0.5]] },
+    ranged:  { label: 'Ranged attack', params: [['range', 'Range (becomes, m)', 18, 1], ['speed', 'Projectile speed (m/s)', 25, 1]] },
   };
   const skillParam = (d, k) => {
     const v = d.params && d.params[k];
@@ -336,6 +367,15 @@ const Engine = (() => {
       case 'leafblade': return `It becomes a leaf-mech suit with two long leaf blades: +${n('hp')}% health, +${n('armor')} armor, and its attack becomes a spin that hits every enemy within ${n('range')} m (+${n('hit')}% hit). It dashes at enemies within ${n('dash')} m. At the start of a fight and every ${n('every')} s it fires ${n('missiles')} homing missiles at the nearest enemies, ${n('mhit')} damage each in a ${n('msplash')} m blast.`;
       case 'berserk': return `Can’t be slowed or displaced (slows, knockback, pushes and roots don’t take). When the fight starts it roars: enemies within ${n('radius')} m attack ${n('attack')}% slower and allies there move ${n('speed')}% faster, for the fight. Roars stack, up to ${n('max')}% on any one unit.`;
       case 'lone': return `Ignores enemies that share a tile with others and hunts lone ones. With no lone enemy left for ${n('secs')} s it fights as usual, until it kills a lone one again.`;
+      case 'frost': return `Its hits put Frost on the target: a stack on the first hit and one more every ${n('every')} s it stays on it, up to 3: ${n('p1')}% / ${n('p2')}% / ${n('p3')}% slower moves and attacks. The stacks melt ${n('keep')} s after the frost stops.`;
+      case 'deepfreeze': return `A 4th stack of Frost freezes the enemy solid for ${n('secs')} s (not towers), then the stacks start over.`;
+      case 'multibeam': return `${+P('beams') === 2 ? 'Another beam' : `${+P('beams') - 1} more beams`} at a different enemy in reach; no two beams on the same enemy, and each keeps to its enemy while it can.`;
+      case 'healthiest': return 'Aims at the enemy in reach with the most health (units before towers) and keeps to it.';
+      case 'storm': return `A snow storm all around it (${n('radius')} m): every enemy in it takes its hit and gets its Frost, as often as it attacks.`;
+      case 'glut': return `Eats the enemies it kills (not buildings or constructs): each is a stack of Glut, up to ${n('cap')} a round and ${n('max')} in all, kept for the whole match. Each stack: +${n('hp')}% health and +${n('hit')}% hit, and it grows.`;
+      case 'glutCap': return `Eats ${+P('add') === 1 ? 'one more stack' : `${n('add')} more stacks`} of Glut a round.`;
+      case 'glutSpeed': return `Each stack of Glut also gives +${n('speed')} m/s move speed and +${n('aps')}% attack speed.`;
+      case 'ranged': return `Its attack becomes ranged: ${n('range')} m reach, shots flying at ${n('speed')} m/s.`;
     }
     return '';
   }
@@ -454,6 +494,15 @@ const Engine = (() => {
           if (P('missiles') > 0) u.missiles = { n: Math.round(P('missiles')), every: Math.max(1, P('every')), hit: Math.max(0, P('mhit')), splash: Math.max(0, P('msplash')), speed: Math.max(2, P('mspeed')) };
           break;
         case 'berserk': u.unstoppable = true; u.roar = { radius: Math.max(0, P('radius')), attack: Math.max(0, P('attack')), speed: Math.max(0, P('speed')), max: Math.max(0, P('max')) }; break;
+        case 'frost': u.frost = { ...(u.frost || {}), every: Math.max(0.1, P('every')), pct: [P('p1'), P('p2'), P('p3')].map(x => Math.max(0, Math.min(90, x))), keep: Math.max(0.1, P('keep')) }; break;
+        case 'deepfreeze': if (u.frost) u.frost = { ...u.frost, stun: Math.max(u.frost.stun || 0, Math.max(0, P('secs'))) }; break;
+        case 'multibeam': u.beams = Math.max(u.beams || 1, Math.round(P('beams'))); u.beamLock = true; break;
+        case 'healthiest': u.healthiest = true; break;
+        case 'storm': u.storm = { radius: Math.max(0, P('radius')) }; break;
+        case 'glut': u.glut = { speed: 0, aps: 0, ...(u.glut || {}), max: Math.max(1, Math.round(P('max'))), cap: Math.max(1, Math.round(P('cap'))), hp: P('hp'), hit: P('hit') }; break;
+        case 'glutCap': if (u.glut) u.glut = { ...u.glut, cap: u.glut.cap + Math.max(0, Math.round(P('add'))) }; break;
+        case 'glutSpeed': if (u.glut) u.glut = { ...u.glut, speed: (u.glut.speed || 0) + P('speed'), aps: (u.glut.aps || 0) + P('aps') }; break;
+        case 'ranged': u.range = Math.max(0.5, P('range')); u.projSpeed = Math.max(2, P('speed')); u.flame = 0; u.slam = false; u.eye = true; break; // eye: drawn awakened (the Obelisk's)
         case 'double': u.hit = u.hit * (1 + P('hit') / 100); u.double = Math.max(2, Math.round(P('every'))); break;
         case 'bleedDeep': u.bleedLonger = (u.bleedLonger || 0) + Math.max(0, P('secs')); u.bleedNoHeal = true; break;
         case 'bleedStun': u.bleedStun = Math.max(u.bleedStun || 0, Math.max(0, P('secs'))); break;
@@ -827,6 +876,7 @@ const Engine = (() => {
         if (owner) owner.xp += x.u.hp * x.level;
         fell(x);
         if (owner) killed(owner, x);
+        devour(owner, x);
       }
     }
     // a body of the other side is cut down (not a structure): what the killer gets for it
@@ -839,6 +889,24 @@ const Engine = (() => {
         const [ox, oy] = SPAWN_SPOTS[(spawnIdx + k) % SPAWN_SPOTS.length], fwd = owner.side === 0 ? 1 : -1;
         pendingKids.push(newBody(owner.u, owner.side, owner.x - ox * g.spacing * 0.6, owner.y - oy * fwd * g.spacing * 0.6, spawnIdx++, -1));
       }
+    }
+    // an enemy body that falls (not a structure, construct or building) is eaten by an Obelisk: the one that killed it,
+    // else the nearest one within EAT_R of it, if it still has room for a stack (see u.glut)
+    const hungry = (b) => b.alive && b.u.glut && (b.glutGain || 0) < b.u.glut.cap && (b.glutN || 0) < b.u.glut.max;
+    function devour(owner, x) {
+      if (x.u.structure || x.u.construct || x.u.building || x.u.aloft) return;
+      let by = owner && owner.side !== x.side && hungry(owner) ? owner : null, bd = EAT_R + 1e-9;
+      if (!by) for (const b of sides[1 - x.side]) { if (!hungry(b)) continue; const d = dist(b, x); if (d <= bd) { bd = d; by = b; } }
+      if (by) eat(by, x);
+    }
+    // a stack of Glut: its health grows with its max health, so the stack heals it by what it adds
+    function eat(b, x) {
+      const gl = b.u.glut, n = b.glutN || 0;
+      const k = (p) => (1 + (n + 1) * (p || 0) / 100) / (1 + n * (p || 0) / 100), hp = b.u.hp * k(gl.hp);
+      b.hp += hp - b.u.hp;
+      b.u = { ...b.u, hp, hit: b.u.hit * k(gl.hit), speed: b.u.speed + (gl.speed || 0), aps: b.u.aps * k(gl.aps) };
+      b.glutN = n + 1; b.glutGain = (b.glutGain || 0) + 1;
+      if (opts.record) shots.push([x.x, x.y, b.x, b.y, b.side, 0, 0, 0, 0, 1, 0, 0, 0, 3]); // [13] 3: eaten
     }
     // Overwatch: a body sitting in a structure that still stands can't be hit or targeted
     const sheltered = (f) => !!(f.inside && f.inside.alive);
@@ -872,6 +940,22 @@ const Engine = (() => {
       bl.t = Math.max(bl.t, BLEED.secs + (owner.u.bleedLonger || 0));
       if (owner.u.bleedNoHeal) bl.noHeal = true;
       if (owner.u.bleedStun > 0 && before < BLEED.max && bl.n >= BLEED.max && !v.u.structure) v.stunT = Math.max(v.stunT, owner.u.bleedStun);
+    }
+    // a frost hit from owner on v (see u.frost): its first stack at once; the next ones build up in the ongoing effects
+    function frostOn(owner, v) {
+      const of = owner.u.frost, fr = v.frost || (v.frost = { n: 0, build: 0, last: t, every: of.every, pct: of.pct, keep: of.keep, stun: 0 });
+      if (!(fr.n > 0)) { fr.n = 1; fr.build = 0; }
+      fr.last = t; fr.every = of.every; fr.pct = of.pct; fr.keep = of.keep;
+      if (of.stun > 0) fr.stun = Math.max(fr.stun, of.stun);
+      frostSlow(v);
+    }
+    // slowed by its Frost stacks while they last (the stronger of this and any other slow counts)
+    function frostSlow(v) {
+      const fr = v.frost;
+      if (!fr || !(fr.n > 0) || v.u.unstoppable) return;
+      const p = fr.pct[fr.n - 1];
+      if (!(v.slowT > 0)) { v.slowMove = 0; v.slowAtk = 0; }
+      v.slowMove = Math.max(v.slowMove, p); v.slowAtk = Math.max(v.slowAtk, p); v.slowT = Math.max(v.slowT, dt * 1.5);
     }
     // amt more to burn on v (see BURN): it adds to what is still burning and the three ticks start again
     function burnOn(owner, v, amt) {
@@ -1003,6 +1087,7 @@ const Engine = (() => {
         v.slowAtk = Math.max(v.slowAtk, owner.u.slowAtk || 0);
         v.slowT = Math.max(v.slowT, owner.u.slowDur);
       }
+      if (owner.u.frost) frostOn(owner, v);
       if (owner.u.shrinkM > 0) {
         v.shrinkM = v.shrinkT > 0 ? Math.max(v.shrinkM, owner.u.shrinkM) : owner.u.shrinkM;
         v.shrinkT = Math.max(v.shrinkT, owner.u.shrinkDur);
@@ -1108,6 +1193,16 @@ const Engine = (() => {
         else if (!f.u.unstoppable) f.roarAtk = Math.min(r.max, (f.roarAtk || 0) + r.attack);
       }
     }
+    // Snow storm: every 1/aps s (slowed like its attacks), its hit and its frost to every enemy within storm.radius
+    function stormStep(b) {
+      b.stormCd = (b.stormCd || 0) - dt * (b.slowT > 0 ? 1 - b.slowAtk / 100 : 1);
+      if (b.stormCd > 1e-9) return;
+      const r = b.u.storm.radius, hit = b.u.hit + (b.auraHit || 0);
+      const caught = sides[1 - b.side].filter(f => f.alive && !f.u.aloft && !sheltered(f) && gap(f, b) <= r);
+      if (!caught.length) { b.stormCd = Math.max(b.stormCd, -dt); return; }
+      b.stormCd = Math.max(b.stormCd, -dt) + 1 / Math.max(0.01, apsOf(b));
+      for (const f of caught) hurt(b, f, hit, b.x, b.y);
+    }
     // a thrown titanium spear lands: its hit to the nearest enemy body within reach of where it is, and its bleed
     function spearLand(p) {
       let v = null, bd = PROJ_HIT_RADIUS;
@@ -1124,7 +1219,7 @@ const Engine = (() => {
       for (const f of sides[1 - b.side]) {
         if (!pickable(b, f)) continue;
         const d = gap(f, b);
-        if (d <= reachOf(b) + 0.01 && d >= b.u.minRange) valid.push([d, f]);
+        if (d <= reachOf(b) + 0.01 && d >= b.u.minRange) valid.push([b.u.healthiest ? (f.u.structure ? 1e9 : 0) - poolHp(f) : d, f]); // healthiest: most health first, units before structures
       }
       valid.sort((p, q) => b.u.backline ? q[0] - p[0] : p[0] - q[0]);
       return valid.map(v => v[1]);
@@ -1167,9 +1262,12 @@ const Engine = (() => {
       if (b.u.flame > 0) return flameTargets(b, primary);
       const n = Math.max(1, Math.round(b.u.pellets));
       if (n === 1 && b.u.beams > 1) {
-        // split beam: the target plus the next nearest enemies in reach, each hit once
+        // split beam: the target plus the next nearest enemies in reach, each hit once (Multibeam: each extra beam
+        // keeps to its enemy while that stays in reach)
         const out = [primary];
-        for (const f of valid) { if (out.length >= b.u.beams) break; if (f !== primary) out.push(f); }
+        if (b.u.beamLock) for (const f of b.beamAims || []) { if (out.length >= b.u.beams) break; if (!out.includes(f) && valid.includes(f)) out.push(f); }
+        for (const f of valid) { if (out.length >= b.u.beams) break; if (!out.includes(f)) out.push(f); }
+        if (b.u.beamLock) b.beamAims = out.slice(1);
         return out;
       }
       if (n === 1) return [primary];
@@ -1246,7 +1344,7 @@ const Engine = (() => {
         } else {
           impact(b, tgt.x, tgt.y, tgt, hit, dirX, dirY, b.x, b.y);
         }
-        if (opts.record && !targets.flame) shots.push([b.x, b.y, tgt.x, tgt.y, b.side, b.u.splash, charged ? 1 : 0, 0, 0, b.u.spinUp > 0 ? b.spin : 1, b.u.chain ? 1 : 0]);
+        if (opts.record && !targets.flame) shots.push([b.x, b.y, tgt.x, tgt.y, b.side, b.u.splash, charged ? 1 : 0, 0, 0, b.u.spinUp > 0 ? b.spin : 1, b.u.chain ? 1 : 0, 0, 0, b.u.frost && !(b.u.projSpeed > 0) ? 1 : 0]); // [13] 1: a frost beam
       }
       // chain lightning: from the target on to the nearest enemy not hit yet, up to chain.jumps times
       if (b.u.chain && targets.length && !targets.flame && !(b.u.projSpeed > 0)) {
@@ -1938,6 +2036,25 @@ const Engine = (() => {
           if (to && b.healFx <= 0) { b.healFx = 1; if (opts.record) shots.push([b.x, b.y, to.x, to.y, b.side, 0, 0, 1]); }
         }
         if (b.shrinkT > 0) { b.shrinkT -= dt; if (b.shrinkT <= 0) { b.shrinkT = 0; b.shrinkM = 0; } }
+        if (b.frost) { // Frost: a stack every fr.every s while the frost keeps coming, melting fr.keep s after it stops (see u.frost)
+          const fr = b.frost;
+          if (t - fr.last > fr.keep + 1e-9) b.frost = null;
+          else {
+            if (t - fr.last <= FROST_ON + 1e-9) {
+              fr.build += dt;
+              if (fr.build >= fr.every - 1e-9) {
+                fr.build -= fr.every;
+                if (fr.n < fr.pct.length) fr.n++;
+                else if (fr.stun > 0 && !b.u.structure) { // Deepfreeze: frozen solid, and the stacks start over
+                  b.stunT = Math.max(b.stunT, fr.stun); b.frozenT = fr.stun; fr.n = 0; fr.build = 0;
+                  if (opts.record) shots.push([b.x, b.y, b.x, b.y, 1 - b.side, 0, 0, 0, 0, 1, 0, 0, 0, 2]); // [13] 2: frozen solid
+                }
+              }
+            }
+            frostSlow(b);
+          }
+        }
+        if (b.frozenT > 0) b.frozenT = b.stunT > 0 ? Math.min(b.frozenT, b.stunT) : 0; // frozen solid until its stun wears off
         if (b.slowT > 0) { b.slowT -= dt; if (b.slowT <= 0) { b.slowT = 0; b.slowMove = 0; b.slowAtk = 0; } }
         if (b.u.spawn) {
           b.spawnT -= dt;
@@ -1967,6 +2084,7 @@ const Engine = (() => {
         if (b.stunT > 0 || b.channel) continue; // stunned, or summoning
         if (b.flurryLeft > 0) { if (b.alive) flurryStep(b); else b.flurryLeft = 0; continue; } // Death flurry: the rest of its blows
         if (b.u.spear && b.alive) forgeSpear(b); // Titanium spears: forged and thrown apart from its own attack
+        if (b.u.storm && b.alive) stormStep(b); // Snow storm: apart from its own attack
         if (b.u.missiles && b.alive) { // Leafblade: a salvo at the start and every missiles.every s
           b.missileT = (b.missileT || 0) - dt;
           if (b.missileT <= 1e-9) { if (salvo(b)) b.missileT = b.u.missiles.every; else b.missileT = 0; }
@@ -2163,7 +2281,7 @@ const Engine = (() => {
         v.windTarget = null; v.windT = 0; v.setUp = false; v.firing = -1; v.burstLeft = 0; v.trampleLeft = 0; v.trampled = null;
         v.spinTarget = null; v.aims = null; v.lock = null; v.march = null; v.guide = null; v.goal = null; v.spreadTo = null; v.engaged = false; v.holdT = 0; v.avenge = null; v.delay = 0; v.band = null; v.hidden = false;
         v.slowT = 0; v.slowMove = 0; v.slowAtk = 0; v.shrinkT = 0; v.shrinkM = 0; v.kids = null; v.stunT = 0; v.frenzy = 0; v.flow = 0; v.knives = null; v.atkN = 0; v.forgeT = 0; v.spearReady = false;
-        v.burn = null; v.kills = 0; v.flurryLeft = 0; v.flurryTgt = null; v.rootTgt = null; v.rootedBy = null; v.hunt = null; v.bullN = 0; v.charging = false; v.inside = null; v.missileT = 0; v.roarSpd = 0; v.roarAtk = 0;
+        v.burn = null; v.kills = 0; v.flurryLeft = 0; v.flurryTgt = null; v.rootTgt = null; v.rootedBy = null; v.hunt = null; v.bullN = 0; v.charging = false; v.inside = null; v.missileT = 0; v.roarSpd = 0; v.roarAtk = 0; v.frost = null; v.frozenT = 0; v.beamAims = null; v.stormCd = 0;
         sides[v.side].push(v); stats[v.side].totalHp += v.hp;
         for (const b of all) {
           if (b.windTarget === v) { b.windTarget = null; b.windT = 0; }
@@ -2199,7 +2317,7 @@ const Engine = (() => {
       return {
         t, shots: final ? [] : shots,
         p: final ? [] : projectiles.map(p => [p.x, p.y, p.owner.side]),
-        b: all.map(x => [x.x, x.y, x.alive ? x.hp / x.u.hp : 0, x.side, x.windTarget && x.u.windUp > 0 ? 1 - x.windT / x.u.windUp : 0, x.hidden ? 1 : 0, x.poison && x.poison.length ? 1 : 0, x.slowT > 0 && x.slowMove > 0 ? 1 : 0, x.stunT > 0 ? 1 : 0, x.bleed ? x.bleed.n : 0]),
+        b: all.map(x => [x.x, x.y, x.alive ? x.hp / x.u.hp : 0, x.side, x.windTarget && x.u.windUp > 0 ? 1 - x.windT / x.u.windUp : 0, x.hidden ? 1 : 0, x.poison && x.poison.length ? 1 : 0, x.slowT > 0 && x.slowMove > 0 ? 1 : 0, x.stunT > 0 ? 1 : 0, x.bleed ? x.bleed.n : 0, x.frost ? x.frost.n : 0]),
       };
     }
 
@@ -2230,6 +2348,7 @@ const Engine = (() => {
         const s = squads[k] || (squads[k] = { side: b.side, squad: b.squad, total: 0, alive: 0, xp: 0, dealt: 0 });
         s.total++; if (b.alive || inside(b)) s.alive++;
         s.xp += b.xp; s.dealt += b.dealt || 0;
+        if (b.glutGain > 0) s.glut = Math.max(s.glut || 0, b.glutGain); // Glut stacks eaten this fight (see u.glut)
       }
       return {
         winner, timeout, time: t, frac,
@@ -2264,6 +2383,6 @@ const Engine = (() => {
     return m;
   }
 
-  return { DASH_SPEED, LONE_R, BURN, TOWER_DOWN, RULES, ruleOn, STEALTH_BACK, SKILL_SLOTS, SLOTS, SKILL_TYPES, skillParam, describeSkill, applySkills, innateUnit, fairBudget, battle, makeArmy, matrix, createBattle, buildSquad, rawStrength, squadsFor, withTraits, leveled, TRAIT_DEFAULTS, SPIN_CAP, CHARGE_RUN, TRAMPLE_RUN, BLAST_RADIUS, BLEED, POISON_HEAL, RAM_REACH, ROLL_START, ROLL_PAST, BUILD_GAP, BUILD_COOP, SITE_REACH, MINE_TRIGGER, REPAIR_SECS, LEVEL_BONUS, MAX_LEVEL, CHARM_MAX, CONVERT_HP, CONVERT_SQUAD };
+  return { DASH_SPEED, LONE_R, BURN, FROST_ON, EAT_R, glutUnit, TOWER_DOWN, RULES, ruleOn, STEALTH_BACK, SKILL_SLOTS, SLOTS, SKILL_TYPES, skillParam, describeSkill, applySkills, innateUnit, fairBudget, battle, makeArmy, matrix, createBattle, buildSquad, rawStrength, squadsFor, withTraits, leveled, TRAIT_DEFAULTS, SPIN_CAP, CHARGE_RUN, TRAMPLE_RUN, BLAST_RADIUS, BLEED, POISON_HEAL, RAM_REACH, ROLL_START, ROLL_PAST, BUILD_GAP, BUILD_COOP, SITE_REACH, MINE_TRIGGER, REPAIR_SECS, LEVEL_BONUS, MAX_LEVEL, CHARM_MAX, CONVERT_HP, CONVERT_SQUAD };
 })();
 if (typeof module !== 'undefined') module.exports = Engine;

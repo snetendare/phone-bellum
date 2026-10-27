@@ -30,7 +30,7 @@
 const Render3D = (THREE, el, view, opts = {}) => {
   const BW = Game.COLS * Game.TILE, BD = Game.ROWS * Game.TILE, T = Game.TILE;
   const css = Art.css;
-  const { ELF_COL, SHROOM_COL, CHARM_COL, BLEED_COL, POOL_COL } = Art;
+  const { ELF_COL, SHROOM_COL, CHARM_COL, BLEED_COL, POOL_COL, FROST_COL, GLUT_COL } = Art;
   // Overwatch: how high a squad in one of its buildings stands, on its roof (a building's model is drawn at its real size)
   const roofOf = (u) => u ? models.height(models.kindOf(u)) * 0.9 : 0;
   const models = Models3D(THREE);
@@ -394,6 +394,15 @@ const Render3D = (THREE, el, view, opts = {}) => {
       const [wx, wz] = world(f, mn.x, mn.y), team = teamColor(mn.side, me);
       scene_(() => { disc(wx, wz, 0.55, color('#2B2F33'), 0.9); arc(wx, wz, 0.8, team, mn.side === me ? 0.9 : 0.5, 1, 0.14); });
     }
+    // Snow storm (Frost Wizard): a pale disc out to its reach and flurries whirling in it
+    for (const b of bt.bodies) {
+      if (!b.alive || !b.u.storm) continue;
+      const [wx, wz] = world(f, b.x, b.y), R = b.u.storm.radius, team = teamColor(b.side, me), t0 = bt.time();
+      scene_(() => {
+        disc(wx, wz, R, color(FROST_COL), 0.12, 0.25); arc(wx, wz, R, team, 0.4, 1, 0.06);
+        for (let k = 0; k < 16; k++) { const a = t0 * (0.9 + (k % 3) * 0.35) + k * 2.4, d = R * (0.25 + 0.72 * ((k * 0.37) % 1)); icon('dot', wx + Math.cos(a) * d, 0.6 + (k % 4) * 0.5, wz + Math.sin(a) * d, 0.3, white, 0.8); }
+      });
+    }
     // Summon hellfiend: a swirling portal on the ground for its first seconds
     for (const pt of bt.portals ? bt.portals() : []) {
       const [wx, wz] = world(f, pt.x, pt.y);
@@ -432,7 +441,8 @@ const Render3D = (THREE, el, view, opts = {}) => {
         return [wx, wz];
       }
       const awake = sq.awaken > 0 && (side === me || !deploying || Game.seenAwake(m, sq)); // the opponent's awakening from this round stays hidden
-      const u = awake && Game.unitFor(m, side, sq.unit, sq).mech ? { ...units[sq.unit], mech: true } : units[sq.unit], w = Game.tileToWorld(sq.col, sq.row), st = tileCenter(v, sq.col, sq.row);
+      const base = Game.glutOf(sq) > 0 ? Engine.glutUnit(units[sq.unit], Game.glutOf(sq)) : units[sq.unit]; // the Obelisk grows with its Glut
+      const u = awake && Game.unitFor(m, side, sq.unit, sq).mech ? { ...base, mech: true } : awake && Game.unitFor(m, side, sq.unit, sq).eye ? { ...base, eye: true } : base, w = Game.tileToWorld(sq.col, sq.row), st = tileCenter(v, sq.col, sq.row);
       const list = Engine.buildSquad(u, side, w.x, w.y, sq.id, T);
       squadTiles.add(sq.col + ',' + sq.row);
       const raise = Game.garrisonAt(m, side, sq.col, sq.row) ? roofOf(Game.towerAt(m, side, sq.col, sq.row) ? towerUnit(m, side, Game.towerTypeShown(m, me, deploying, side))
@@ -452,6 +462,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
       if (pips.length) { const n = (pips.length - 1) * 0.42 * bs * 1.1 / 2; iconRow(pips.map(() => 'dot'), wx - camRight.x * (o - n) - camDown.x * o, top + 0.2, wz - camRight.z * (o - n) - camDown.z * o, 0.42 * bs * 1.5, pips); }
       if (Game.isGentleman(sq)) icon('hat', wx, top + 1.1, wz, 1.1 * bs * 0.8);
       if (awake) arc(wx, wz, T * 0.42, gold, 0.85, 1, 0.07); // awakened: a gold ring on its tile
+      if (Game.glutOf(sq) > 0 && u.glut) arc(wx, wz, T * 0.36, color(GLUT_COL), 0.85, Math.min(1, Game.glutOf(sq) / u.glut.max), 0.08, 24); // the Obelisk's Glut
       if (side === me && deploying && Game.isReady(m, sq)) icon('plus', wx + (camRight.x - camDown.x) * o, top + 0.2, wz + (camRight.z - camDown.z) * o, 0.9 * bs);
       return [wx, wz];
     };
@@ -576,11 +587,13 @@ const Render3D = (THREE, el, view, opts = {}) => {
     if (b.level > 0) for (let k = 0; k < b.level; k++) arc(wx, wz, r * (1.8 + k * 0.24), color(css('--gold') || '#E6B84A'), 0.9, 1, 0.12);
     if (b.convert) arc(wx, wz, r * 1.66, color(CHARM_COL), 0.9, 1, 0.07, 16);
     if (b.forgeT > 0 && b.forgeFull > 0) arc(wx, wz, r * 1.7, color('#C9D1D9'), 0.95, 1 - b.forgeT / b.forgeFull, 0.1, 24); // forging a titanium spear
+    if (u.glut && b.glutN > 0) arc(wx, wz, r * 1.95, color(GLUT_COL), b.glutN >= u.glut.max ? 1 : 0.85, Math.min(1, b.glutN / u.glut.max), 0.1, 24); // the Obelisk's Glut
     // small dots over the head: poisoned (green), slowed (blue), bleeding (a red one per stack), charisma stacks (pink)
     const dots = [];
     if (b.poison && b.poison.length) dots.push(color('#6FD08C'));
     if (b.slowT > 0) dots.push(color('#9BD0FF'));
     if (b.bleed) for (let k = 0; k < b.bleed.n; k++) dots.push(color(BLEED_COL));
+    if (b.frost) for (let k = 0; k < b.frost.n; k++) dots.push(color(FROST_COL)); // Frost stacks
     if (b.burn) dots.push(color('#FF7A1A')); // burning
     const ch = v0.bt.charm ? v0.bt.charm(b.side, b.squad) : 0;
     if (ch >= Engine.CHARM_MAX) { icon('hat', wx, top + 0.35, wz, Math.max(0.8, r * 0.9)); y += 0.5; }
@@ -603,6 +616,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
   }
   // what belongs to the scene itself, shown in every view: stun, mushroom spores, Zoe's stars
   function sceneMarkers(b, wx, wz, r, top, t) {
+    if (b.frozenT > 0) { disc(wx, wz, r * 1.25, color(FROST_COL), 0.45, 0.2); arc(wx, wz, r * 1.25, color('#E8FAFF'), 0.9, 1, 0.12); } // frozen solid: ice round its feet
     if (b.stunT > 0) for (let k = 0; k < 3; k++) { // stunned: three dots circling over its head
       const a = t * 6 + k * 2.094; icon('dot', wx + Math.cos(a) * r * 0.7, top + 0.25, wz + Math.sin(a) * r * 0.7, 0.35, color('#FFD23F'));
     }
@@ -732,11 +746,16 @@ const Render3D = (THREE, el, view, opts = {}) => {
     for (const e of v.fx || []) {
       const a = Math.max(0, 1 - e.age / e.life), team = teamColor(e.side, v.me);
       if (e.kind === 'death') { arc(e.x * f, -e.y * f, size(e.u) * (1 + e.age / e.life), team, 0.6 * a, 1, 0.1); continue; }
+      if (e.kind === 'freeze') { arc(e.x * f, -e.y * f, 1 + 2 * (1 - a), color(FROST_COL), a, 1, 0.15); continue; } // frozen solid: an icy ring bursts out
       if (e.kind === 'roar') { arc(e.x * f, -e.y * f, e.r * (0.25 + 0.75 * e.age / e.life), team, 0.75 * a, 1, 0.18); continue; } // Berserkers: a ring sweeping out
       const x1 = e.x1 * f, z1 = -e.y1 * f, x2 = e.x2 * f, z2 = -e.y2 * f;
       if (e.kind === 'shot') {
         beam(x1, 1.1, z1, x2, 0.9, z2, k * Math.max(e.charged ? 0.28 : 0.1, 0.1 + ((e.spin || 1) - 1) * 0.16), team, 0.85 * a);
         if (e.splash > 0) arc(x2, z2, e.splash, team, 0.55 * a, 1, 0.08);
+      } else if (e.kind === 'frost') { // a frost beam: a pale core in a glow of the team colour
+        beam(x1, 1.4, z1, x2, 1.0, z2, k * 0.24, team, 0.35 * a); beam(x1, 1.4, z1, x2, 1.0, z2, k * 0.08, color(FROST_COL), a);
+      } else if (e.kind === 'eat') { // eaten by the Obelisk: a violet wisp drawn into it
+        const p = 1 - a; beam(x1, 0.8, z1, x1 + (x2 - x1) * p, 0.8 + 1.5 * p, z1 + (z2 - z1) * p, k * 0.12, color(GLUT_COL), 0.85 * a);
       } else if (e.kind === 'heal') { // a dashed green line
         const L = Math.hypot(x2 - x1, z2 - z1), n = Math.max(1, Math.floor(L / 1.2)), heal = color('#6FD08C');
         for (let k = 0; k < n; k++) { const p0 = k / n, p1 = (k + 0.5) / n; beam(x1 + (x2 - x1) * p0, 1.0, z1 + (z2 - z1) * p0, x1 + (x2 - x1) * p1, 1.0, z1 + (z2 - z1) * p1, 0.12 * k, heal, 0.9 * a); }

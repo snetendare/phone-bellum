@@ -20,7 +20,7 @@ const Render2D = (cv, view) => {
   const pull = () => { ({ m, me, phase, units, mode, bt, battlePre, fx, selected, moving, drag, hoverTile, rangeOf, editable, placingUnit, placingElf, placingTower, placingWall, placingBuilding, battleCam, dev } = view()); };
   const foe = () => 1 - me;
   const css = Art.css, tag = Shapes.tag;
-  const { ELF_COL, SHROOM_COL, CHARM_COL, BLEED_COL, POOL_COL } = Art;
+  const { ELF_COL, SHROOM_COL, CHARM_COL, BLEED_COL, POOL_COL, FROST_COL, GLUT_COL } = Art;
   let W = 0, H = 0, S = 0;
   function size() {
     const r = cv.getBoundingClientRect();
@@ -460,7 +460,7 @@ const Render2D = (cv, view) => {
   }
 
   function drawSquad(sq, side, fresh) {
-    const u = units[sq.unit];
+    const u = Game.glutOf(sq) > 0 ? Engine.glutUnit(units[sq.unit], Game.glutOf(sq)) : units[sq.unit]; // the Obelisk grows with its Glut
     if (u.building) { // a building bought in the shop (the Altar of Build): drawn in the middle of its block
       const n = Game.footprint(m, sq.unit), w = Game.recordWorld({ col: sq.col, row: sq.row, size: n }), t = tilePx();
       if (fresh) { // a dashed outline round its whole block
@@ -506,6 +506,7 @@ const Render2D = (cv, view) => {
       for (let k = 0; k < Game.charmOf(sq); k++) { ctx.beginPath(); ctx.arc(c * t + pr + 2, (r0 + 1) * t - pr - 3 - k * (pr * 2.6), pr, 0, Math.PI * 2); ctx.fill(); }
       if (Game.isGentleman(sq)) drawHat((c + 0.5) * t, r0 * t + t * 0.2, t * 0.22);
     }
+    if (Game.glutOf(sq) > 0) glutMark((c + 0.5) * t, (r0 + 0.5) * t, r + 5, Game.glutOf(sq), (u.glut || {}).max || 1); // the Obelisk's Glut
     if (sq.level > 0) {
       ctx.fillStyle = css('--gold');
       const pr = Math.max(2, t * 0.07);
@@ -539,6 +540,24 @@ const Render2D = (cv, view) => {
     const pr = Math.max(1.2, r * 0.14);
     for (let k = 0; k < n; k++) { ctx.beginPath(); ctx.arc(x + (k - (n - 1) / 2) * pr * 2.6, y + r * 1.3, pr, 0, Math.PI * 2); ctx.fill(); }
     ctx.globalAlpha = 1;
+  }
+  // Frost: an ice-blue diamond per stack over the body
+  function frostMark(x, y, r, n) {
+    const pr = Math.max(1.6, r * 0.2);
+    ctx.fillStyle = FROST_COL; ctx.strokeStyle = '#1F4A66'; ctx.lineWidth = 0.8;
+    for (let k = 0; k < n; k++) { const px = x + (k - (n - 1) / 2) * pr * 2.4, py = y - r * 1.35; ctx.beginPath(); ctx.moveTo(px, py - pr); ctx.lineTo(px + pr * 0.7, py); ctx.lineTo(px, py + pr); ctx.lineTo(px - pr * 0.7, py); ctx.closePath(); ctx.fill(); ctx.stroke(); }
+  }
+  // frozen solid (Deepfreeze): a block of ice round the body
+  function iceBlock(x, y, r) {
+    ctx.fillStyle = 'rgba(190,235,255,0.45)'; ctx.strokeStyle = '#E8FAFF'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(x - r * 1.15, y - r * 0.9); ctx.lineTo(x - r * 0.3, y - r * 1.3); ctx.lineTo(x + r * 1.2, y - r * 1.0); ctx.lineTo(x + r * 1.05, y + r * 1.1); ctx.lineTo(x - r * 1.2, y + r * 1.15); ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x - r * 0.5, y - r * 0.6); ctx.lineTo(x + r * 0.1, y - r * 0.2); ctx.stroke();
+  }
+  // Glut (the Obelisk): a violet ring that fills up to its most stacks, solid and glowing once full
+  function glutMark(x, y, rr, n, max) {
+    const full = n >= max;
+    ctx.strokeStyle = GLUT_COL; ctx.lineWidth = full ? 2.5 : 2; ctx.globalAlpha = full ? 0.7 + 0.3 * Math.abs(Math.sin((bt ? bt.time() : 0) * 3)) : 0.9;
+    ctx.beginPath(); ctx.arc(x, y, rr, Math.PI / 2, Math.PI / 2 + Math.PI * 2 * Math.min(1, n / max)); ctx.stroke(); ctx.globalAlpha = 1;
   }
   // the Gentleman's top hat (brim centred on x, y; s = its width)
   function drawHat(x, y, s) {
@@ -873,6 +892,16 @@ const Render2D = (cv, view) => {
       ctx.strokeStyle = teamCol(q.side); ctx.globalAlpha = 0.45; ctx.lineWidth = 1.5; ctx.stroke();
     }
     ctx.globalAlpha = 1;
+    // Snow storm (Frost Wizard): flurries whirling round it out to the storm's reach
+    for (const b of bt.bodies) {
+      if (!b.alive || !b.u.storm) continue;
+      const R = b.u.storm.radius * S, x = PX(b.x), y = PY(b.y), t0 = bt.time();
+      ctx.fillStyle = 'rgba(200,236,255,0.10)'; ctx.beginPath(); ctx.arc(x, y, R, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = teamCol(b.side); ctx.globalAlpha = 0.35; ctx.lineWidth = 1; ctx.setLineDash([3, 4]); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = '#F2FBFF';
+      for (let k = 0; k < 14; k++) { const a = t0 * (0.9 + (k % 3) * 0.35) + k * 2.4, d = R * (0.25 + 0.72 * ((k * 0.37) % 1)); ctx.globalAlpha = 0.75; ctx.beginPath(); ctx.arc(x + Math.cos(a) * d, y + Math.sin(a) * d, Math.max(1, S * 0.35), 0, Math.PI * 2); ctx.fill(); }
+      ctx.globalAlpha = 1;
+    }
     // Summon hellfiend: a swirling portal in front of each squad for its first seconds
     for (const pt of bt.portals ? bt.portals() : []) {
       const pr = tilePx() * 0.42, a0 = bt.time() * 5;
@@ -959,6 +988,9 @@ const Render2D = (cv, view) => {
       if (b.poison && b.poison.length) { ctx.fillStyle = '#6FD08C'; ctx.beginPath(); ctx.arc(PX(b.x) + r * 0.9, PY(b.y) - r * 0.9, Math.max(2, r * 0.3), 0, Math.PI * 2); ctx.fill(); }
       if (b.slowT > 0) { ctx.fillStyle = '#9BD0FF'; ctx.beginPath(); ctx.arc(PX(b.x) - r * 0.9, PY(b.y) - r * 0.9, Math.max(2, r * 0.3), 0, Math.PI * 2); ctx.fill(); } // slowed
       if (b.bleed && b.bleed.n > 0) bleedMark(PX(b.x), PY(b.y), r, b.bleed.n);
+      if (b.frost && b.frost.n > 0) frostMark(PX(b.x), PY(b.y), r, b.frost.n);
+      if (b.frozenT > 0) iceBlock(PX(b.x), PY(b.y), r);
+      if (b.u.glut && b.glutN > 0) glutMark(PX(b.x), PY(b.y), r + 5, b.glutN, b.u.glut.max);
       if (b.burn) { ctx.fillStyle = '#FF7A1A'; ctx.globalAlpha = 0.6 + 0.4 * Math.abs(Math.sin(bt.time() * 9 + b.x)); ctx.beginPath(); ctx.arc(PX(b.x), PY(b.y) - r * 1.05, Math.max(2, r * 0.3), 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1; } // burning
       if (b.inside && b.inside.alive) { ctx.strokeStyle = css('--gold'); ctx.lineWidth = 1.5; ctx.setLineDash([2, 2]); ctx.beginPath(); ctx.arc(PX(b.x), PY(b.y), r + 3, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]); } // Overwatch: safe in its building
       if (b.dashing || b.charging) { // a dash or a Bullhead charge: speed lines behind it
@@ -1031,6 +1063,20 @@ const Render2D = (cv, view) => {
         ctx.strokeStyle = '#6FD08C'; ctx.globalAlpha = 0.8 * a; ctx.lineWidth = 1.5; ctx.setLineDash([2, 3]);
         ctx.beginPath(); ctx.moveTo(PX(e.x1), PY(e.y1)); ctx.lineTo(PX(e.x2), PY(e.y2)); ctx.stroke(); ctx.setLineDash([]);
         if (e.splash > 0) { ctx.globalAlpha = 0.5 * a; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(PX(e.x2), PY(e.y2), e.splash * S, 0, Math.PI * 2); ctx.stroke(); } // the elves' splash heal
+      }
+      if (e.kind === 'frost') { // a frost beam: a cold glow in the team colour round a pale core
+        for (const [col, lw, al] of [[teamCol(e.side), 4, 0.3], [FROST_COL, 2, 0.85], ['#FFFFFF', 0.8, 0.9]]) { ctx.strokeStyle = col; ctx.lineWidth = lw; ctx.globalAlpha = al * a; ctx.beginPath(); ctx.moveTo(PX(e.x1), PY(e.y1)); ctx.lineTo(PX(e.x2), PY(e.y2)); ctx.stroke(); }
+      }
+      if (e.kind === 'freeze') { // frozen solid: shards of ice burst out
+        ctx.strokeStyle = '#E8FAFF'; ctx.globalAlpha = a; ctx.lineWidth = 1.5;
+        const x = PX(e.x), y = PY(e.y), d = tilePx() * (0.2 + 0.35 * (1 - a));
+        for (let k = 0; k < 6; k++) { const an = k * Math.PI / 3 + 0.3; ctx.beginPath(); ctx.moveTo(x + Math.cos(an) * d * 0.4, y + Math.sin(an) * d * 0.4); ctx.lineTo(x + Math.cos(an) * d, y + Math.sin(an) * d); ctx.stroke(); }
+      }
+      if (e.kind === 'eat') { // eaten by the Obelisk: a violet wisp drawn from the fallen body into it
+        const p = 1 - a, x = PX(e.x1) + (PX(e.x2) - PX(e.x1)) * p, y = PY(e.y1) + (PY(e.y2) - PY(e.y1)) * p;
+        ctx.strokeStyle = GLUT_COL; ctx.globalAlpha = 0.8 * a; ctx.lineWidth = 2; ctx.setLineDash([3, 3]);
+        ctx.beginPath(); ctx.moveTo(PX(e.x1), PY(e.y1)); ctx.lineTo(x, y); ctx.stroke(); ctx.setLineDash([]);
+        ctx.fillStyle = GLUT_COL; ctx.beginPath(); ctx.arc(x, y, Math.max(2, tilePx() * 0.08), 0, Math.PI * 2); ctx.fill();
       }
       if (e.kind === 'bolt') { // lightning: a jagged white-blue line with a glow in the team colour
         const x1 = PX(e.x1), y1 = PY(e.y1), x2 = PX(e.x2), y2 = PY(e.y2), dx = x2 - x1, dy = y2 - y1, L = Math.hypot(dx, dy) || 1, n = Math.max(3, Math.round(L / 8));

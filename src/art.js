@@ -12,6 +12,8 @@ const Art = (() => {
   const CHARM_COL = '#FF7AB6';
   const BLEED_COL = '#C0122F'; // bleed stacks (Shiv, titanium spears)
   const POOL_COL = '#3B8BE0';  // Pool shaper's pools
+  const FROST_COL = '#BFEFFF'; // Frost stacks and frost beams (Frost Wizard)
+  const GLUT_COL = '#B07CFF';  // Glut (the Obelisk)
   // Each character's coat of arms: a field colour and a bold charge, drawn on a small shield.
   // Shield coordinates: 1 wide, from -0.55 (top) to 0.65 (the point), centred on (0, 0).
   const ARMS = {
@@ -119,5 +121,5 @@ const Art = (() => {
     if (crest) arms(ctx, crest, x + Math.min(w / 2, s * 0.28), y + s * 0.18, Math.max(8, s * 0.38));
     ctx.globalAlpha = 1;
   }
-  return { css, teamCol, ELF_COL, SHROOM_COL, CHARM_COL, BLEED_COL, POOL_COL, ARMS, arms, armsFlag, armsImg, keep };
+  return { css, teamCol, ELF_COL, SHROOM_COL, CHARM_COL, BLEED_COL, POOL_COL, FROST_COL, GLUT_COL, ARMS, arms, armsFlag, armsImg, keep };
 })();
