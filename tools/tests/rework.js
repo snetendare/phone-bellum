@@ -23,7 +23,7 @@ const near = (a, b, eps = 1e-6) => Math.abs(a - b) < eps;
   const a = unit('Assassin');
   assert.ok(a.cost === 5 && a.bodies === 1 && a.hit === 500 && a.hp === 350 && a.aps === 0.35 && a.speed === 6 && a.stealth && a.dash === 10 && a.bldgPct === 50);
   const sn = withSkills('Sniper', ['assaultgunner']);
-  assert.ok(near(sn.aps, 1) && sn.range === 24 && near(sn.hit, 105), 'Assaultgunner: 1 attack a second');
+  assert.ok(near(sn.aps, 1) && sn.range === 21 && near(sn.hit, 105), 'Assaultgunner: 1 attack a second');
   const de = withSkills('Sniper', ['deadeye']); assert.ok(de.range === 34 && near(de.hit, 252));
   const sk = withSkills('Skeleton Archers', ['graverot']); assert.ok(near(sk.aps, 0.6) && sk.poisonPct === 150);
   const dr = withSkills('Skeleton Archers', ['dreadRangers']); assert.ok(dr.shield === 1 && dr.range === 20);

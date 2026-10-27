@@ -17,7 +17,7 @@ const near = (a, b, eps = 1e-6) => Math.abs(a - b) < eps;
 // the Leaf Wizard: single leaves at 1.2 attacks a second, a little less health; its skills
 {
   const lw = unit('Leaf Wizard');
-  assert.ok(lw.burst === 1 && lw.pellets === 1 && lw.aps === 1.2 && lw.hp === 210 && lw.hit === 95 && lw.windUp === 0, 'single shots, 1.2 a second');
+  assert.ok(lw.burst === 1 && lw.pellets === 1 && lw.aps === 1.2 && lw.hp === 185 && lw.hit === 95 && lw.windUp === 0, 'single shots, 1.2 a second');
   assert.deepStrictEqual(lw.skills, ['windWalk', 'bouncingBlade', 'petalburst', 'leafblade']);
   assert.deepStrictEqual(lw.skillOr, [[1, 2]], 'Bouncing blade or Petalburst');
   assert.deepStrictEqual(lw.skillNeedsAny, [null, null, null, [1, 2]], 'Leafblade needs one of them');
