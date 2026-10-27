@@ -25,7 +25,7 @@ const OUT = process.env.OUT || '.';
   await p.screenshot({ path: OUT + '/charm-board.png' });
   await p.click('#fight'); await sleep(2500);
   await p.screenshot({ path: OUT + '/charm-battle.png' });
-  await p.click('#skip'); await sleep(400);
+  await p.click('#skip').then(() => p.click('#skip')); await sleep(400);
   console.log('result:', (await p.locator('.card').first().innerText()).replace(/\s+/g, ' ').slice(0, 300));
   console.log('charm after:', JSON.stringify(await p.evaluate(() => { const { m, me } = window.__pb(); return m.armies[me].map(q => q.charm || 0); })));
   await b.close();

@@ -34,7 +34,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   console.log('guest sees host charm:', JSON.stringify(await guest.evaluate(() => window.__pb().m.armies[0].map(q => [q.id, q.charm || 0]))));
   await guest.click('#ready'); await host.click('#ready');
   await guest.waitForFunction(() => document.getElementById('phase').textContent === 'Battle', null, { timeout: 5000 });
-  await host.click('#skip').catch(() => {}); await guest.click('#skip').catch(() => {}); await sleep(600);
+  await host.click('#skip').then(() => host.click('#skip')).catch(() => {}); await guest.click('#skip').then(() => guest.click('#skip')).catch(() => {}); await sleep(600);
   const hs = await host.evaluate(() => window.__pb().m.armies.map(a => a.map(q => q.charm || 0)));
   const gs = await guest.evaluate(() => window.__pb().m.armies.map(a => a.map(q => q.charm || 0)));
   console.log('after fight host:', JSON.stringify(hs), '| guest:', JSON.stringify(gs), JSON.stringify(hs) === JSON.stringify(gs) ? 'SAME' : 'DIFFERENT');

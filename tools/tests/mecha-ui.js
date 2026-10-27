@@ -20,7 +20,7 @@ const R = require('../../src/default-roster.json'), F = require('../../src/facti
       await p.waitForTimeout(board === '3d' ? 7000 : 5000);
       if (mid) await mid();
       await p.screenshot({ path: shot });
-      await p.click('#skip').catch(() => {});
+      await p.click('#skip').then(() => p.click('#skip')).catch(() => {});
       await p.waitForTimeout(800);
       const next = p.locator('#overlay button').first(); if (await next.count()) await next.click().catch(() => {});
       await p.waitForFunction(() => document.getElementById('phase').textContent === 'Deploy', null, { timeout: 20000 });

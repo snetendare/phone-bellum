@@ -22,7 +22,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   await p.click('.ucard:not([data-locked])'); await tap(5, 13); await sleep(2000); await p.click('#fight'); await sleep(2000);
   console.log('fight:', await playing());
   const deployAt = await p.evaluate(() => [...window.__els].find(a => a.src.includes('bulgaria')).currentTime);
-  await p.click('#skip'); await sleep(800);
+  await p.click('#skip').then(() => p.click('#skip')); await sleep(800);
   await p.click('#next').catch(() => {}); await sleep(1500);
   console.log('round 2 deploy:', await playing());
   console.log('deploy music resumed, not restarted:', await p.evaluate((t) => [...window.__els].find(a => a.src.includes('bulgaria')).currentTime >= t, deployAt), deployAt.toFixed(1) + ' s');

@@ -53,7 +53,7 @@ const BASE = 'http://127.0.0.1:8766/?test&peerhost=127.0.0.1&peerport=9000';
 
   await guest.click('#ready'); await host.click('#ready');
   await inPhase(guest, 'Battle', 15000); await sleep(2000);
-  await host.click('#skip').catch(() => {}); await guest.click('#skip').catch(() => {});
+  await host.click('#skip').then(() => host.click('#skip')).catch(() => {}); await guest.click('#skip').then(() => guest.click('#skip')).catch(() => {});
   await guest.waitForFunction(() => document.getElementById('phase').textContent !== 'Battle', null, { timeout: 60000 }); await sleep(500);
   // the host marks it built (as if the work was done) before the next round starts, so the guest can use it
   await host.evaluate(() => { const { m } = window.__pb(); const s = m.armies[1].find(q => m.units[q.unit].name === 'Altar of Build'); s.built = true; s.progress = 1; });

@@ -481,13 +481,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
       if (rider) { const ru = units[rider.unit]; icon(`rider|${ru.shape}|${ru.color}|${Art.teamCol(me, me)}`, wx - camRight.x * 1.6, 1.0, wz - camRight.z * 1.6, 1.0); }
       if (moving === sq.id && deploying) { const s = tileCenter(v, sq.col, sq.row); tileSq(s.c, s.r, gold, 1, 0.08, 0, 0.02); }
     }
-    // the squad tapped last: its range as a dashed ring on the ground (theirs as you can know it)
-    const rs = v.rangeOf && deploying && m.armies[v.rangeOf.side].find(s => s.id === v.rangeOf.id);
-    if (rs) {
-      const p = v.rangeOf.side !== me ? Game.seenAt(m, rs) : drag && drag.moved && drag.id === rs.id ? drag.over : rs;
-      const w = Game.tileToWorld(p.col, p.row), [wx, wz] = world(f, w.x, w.y), r = Game.squadRange(m, v.rangeOf.side, rs, v.rangeOf.side !== me);
-      arc(wx, wz, r, teamColor(v.rangeOf.side, me), 0.9, 1, 0.3 / r, Math.max(24, Math.round(r * 4)));
-    }
+    // (the squad tapped last shows its range as a dotted ring drawn by the page over the board, as on the 2D board: boardMarks)
     // where things may go
     if ((selected !== null || (drag && drag.moved) || moving != null) && deploying) {
       for (let row = 0; row < Game.ROWS; row++) for (let c = 0; c < Game.COLS; c++) {

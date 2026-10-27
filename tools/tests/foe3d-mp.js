@@ -73,7 +73,7 @@ const BASE = 'http://127.0.0.1:8766/?test&peerhost=127.0.0.1&peerport=9000';
       await guest.click('#ready'); await host.click('#ready');
       await inPhase(v, 'Battle', 15000);
       for (const [ms, what] of moments) { await sleep(ms); if (await phase(v) === 'Battle') await compare(what); }
-      await host.click('#skip').catch(() => {}); await guest.click('#skip').catch(() => {});
+      await host.click('#skip').then(() => host.click('#skip')).catch(() => {}); await guest.click('#skip').then(() => guest.click('#skip')).catch(() => {});
       await v.waitForFunction(() => document.getElementById('phase').textContent !== 'Battle', null, { timeout: 60000 });
       await sleep(500);
     };

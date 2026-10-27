@@ -6,7 +6,8 @@
 // dev (Factions devtest only): { bPlacing, castMode, guideMode, guideId, guide }: the building being placed, the spell being
 // cast, and the arrow being drawn (guide: its points so far, for squad guideId).
 // fx: short-lived battle effects as plain data (shots, flames, bolts, heals, deaths), in board metres.
-// rangeOf: { side, id } of the squad whose range shows as a dotted ring while deploying, or null.
+// rangeOf: { side, id } of the squad last tapped, or null (its range ring is drawn by the page, over the board, with the
+// same measure as the ring under the mouse: boardMarks in site-template.html).
 // battleCam: { zoom, x, y } while the battle cam zooms in on the final seconds of a fight (board metres), else null.
 // Calls: size() after the canvas changes size, draw(), tileAt(clientX, clientY) -> { col, row } or null,
 // thumb(match) -> a data URL of a small picture of that match's board (null: a plain board with a question mark),
@@ -837,15 +838,7 @@ const Render2D = (cv, view) => {
       if (!Game.garrisonAt(m, side, p.col, p.row)) continue;
       drawSquad({ ...sq, col: p.col, row: p.row, ...(side !== me ? { unit: Game.shownUnit(m, me, side, sq.unit), level: Game.seenLevel(m, sq) } : {}) }, side, side === me && phase === 'deploy' && (sq.round === m.round || sq.movedRound === m.round));
     }
-    // the squad tapped last: its range as a dotted ring round its tile (theirs as you can know it)
-    const rs = rangeOf && phase === 'deploy' && m.armies[rangeOf.side].find(s => s.id === rangeOf.id);
-    if (rs) {
-      const p = rangeOf.side !== me ? Game.seenAt(m, rs) : drag && drag.moved && drag.id === rs.id ? drag.over : rs;
-      const w = Game.tileToWorld(p.col, p.row);
-      ctx.strokeStyle = teamCol(rangeOf.side); ctx.globalAlpha = 0.9; ctx.lineWidth = 1.5; ctx.setLineDash([4, 5]);
-      ctx.beginPath(); ctx.arc(PX(w.x), PY(w.y), Game.squadRange(m, rangeOf.side, rs, rangeOf.side !== me) * S, 0, Math.PI * 2); ctx.stroke();
-      ctx.setLineDash([]); ctx.globalAlpha = 1;
-    }
+    // (the squad tapped last shows its range as a dotted ring drawn by the page over the board: boardMarks)
     drawElfTower(m, true);
     if (Game.isIce(m)) for (const side of [me, foe()]) {
       // Snowgres on their tiles in no man's land (an opponent's new one shows up at the fight)
