@@ -141,7 +141,7 @@ const Engine = (() => {
   // every source adds to the same ones. u.bleedLonger: its stacks last that many seconds more; u.bleedNoHeal: a body
   // bleeding from it can't heal or regenerate until the bleed runs out; u.bleedStun: a body it brings to BLEED.max
   // stacks is stunned that many seconds.
-  const BLEED = { dmg: 2, pulse: 0.5, secs: 2, max: 5, pct: { 4: 2, 5: 5 } };
+  const BLEED = { dmg: 3, pulse: 0.5, secs: 2.5, max: 5, pct: { 4: 2, 5: 5 } };
   // Poisoned bodies heal POISON_HEAL % as much (slime units drink poison and heal fully)
   const POISON_HEAL = 50;
   // waterHeal: allies inside the splash of its attacks heal for its hit; with no enemy in reach it shoots at the most
@@ -274,6 +274,7 @@ const Engine = (() => {
     freeMove: { label: 'Free moves', params: [] },
     silent:  { label: 'Silent first strike', params: [] },
     firstHit: { label: 'Opening strike', params: [['pct', 'First attack hit size (+%)', 25, 5]] },
+    pctHit:  { label: 'Health cut', params: [['pct', 'Every hit also deals (% of target max health)', 6, 1]] },
     flurry:  { label: 'Flurry', params: [['hits', 'Blows per attack', 3, 1], ['hit', 'Damage per blow (becomes)', 200, 10], ['gap', 'Time between blows (s)', 0.5, 0.05], ['aps', 'Attacks per second (becomes)', 0.2, 0.05], ['leap', 'Leaps to a new target within (m)', 10, 1]] },
     lone:    { label: 'Hunt lone targets', params: [['secs', 'Gives up after (s) without one', 5, 0.5]] },
     windWalk: { label: 'Wind walk', params: [['every', 'Dodges every this many attacks at it (from the first)', 5, 1], ['step', 'Dashes after a dodge (m)', 4, 0.5]] },
@@ -375,6 +376,7 @@ const Engine = (() => {
       case 'freeMove': return 'Squads of it can be moved every round for free, as often as you like.';
       case 'silent': return 'Its first attack in a fight doesn’t give it away: it stays hidden.';
       case 'firstHit': return `Its first attack in a fight hits ${n('pct')}% harder.`;
+      case 'pctHit': return `Every hit also deals ${n('pct')}% of the target’s max health, past armor (not to towers or buildings).`;
       case 'flurry': return `Each attack is ${n('hits')} blows of ${n('hit')} damage in quick succession (${n('aps')} attacks per second). When a blow kills, it leaps to the nearest enemy within ${n('leap')} m for the next one. It ignores the enemy tower while there are units to go for.`;
       case 'windWalk': {
         const e = Math.max(1, Math.round(+P('every'))), ord = (k) => k + (k % 100 >= 11 && k % 100 <= 13 ? 'th' : ['th', 'st', 'nd', 'rd'][k % 10] || 'th');
@@ -498,6 +500,7 @@ const Engine = (() => {
         case 'freeMove': u.freeMove = true; break;
         case 'silent': u.silent = true; break;
         case 'firstHit': u.firstHit = (u.firstHit || 0) + Math.max(0, P('pct')); break;
+        case 'pctHit': u.pctHit = Math.min(100, (u.pctHit || 0) + Math.max(0, P('pct'))); break;
         case 'flurry':
           u.flurry = { hits: Math.max(1, Math.round(P('hits'))), gap: Math.max(0.05, P('gap')), leap: Math.max(0, P('leap')) };
           u.hit = Math.max(0, P('hit')); u.aps = Math.max(0.05, P('aps')); u.burst = 1; u.noTower = true;

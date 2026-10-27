@@ -21,8 +21,11 @@ const near = (a, b, eps = 1e-6) => Math.abs(a - b) < eps;
   assert.ok(f.cost === 3 && f.bodies === 1 && f.range === 25 && f.projSpeed === 0 && f.frost && f.frost.every === 2.5 && f.frost.pct.join() === '20,30,40', 'Frost Wizard: a 25 m beam with Frost');
   assert.deepStrictEqual(f.skillOr, [[1, 2]]); assert.deepStrictEqual(f.skillNeedsAny[3], [1, 2]);
   assert.ok(skill(f.skills[3]).master && skill(f.skills[3]).flat, 'Snow storm is a Master skill');
+  // one beam can't kill a goblin of its own level, even with Glacial gaze
+  const gob = unit('Goblin Swarm'), gaze = withSkills('Frost Wizard', ['glacialGaze']);
+  for (const L of [0, 1, 2]) assert.ok(E.leveled(gaze, L).hit < E.leveled(gob, L).hp, `no one-shot goblins at level ${L + 1}`);
   const o = unit('Obelisk');
-  assert.ok(o.cost === 3 && o.bodies === 1 && o.range === 3 && o.glut && o.glut.max === 12 && o.glut.cap === 2, 'Obelisk: melee, Glut up to 12, 2 a round');
+  assert.ok(o.cost === 3 && o.bodies === 1 && o.range === 3 && o.glut && o.glut.max === 15 && o.glut.cap === 3, 'Obelisk: melee, Glut up to 15, 3 a round');
   assert.deepStrictEqual(o.skillOr, [[1, 2]]);
   assert.strictEqual(o.lifesteal, 50, 'it heals for 50% of the damage it deals');
   const eye = skill(o.skills[3]); assert.ok(eye.flat && !eye.master && eye.needs === 'glutMax', 'Eye of the Obelisk: an Awaken skill that needs full Glut');
@@ -87,15 +90,15 @@ const near = (a, b, eps = 1e-6) => Math.abs(a - b) < eps;
   const d2 = body(dummy(1e6), 1, 0, 6), s4 = E.createBattle([fw4], [d2], G); steps(s4, 4); const without = 1e6 - d2.hp;
   assert.ok(withStorm > without * 1.8, `beam and storm both hit (${withStorm} vs ${without})`);
 }
-// Glut: each enemy body it kills, or that falls within a tile of it, is a stack (2 a fight, 12 in all); not buildings
+// Glut: each enemy body it kills, or that falls within a tile of it, is a stack (3 a fight, 15 in all); not buildings
 {
   const o = unit('Obelisk'), ob = body(o, 0, 0, 0);
-  const prey = [0, 1, 2].map(k => body(dummy(10), 1, (k - 1) * 2, 2.5));
+  const prey = [0, 1, 2, 3].map(k => body(dummy(10), 1, (k - 1.5) * 1.6, 2.5));
   const bt = E.createBattle([ob], prey, G); steps(bt, 8);
   assert.ok(prey.every(p => !p.alive), 'it kills them all');
-  assert.strictEqual(ob.glutN, 2, 'but eats at most 2 in a fight'); assert.strictEqual(ob.glutGain, 2);
-  assert.ok(near(ob.u.hp, o.hp * 1.12) && near(ob.u.hit, o.hit * 1.12), '+6% health and hit a stack');
-  assert.strictEqual(bt.result().squads['0:0'].glut, 2, 'the result says what it ate');
+  assert.strictEqual(ob.glutN, 3, 'but eats at most 3 in a fight'); assert.strictEqual(ob.glutGain, 3);
+  assert.ok(near(ob.u.hp, o.hp * 1.18) && near(ob.u.hit, o.hit * 1.18), '+6% health and hit a stack');
+  assert.strictEqual(bt.result().squads['0:0'].glut, 3, 'the result says what it ate');
   // Devour: it heals for half the damage it deals
   const ob5 = body(o, 0, 0, 0), sack = body(dummy(1e6), 1, 0, 2.5), bt5 = E.createBattle([ob5], [sack], G);
   ob5.hp = 100; steps(bt5, 3);
@@ -109,14 +112,14 @@ const near = (a, b, eps = 1e-6) => Math.abs(a - b) < eps;
   const bt3 = E.createBattle([ob3, ally], [v1, v2], G); steps(bt3, 2);
   assert.ok(!v1.alive && !v2.alive && ob3.glutN === 1, 'it eats what falls next to it, not far away');
   // at its most it eats no more
-  const ob4 = body(E.glutUnit(o, 12), 0, 0, 0); ob4.glutN = 12;
+  const ob4 = body(E.glutUnit(o, 15), 0, 0, 0); ob4.glutN = 15;
   const bt4 = E.createBattle([ob4], [body(dummy(10), 1, 0, 2.5)], G); steps(bt4, 3);
-  assert.strictEqual(ob4.glutN, 12);
+  assert.strictEqual(ob4.glutN, 15);
 }
 // skills: Gluttony (one more a round), Hunger's haste (speed and a little attack speed a stack), Crushing maw (3 m splash),
 // Eye of the Obelisk (18 m, ranged)
 {
-  assert.strictEqual(withSkills('Obelisk', ['gluttony']).glut.cap, 3);
+  assert.strictEqual(withSkills('Obelisk', ['gluttony']).glut.cap, 4);
   const h = withSkills('Obelisk', ['hungerHaste']), g6 = E.glutUnit(h, 6);
   assert.ok(near(g6.speed, h.speed + 0.6) && near(g6.aps, h.aps * 1.09), 'Hunger’s haste: +0.1 m/s and +1.5% attack speed a stack');
   assert.strictEqual(withSkills('Obelisk', ['crushingMaw']).splash, 3);
@@ -137,8 +140,8 @@ const near = (a, b, eps = 1e-6) => Math.abs(a - b) < eps;
   assert.ok(near(Game.unitFor(m, 0, ui, sq).hp, base.hp * 1.12), 'its Glut is in its stats');
   const bodies = Game.bodiesFor(m, 0).filter(b => b.squad === sq.id);
   assert.ok(bodies.length === 1 && bodies[0].glutN === 2, 'it starts the fight with its Glut');
-  sq.glut = 11; Game.resolve(m, { winner: 0, timeout: false, time: 10, frac: [1, 0], squads: { ['0:' + sq.id]: { side: 0, squad: sq.id, total: 1, alive: 1, xp: 0, dealt: 0, glut: 2 } }, charm: [null, null], converted: [0, 0], buildings: [] });
-  assert.strictEqual(Game.glutOf(sq), 12, 'never past 12');
+  sq.glut = 14; Game.resolve(m, { winner: 0, timeout: false, time: 10, frac: [1, 0], squads: { ['0:' + sq.id]: { side: 0, squad: sq.id, total: 1, alive: 1, xp: 0, dealt: 0, glut: 2 } }, charm: [null, null], converted: [0, 0], buildings: [] });
+  assert.strictEqual(Game.glutOf(sq), 15, 'never past 15');
   m.gold[0] = 5000;
   assert.strictEqual(Game.awakenBlock(m, 0, sq), '', 'full Glut: it can be awakened');
   assert.ok(Game.awaken(m, 0, sq.id) && Game.unitFor(m, 0, ui, sq).range === 18, 'Eye of the Obelisk: 18 m');
