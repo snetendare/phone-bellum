@@ -42,7 +42,8 @@ const clone = (m) => ({ ...JSON.parse(JSON.stringify({ ...m, units: null, matrix
 }
 
 // the preview picks what the real fight picks, when nothing is hidden
-let compared = 0, split = 0;
+let compared = 0, split = 0, named = 0, ways = 0;
+const order = (list) => list.sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1));
 for (const seed of [3, 7, 11]) {
   const m = Game.createMatch(demo.units, demo.matrix, seed, 'standard'); // the AI needs the counter table
   for (let rd = 0; rd < 4 && !m.over; rd++) {
@@ -68,37 +69,43 @@ for (const seed of [3, 7, 11]) {
     if (!pv || !pv.moves) continue;
     const by = {};
     for (const [b, k] of first) if (b.squad === sq.id && k) by[k] = (by[k] || 0) + 1;
-    const top = Object.entries(by).sort((a, b) => b[1] - a[1]).slice(0, Game.INTENT.groups);
-    assert.deepStrictEqual(pv.groups.map(g => [g.side + ':' + g.squad, g.n]), top, `seed ${seed} squad ${sq.id} (${demo.units[sq.unit].name})`);
-    assert.ok(pv.groups.length <= 2);
-    compared++; if (pv.groups.length > 1) split++;
+    assert.deepStrictEqual(order(pv.picks), order(Object.entries(by)), `seed ${seed} squad ${sq.id} (${demo.units[sq.unit].name})`);
+    assert.ok(pv.groups.length + (pv.ahead ? 1 : 0) <= 2, 'two arrows at most');
+    for (const g of pv.groups) assert.ok(pv.picks.some(([k, n]) => k === g.side + ':' + g.squad && n >= g.n), 'a named arrow is one of its picks');
+    compared++; if (pv.picks.length > 1) split++; named += pv.groups.length; if (pv.ahead) ways++;
   }
 }
 assert.ok(compared >= 10, `compared ${compared}`);
-console.log(`preview = real fight for ${compared} squads (${split} split)`);
+console.log(`preview = real fight for ${compared} squads (${split} split; ${named} named arrows, ${ways} squads with a way only)`);
 
 // what the opponent placed this round stays out of it; the preview never changes the match
 {
   const m = Game.createMatch(units, null, 5, 'standard');
   m.round = 2; m.gold = [5000, 5000]; m.armies = [[], []]; m.chars = [null, null];
   for (const n of ['Brute', 'Fire Mage', 'Goblin Swarm']) { m.unlocks[0][ix(n)] = 1; m.unlocks[1][ix(n)] = 1; }
+  m.extraDeploys = [Game.CONFIG.maxExtraDeploys, 0]; m.unlocks[0][ix('Sniper')] = 1;
   const mine = Game.place(m, 0, ix('Brute'), 3, 11);
   const old = Game.place(m, 1, ix('Brute'), 3, 4); old.round = 1;
   const now = Game.place(m, 1, ix('Fire Mage'), 2, 5); // closer still, placed this round: unseen
   const before = JSON.stringify(m.armies);
   const pv = Game.intentPreview(m, 0, { id: mine.id });
   assert.strictEqual(JSON.stringify(m.armies), before, 'the match is left as it was');
-  assert.ok(pv.groups.length === 1 && pv.groups[0].squad === old.id, 'only what it can see: ' + JSON.stringify(pv.groups));
+  assert.ok(pv.picks.length === 1 && pv.picks[0][0] === '1:' + old.id, 'only what it can see: ' + JSON.stringify(pv.picks));
   assert.ok(!Game.seenBy(m, 0).armies[1].some(s => s.id === now.id), 'seenBy leaves it out');
+  // the Brute (melee, 18 m of awareness) starts 42 m from it: too far to name, only the way it walks (ahead)
+  assert.ok(pv.groups.length === 0 && pv.ahead && pv.ahead.n === 1 && pv.ahead.dy > 0.9, 'far: a way, not a unit: ' + JSON.stringify(pv));
+  // a Sniper (29 m of range, 44 m of awareness) 36 m from it: that one, by name
+  const sn = Game.intentPreview(m, 0, { unit: ix('Sniper'), col: 3, row: 10 });
+  assert.ok(sn.groups.length === 1 && sn.groups[0].squad === old.id && !sn.ahead, 'near: the unit itself: ' + JSON.stringify(sn));
   // a unit about to be placed, and a squad about to be moved
   const hyp = Game.intentPreview(m, 0, { unit: ix('Fire Mage'), col: 8, row: 11 });
-  assert.ok(hyp && hyp.total === 1 && hyp.groups.length === 1 && hyp.groups[0].squad !== now.id, 'a shop pick over a tile');
+  assert.ok(hyp && hyp.total === 1 && !hyp.picks.some(([k]) => k === '1:' + now.id), 'a shop pick over a tile');
   const mv = Game.intentPreview(m, 0, { id: mine.id, col: 10, row: 11 });
-  assert.ok(mv && mv.groups.length === 1 && mv.groups[0].squad !== now.id, 'a squad about to be moved');
+  assert.ok(mv && mv.total === 1 && !mv.picks.some(([k]) => k === '1:' + now.id), 'a squad about to be moved');
   // a Goblin Swarm with Tacticalness runs out to its spots first: its picks still come
   m.tech[0][ix('Goblin Swarm')] = [2, 2, 0, 0];
   const gob = Game.intentPreview(m, 0, { unit: ix('Goblin Swarm'), col: 6, row: 11 });
-  assert.ok(gob.total === 15 && gob.groups.length >= 1 && gob.groups.length <= 2 && gob.groups.reduce((a, g) => a + g.n, 0) + gob.marching <= 15, JSON.stringify(gob));
+  assert.ok(gob.total === 15 && gob.groups.length + (gob.ahead ? 1 : 0) >= 1 && gob.groups.length + (gob.ahead ? 1 : 0) <= 2 && gob.groups.reduce((a, g) => a + g.n, 0) + (gob.ahead ? gob.ahead.n : 0) <= 15, JSON.stringify(gob));
   // the same board, the same answer
   assert.deepStrictEqual(Game.intentPreview(m, 0, { id: mine.id }), pv);
 }

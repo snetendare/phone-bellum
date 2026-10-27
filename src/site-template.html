@@ -3076,14 +3076,20 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     }
     return undefined;
   }
-  // its first pick in words, for its sheet: "Brute (8), Fire Mage (4)"
+  // a way on the board in words, as this screen shows it (your side at the bottom): "ahead and to the left"
+  function wayWords(dx, dy) {
+    const k = me === 0 ? 1 : -1, ahead = dy * k, right = dx * k, lr = right > 0 ? 'right' : 'left';
+    return ahead > 0.92 ? 'straight ahead' : ahead > 0.38 ? `ahead and to the ${lr}` : ahead > -0.38 ? `to the ${lr}` : 'back';
+  }
+  // its first pick in words, for its sheet: "Goes for Brute (8), Fire Mage (4) first." The ones too far to call: the way they walk
   function intentWords(r) {
     if (!r) return '';
     if (!r.moves) return 'Holds its ground: it doesn’t walk.';
     const name = (g) => g.unit != null ? units[g.unit].name : g.name || 'Enemy';
-    const parts = r.groups.map(g => `${esc(name(g))}${r.total > 1 ? ` (${g.n})` : ''}`);
-    if (r.marching) parts.push(`${r.total > 1 ? `${r.marching} ` : ''}straight ahead, nothing in sight yet`);
-    return parts.length ? `Heads for ${parts.join(', ')} first.` : '';
+    const out = [];
+    if (r.groups.length) out.push(`Goes for ${r.groups.map(g => `${esc(name(g))}${r.total > 1 ? ` (${g.n})` : ''}`).join(', ')} first.`);
+    if (r.ahead) out.push(`${r.total > 1 ? `${r.ahead.n === r.total ? 'All' : r.ahead.n} head` : 'Heads'} ${wayWords(r.ahead.dx, r.ahead.dy)}: no enemy in sight close enough to say which one yet.`);
+    return out.join(' ');
   }
   // the squad tapped in a fight: what its bodies walk to now, by enemy squad (live), and whom they attack
   function fightIntent(w) {
@@ -3092,22 +3098,24 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     let x = 0, y = 0;
     for (const b of mine) { x += b.x; y += b.y; }
     const by = new Map(), hits = new Set();
-    let marching = 0;
+    let marching = 0, hx = 0, hy = 0;
     for (const b of mine) {
       if (b.lock && b.lock.alive && !(b.lock.hidden && b.lock.side !== me)) hits.add(b.lock);
       const f = b.intent;
-      if (!f || !f.alive || (f.hidden && f.side !== me)) { if (!(b.u.idle || b.inside)) marching++; continue; }
+      if (!f || !f.alive || (f.hidden && f.side !== me)) { if (!(b.u.idle || b.inside)) { marching++; if (b.hx !== undefined) { hx += b.hx; hy += b.hy; } } continue; } // marching: its heading
       const k = f.side + ':' + f.squad;
       if (!by.has(k)) by.set(k, { side: f.side, squad: f.squad, n: 0, got: new Set() });
       const e = by.get(k); e.n++; e.got.add(f);
     }
-    const groups = [...by.values()].sort((a, b) => b.n - a.n).slice(0, Game.INTENT.groups).map(e => {
+    const b0 = mine[0], fwd = b0.march || [0, b0.side === 0 ? 1 : -1], hl = Math.hypot(hx, hy);
+    const ahead = marching ? (hl > 0.25 * marching ? { n: marching, dx: hx / hl, dy: hy / hl } : { n: marching, dx: fwd[0], dy: fwd[1] }) : null;
+    const near = [...by.values()].sort((a, b) => b.n - a.n), keep = [...near, ...(ahead ? [ahead] : [])].sort((a, b) => b.n - a.n).slice(0, Game.INTENT.groups); // two arrows at most
+    const groups = near.filter(e => keep.includes(e)).map(e => {
       let gx = 0, gy = 0;
       for (const f of e.got) { gx += f.x; gy += f.y; }
       return { side: e.side, n: e.n, x: gx / e.got.size, y: gy / e.got.size };
     });
-    const b0 = mine[0], fwd = b0.side === 0 ? 1 : -1;
-    return { from: { x: x / mine.length, y: y / mine.length }, total: mine.length, groups, marching, march: b0.march || [0, fwd], hits: [...hits].slice(0, 6) };
+    return { from: { x: x / mine.length, y: y / mine.length }, total: mine.length, groups, ahead: ahead && keep.includes(ahead) ? ahead : null, hits: [...hits].slice(0, 6) };
   }
   // SVG for one arrow from a to b (screen points), bent a little (bend: -1..1) so two branches stay apart, with an
   // optional count at its middle
@@ -3125,14 +3133,15 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (opt.count) { const m2 = [(p0[0] + 2 * c[0] + p1[0]) / 4, (p0[1] + 2 * c[1] + p1[1]) / 4]; html += `<g class="intent-n"><circle cx="${m2[0].toFixed(1)}" cy="${m2[1].toFixed(1)}" r="8.5" style="stroke:${col}"/><text x="${m2[0].toFixed(1)}" y="${(m2[1] + 3.5).toFixed(1)}">${opt.count}</text></g>`; }
     return html;
   }
-  // the arrows (deploying or in a fight): from where the squad is to each enemy squad it goes for (two at most), a
-  // dashed one straight ahead for bodies with nothing in sight yet, and in a fight small rings on whom it attacks
+  // the arrows (deploying or in a fight), two at most: from where the squad is to each enemy squad it goes for, with a
+  // ring round it, and a dashed one the way it walks for bodies with no enemy close enough to say which (deploying:
+  // not in their awareness where the fight begins; in a fight: nothing picked yet); in a fight small rings on whom it attacks
   function intentMarks(at) {
-    let it = null, from = null, march = null;
+    let it = null, from = null;
     if (phase === 'battle' && bt && watchSq) {
       it = fightIntent(watchSq);
       if (!it) { watchSq = null; return ''; }
-      from = it.from; march = it.march;
+      from = it.from;
     } else if (phase === 'deploy') {
       const ask = intentAsk();
       if (!ask) return '';
@@ -3140,11 +3149,10 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       if (!r || !r.moves) return '';
       const n = Game.footprint(m, ask.unit);
       from = Game.tileToWorld(ask.col + (n - 1) / 2, ask.row + (n - 1) / 2);
-      march = Game.isFlank(me, ask.col, ask.row) ? [from.x < 0 ? 1 : -1, 0] : [0, me === 0 ? 1 : -1];
       it = r;
     }
     if (!it) return '';
-    const col = teamCol(watchSq && phase === 'battle' ? watchSq.side : me), split = it.groups.length + (it.marching ? 1 : 0) > 1;
+    const col = teamCol(watchSq && phase === 'battle' ? watchSq.side : me), split = it.groups.length + (it.ahead ? 1 : 0) > 1;
     const a = at(from.x, from.y);
     let html = '';
     it.groups.forEach((g, k) => {
@@ -3152,9 +3160,9 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       html += `<circle class="intent-ring" cx="${b[0].toFixed(1)}" cy="${b[1].toFixed(1)}" r="${r.toFixed(1)}" style="stroke:${fc}"/>`;
       html += arrowSvg(a, b, col, { bend: it.groups.length > 1 ? (k ? -0.6 : 0.6) : 0.15, count: split && it.total > 1 ? g.n : 0, short: r + 2 });
     });
-    if (it.marching) {
-      const T = Game.TILE * 1.6, b = at(from.x + march[0] * T, from.y + march[1] * T);
-      html += arrowSvg(a, b, col, { dash: true, short: 0, count: split && it.total > 1 ? it.marching : 0 });
+    if (it.ahead) {
+      const T = Game.TILE * (phase === 'deploy' ? 2.4 : 1.6), b = at(from.x + it.ahead.dx * T, from.y + it.ahead.dy * T);
+      html += arrowSvg(a, b, col, { dash: true, short: 0, count: split && it.total > 1 ? it.ahead.n : 0 });
     }
     if (it.hits) for (const h of it.hits) { const p = at(h.x, h.y); html += `<circle class="intent-hit" cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="6" style="stroke:${col}"/>`; }
     return html;

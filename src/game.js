@@ -1766,12 +1766,19 @@ const Game = (() => {
   // as it stands (seenBy), by the same engine and rules as the real one, until each of the squad's bodies has picked
   // an enemy to walk to (its b.intent: not the enemy it attacks, see the engine). It shows intent, not who wins or how
   // much damage is done; the real fight also has whatever the opponent does this round.
+  // A pick is only told as that enemy when the enemy already stands within the body's awareness where the fight
+  // begins (its range + sight, at least minSight, as the engine spots enemies): it goes for that one from the first
+  // moment. A pick further off depends on walking there first, while both sides move and the opponent's new squads
+  // (unseen) can be in the way, so it is only told as the way the body walks.
   // q: { id } (a squad on the board), { id, col, row } (that squad moved there) or { unit, col, row } (one about to be
   // placed there, with the unit's skills).
-  // Returns null (nothing to show) or { total, moves, groups: [{ side, squad, unit, name, n, x, y }], marching }:
-  // total bodies; moves false for a squad that never walks (one in a building); groups by the enemy squad they go for,
-  // most bodies first, at most INTENT.groups (unit: its unit index, or name for what isn't a squad, like the tower;
-  // x, y: where that squad stood when the fight began); marching: bodies still walking straight ahead at the end.
+  // Returns null (nothing to show) or { total, moves, groups: [{ side, squad, unit, name, n, x, y }], ahead, picks }:
+  // total bodies; moves false for a squad that never walks (one in a building); groups: the enemy squads in its
+  // awareness it goes for, most bodies first (unit: its unit index, or name for what isn't a squad, like the tower;
+  // x, y: where that squad stands when the fight begins); ahead: { n, dx, dy } the bodies with nothing that close,
+  // and the way they walk (a unit vector, the average of where each is when it picks, or when the look ahead ends,
+  // from where it began), or null. groups and ahead together make INTENT.groups arrows at most (the most bodies
+  // first). picks: every body's pick as [side:squad, bodies], most first, near or far (for checks).
   const INTENT = { secs: 15, settle: 1, groups: 2 }; // the longest look ahead (s); ticks a pick must hold before it counts (aware2 may change it on the next); arrows a squad gets
   function intentPreview(m, viewer, q) {
     const v = seenBy(m, viewer);
@@ -1791,8 +1798,11 @@ const Game = (() => {
     const start = new Map(bt.bodies.map(b => [b, { x: b.x, y: b.y }]));
     const mine = bt.bodies.filter(b => b.side === viewer && b.squad === id && !b.boarded);
     if (!mine.length) return null;
-    if (mine.every(b => b.inside || b.u.idle || b.u.stay || !(b.u.speed > 0))) return { total: mine.length, moves: false, groups: [], marching: 0 };
+    if (mine.every(b => b.inside || b.u.idle || b.u.stay || !(b.u.speed > 0))) return { total: mine.length, moves: false, groups: [], ahead: null, picks: [] };
+    // how far each body notices an enemy where the fight begins (the engine's sight; without vision, the whole board)
+    const sight = g.rules && g.rules.vision === false ? Infinity : g.sight, aware = new Map(mine.map(b => [b, Math.max(b.u.range + sight, g.minSight)]));
     const picked = new Map(), held = new Map(), cap = Math.round(INTENT.secs / g.dt);
+    const pick = (b) => picked.set(b, { side: b.intent.side, squad: b.intent.squad, f: b.intent, at: { x: b.x, y: b.y } }); // as it is now (a body won over later changes sides)
     for (let k = 0; k < cap && picked.size < mine.length; k++) {
       if (!bt.step()) break;
       for (const b of mine) {
@@ -1801,27 +1811,42 @@ const Game = (() => {
         if (!b.intent) { held.delete(b); continue; }
         const n = (held.get(b) || 0) + 1;
         held.set(b, n);
-        if (n > INTENT.settle) picked.set(b, { side: b.intent.side, squad: b.intent.squad, f: b.intent }); // as it is now (a body won over later changes sides)
+        if (n > INTENT.settle) pick(b);
       }
     }
-    for (const b of mine) if (!picked.has(b) && b.alive && b.intent) picked.set(b, { side: b.intent.side, squad: b.intent.squad, f: b.intent });
-    const by = new Map();
-    let marching = 0;
+    for (const b of mine) if (!picked.has(b) && b.alive && b.intent) pick(b);
+    const by = new Map(), all = new Map();
+    let far = 0, fx = 0, fy = 0;
     for (const b of mine) {
-      const f = picked.get(b);
-      if (!f) { if (!picked.has(b)) marching++; continue; }
-      const key = f.side + ':' + f.squad;
-      if (!by.has(key)) by.set(key, { side: f.side, squad: f.squad, n: 0, first: f.f });
-      by.get(key).n++;
+      const pk = picked.get(b);
+      if (pk === null) continue; // fell before it picked
+      if (pk) all.set(pk.side + ':' + pk.squad, (all.get(pk.side + ':' + pk.squad) || 0) + 1);
+      const s0 = start.get(b), t0 = pk && start.get(pk.f);
+      if (pk && t0 && Math.hypot(t0.x - s0.x, t0.y - s0.y) <= aware.get(b)) { // in its awareness from the start: that one
+        const key = pk.side + ':' + pk.squad;
+        if (!by.has(key)) by.set(key, { side: pk.side, squad: pk.squad, n: 0, first: pk.f });
+        by.get(key).n++;
+        continue;
+      }
+      const at = pk ? pk.at : b, dx = at.x - s0.x, dy = at.y - s0.y, d = Math.hypot(dx, dy); // too far to tell: the way it walks
+      far++;
+      if (d > 1e-6) { fx += dx / d; fy += dy / d; }
     }
-    const groups = [...by.values()].sort((a, b) => b.n - a.n).slice(0, INTENT.groups).map(e => {
-      const all = bt.bodies.filter(f => f.side === e.side && f.squad === e.squad && start.has(f));
+    let ahead = null;
+    if (far) {
+      const fwd = mine[0].march || [0, viewer === 0 ? 1 : -1], d = Math.hypot(fx, fy);
+      ahead = d > 0.25 * far ? { n: far, dx: fx / d, dy: fy / d } : { n: far, dx: fwd[0], dy: fwd[1] }; // standing still, or every way at once: ahead
+    }
+    // at most INTENT.groups arrows, the most bodies first
+    const near = [...by.values()].sort((a, b) => b.n - a.n), keep = [...near, ...(ahead ? [ahead] : [])].sort((a, b) => b.n - a.n).slice(0, INTENT.groups);
+    const groups = near.filter(e => keep.includes(e)).map(e => {
+      const sb = bt.bodies.filter(f => f.side === e.side && f.squad === e.squad && start.has(f));
       let x = 0, y = 0;
-      for (const f of all) { const p = start.get(f); x += p.x; y += p.y; }
+      for (const f of sb) { const p = start.get(f); x += p.x; y += p.y; }
       const s = e.squad >= 0 ? v.armies[e.side].find(z => z.id === e.squad) : null;
-      return { side: e.side, squad: e.squad, unit: s ? s.unit : null, name: s ? null : e.first.u.name, n: e.n, x: all.length ? x / all.length : e.first.x, y: all.length ? y / all.length : e.first.y };
+      return { side: e.side, squad: e.squad, unit: s ? s.unit : null, name: s ? null : e.first.u.name, n: e.n, x: sb.length ? x / sb.length : e.first.x, y: sb.length ? y / sb.length : e.first.y };
     });
-    return { total: mine.length, moves: true, groups, marching };
+    return { total: mine.length, moves: true, groups, ahead: ahead && keep.includes(ahead) ? ahead : null, picks: [...all.entries()].sort((a, b) => b[1] - a[1]) };
   }
 
   // Damage a side deals = the damage of its squads' tiers, scaled by how much of each squad is still alive.
