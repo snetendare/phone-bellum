@@ -23,9 +23,9 @@ Why it can feel like everything locks on to everything:
 - Overkill avoidance: shooters skip an enemy that's already going to die from shots on their way and spread fire to the next one (AI War's ships work like this, by a player's account). ([Arcen forums](https://forums.arcengames.com/ai-war-classic/target-selection-priority/))
 - For big crowds, flow fields (one shared direction map per goal) replace per-unit pathfinding, as in Supreme Commander 2. That's for routing around terrain, which our open boards don't have yet; worth it once maps get walls or buildings that block. ([Wildfire Games forum](https://wildfiregames.com/forum/topic/16018-supreme-commander-2-pathfinding/))
 
-## The prototype (on in Factions – devtest only)
+## Awareness (on in every gamemode)
 
-`g.aware2` in the engine, switched on by `DEV.awareness` in `src/game.js`. Four changes to how an engaged body chooses:
+`g.aware2` in the engine, switched on by `AWARENESS` in `src/game.js` for every match (it started as a prototype in the Factions devtest). Counter Lab's sandbox fights don't use it. Four changes to how an engaged body chooses:
 
 1. It only considers enemies within its own sight (its current target a bit further, 1.5×). If nobody is in sight it falls back to the nearest, as now.
 2. Cost instead of distance: distance + 0.5 per metre sideways (it keeps to its lane) + crowding.
@@ -58,4 +58,8 @@ It is deterministic (same numbers on every device) and costs about the same as t
 4. Disengage. Let an engaged body go back to marching when nothing is in sight any more, instead of chasing across the board.
 5. Flow fields later, when maps get blocking buildings or terrain.
 
-Settings to play with: `AWARE` in `src/engine.js` (step, full, stick, leash, lane) and `DEV.awareness` in `src/game.js`.
+Settings to play with: `AWARE` in `src/engine.js` (step, full, stick, leash, lane) and `AWARENESS` in `src/game.js`.
+
+## Intent (movement target) and attack target
+
+The engine keeps two targets per body: `b.intent`, the enemy it is walking to (set each tick in the movement step: its goal once engaged, or the enemy it stands at in reach; null while it marches ahead), and `b.lock`, the enemy it attacks (see `locked`). They can differ: a body can shoot one enemy on its way to another. The intent preview on the page (`Game.intentPreview`) and a tap on a squad in a fight show `b.intent`.

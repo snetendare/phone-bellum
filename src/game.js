@@ -1123,12 +1123,23 @@ const Game = (() => {
   // the fight, like a skill; taken back this round for a refund.
   const squadOf = (m, side, id) => m.armies[side].find(s => s.id === id) || null;
   const awakenCost = (m, ui) => awakenSlot(m, ui) >= 0 ? skillCost(m, ui, awakenSlot(m, ui)) : 0;
-  // why a squad can't be awakened now ('' = it can): 'none' (no Awaken skill or already awake), 'enzo', 'needs', 'glut',
-  // 'or', 'gold'. An Awaken skill with needs: 'glutMax' (the Obelisk's) needs the squad at its most Glut
+  // A player awakens one unit type a match: the type of the first squad they awaken (any number of its squads, but no
+  // other type's). It holds from the fight on (m.woke[side], set in resolve), even once those squads are sold; until
+  // then it is the type of the squads awakened this round, so taking that awakening back frees the choice again.
+  const wokeUnit = (m, side) => {
+    const w = m && m.woke ? m.woke[side] : null;
+    if (w != null) return w;
+    const sq = m ? m.armies[side].find(s => s.awaken > 0) : null;
+    return sq ? sq.unit : null;
+  };
+  // why a squad can't be awakened now ('' = it can): 'none' (no Awaken skill or already awake), 'enzo', 'type' (another
+  // unit type is the one awakened this match), 'needs', 'glut', 'or', 'gold'. An Awaken skill with needs: 'glutMax' (the
+  // Obelisk's) needs the squad at its most Glut
   function awakenBlock(m, side, sq) {
     const k = sq ? awakenSlot(m, sq.unit) : -1;
     if (k < 0 || sq.awaken > 0) return 'none';
     if (charOf(m, side) === 'enzo') return 'enzo'; // Enzo's squads come with their skill instead
+    if (wokeUnit(m, side) != null && wokeUnit(m, side) !== sq.unit) return 'type';
     if (skillNeedsMissing(m, side, sq.unit, k).length) return 'needs';
     if (skillDef(m, sq.unit, k).needs === 'glutMax' && !glutFull(m, side, sq)) return 'glut';
     if (skillOrTaken(m, side, sq.unit, k).length) return 'or';
@@ -1707,6 +1718,15 @@ const Game = (() => {
     ensurePack(m, 0); ensurePack(m, 1);
     ensureCharm(m, 0); ensureCharm(m, 1);
     settleDev(m);
+    const { g, opts } = battleSetup(m);
+    return E.createBattle(bodiesFor(m, 0), bodiesFor(m, 1), g, { ...opts, record: true });
+  }
+  // Awareness (docs/AWARENESS.md): an engaged body picks whom to walk to within its sight, by distance, its lane and
+  // crowding (melee slots), keeping its current one unless another is clearly better, and a new attack target skips an
+  // enemy its side is already about to kill. Part of the core fight: on in every gamemode.
+  const AWARENESS = true;
+  // a fight's settings and extras (map tiles, spells, neutrals, charisma) for a match as it stands; changes nothing
+  function battleSetup(m) {
     const mp = mapOf(m), elf = elfSpot(m);
     let g = { ...SETTINGS, bounds: { ...BOUNDS }, ...(mp && mp.healMul ? { healMul: mp.healMul } : {}) };
     if (m.rules) g = { ...g, rules: m.rules }; // the roster's rules (a Counter Lab roster can switch mechanics off)
@@ -1720,10 +1740,124 @@ const Game = (() => {
     for (const h of hailTiles(m)) { const w = tileToWorld(h.col, h.row); tiles.push({ type: 'hail', dps: ICE.hailDps, x0: w.x - T2, x1: w.x + T2, y0: w.y - T2, y1: w.y + T2 }); }
     const fx = isDev(m) ? castEffects(m) : { tiles: [], strikes: [] }; // devtest spells
     tiles.push(...fx.tiles);
-    if (isDev(m) && DEV.awareness) g = { ...g, aware2: true, ...(DEV.awareLane != null ? { awareLane: DEV.awareLane } : {}) };
+    if (AWARENESS) g = { ...g, aware2: true, ...(isDev(m) && DEV.awareLane != null ? { awareLane: DEV.awareLane } : {}) };
     const neutrals = elf ? [{ u: elfUnit(m), x: elf.x, y: elf.y, friends: [bribeLeader(m) === 0, bribeLeader(m) === 1] }] : [];
     for (const side of [0, 1]) { const e = elfOwnOf(m, side); if (e) { const w = tileToWorld(e.col, e.row); neutrals.push({ u: elfUnit(m), x: w.x, y: w.y, friends: [side === 0, side === 1], side }); } }
-    return E.createBattle(bodiesFor(m, 0), bodiesFor(m, 1), g, { record: true, tiles, strikes: fx.strikes, neutrals, charm: [charmMap(m, 0), charmMap(m, 1)] });
+    return { g, opts: { tiles, strikes: fx.strikes, neutrals, charm: [charmMap(m, 0), charmMap(m, 1)] } };
+  }
+
+  // ---------- intent: whom a squad goes for ----------
+  // The match as a player may know it while deploying: the other side as their screen shows it (squads from earlier
+  // rounds where seenAt has them, at seenLevel, awakened only if seenAwake; skills, tower picks, walls and the rest
+  // from earlier rounds only). A new object; m is left as it is.
+  function seenBy(m, viewer) {
+    const fo = 1 - viewer, v = { ...m }, now = m.round;
+    const two = (a, x) => { const o = Array.isArray(a) ? a.slice() : [null, null]; o[fo] = x; return o; };
+    v.armies = two(m.armies, m.armies[fo].filter(s => s.round < now && !hiddenFromFoe(m, s)).map(s => {
+      const p = seenAt(m, s), q = { ...s, col: p.col, row: p.row, level: seenLevel(m, s) };
+      delete q.from; delete q.movedRound;
+      if (!seenAwake(m, s)) delete q.awaken;
+      if (q.charmGiven === now) { delete q.charm; delete q.charmGiven; }
+      return q;
+    }));
+    if (m.tech) v.tech = two(m.tech, Object.fromEntries(Object.entries(m.tech[fo] || {}).map(([ui, t]) => [ui, t.map(r => r >= now ? 0 : r)])));
+    if (!charShown(m, viewer, true, fo)) { v.chars = two(m.chars, null); v.buff = two(m.buff, []); }
+    if (m.towers && m.towers[fo] && !towerTypeShown(m, viewer, true, fo)) { const t = { ...m.towers[fo] }; delete t.type; v.towers = two(m.towers, t); }
+    if (m.towerSkill && m.towerSkill[fo] >= now) v.towerSkill = two(m.towerSkill, 0);
+    if (m.towerSkill2 && m.towerSkill2[fo] >= now) v.towerSkill2 = two(m.towerSkill2, 0);
+    if (m.bwalls) v.bwalls = two(m.bwalls, bwallsOf(m, fo).filter(w => w.round < now));
+    if (elfOwnOf(m, fo) && !elfOwnShown(m, viewer, true, fo)) v.elfOwn = two(m.elfOwn, null);
+    if (m.bribe) v.bribe = two(m.bribe, bribeList(m, fo).filter(r => r < now));
+    if (m.mageGen) v.mageGen = two(m.mageGen, null);
+    if (m.tround) v.tround = two(m.tround, {});
+    if (m.altar) v.altar = m.altar.filter(x => altarShown(m, viewer, true, x));
+    return v;
+  }
+  // Where a squad of the viewer's means to go first, from what they can see: a short fight is played from the board
+  // as it stands (seenBy), by the same engine and rules as the real one, until each of the squad's bodies has picked
+  // an enemy to walk to (its b.intent: not the enemy it attacks, see the engine). It shows intent, not who wins or how
+  // much damage is done; the real fight also has whatever the opponent does this round.
+  // A pick is only told as that enemy when the enemy already stands within the body's awareness where the fight
+  // begins (its range + sight, at least minSight, as the engine spots enemies): it goes for that one from the first
+  // moment. A pick further off depends on walking there first, while both sides move and the opponent's new squads
+  // (unseen) can be in the way, so it is only told as the way the body walks.
+  // q: { id } (a squad on the board), { id, col, row } (that squad moved there) or { unit, col, row } (one about to be
+  // placed there, with the unit's skills).
+  // Returns null (nothing to show) or { total, moves, groups: [{ side, squad, unit, name, n, x, y }], ahead, picks }:
+  // total bodies; moves false for a squad that never walks (one in a building); groups: the enemy squads in its
+  // awareness it goes for, most bodies first (unit: its unit index, or name for what isn't a squad, like the tower;
+  // x, y: where that squad stands when the fight begins); ahead: { n, dx, dy } the bodies with nothing that close,
+  // and the way they walk (a unit vector, the average of where each is when it picks, or when the look ahead ends,
+  // from where it began), or null. groups and ahead together make INTENT.groups arrows at most (the most bodies
+  // first). picks: every body's pick as [side:squad, bodies], most first, near or far (for checks).
+  const INTENT = { secs: 15, settle: 1, groups: 2 }; // the longest look ahead (s); ticks a pick must hold before it counts (aware2 may change it on the next); arrows a squad gets
+  function intentPreview(m, viewer, q) {
+    const v = seenBy(m, viewer);
+    let id = q.id;
+    if (id != null && q.col != null) { v.armies = v.armies.slice(); v.armies[viewer] = v.armies[viewer].map(s => s.id === id && (s.col !== q.col || s.row !== q.row) ? { ...s, col: q.col, row: q.row, movedRound: m.round } : s); } // (a flank waits in the first fight after a move)
+    if (id == null) {
+      if (!m.units[q.unit]) return null;
+      id = -1e6; // a squad id no army uses
+      v.armies = v.armies.slice();
+      v.armies[viewer] = v.armies[viewer].filter(s => !blockOf(m, q.unit, q.col, q.row).some(([c, r]) => covers(m, s, c, r)))
+        .concat([{ id, unit: q.unit, col: q.col, row: q.row, round: m.round, xp: 0, level: startLevel(m, viewer), cost: 0 }]);
+    }
+    const sq = v.armies[viewer].find(s => s.id === id);
+    if (!sq || m.units[sq.unit].building) return null;
+    const { g, opts } = battleSetup(v);
+    const bt = E.createBattle(bodiesFor(v, 0), bodiesFor(v, 1), g, { ...opts, record: false });
+    const start = new Map(bt.bodies.map(b => [b, { x: b.x, y: b.y }]));
+    const mine = bt.bodies.filter(b => b.side === viewer && b.squad === id && !b.boarded);
+    if (!mine.length) return null;
+    if (mine.every(b => b.inside || b.u.idle || b.u.stay || !(b.u.speed > 0))) return { total: mine.length, moves: false, groups: [], ahead: null, picks: [] };
+    // how far each body notices an enemy where the fight begins (the engine's sight; without vision, the whole board)
+    const sight = g.rules && g.rules.vision === false ? Infinity : g.sight, aware = new Map(mine.map(b => [b, Math.max(b.u.range + sight, g.minSight)]));
+    const picked = new Map(), held = new Map(), cap = Math.round(INTENT.secs / g.dt);
+    const pick = (b) => picked.set(b, { side: b.intent.side, squad: b.intent.squad, f: b.intent, at: { x: b.x, y: b.y } }); // as it is now (a body won over later changes sides)
+    for (let k = 0; k < cap && picked.size < mine.length; k++) {
+      if (!bt.step()) break;
+      for (const b of mine) {
+        if (picked.has(b)) continue;
+        if (!b.alive) { picked.set(b, null); continue; }
+        if (!b.intent) { held.delete(b); continue; }
+        const n = (held.get(b) || 0) + 1;
+        held.set(b, n);
+        if (n > INTENT.settle) pick(b);
+      }
+    }
+    for (const b of mine) if (!picked.has(b) && b.alive && b.intent) pick(b);
+    const by = new Map(), all = new Map();
+    let far = 0, fx = 0, fy = 0;
+    for (const b of mine) {
+      const pk = picked.get(b);
+      if (pk === null) continue; // fell before it picked
+      if (pk) all.set(pk.side + ':' + pk.squad, (all.get(pk.side + ':' + pk.squad) || 0) + 1);
+      const s0 = start.get(b), t0 = pk && start.get(pk.f);
+      if (pk && t0 && Math.hypot(t0.x - s0.x, t0.y - s0.y) <= aware.get(b)) { // in its awareness from the start: that one
+        const key = pk.side + ':' + pk.squad;
+        if (!by.has(key)) by.set(key, { side: pk.side, squad: pk.squad, n: 0, first: pk.f });
+        by.get(key).n++;
+        continue;
+      }
+      const at = pk ? pk.at : b, dx = at.x - s0.x, dy = at.y - s0.y, d = Math.hypot(dx, dy); // too far to tell: the way it walks
+      far++;
+      if (d > 1e-6) { fx += dx / d; fy += dy / d; }
+    }
+    let ahead = null;
+    if (far) {
+      const fwd = mine[0].march || [0, viewer === 0 ? 1 : -1], d = Math.hypot(fx, fy);
+      ahead = d > 0.25 * far ? { n: far, dx: fx / d, dy: fy / d } : { n: far, dx: fwd[0], dy: fwd[1] }; // standing still, or every way at once: ahead
+    }
+    // at most INTENT.groups arrows, the most bodies first
+    const near = [...by.values()].sort((a, b) => b.n - a.n), keep = [...near, ...(ahead ? [ahead] : [])].sort((a, b) => b.n - a.n).slice(0, INTENT.groups);
+    const groups = near.filter(e => keep.includes(e)).map(e => {
+      const sb = bt.bodies.filter(f => f.side === e.side && f.squad === e.squad && start.has(f));
+      let x = 0, y = 0;
+      for (const f of sb) { const p = start.get(f); x += p.x; y += p.y; }
+      const s = e.squad >= 0 ? v.armies[e.side].find(z => z.id === e.squad) : null;
+      return { side: e.side, squad: e.squad, unit: s ? s.unit : null, name: s ? null : e.first.u.name, n: e.n, x: sb.length ? x / sb.length : e.first.x, y: sb.length ? y / sb.length : e.first.y };
+    });
+    return { total: mine.length, moves: true, groups, ahead: ahead && keep.includes(ahead) ? ahead : null, picks: [...all.entries()].sort((a, b) => b[1] - a[1]) };
   }
 
   // Damage a side deals = the damage of its squads' tiers, scaled by how much of each squad is still alive.
@@ -1750,6 +1884,8 @@ const Game = (() => {
     // Zoe: a fight with a squad on one of her buff tiles makes the buff stronger from the next round on
     if (!m.zoeUses) m.zoeUses = [0, 0];
     for (const sd of [0, 1]) if (m.armies[sd].some(sq => onBuffTile(m, sd, sq.col, sq.row))) m.zoeUses[sd]++;
+    // the unit type each player has awakened is theirs for the rest of the match (see wokeUnit)
+    for (const sd of [0, 1]) { const w = wokeUnit(m, sd); if (w != null) { if (!m.woke) m.woke = [null, null]; m.woke[sd] = w; } }
     let roundWinner = res.winner;
     if (res.timeout) {
       dmg[0] = survivorDamage(m, res, 1);
@@ -2029,7 +2165,6 @@ const Game = (() => {
     offer: 3,          // options per pick
     guideAll: true,    // every squad can get an arrow (false: only units with "guide": true)
     guidePoints: 4,    // most points in one arrow
-    awareness: true,   // fights use the awareness prototype (see docs/AWARENESS.md)
   };
   const CAT_NAMES = { building: 'Lesser building', tower: 'Powertower', power: 'Power', neutral: 'Neutral unit' };
   const LESSER_SQ = -1000, WALL_SQ = -2000; // squad ids in fights: building key k is LESSER_SQ - k, wall cast k is WALL_SQ - k
@@ -2471,7 +2606,7 @@ const Game = (() => {
     deploysAllowed, deploysLeft, deployedThisRound, canBuyDeploy, buyDeploy, refundDeploy,
     PACKAGE, allPackages, packOf, needsPack, freeLeft, choosePack, ensurePack,
     unlockCost, tierOf, startLevel, shopCost, mapFreeOf, mapFreeLeft, isUnlocked, unlockVisible, unlock, undoUnlock,
-    skillDef, skillCost, SKILL_STEP, skillsBought, isInnate, hasSkill, skillVisible, skillNeeds, skillNeedsAny, skillNeedsMissing, skillHeldUp, isFlat, isMaster, isAwaken, awakenSlot, awakenCost, awakenBlock, canAwaken, awaken, undoAwaken, seenAwake, glutOf, glutMax, glutFull, skillOr, skillOrTaken, unitFor, withCharacter,
+    skillDef, skillCost, SKILL_STEP, skillsBought, isInnate, hasSkill, skillVisible, skillNeeds, skillNeedsAny, skillNeedsMissing, skillHeldUp, isFlat, isMaster, isAwaken, awakenSlot, awakenCost, wokeUnit, awakenBlock, canAwaken, awaken, undoAwaken, seenAwake, glutOf, glutMax, glutFull, skillOr, skillOrTaken, unitFor, withCharacter,
     footprint, blockOf, spotFree, buildingRecords, recordOf, recordWorld, buildingEffects,
     setBuildings, BUILDINGS: () => BUILDINGS, buildingInfo, BUILDING_SQUAD, isBuildingSkill, buildingIdOf, buildingsOf, buildingOf, buildingAt, buildingShown, buildingSpotOk,
     canBuyBuilding, buyBuilding, buildingSkills, buildingSkillInfo, bskillOf, bskillCost, canBuyBuildingSkill, buyBuildingSkill, undoBuildingSkill,
@@ -2485,7 +2620,7 @@ const Game = (() => {
     TREASURY, TREASURY_SQ, treasuryOn, treasuryUp, treasurySpot, treasuryAt, treasuryUnit,
     FACTION_MODE, FACTIONS: () => FACTIONS, setFactions, factionInfo, factionsOf, factionTowers, towerTypeById, ownsUnit, withFactionTrait, factionSet,
     createDraft, draftTurn, draftOpen, draftAct, draftDone, draftPossible, aiDraftChoice,
-    zoneRows, inZone, tileToWorld, squadRange, createMatch, place, unplace, bodiesFor, startBattle, resolve, aiDeploy, occupied,
+    zoneRows, inZone, tileToWorld, squadRange, createMatch, place, unplace, bodiesFor, startBattle, battleSetup, seenBy, intentPreview, INTENT, AWARENESS, resolve, aiDeploy, occupied,
     GRID, useGrid,
     DEV, CAT_NAMES, LESSER_SQ, WALL_SQ, setDevData, devBuilding, devPower, devSpell, isDev, towerUp, pickCat, devOffer, pickNow, needsDevPick, devPick, undoDevPick, devShown,
     lessersOf, placedLessers, unplacedLesser, lesserAt, lesserSpotOk, placeLesser, lesserUnit, auraFor, modUnit, powersOf, devGold, devDeploys,
