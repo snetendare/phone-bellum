@@ -2388,14 +2388,14 @@
       "name": "Obelisk",
       "cost": 300,
       "bodies": 1,
-      "hp": 1550,
-      "hit": 100,
+      "hp": 1300,
+      "hit": 90,
       "aps": 0.7,
       "range": 3,
       "speed": 4,
       "splash": 0,
       "shape": "obelisk",
-      "color": "#5B4B7A",
+      "color": "#4E6B35",
       "tag": "OBE",
       "glut": {
         "max": 12,
@@ -2404,6 +2404,11 @@
         "hit": 6,
         "speed": 0,
         "aps": 0
+      },
+      "lifesteal": 50,
+      "trait2": {
+        "name": "Devour",
+        "text": "Heals for 50% of the damage it deals."
       },
       "trait": {
         "name": "Glut",

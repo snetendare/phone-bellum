@@ -42,13 +42,29 @@ const Models3D = (THREE) => {
     out.computeBoundingSphere();
     return out;
   }
+  // the Obelisk: a giant serpent (a basilisk). Its body lies in coils on the ground, scales in the unit's colour, a band
+  // in the team colour round the lowest coil and violet spines (its Glut) down its back; the neck rears up and forward to
+  // a wedge-shaped head with an open jaw, fangs and glowing yellow eyes. torus(): a coil lying flat
+  const coil = (r, t, y, col, [x, z] = [0, 0]) => P(new THREE.TorusGeometry(r, t, 6, 14), col, [x, y, z], [Math.PI / 2, 0, 0]);
   const obeliskParts = () => [
-    P(box(1.6, 0.35, 1.6), STONE, [0, 0.18, 0]), P(box(1.66, 0.12, 1.66), 'team', [0, 0.42, 0]),
-    P(cyl(0.42, 0.64, 2.8, 4), 'tint', [0, 1.85, 0], [0, Math.PI / 4, 0]),
-    P(cone(0.42, 0.7, 4), 'tint', [0, 3.6, 0], [0, Math.PI / 4, 0]),
-    ...[1.5, 2.0, 2.55].map((y, k) => P(box(0.08 + (k % 2) * 0.1, 0.32, 0.05), GLUT, [k === 1 ? 0.1 : -0.06, y, -0.4 + (y - 1.85) * 0.07])),
-    P(box(0.52, 0.12, 0.06), DARK, [0, 1.08, -0.47]),
-    P(box(0.28, 0.28, 0.28), 'tint', [0.95, 2.3, 0.2], [0.5, 0.5, 0]), P(box(0.2, 0.2, 0.2), 'tint', [-0.85, 1.7, -0.25], [0.3, 0.8, 0])];
+    coil(1.2, 0.42, 0.42, 'tint'), coil(1.28, 0.07, 0.22, 'team'),
+    coil(0.85, 0.38, 1.08, 'tint', [0, 0.3]),
+    P(cone(0.24, 1.2, 6), 'tint', [1.45, 0.36, 0.7], [0, 0, -1.35]), // the tail's tip, out of the coils
+    // the neck, rising from the back of the coils and arching forward (toward -z) over them
+    P(cyl(0.36, 0.42, 1.2, 8), 'tint', [0, 1.85, 0.3], [0.1, 0, 0]),
+    P(cyl(0.33, 0.37, 1.0, 8), 'tint', [0, 2.65, 0.05], [-0.55, 0, 0]),
+    P(cyl(0.3, 0.34, 0.9, 8), 'tint', [0, 3.05, -0.55], [-1.25, 0, 0]),
+    P(box(0.42, 0.7, 0.1), '#C9C79A', [0, 2.45, -0.22], [-0.45, 0, 0]), // its pale throat
+    // the head: a broad flat skull, a snout, an open lower jaw, fangs, eyes and two horns of scale
+    P(box(0.95, 0.46, 1.0), 'tint', [0, 3.1, -1.15], [0.08, 0, 0]),
+    P(box(0.72, 0.34, 0.6), 'tint', [0, 3.02, -1.8], [0.12, 0, 0]),
+    P(box(0.74, 0.13, 1.15), 'tint', [0, 2.62, -1.5], [0.42, 0, 0]),
+    P(box(0.6, 0.05, 0.85), '#7A1F2B', [0, 2.76, -1.5], [0.25, 0, 0]), // the mouth
+    ...[-1, 1].flatMap(sd => [
+      P(cone(0.07, 0.42, 4), BONE, [sd * 0.24, 2.72, -1.98], [Math.PI, 0, 0]),
+      P(ball(0.12), '#F7D154', [sd * 0.42, 3.24, -1.42]),
+      P(cone(0.1, 0.55, 4), 'tint', [sd * 0.32, 3.42, -0.75], [0.95, 0, sd * -0.35])]),
+    ...[[0.95, 0.75], [1.6, 0.68], [2.25, 0.55], [2.9, 0.2]].map(([y, z]) => P(cone(0.09, 0.34, 4), GLUT, [0, y, z], [-0.5, 0, 0]))];
   const legs = (h = 0.8, gap = 0.2, w = 0.24) => [P(box(w, h, w), DARK, [-gap, h / 2, 0]), P(box(w, h, w), DARK, [gap, h / 2, 0])];
 
   const BUILD = {
@@ -215,11 +231,12 @@ const Models3D = (THREE) => {
       P(cone(0.32, 0.8, 7), 'tint', [0, 2.2, 0.05], [0.15, 0, 0]),
       P(cyl(0.05, 0.05, 2.2, 5), WOOD, [0.55, 1.1, -0.15]),
       ...top()]])),
-    // Obelisk: a tapering stone pillar in the unit's colour on a plinth, a band in the team colour, violet runes and a
-    // mouth on its front, a pointed cap and two stones floating round it
+    // Obelisk: a giant serpent coiled on the ground, its head reared up (see obeliskParts)
     obelisk: () => obeliskParts(),
-    // ...awakened (Eye of the Obelisk): a great glowing eye on its front and a crystal on its cap
-    'obelisk:eye': () => [...obeliskParts(), P(ball(0.26), GLUT, [0, 2.35, -0.42], [0, 0, 0], [1, 0.7, 0.5]), P(ball(0.11), '#2A0F4A', [0, 2.35, -0.53]), P(cone(0.16, 0.6, 4), GLUT, [0, 3.95, 0])],
+    // ...awakened (Eye of the Obelisk): a hood spread behind its head and great glowing eyes, its deadly gaze
+    'obelisk:eye': () => [...obeliskParts(), 
+      ...[-1, 1].flatMap(sd => [P(box(0.08, 1.15, 0.75), 'tint', [sd * 0.5, 2.7, -0.3], [-0.45, 0, sd * 0.55]), P(box(0.04, 0.8, 0.4), GLUT, [sd * 0.53, 2.7, -0.42], [-0.45, 0, sd * 0.55]),
+        P(ball(0.22), GLUT, [sd * 0.43, 3.26, -1.45]), P(ball(0.11), '#FFF2A8', [sd * 0.45, 3.26, -1.6])])],
     // ---------- the tier 4 units (NAMED) ----------
     // Ether Golem: a hunched heap of boulders in the unit's colour, a glowing core and eye slit, rune shards floating
     golem: () => [

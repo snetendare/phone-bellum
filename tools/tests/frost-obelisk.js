@@ -24,6 +24,7 @@ const near = (a, b, eps = 1e-6) => Math.abs(a - b) < eps;
   const o = unit('Obelisk');
   assert.ok(o.cost === 3 && o.bodies === 1 && o.range === 3 && o.glut && o.glut.max === 12 && o.glut.cap === 2, 'Obelisk: melee, Glut up to 12, 2 a round');
   assert.deepStrictEqual(o.skillOr, [[1, 2]]);
+  assert.strictEqual(o.lifesteal, 50, 'it heals for 50% of the damage it deals');
   const eye = skill(o.skills[3]); assert.ok(eye.flat && !eye.master && eye.needs === 'glutMax', 'Eye of the Obelisk: an Awaken skill that needs full Glut');
   for (const n of ['Frost Wizard', 'Obelisk']) assert.ok(demo.units.some(u => u.name === n), n + ' is in the counter table');
 }
@@ -95,6 +96,10 @@ const near = (a, b, eps = 1e-6) => Math.abs(a - b) < eps;
   assert.strictEqual(ob.glutN, 2, 'but eats at most 2 in a fight'); assert.strictEqual(ob.glutGain, 2);
   assert.ok(near(ob.u.hp, o.hp * 1.12) && near(ob.u.hit, o.hit * 1.12), '+6% health and hit a stack');
   assert.strictEqual(bt.result().squads['0:0'].glut, 2, 'the result says what it ate');
+  // Devour: it heals for half the damage it deals
+  const ob5 = body(o, 0, 0, 0), sack = body(dummy(1e6), 1, 0, 2.5), bt5 = E.createBattle([ob5], [sack], G);
+  ob5.hp = 100; steps(bt5, 3);
+  assert.ok(near(ob5.hp - 100, (1e6 - sack.hp) / 2, 1e-3), `heals half its damage (${ob5.hp - 100} of ${1e6 - sack.hp})`);
   const ob2 = body(o, 0, 0, 0), tw = body(dummy(5, { structure: true }), 1, 0, 2.5), cn = body(dummy(5, { construct: true, noCount: true }), 1, 1, 2.5), real = body(dummy(1e6), 1, 0, 30);
   const bt2 = E.createBattle([ob2], [tw, cn, real], G); steps(bt2, 4);
   assert.ok(!tw.alive && !cn.alive && !(ob2.glutN > 0), 'towers and constructs are not food');
