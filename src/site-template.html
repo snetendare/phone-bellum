@@ -358,6 +358,11 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
 .coach .btnrow:empty { display: none; }
 .coach-ring { position: absolute; z-index: 2; width: 56px; height: 56px; margin: -28px 0 0 -28px; border: 2px solid var(--gold); border-radius: 50%; pointer-events: none; animation: coach-ring 1.4s ease-out infinite; }
 .tut-glow { animation: tut-glow 1.4s ease-in-out infinite; }
+/* live fight speed (showSpeed): the opponent's request glows, ours waits with a dashed outline */
+.seg.speeds button.offer { color: var(--gold); box-shadow: inset 0 0 0 1px var(--gold); animation: tut-glow-in 1.4s ease-in-out infinite; }
+.seg.speeds button.asked { outline: 1px dashed var(--gold); outline-offset: -4px; }
+.speed-ask { display: block; margin-top: 6px; color: var(--gold); }
+.speed-ask[hidden] { display: none; }
 .marks .tut-tile { fill: rgba(92, 198, 223, 0.28); stroke: var(--you); stroke-width: 1.5; animation: tut-blink 1.1s ease-in-out infinite; }
 @keyframes tut-blink { 50% { opacity: 0.2; } }
 .ucard.tut-glow { animation-name: tut-glow-in; } /* the shop scrolls sideways and would clip a glow outside the card */
@@ -394,7 +399,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
 .marks .intent-hit { fill: none; stroke-width: 1.6; opacity: 0.9; }
 .marks .intent-n circle { fill: rgba(13, 19, 21, 0.85); stroke-width: 1.2; }
 .marks .intent-n text { fill: var(--ink); font: 700 10px/1 var(--font-body, sans-serif); text-anchor: middle; }
-@media (prefers-reduced-motion: reduce) { .coach, .coach-ring, .tut-glow, .marks .tut-tile { animation: none; } .tut-glow { box-shadow: inset 0 0 0 2px var(--gold); } }
+@media (prefers-reduced-motion: reduce) { .coach, .coach-ring, .tut-glow, .marks .tut-tile, .seg.speeds button.offer { animation: none; } .tut-glow { box-shadow: inset 0 0 0 2px var(--gold); } }
 </style>
 <script>
 // PC or phone: a fine pointer that can hover (a mouse) and room for the board and controls side by side
@@ -604,7 +609,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
   const foe = () => 1 - me;
   let m = null;             // match state (on the guest: a copy kept in step by the host)
   let phase = 'start';      // start | lobby | draft | deploy | battle | result | end
-  try { if (/[?&]test\b/.test(location.search)) window.__pb = () => ({ m, me, board3d, board, bt }); } catch (e) {} // read-only peek for UI tests
+  try { if (/[?&]test\b/.test(location.search)) window.__pb = () => ({ m, me, board3d, board, bt, phase, liveSpeed: liveSpeed.slice(), playSpeed: playSpeed(), away }); } catch (e) {} // read-only peek for UI tests
   try { if (/[?&]test\b/.test(location.search)) window.__pbRedraw = () => { if (phase === 'deploy') panelDeploy(); render(); }; } catch (e) {} // UI tests that set up a board state: draw it
   let selected = null;      // unit index chosen in the shop
   let rangeOf = null;       // { side, id }: the squad last tapped on the board; its range shows as a dotted ring
@@ -613,6 +618,16 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
   let bt = null;            // battle being played back
   let battlePre = null;     // match as it stood when the running battle began (for the HUD)
   let speed = 1, lastTs = 0, acc = 0, raf = 0;
+  // Fight speed. Against the computer the 1× / 1.5× / 2× buttons just set `speed`. In a live match both phones play at
+  // the same speed: each player's pick is what they want (liveSpeed[side]) and the fight plays at the slower of the two
+  // (playSpeed). So a faster pick is a request: the other phone shows it ("Opponent wants 2×", that button glowing) and it
+  // takes hold on both once they pick it too; a slower pick slows both phones at once. Picks carry over to the next fights
+  // of the match (each phone sends its pick as a fight starts, so a reconnect can't leave them apart).
+  const SPEEDS = [1, 1.5, 2];
+  let liveSpeed = [1, 1];
+  const playSpeed = () => solo() ? speed : Math.min(liveSpeed[0], liveSpeed[1]);
+  const LIVE_AWAY = 45;                 // seconds a live fight waits for a page in the background (see awayStart)
+  const away = { at: 0, timer: 0 };     // when this page went into the background mid-fight, and the timer for LIVE_AWAY
   let fx = [];
   // battle cam: the last CAM.secs of a high-stakes fight play a little slower, zoomed in on the action.
   // High stakes: both sides still have units fighting then, and the fight ends the match, or a player went into it under
@@ -1781,15 +1796,14 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
   function panelBattle() {
     $('panel').innerHTML = `
       <div class="bar">
-        <div class="seg" role="group" aria-label="Playback speed">
-          ${[1, 1.5, 2].map(s => `<button data-s="${s}" aria-pressed="${speed === s}">${s}×</button>`).join('')}
+        <div class="seg speeds" role="group" aria-label="Playback speed">
+          ${SPEEDS.map(s => `<button data-s="${s}" aria-pressed="${playSpeed() === s}">${s}×</button>`).join('')}
         </div>
         <button class="btn small" id="skip">Skip to result</button>
-      </div>`;
-    $('panel').querySelectorAll('[data-s]').forEach(b => b.addEventListener('click', () => {
-      speed = +b.dataset.s;
-      $('panel').querySelectorAll('[data-s]').forEach(x => x.setAttribute('aria-pressed', String(+x.dataset.s === speed)));
-    }));
+      </div>
+      <span class="hint speed-ask" id="speed-ask" aria-live="polite" hidden></span>`;
+    $('panel').querySelectorAll('[data-s]').forEach(b => b.addEventListener('click', () => pickSpeed(+b.dataset.s)));
+    showSpeed();
     // asks first, as selling does: the first tap turns it into "Tap again to skip" (gold) for a few seconds
     const sk = $('skip');
     sk.addEventListener('click', () => {
@@ -1804,6 +1818,32 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
       while (bt.step()) {}
       finishBattle();
     });
+  }
+
+  // a speed button: the speed (vs the computer), or this player's pick in a live match (see liveSpeed)
+  function pickSpeed(s) {
+    if (!SPEEDS.includes(s)) return;
+    if (solo()) speed = s;
+    else { liveSpeed[me] = s; send({ t: 'speed', s }); }
+    showSpeed();
+  }
+  // the opponent's pick came in (or ours changed): the buttons show the speed playing, a request still open glows
+  function showSpeed() {
+    const bs = phase === 'battle' ? $('panel').querySelectorAll('[data-s]') : [];
+    if (!bs.length) return;
+    const cur = playSpeed(), mine = solo() ? cur : liveSpeed[me], theirs = solo() ? cur : liveSpeed[foe()];
+    bs.forEach(x => {
+      const s = +x.dataset.s;
+      x.setAttribute('aria-pressed', String(s === cur));
+      x.classList.toggle('asked', s === mine && s !== cur);   // ours, waiting for them
+      x.classList.toggle('offer', s === theirs && s !== cur); // theirs, waiting for us
+    });
+    const el = $('speed-ask');
+    if (!el) return;
+    const them = foeName();
+    el.textContent = mine > cur ? `You asked for ${mine}×. Waiting for ${them === 'Opponent' ? 'your opponent' : them} to agree.`
+      : theirs > cur ? `${them} wants ${theirs}×. Tap ${theirs}× to agree.` : '';
+    el.hidden = !el.textContent;
   }
 
   function panelInfo(text, btnLabel, onClick, extra = '') {
@@ -2830,6 +2870,8 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     closeSheet(); overlay(null); hud(); panelBattle(); render();
     cancelAnimationFrame(raf);
     if (reduced) { while (bt.step()) {} finishBattle(); return; }
+    if (!solo()) send({ t: 'speed', s: liveSpeed[me] }); // our pick, so both phones start the fight at the same speed
+    if (document.hidden) awayStart(); // (it began while this page is in the background: it waits for it, see awayStart)
     raf = requestAnimationFrame(loop);
   }
 
@@ -2871,13 +2913,14 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     }
     if (cam && cam.on) { cam.k = Math.min(1, cam.k + dtReal / CAM.ease); camFollow(dtReal); }
     const boost = (bt.time() > 20 ? 2 : 1) * (cam && cam.on ? 1 - (1 - CAM.slow) * cam.k : 1);
-    acc += dtReal * speed * boost;
+    const sp = playSpeed();
+    acc += dtReal * sp * boost;
     while (acc >= Game.SETTINGS.dt) {
       acc -= Game.SETTINGS.dt;
       if (!bt.step()) break;
       absorb();
     }
-    for (const e of fx) e.age += dtReal * speed * boost;
+    for (const e of fx) e.age += dtReal * sp * boost;
     fx = fx.filter(e => e.age < e.life);
     $('clock').textContent = `${bt.time().toFixed(1)} s${cam && cam.on ? ' · final seconds' : boost > 1 ? ' · speeding up' : ''}`;
     render();
@@ -2888,6 +2931,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   function finishBattle() {
     if (phase !== 'battle') return;
     cancelAnimationFrame(raf);
+    clearTimeout(away.timer); away.at = 0;
     fx = []; cam = null;
     const res = bt.result();
     $('clock').textContent = `${res.time.toFixed(1)} s`;
@@ -4310,6 +4354,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     try { if (net.conn) net.conn.close(); } catch (e) {}
     try { if (net.peer) net.peer.destroy(); } catch (e) {}
     net.peer = null; net.conn = null; net.connected = false; net.code = ''; net.tries = 0;
+    liveSpeed = [1, 1]; // a new live match starts at 1x
     // the address bar, not qs: joinMatch puts join= back in it after the first leaveNet
     const u = new URLSearchParams(location.search);
     if (u.has('join')) { u.delete('join'); qs.delete('join'); history.replaceState(null, '', location.pathname + (u.toString() ? '?' + u : '')); }
@@ -4338,6 +4383,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
         if (net.conn && net.conn !== c) { const old = net.conn; net.conn = null; try { old.close(); } catch (e) {} }
         net.conn = c; net.connected = true;
         onFriendConnected();
+        send({ t: 'speed', s: liveSpeed[0] });
       });
       c.on('data', (d) => { if (c === net.conn) hostRecv(d); });
       c.on('close', () => { if (c === net.conn) { net.connected = false; onFriendLost(); } });
@@ -4494,7 +4540,8 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     } else if (d.t === 'dpick') {
       if (phase !== 'draft' || !draft || d.step !== draft.step || !Game.draftAct(draft, 1, String(d.id))) return;
       draftChanged();
-    } else if (d.t === 'forfeit') foeForfeited();
+    } else if (d.t === 'speed') { if (SPEEDS.includes(d.s)) { liveSpeed[1] = d.s; showSpeed(); } }
+    else if (d.t === 'forfeit') foeForfeited();
   }
 
   function applySide(d) {
@@ -4716,6 +4763,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       opened = true; clearTimeout(giveUp);
       if (net.conn && net.conn !== c) { try { net.conn.close(); } catch (e) {} }
       net.conn = c; net.connected = true; net.tries = 0;
+      send({ t: 'speed', s: liveSpeed[1] });
       netStatus();
       if (phase === 'deploy') { sendSide(); panelDeploy(); }
       if (phase === 'lobby' && !m) guestWaiting('Connected. Waiting for your friend to start the match');
@@ -4825,7 +4873,8 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       if (d.rematch) rematch[0] = !!d.rematch[0];
       if (phase === 'deploy') panelDeploy();
       else if (phase === 'end') showResult(lastSummary);
-    } else if (d.t === 'forfeit') foeForfeited();
+    } else if (d.t === 'speed') { if (SPEEDS.includes(d.s)) { liveSpeed[0] = d.s; showSpeed(); } }
+    else if (d.t === 'forfeit') foeForfeited();
   }
 
   function overlayMsg(head, text) {
@@ -4833,11 +4882,31 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     $('ok').addEventListener('click', showStart);
   }
 
+  // The fight in the background: a hidden page gets no animation frames, so the replay simply stops where it is (the
+  // playback clock only moves in loop(), and each frame counts at most 0.1 s) and goes on from there when the page is
+  // back. Nothing in the match waits on it but the next round: in a live match the host starts that once both phones
+  // have seen the result (Next round on both, or NEXT_SECONDS on the results screen), so the other player waits on the
+  // results screen meanwhile and no deploy clock runs. So that they don't wait for long, a live fight left in the
+  // background for LIVE_AWAY seconds plays out to its result: at once on return, or then if the browser still runs timers.
+  function awayStart() {
+    if (away.at) return;
+    away.at = now();
+    clearTimeout(away.timer);
+    if (!solo()) away.timer = setTimeout(() => { if (document.hidden && phase === 'battle' && bt) { while (bt.step()) {} finishBattle(); } }, LIVE_AWAY * 1000);
+  }
+
   // Phones pause pages in the background; reconnect when the page comes back
   document.addEventListener('visibilitychange', () => {
-    // a hidden page gets no animation frames, so the fight replay would stall until it comes back and the other
-    // player would wait: play the rest of it out at once (the result is already known)
-    if (document.hidden && phase === 'battle' && bt) { while (bt.step()) {} finishBattle(); }
+    // the fight replay pauses with the page and goes on from where it was when it is back (see awayStart)
+    if (phase === 'battle' && bt) {
+      if (document.hidden) { cancelAnimationFrame(raf); awayStart(); }
+      else {
+        const long = !solo() && away.at && now() - away.at >= LIVE_AWAY * 1000;
+        clearTimeout(away.timer); away.at = 0;
+        if (long) { while (bt.step()) {} finishBattle(); }
+        else { lastTs = 0; cancelAnimationFrame(raf); raf = requestAnimationFrame(loop); } // lastTs: no catching up on the time away
+      }
+    }
     if (document.hidden || !net.alive || !net.peer) return;
     if (net.peer.disconnected && !net.peer.destroyed) net.peer.reconnect();
     if (mode === 'guest' && !net.connected) retryConnect(300);

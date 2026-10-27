@@ -1239,15 +1239,16 @@ const Engine = (() => {
       shield: u.shield || 0, // hits left that the Shield skill blocks completely
       frenzy: 0, // hits landed so far (Frenzy skill)
       stunT: 0, lastAtk: 0, // seconds of stun left (chargeStun); fight time of its last attack (stealth returns)
-      spreadTo: u.spread ? spreadSpot(x, y, i, u.spread) : null, // Spread skill: where it runs to before anything else
+      spreadTo: u.spread ? spreadSpot(x, y, i, u.spread, side) : null, // Spread skill: where it runs to before anything else
       spreadT: null, // ...and the seconds it may spend getting there (set on its first step)
     };
   }
-  // Spread: a spot min..max metres from (x, y) in one of 12 directions, picked from the body's index (the same on every device)
+  // Spread: a spot min..max metres from (x, y) in one of 12 directions, picked from the body's index (the same on every device;
+  // side 1's mirrored, toward its own front, so both sides spread alike)
   const DIRS12 = [[1, 0], [0.866025, 0.5], [0.5, 0.866025], [0, 1], [-0.5, 0.866025], [-0.866025, 0.5], [-1, 0], [-0.866025, -0.5], [-0.5, -0.866025], [0, -1], [0.5, -0.866025], [0.866025, -0.5]];
-  function spreadSpot(x, y, i, [min, max]) {
+  function spreadSpot(x, y, i, [min, max], side) {
     const [dx, dy] = DIRS12[(i * 5) % 12], d = min + (max - min) * ((i * 7) % 12) / 11;
-    return { x: x + dx * d, y: y + dy * d };
+    return { x: x + dx * d, y: y + dy * d * (side === 1 ? -1 : 1) };
   }
 
   // Bodies of one squad placed around a point on the board (footprint about `size` metres)
@@ -1259,7 +1260,8 @@ const Engine = (() => {
     const out = [];
     for (let i = 0; i < n; i++) {
       const c = i % cols, r = Math.floor(i / cols);
-      out.push(newBody(u, side, cx + (c - (cols - 1) / 2) * sp, cy + (r - (rows - 1) / 2) * sp, startIndex + i, squad));
+      // rows from the side's own front back, so side 1's squad is side 0's mirrored (the same bodies in front)
+      out.push(newBody(u, side, cx + (c - (cols - 1) / 2) * sp, cy + (r - (rows - 1) / 2) * sp * (side === 1 ? -1 : 1), startIndex + i, squad));
     }
     return out;
   }
@@ -1332,6 +1334,7 @@ const Engine = (() => {
     const minSight = g.minSight == null ? MIN_SIGHT : g.minSight;
     const drift = g.drift == null ? DRIFT : g.drift;
     const cripple = [0, 0];      // seconds left of the tower-down penalty for each side
+    const downNow = [];          // sides whose tower fell this tick: crippled from the next one
     const towerDown = g.towerDown || TOWER_DOWN;
     // a body died: a fallen tower cripples its side; a body with deathBlast explodes (deathBlast % of its max health)
     const fell = (v) => {
@@ -1341,7 +1344,9 @@ const Engine = (() => {
         v.x = v.u.teleport.x; v.y = v.u.teleport.y;
         return;
       }
-      if (v.u.structure && !v.u.lesser) cripple[v.side] = towerDown.secs; // a lesser building (Factions devtest) doesn't cripple its side
+      // a lesser building (Factions devtest) doesn't cripple its side. The penalty starts with the next tick, so the
+      // other side's bodies still to act this tick don't get the better of it (see the end of step)
+      if (v.u.structure && !v.u.lesser) downNow.push(v.side);
       if (v.u.deathBlast > 0) {
         const dmg = v.u.hp * v.u.deathBlast / 100, rad = v.u.blastAt > 0 ? v.u.blastAt : BLAST_RADIUS;
         if (opts.record) shots.push([v.x, v.y, v.x, v.y, v.side, rad, 1, 0, 0]);
@@ -1372,7 +1377,7 @@ const Engine = (() => {
         const ku = { ...rest, hp: base.hp * ds.strength, hit: base.hit * ds.strength };
         for (let k = 0; k < ds.count; k++) {
           const [ox, oy] = SPAWN_SPOTS[k % SPAWN_SPOTS.length], fwd = v.side === 0 ? 1 : -1;
-          pendingKids.push(newBody(ku, v.side, v.x + ox * g.spacing * 0.7, v.y + oy * fwd * g.spacing * 0.7, spawnIdx++, -1));
+          pendingKids.push(newBody(ku, v.side, v.x + ox * g.spacing * 0.7, v.y + oy * fwd * g.spacing * 0.7, spawnNo[v.side]++, -1));
         }
       }
     };
@@ -1408,7 +1413,24 @@ const Engine = (() => {
     // how much of a heal a body gets: none while it bleeds from Too deep (bleedNoHeal), POISON_HEAL % while poisoned
     // (slime units drink poison, so they heal in full)
     const healK = (v) => v.bleed && v.bleed.noHeal ? 0 : v.poison && v.poison.length && !v.u.slime ? POISON_HEAL / 100 : 1;
-    function heal(v, amt) { if (amt > 0 && v.hp < v.u.hp) v.hp = Math.min(v.u.hp, v.hp + amt * healK(v)); }
+    // while a tick's attacks and shots land (healLater is a list), heals wait until they all have, so a heal isn't lost
+    // to full health or saves a body just because of who went first; a body that fell meanwhile gets none
+    let healLater = null;
+    function heal(v, amt) {
+      if (healLater) { if (amt > 0) healLater.push(v, amt * healK(v)); return; }
+      if (amt > 0 && v.hp < v.u.hp) v.hp = Math.min(v.u.hp, v.hp + amt * healK(v));
+    }
+    function healsLand() {
+      const list = healLater;
+      healLater = null;
+      for (let i = 0; i < eatLater.length; i += 2) if (hungry(eatLater[i])) eat(eatLater[i], eatLater[i + 1]); // the Obelisk's meals too
+      eatLater.length = 0;
+      for (const f of hitsLater) f(); // and range cuts and knockbacks
+      hitsLater.length = 0;
+      for (let i = 0; i < list.length; i += 2) { const v = list[i]; if (v.alive && v.hp < v.u.hp) v.hp = Math.min(v.u.hp, v.hp + list[i + 1]); }
+    }
+    // attack speed right now: a slow on it at the start of the tick's attacks (one landing during them counts from the next tick)
+    const atkMul = (b) => b.atkSlow ? 1 - b.atkSlow / 100 : 1;
     // neutral structures (a map's elf tower): they belong to neither side, can't be hit, and shoot at
     // units of both sides in turn. Each is { u, x, y, friends: [bool, bool] }. A side it is friends with
     // (bribed) is never shot; it gets small splash heals instead (u.healHit, u.healAps, u.healSplash).
@@ -1462,9 +1484,13 @@ const Engine = (() => {
     // Where a unit stops walking: by default a little inside its range (g.stopPct: a share of range instead)
     const stopAt = (rg) => g.stopPct > 0 && g.stopPct < 1 ? rg * g.stopPct : rg - Math.min(APPROACH, rg * 0.25);
     // deterministic random numbers for healing targets (same on every device)
-    let seed = (A.length * 7919 + B.length * 104729 + 1) >>> 0;
-    const rnd = () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let x = Math.imul(seed ^ seed >>> 15, 1 | seed); x = x + Math.imul(x ^ x >>> 7, 61 | x) ^ x; return ((x ^ x >>> 14) >>> 0) / 4294967296; };
-    let spawnIdx = A.length + B.length;
+    // one stream per side (for the dodges of its bodies and its healers' picks), seeded alike, so neither side's luck
+    // depends on how often the other side drew first
+    const seeds = [0, 1].map(() => ((A.length + B.length) * 7919 + Math.abs(A.length - B.length) * 104729 + 1) >>> 0);
+    const rnd = (side) => { let seed = seeds[side] | 0; seed = seed + 0x6D2B79F5 | 0; seeds[side] = seed; let x = Math.imul(seed ^ seed >>> 15, 1 | seed); x = x + Math.imul(x ^ x >>> 7, 61 | x) ^ x; return ((x ^ x >>> 14) >>> 0) / 4294967296; };
+    // bodies made during the fight are numbered per side (their reload stagger and spawn spot come from it), so a side's
+    // spawns don't depend on whether the other side spawned first that tick
+    const spawnNo = [A.length + B.length, A.length + B.length];
     // g.bounds = { x0, x1, y0, y1 } (optional): the board; Spread never sends a body off it
     if (g.bounds) for (const b of all) if (b.spreadTo) {
       b.spreadTo.x = Math.max(g.bounds.x0, Math.min(g.bounds.x1, b.spreadTo.x));
@@ -1496,9 +1522,9 @@ const Engine = (() => {
       const ks = owner.u.killStack;
       if (ks && (!(ks.max > 0) || (owner.kills || 0) < ks.max)) owner.kills = (owner.kills || 0) + 1; // the Assassin's trait, Rampager
       if (owner.u.lone > 0 && isLone(x)) { owner.hunt = true; owner.huntT = 0; } // Shadow hunter: a lone kill starts the hunt again
-      if (owner.u.killSpawn > 0 && owner.alive) for (let k = 0; k < owner.u.killSpawn; k++) { // More where that came from: a new body of the killer
-        const [ox, oy] = SPAWN_SPOTS[(spawnIdx + k) % SPAWN_SPOTS.length], fwd = owner.side === 0 ? 1 : -1;
-        pendingKids.push(newBody(owner.u, owner.side, owner.x - ox * g.spacing * 0.6, owner.y - oy * fwd * g.spacing * 0.6, spawnIdx++, -1));
+      if (owner.u.killSpawn > 0 && (owner.alive || owner.diedTick === tick)) for (let k = 0; k < owner.u.killSpawn; k++) { // More where that came from: a new body of the killer (one that fell this tick too: its kill counts, see the attacks)
+        const [ox, oy] = SPAWN_SPOTS[(spawnNo[owner.side] + k) % SPAWN_SPOTS.length], fwd = owner.side === 0 ? 1 : -1;
+        pendingKids.push(newBody(owner.u, owner.side, owner.x - ox * g.spacing * 0.6, owner.y - oy * fwd * g.spacing * 0.6, spawnNo[owner.side]++, -1));
       }
     }
     // an enemy body that falls (not a structure, construct or building) is eaten by an Obelisk: the one that killed it,
@@ -1508,8 +1534,10 @@ const Engine = (() => {
       if (x.u.structure || x.u.construct || x.u.building || x.u.aloft) return;
       let by = owner && owner.side !== x.side && hungry(owner) ? owner : null, bd = EAT_R + 1e-9;
       if (!by) for (const b of sides[1 - x.side]) { if (!hungry(b)) continue; const d = dist(b, x); if (d <= bd) { bd = d; by = b; } }
-      if (by) eat(by, x);
+      if (by && healLater) eatLater.push(by, x); // during the attacks: once they have all landed, like heals (see healsLand)
+      else if (by) eat(by, x);
     }
+    const eatLater = [], hitsLater = [];
     // a stack of Glut: its health grows with its max health, so the stack heals it by what it adds
     function eat(b, x) {
       const gl = b.u.glut, n = b.glutN || 0;
@@ -1673,7 +1701,7 @@ const Engine = (() => {
         }
       }
       // Dodge: the whole hit misses (the same random numbers on every device)
-      if (v.u.dodge > 0 && rnd() * 100 < v.u.dodge) { st.missed += hit; return; }
+      if (v.u.dodge > 0 && rnd(v.side) * 100 < v.u.dodge) { st.missed += hit; return; }
       // a guard (the keep's) that is attacked leaves its post and goes for its attacker
       if (v.guard && owner.alive && owner.side !== v.side && !owner.u.aloft && !(v.avenge && v.avenge.alive)) { v.holdT = 0; v.avenge = owner; v.engaged = true; }
       if (owner.u.bldgPct > 0 && v.u.structure) hit = hit * owner.u.bldgPct / 100; // weaker against buildings (the Assassin)
@@ -1737,15 +1765,19 @@ const Engine = (() => {
         v.slowT = Math.max(v.slowT, owner.u.slowDur);
       }
       if (owner.u.frost) frostOn(owner, v);
+      // a range cut and a knockback that land during the attacks take hold once they all have (see healsLand), so the
+      // body hit still gets its own attack from where it stood, with its reach, this tick
       if (owner.u.shrinkM > 0) {
-        v.shrinkM = v.shrinkT > 0 ? Math.max(v.shrinkM, owner.u.shrinkM) : owner.u.shrinkM;
-        v.shrinkT = Math.max(v.shrinkT, owner.u.shrinkDur);
+        const sm = owner.u.shrinkM, sd = owner.u.shrinkDur;
+        const shrink = () => { v.shrinkM = v.shrinkT > 0 ? Math.max(v.shrinkM, sm) : sm; v.shrinkT = Math.max(v.shrinkT, sd); };
+        if (healLater) hitsLater.push(shrink); else shrink();
       }
       if (owner.u.knockback > 0 && knockOn && !v.u.structure && !v.u.anchored && !v.u.unstoppable) {
         // big hits on small bodies push the full distance; on big bodies barely at all
         const push = owner.u.knockback * Math.min(1, hit / v.u.hp);
         const dx = v.x - fromX, dy = v.y - fromY, d = hyp(dx, dy) || 1;
-        v.x += dx / d * push; v.y += dy / d * push;
+        const knock = () => { v.x += dx / d * push; v.y += dy / d * push; };
+        if (healLater) hitsLater.push(knock); else knock();
       }
     }
 
@@ -1844,7 +1876,7 @@ const Engine = (() => {
     }
     // Snow storm: every 1/aps s (slowed like its attacks), its hit and its frost to every enemy within storm.radius
     function stormStep(b) {
-      b.stormCd = (b.stormCd || 0) - dt * (b.slowT > 0 ? 1 - b.slowAtk / 100 : 1);
+      b.stormCd = (b.stormCd || 0) - dt * atkMul(b);
       if (b.stormCd > 1e-9) return;
       const r = b.u.storm.radius, hit = b.u.hit + (b.auraHit || 0);
       const caught = sides[1 - b.side].filter(f => f.alive && !f.u.aloft && !sheltered(f) && gap(f, b) <= r);
@@ -1959,13 +1991,15 @@ const Engine = (() => {
     function fire(b, targets, canCharge) {
       const charged = canCharge && b.u.charge > 1 && b.moved >= CHARGE_RUN;
       b.moved = 0;
-      if (!b.u.aloft && !b.quiet) b.hidden = false; // attacking gives a stealth unit away (it hides again after STEALTH_BACK s without attacking); an airship stays out of reach; Silent blade's first attack doesn't
+      // attacking gives a stealth unit away (it hides again after STEALTH_BACK s without attacking); an airship stays out of
+      // reach; Silent blade's first attack doesn't. During the tick's attacks the enemy sees it from the next tick (healsLand)
+      if (b.hidden && !b.u.aloft && !b.quiet) { if (healLater) hitsLater.push(() => { b.hidden = false; }); else b.hidden = false; }
       b.lastAtk = t; b.revealed = true; // a disguised body (b.mask) shows what it is from its first attack
       if (b.u.healPct > 0) {
         // heal a random wounded ally (not itself)
         const hurtAllies = sides[b.side].filter(a => a.alive && a !== b && a.hp < a.u.hp);
         if (hurtAllies.length) {
-          const a = hurtAllies[Math.min(hurtAllies.length - 1, Math.floor(rnd() * hurtAllies.length))];
+          const a = hurtAllies[Math.min(hurtAllies.length - 1, Math.floor(rnd(b.side) * hurtAllies.length))];
           heal(a, b.u.hit * b.u.healPct / 100 * healMul);
           if (opts.record) shots.push([b.x, b.y, a.x, a.y, b.side, 0, 0, 1]);
         }
@@ -2053,7 +2087,7 @@ const Engine = (() => {
       if (!b.tcd) b.tcd = [];
       let valid = null;
       for (let k = 1; k < b.u.turrets; k++) {
-        b.tcd[k] = (b.tcd[k] || 0) - dt * (b.slowT > 0 ? 1 - b.slowAtk / 100 : 1);
+        b.tcd[k] = (b.tcd[k] || 0) - dt * atkMul(b);
         if (b.tcd[k] > 0) continue;
         if (!valid) valid = validTargets(b);
         const taken = turretTaken(b, k), tgt = valid.find(f => !taken.includes(f));
@@ -2080,8 +2114,9 @@ const Engine = (() => {
       if (opts.record) shots.push([b.x, b.y, tgt.x, tgt.y, b.side, 0, 1, 0, 0]);
       b.rammed = tgt;
       hurt(b, tgt, b.u.hit, b.x, b.y);
-      if (b.alive) { b.hp = 0; b.alive = false; b.diedTick = tick; fell(b); }
+      if (b.alive) rammed.push(b); // it falls once every body has moved, so an enemy ram reaching it this tick still finds it
     }
+    const rammed = [];
 
     // share of its move speed a body walks at right now (slowed, or crippled by its fallen tower)
     const moveMul = (b) => (b.slowT > 0 ? 1 - b.slowMove / 100 : 1) * (cripple[b.side] > 0 ? 1 - towerDown.move / 100 : 1);
@@ -2168,7 +2203,7 @@ const Engine = (() => {
         const off = (k - (n - 1) / 2) * BUILD_GAP;
         let x = b.x - dy * off, y = b.y + dx * off;
         if (g.bounds) { x = Math.max(g.bounds.x0, Math.min(g.bounds.x1, x)); y = Math.max(g.bounds.y0, Math.min(g.bounds.y1, y)); }
-        const kid = newBody(cu, b.side, x, y, spawnIdx++, -1);
+        const kid = newBody(cu, b.side, x, y, spawnNo[b.side]++, -1);
         kid.credit = b; // its XP and damage count for its builder's squad
         pendingKids.push(kid);
       }
@@ -2334,8 +2369,20 @@ const Engine = (() => {
           if (b.lock && b.lock.alive) b.lock.claimDmg += b.u.hit;
         }
       }
-      // movement + targeting
-      for (const b of all) {
+      // Fair turns: the side whose bodies go first alternates every tick (side 0 on odd ticks, side 1 on even ones), so
+      // neither player wins a tie just by being processed first (the host used to: its rams, charges, stuns and slows
+      // always landed before the guest's). See tools/tests/fairness.js.
+      const first = tick % 2 ? 0 : 1;
+      const turnOrder = () => sides[first].concat(sides[1 - first]);
+      // movement + targeting, both sides from where everyone stood when the tick began: the side that goes second sees
+      // the first side's bodies where they were (their steps are put back on after), so nobody reacts to where the
+      // other side has only just stepped (an archer stopping a step early, a sniper setting up first)
+      const order = turnOrder(), nFirst = sides[first].length;
+      let stepsOut = false;
+      for (const a of sides[first]) { a.mvX = a.x; a.mvY = a.y; }
+      for (let i = 0; i < order.length; i++) {
+        if (i === nFirst) { stepsOut = true; for (const a of sides[first]) { const x = a.x, y = a.y; a.x = a.mvX; a.y = a.mvY; a.mvX = x - a.mvX; a.mvY = y - a.mvY; } }
+        const b = order[i];
         if (!b.alive || b.delay > 0) continue;
         b.dashing = false;
         if (b.u.roar && !b.roared) roar(b); // Berserkers roar as they start
@@ -2497,6 +2544,9 @@ const Engine = (() => {
           }
         }
       }
+      if (stepsOut) for (const a of sides[first]) { a.x += a.mvX; a.y += a.mvY; } // the first side's steps (on top of any knockback since)
+      for (const b of rammed) if (b.alive) { b.hp = 0; b.alive = false; b.diedTick = tick; fell(b); } // rams that hit fall
+      rammed.length = 0;
       // Flow state: a body that walked since its last attack has lost its stacks
       for (const b of all) if (b.flow > 0 && b.moved > 1e-6) b.flow = 0;
       // auras (Reforge): other units of the side near one get its bonus to every hit and to attack speed this tick
@@ -2622,9 +2672,7 @@ const Engine = (() => {
         }
       }
       // ongoing effects: poison, bleed, regeneration, shortsight wearing off, spawns
-      const n0 = all.length;
-      for (let i = 0; i < n0; i++) {
-        const b = all[i];
+      for (const b of turnOrder()) { // (the sides take turns going first here too; bodies spawned below start next tick)
         if (!b.alive) continue;
         if (b.poison && b.poison.length) {
           for (const p of b.poison) {
@@ -2685,7 +2733,7 @@ const Engine = (() => {
             list.forEach((pu, k) => {
               let x = b.x + (k - (list.length - 1) / 2) * gap;
               if (g.bounds) x = Math.max(g.bounds.x0, Math.min(g.bounds.x1, x));
-              const kid = newBody(pu, b.side, x, y, spawnIdx++, -1);
+              const kid = newBody(pu, b.side, x, y, spawnNo[b.side]++, -1);
               kid.credit = b;
               pendingKids.push(kid);
             });
@@ -2729,7 +2777,7 @@ const Engine = (() => {
             for (let k = 0; k < n; k++) {
               // spots are relative to the side's forward direction, so both sides spawn in front of the summoner
               const [ox, oy] = SPAWN_SPOTS[(b.kids.length + k) % SPAWN_SPOTS.length], fwd = b.side === 0 ? 1 : -1;
-              const kid = newBody(b.u.spawn.unit, b.side, b.x + ox * g.spacing * 0.7, b.y + oy * fwd * g.spacing * 0.7, spawnIdx++, -1);
+              const kid = newBody(b.u.spawn.unit, b.side, b.x + ox * g.spacing * 0.7, b.y + oy * fwd * g.spacing * 0.7, spawnNo[b.side]++, -1);
               b.kids.push(kid); all.push(kid); sides[b.side].push(kid);
               stats[b.side].totalHp += kid.u.hp;
             }
@@ -2737,13 +2785,18 @@ const Engine = (() => {
         }
       }
       // attacks. A body killed earlier in this same tick still gets its attack, so neither side
-      // wins a trade just by being processed first (side 0 used to win one-shot duels like Sniper vs Sniper)
-      for (const b of all) {
+      // wins a trade just by being processed first (side 0 used to win one-shot duels like Sniper vs Sniper); the sides
+      // take turns going first (see first). Likewise a stun or slow that lands during the attacks only counts from the
+      // next tick (atkStun, atkSlow: as they were when the attacks began), and heals wait for the end (healLater)
+      const attackers = turnOrder();
+      for (const b of attackers) { b.atkStun = b.stunT > 0; b.atkSlow = b.slowT > 0 ? b.slowAtk : 0; }
+      healLater = [];
+      for (const b of attackers) {
         if ((!b.alive && b.diedTick !== tick) || b.delay > 0 || b.u.ram || b.boarded || b.turning) continue;
         if (b.u.roll > 0 || b.follow || b.buildT > 0 || b.siteJob || b.u.idle || b.u.bot) continue; // rollers hit by rolling; healbots, bots and buildings never attack; builders at work don't
-        b.cd -= dt * (b.slowT > 0 ? 1 - b.slowAtk / 100 : 1); // slowed units reload slower
+        b.cd -= dt * atkMul(b); // slowed units reload slower
         if (b.firing >= 0) b.firing += dt;
-        if (b.stunT > 0 || b.channel) continue; // stunned, or summoning
+        if (b.atkStun || b.channel) continue; // stunned, or summoning
         if (b.flurryLeft > 0) { if (b.alive) flurryStep(b); else b.flurryLeft = 0; continue; } // Death flurry: the rest of its blows
         if (b.u.spear && b.alive) forgeSpear(b); // Titanium spears: forged and thrown apart from its own attack
         if (b.u.storm && b.alive) stormStep(b); // Snow storm: apart from its own attack
@@ -2934,6 +2987,7 @@ const Engine = (() => {
         }
         projectiles = next;
       }
+      healsLand(); // the heals of the attacks and shots above
       // bodies won over by a Gentleman switch sides; they start fresh (no target, no burst, no effects from before)
       for (const v of turning) {
         const from = sides[v.side];
@@ -2971,6 +3025,8 @@ const Engine = (() => {
         for (const x of grp) if (x.alive) { s += x.hp; mx += x.u.hp; }
         if (mx > 0) for (const x of grp) if (x.alive) x.hp = x.u.hp * s / mx;
       }
+      for (const sd of downNow) cripple[sd] = towerDown.secs;
+      downNow.length = 0;
       t += dt;
       return true;
     }
