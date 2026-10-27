@@ -2934,8 +2934,8 @@ const Game = (() => {
   // COLS, ROWS and ZONE while a match on it is in play (see useGrid); every other map keeps these.
   const TILE = 6, GRID = { cols: 12, rows: 16, zone: 6 };
   let COLS = GRID.cols, ROWS = GRID.rows, ZONE = GRID.zone;
-  const START_HP = 60, MAX_ROUND_DMG = 20, START_GOLD = 250, INCOME = 250, LOSER_BONUS = 50;
-  const SQUAD_COST = 100, SQUAD_POINTS = 2;
+  const START_HP = 100, START_GOLD = 250, INCOME = 250, LOSER_BONUS = 50;
+  const SQUAD_COST = 100;
   const SETTINGS = { dt: 0.05, timeCap: 60, spacing: 3.5, minDmgPct: 15, absorbXp: 1, armorXp: 0.5, sight: 15, minSight: 18, drift: 15, flameReach: 1.2 }; // sight: metres beyond range a unit notices an enemy (at least minSight), drift: it leans toward one this much further out. flameReach: flame cones reach 1.2x the unit's range
   // XP a squad needs in total to reach level 1, 2, 3, as multiples of its own starting health.
   // XP = damage dealt + damage absorbed + bounty for killing leveled bodies.
@@ -4643,22 +4643,22 @@ const Game = (() => {
     return E.createBattle(bodiesFor(m, 0), bodiesFor(m, 1), g, { record: true, tiles, strikes: fx.strikes, neutrals, charm: [charmMap(m, 0), charmMap(m, 1)] });
   }
 
-  // Damage a side deals = points of its squads, scaled by how much of each squad is still alive.
-  // TIER_DMG: a share for the squads of a tier (tier 3 squads deal 25% less than their price would)
-  const TIER_DMG = { 3: 0.75 };
+  // Damage a side deals = the damage of its squads' tiers, scaled by how much of each squad is still alive.
+  // TIER_DMG: damage a full squad of each tier deals (a tier past the table deals the top tier's)
+  const TIER_DMG = { 1: 3, 2: 6, 3: 8, 4: 12 };
+  const tierDmg = (tier) => TIER_DMG[Math.min(Math.max(1, tier), 4)];
   function survivorDamage(m, res, side) {
     let sum = 0;
     for (const k in res.squads) {
       const s = res.squads[k];
       if (s.side !== side || s.alive <= 0) continue;
-      if (s.squad <= -10 && s.squad > YOT_SQUAD) { const sg = snowgres(m, side)[-10 - s.squad]; if (sg) sum += SQUAD_POINTS * GOLEM.cost * sg.strength * s.alive / s.total; continue; } // a Snowgre
+      if (s.squad <= -10 && s.squad > YOT_SQUAD) { const sg = snowgres(m, side)[-10 - s.squad]; if (sg) sum += tierDmg(4) * sg.strength * s.alive / s.total; continue; } // a Snowgre: an Ether Golem (tier 4)
       if (s.squad < 0) continue; // spawned bodies don't count
       const sq = m.armies[side].find(q => q.id === s.squad);
       if (sq && m.units[sq.unit].building) continue; // nor do buildings
-      const value = sq ? (m.units[sq.unit].cost || 1) * (TIER_DMG[tierOf(m.units, sq.unit)] || 1) : 1; // pricier squads hit harder, like their price
-      sum += SQUAD_POINTS * value * s.alive / s.total;
+      sum += (sq ? tierDmg(tierOf(m.units, sq.unit)) : tierDmg(1)) * s.alive / s.total;
     }
-    return sum > 0 ? Math.min(MAX_ROUND_DMG, Math.max(1, Math.round(sum))) : 0; // at most MAX_ROUND_DMG per round
+    return sum > 0 ? Math.max(1, Math.round(sum)) : 0;
   }
 
   // Apply a finished battle to the match. Returns a summary for the results screen.
@@ -5373,8 +5373,8 @@ const Game = (() => {
   }
 
   const api = {
-    MAX_ROUND_DMG, TIER_DMG, bankBusy, seenAt, charShown, towerTypeShown, altarShown, elfOwnShown, shroomShown, removingShroom, movedId, canMove, moveSquad, undoMove,
-    COLS, ROWS, TILE, ZONE, START_HP, START_GOLD, INCOME, incomeFor, LOSER_BONUS, SQUAD_COST, SQUAD_POINTS, SETTINGS, XP_STEPS, xpNeeded, unitCostOf,
+    TIER_DMG, bankBusy, seenAt, charShown, towerTypeShown, altarShown, elfOwnShown, shroomShown, removingShroom, movedId, canMove, moveSquad, undoMove,
+    COLS, ROWS, TILE, ZONE, START_HP, START_GOLD, INCOME, incomeFor, LOSER_BONUS, SQUAD_COST, SETTINGS, XP_STEPS, xpNeeded, unitCostOf,
     levelCost, isReady, levelUp, undoLevel, seenLevel, aiLevel, AI, CONFIG,
     deploysAllowed, deploysLeft, deployedThisRound, canBuyDeploy, buyDeploy, refundDeploy,
     PACKAGE, allPackages, packOf, needsPack, freeLeft, choosePack, ensurePack,
@@ -8467,7 +8467,7 @@ Worst choices against it: ${answers.slice(-3).reverse().map(([i, v]) => `${units
 RULES
 - Board: columns 0-${Game.COLS - 1}, rows 0-${Game.ROWS - 1}, tiles ${Game.TILE} m wide. Your zone is rows 0-${Game.ZONE - 1}; row ${Game.ZONE - 1} is your front line, nearest the enemy, and row 0 is the back. Rows ${Game.ZONE}-${Game.ROWS - Game.ZONE - 1} are no man's land. From round ${Game.FLANK.round} each player may also deploy on flank tiles: columns ${Game.FLANK.cols.join(' and ')}, on the OPPONENT's half of the board: their whole zone plus their half of no man's land (yours: rows ${Math.min(...Game.flankRows(1))}-${Math.max(...Game.flankRows(1))}; theirs: rows ${Math.min(...Game.flankRows(0))}-${Math.max(...Game.flankRows(0))})${Game.flankOpen(m) ? ', OPEN NOW' : ''}. You can't use a tile the opponent already holds with a squad or their tower. Their flank columns on YOUR half (columns ${Game.FLANK.cols.join(' and ')}, rows ${Math.min(...Game.flankRows(0))}-${Math.max(...Game.flankRows(0))}) are reserved for them for the whole match: you can never place a squad or your tower there. Squads there start inside the enemy's lines, good for hitting their tower or backline from the side, so guard your own edges against theirs. A squad placed on a flank can't move or attack for the first ${Game.FLANK.delay} s of the first fight after it was placed; from the next round on it starts normally. The enemy zone is rows ${Game.ROWS - Game.ZONE}-${Game.ROWS - 1}; row ${Game.ROWS - Game.ZONE} is their front. One squad per tile. Squads keep their tile, except: once per round you may move ONE of your squads from an earlier round to another free tile you could place on, for ${Game.CONFIG.moveCost} gold ("move"). The opponent sees it on its old tile until the fight.
 - The fight is automatic. Every body marches straight ahead in its own column (a squad on a flank tile marches sideways, toward the middle of the board, instead) until an enemy comes within its range + ${Game.SETTINGS.sight} m in any direction (at least ${Game.SETTINGS.minSight} m), then turns toward the nearest enemy and attacks once in range, staying on that enemy until it dies or leaves its range. Within ${Game.SETTINGS.drift} m beyond that it already starts curving toward the nearest enemy. Once no enemy is ahead of it, it turns toward the nearest one. So columns are lanes: a squad fights what stands in or near its lane, a squad in an empty lane far from the enemy walks past and hits the enemy from the side or behind, and long-range units in the back only get attacked once the front is gone. Short-range units in front shield long-range units behind. Spreading out limits splash damage.
-- The round's loser loses health: for each surviving enemy squad, 2 x (its price / 100), scaled by the share of its bodies alive. If time runs out, both sides take damage. A round costs the loser at most ${Game.MAX_ROUND_DMG} health. Health starts at ${Game.START_HP} and the match ends at 0.
+- The round's loser loses health: for each surviving enemy squad, by its tier (${Object.entries(Game.TIER_DMG).map(([t, d]) => `tier ${t}: ${d}`).join(', ')}), scaled by the share of its bodies alive. If time runs out, both sides take damage. Health starts at ${Game.START_HP} and the match ends at 0.
 - Gold: both players get ${Game.incomeFor(2)} going into round 2, and ${Game.CONFIG.incomeStep} more every round after that (next round: +${Game.incomeFor(m.round + 1)}). The round's loser gets +${Game.LOSER_BONUS} extra. Unspent gold carries over.
 - This round you may place ${Game.deploysAllowed(m, 1)} new squad(s). You may buy ONE extra deployment per round for ${Game.CONFIG.extraDeployCost} gold.
 - Squads earn XP by dealing and taking damage. A squad marked READY TO LEVEL UP can be upgraded for its unit's level-up cost: level 2 doubles health and hit, level 3 triples them. Leveling up chaff (many cheap bodies) gives the enemy lots of XP when they die.
