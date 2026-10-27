@@ -487,8 +487,15 @@ const Engine = (() => {
       }
       if (Array.isArray(d.also) && d.also.length) u = applySkills(u, d.also, roster); // the effects that come with it
     }
+    // the skills it has, in order (Mirror Wraith's copySkill takes one of them in a fight)
+    const had = (defs || []).filter(d => d && SKILL_TYPES[d.type]);
+    if (had.length) u.skillsHad = (u.skillsHad || []).concat(had);
     return u;
   }
+  // skills a Mirror Wraith can take in the middle of a fight: the ones that only change the unit's own numbers and
+  // what its hits do (not the ones that need setting up when the fight starts: spawns, links, buildings, portals...)
+  const COPYABLE = ['regen', 'poison', 'armorHp', 'rapid', 'swift', 'heavy', 'healer', 'range', 'shrink', 'ward', 'slow', 'shield',
+    'dodge', 'lifesteal', 'frenzy', 'double', 'bleedDeep', 'bleedStun', 'burn', 'killStack', 'stats', 'explode', 'blast', 'firstHit'];
 
   // The unit with its built-in skills (slots marked in skillsInnate), resolved from a skill library
   function innateUnit(unit, lib, roster) {
@@ -530,7 +537,7 @@ const Engine = (() => {
 
   function damageAfterDefense(hit, target, g) {
     const u = target.u;
-    const armor = (u.defense === 'armor' ? u.defVal : 0) + (u.bonusArmor || 0) + (u.bull && target.trampleLeft > 0 ? u.bull.armor : 0); // Bullhead: tougher while it charges
+    const armor = (u.defense === 'armor' ? u.defVal : 0) + (u.bonusArmor || 0) + (target.auraArmor || 0) + (u.bull && target.trampleLeft > 0 ? u.bull.armor : 0); // Bullhead: tougher while it charges
     let d = armor > 0 ? Math.max(hit - armor, hit * g.minDmgPct / 100) : hit;
     if (u.defense === 'ward') d = Math.min(d, u.defVal);
     if (u.bonusWard > 0) d = Math.min(d, u.bonusWard); // ward from a skill; works next to armor
@@ -680,6 +687,26 @@ const Engine = (() => {
         return;
       }
       if (v.u.structure && !v.u.lesser) cripple[v.side] = towerDown.secs; // a lesser building (Factions devtest) doesn't cripple its side
+      // Raise dead (the Lich): an enemy body that falls near a raiser gets up on the raiser's side (it switches at the end
+      // of the tick, like a body won over). It doesn't explode or spawn: it hasn't really gone.
+      if (raisers.length && raiseable(v)) {
+        for (const r of raisers) {
+          if (!r.alive || r.side === v.side || (r.raised || 0) >= r.u.raise.max || hyp(r.x - v.x, r.y - v.y) > r.u.raise.radius) continue;
+          r.raised = (r.raised || 0) + 1;
+          v.alive = true; v.diedTick = undefined; v.hp = v.u.hp * r.u.raise.pct / 100;
+          v.turning = true; v.risen = true; v.poison = null; v.bleed = null; v.burn = null;
+          turning.push(v);
+          if (opts.record) shots.push([r.x, r.y, v.x, v.y, r.side, 0, 0, 1]);
+          return;
+        }
+      }
+      // Death zone (Plague Carriers): a patch of poison where it fell that hurts its enemies for a while
+      if (v.u.deathZone) {
+        const z = v.u.deathZone;
+        pools.push({ x: v.x, y: v.y, r: z.r, side: v.side, owner: v, amt: z.dps, speed: 0, secs: 0, left: z.secs, noHeal: true });
+      }
+      // Regrowth (the Hydra): a head that falls grows back after a while, while another head of its squad lives
+      if (v.u.regrow && v.squad !== CONVERT_SQUAD) regrowing.push({ v, left: v.u.regrow.secs });
       if (v.u.deathBlast > 0) {
         const dmg = v.u.hp * v.u.deathBlast / 100, rad = v.u.blastAt > 0 ? v.u.blastAt : BLAST_RADIUS;
         if (opts.record) shots.push([v.x, v.y, v.x, v.y, v.side, rad, 1, 0, 0]);
@@ -874,11 +901,27 @@ const Engine = (() => {
     // amt more to burn on v (see BURN): it adds to what is still burning and the three ticks start again
     function burnOn(owner, v, amt) {
       if (!v.alive || v.turning || v.u.aloft) return;
+      if (v.u.regrow) v.searT = t;
       const bn = v.burn || (v.burn = { left: 0, k: 0, t: 0, src: owner });
       bn.left += amt; bn.k = 0; bn.t = BURN.every; bn.src = owner;
     }
-    // pools (see u.pools): { x, y, r, side, owner, amt (per second), speed, secs }
+    // pools (see u.pools): { x, y, r, side, owner, amt (per second), speed, secs }. A pool with left (seconds) dries up
+    // when that runs out; one with noHeal only hurts (a Plague Carrier's death zone)
     const pools = [];
+    // Raise dead: bodies with u.raise { radius, max, pct } (the Lich). At most max raised per raiser per fight, at pct %
+    // of their health. Never a structure, a construct, a linked body, a carrier or a body that already switched sides.
+    const raisers = all.filter(b => b.u.raise && b.u.raise.max > 0);
+    const raiseable = (v) => !v.u.structure && !v.u.construct && !v.u.aloft && !v.u.carrier && !v.u.ram && !v.link && !v.convert && !v.boarded && v.squad >= 0;
+    // Regrowth: heads waiting to grow back { v, left } (u.regrow { secs, pct, block, by }): after secs seconds the head
+    // gets up again with pct % of its health next to a living head of its squad. While any of the squad was seared
+    // (hit by fire: a flame cone, a burn, or a unit named in by) within the last block seconds, the clock starts again.
+    const regrowing = [];
+    const fiery = (o, v) => !!(o && v.u.regrow && ((o.u.flame > 0 && !o.u.slam && !o.u.spinBlade) || o.u.burn > 0 || (Array.isArray(v.u.regrow.by) && v.u.regrow.by.includes(o.u.name))));
+    // Cast walls (Wall Engineers): u.walls { at, ahead, hp, armor, half, thick }: at fight time at, each body puts up
+    // a wall ahead metres in front of itself (half: half its length, across the board; thick: its depth). Its own
+    // side walks and shoots through it; the enemy has to break it or go round.
+    const WALL_CAST_SQ = -3000;
+    const wallers = all.filter(b => b.u.walls);
     function makePool(owner, x, y, hit) {
       const r = owner.u.splash;
       if (!(r > 0)) return;
@@ -926,6 +969,17 @@ const Engine = (() => {
       if (v.turning) return; // being won over: nothing hurts it until it has switched sides
       if (v.u.aloft) return; // an airship can't be shot down
       if (sheltered(v)) return; // Overwatch: safe inside its building
+      if (v.u.regrow && fiery(owner, v)) v.searT = t; // fire on a Hydra stops its heads growing back for a while
+      // Copy skill (Mirror Wraith): the first enemy it hits that has a skill it can take gives it that skill for the rest
+      // of the fight (the first one the enemy has, in slot order). Its health keeps the same share of its new max.
+      if (owner.u.copySkill && !owner.copied && owner.alive && v.side !== owner.side && !v.u.structure) {
+        const def = (v.u.skillsHad || []).find(d => COPYABLE.includes(d.type));
+        if (def) {
+          const share = owner.hp / owner.u.hp, nu = applySkills(owner.u, [def]);
+          owner.shield += Math.max(0, (nu.shield || 0) - (owner.u.shield || 0));
+          owner.u = nu; owner.hp = nu.hp * share; owner.copied = def.type;
+        }
+      }
       const st = stats[owner.side];
       // Dodge: the whole hit misses (the same random numbers on every device)
       if (v.u.dodge > 0 && rnd() * 100 < v.u.dodge) {
@@ -1223,7 +1277,7 @@ const Engine = (() => {
       }
       const opening = b.u.firstHit > 0 && !b.firstDone ? 1 + b.u.firstHit / 100 : 1; // Shadowborn: the first attack of the fight hits harder
       b.firstDone = true;
-      const hit = (b.u.hit * (charged ? b.u.charge : 1) * (b.u.spinHit > 0 ? Math.min(SPIN_CAP, 1 + b.u.spinHit / 100 * Math.max(0, b.firing)) : 1) + (b.auraHit || 0)) * opening; // an ally's aura adds to every hit
+      const hit = (b.u.hit * (charged ? b.u.charge : 1) * (b.u.spinHit > 0 ? Math.min(SPIN_CAP, 1 + b.u.spinHit / 100 * Math.max(0, b.firing)) : 1) + (b.auraHit || 0)) * opening * (b.auraPct > 0 ? 1 + b.auraPct / 100 : 1); // an ally's aura adds to every hit
       // trample: a charged hit doesn't stop the unit; it runs on through its target and over every body in its path
       if (charged && b.u.trample > 0 && targets.length && !targets.flame) {
         const tgt = targets[0], dx = tgt.x - b.x, dy = tgt.y - b.y, d = hyp(dx, dy);
@@ -1740,11 +1794,15 @@ const Engine = (() => {
       const auraNow = all.some(b => b.alive && b.u.aura);
       if (auraNow || auraWas) { // the last one gone: its bonus goes too
         auraWas = auraNow;
-        for (const a of all) { a.auraHit = 0; a.auraAps = 0; }
+        for (const a of all) { a.auraHit = 0; a.auraAps = 0; a.auraPct = 0; a.auraArmor = 0; }
         for (const src of all) {
           if (!src.alive || !src.u.aura) continue;
           const au = src.u.aura;
-          for (const a of sides[src.side]) if (a !== src && a.alive && !a.u.structure && dist(a, src) <= au.radius) { a.auraHit = Math.max(a.auraHit, au.hit); a.auraAps = Math.max(a.auraAps, au.aps); }
+          // hit and aps: flat bonuses (Reforge); pct: hit size in % and armor: flat armor for the allies (the Bannerman)
+          for (const a of sides[src.side]) if (a !== src && a.alive && !a.u.structure && dist(a, src) <= au.radius) {
+            a.auraHit = Math.max(a.auraHit, au.hit || 0); a.auraAps = Math.max(a.auraAps, au.aps || 0);
+            a.auraPct = Math.max(a.auraPct, au.pct || 0); a.auraArmor = Math.max(a.auraArmor, au.armor || 0);
+          }
         }
       }
       // builders at work: each builder building within BUILD_COOP of others speeds them up (1x, 1.5x, 1.75x, ...)
@@ -1853,10 +1911,45 @@ const Engine = (() => {
         const done = new Set();
         for (const q of pools) for (const f of all) {
           if (!f.alive || f.u.structure || f.u.aloft || done.has(f) || hyp(f.x - q.x, f.y - q.y) > q.r) continue;
+          if (f.side === q.side && q.noHeal) continue; // a death zone does nothing to its own side
           done.add(f);
           if (f.side !== q.side) direct(q.owner, f, q.amt * dt);
           else { heal(f, q.amt * healMul * dt); if (q.speed > 0) { f.poolFast = q.speed; f.poolFastT = q.secs; } }
         }
+        // death zones dry up
+        for (let k = pools.length - 1; k >= 0; k--) if (pools[k].left != null && (pools[k].left -= dt) <= 1e-9) pools.splice(k, 1);
+      }
+      // Regrowth: heads grow back (see regrowing)
+      for (let k = regrowing.length - 1; k >= 0; k--) {
+        const rg = regrowing[k], v = rg.v, rw = v.u.regrow;
+        const mates = sides[v.side].filter(x => x !== v && x.alive && x.squad === v.squad && x.u.name === v.u.name);
+        if (!mates.length || v.alive) { regrowing.splice(k, 1); continue; } // the whole squad is down (or it's back some other way)
+        if (mates.some(x => x.searT != null && t - x.searT < (rw.block || 0))) { rg.left = rw.secs; continue; } // fire stops it
+        if ((rg.left -= dt) > 1e-9) continue;
+        regrowing.splice(k, 1);
+        const at = mates[0];
+        v.alive = true; v.diedTick = undefined; v.hp = v.u.hp * (rw.pct > 0 ? rw.pct : 50) / 100;
+        v.x = at.x + (at.side === 0 ? -1 : 1) * g.spacing * 0.6; v.y = at.y;
+        if (g.bounds) { v.x = Math.max(g.bounds.x0, Math.min(g.bounds.x1, v.x)); v.y = Math.max(g.bounds.y0, Math.min(g.bounds.y1, v.y)); }
+        v.poison = null; v.bleed = null; v.burn = null; v.stunT = 0; v.slowT = 0; v.slowMove = 0; v.slowAtk = 0; v.shrinkT = 0; v.shrinkM = 0;
+        v.windTarget = null; v.windT = 0; v.firing = -1; v.burstLeft = 0; v.lock = null; v.searT = null; v.regrown = (v.regrown || 0) + 1;
+        if (opts.record) shots.push([at.x, at.y, v.x, v.y, v.side, 0, 0, 1]);
+      }
+      // Cast walls: each Wall Engineer body puts up its wall once, at its time
+      for (const b of wallers) {
+        const w = b.u.walls;
+        if (!b.alive || b.wallDone || b.delay > 0 || t + 1e-9 < (w.at || 0)) continue;
+        b.wallDone = true;
+        const half = w.half > 0 ? w.half : 3, thick = w.thick > 0 ? w.thick : 1.2;
+        let x = b.x, y = b.y + (b.side === 0 ? 1 : -1) * (w.ahead > 0 ? w.ahead : 8);
+        if (g.bounds) { x = Math.max(g.bounds.x0 + half, Math.min(g.bounds.x1 - half, x)); y = Math.max(g.bounds.y0, Math.min(g.bounds.y1, y)); }
+        if (barriers.some(o => o.alive && Math.abs(o.x - x) < halfX(o) + half && Math.abs(o.y - y) < halfY(o) + thick)) continue; // no room: a wall stands there
+        const wu = withTraits({ name: 'Wall', cost: 0, bodies: 1, hp: w.hp > 0 ? w.hp : 300, hit: 0, aps: 1, range: 0, speed: 0, splash: 0, shape: 'square', color: '#9C8F7A',
+          structure: true, lesser: true, idle: true, kind: 'wall', barrier: half, barrierY: thick / 2, defense: 'armor', defVal: w.armor || 0, level: 0 });
+        const wb = newBody(wu, b.side, x, y, spawnIdx++, WALL_CAST_SQ);
+        wb.credit = b;
+        pendingKids.push(wb); barriers.push(wb);
+        if (opts.record) shots.push([b.x, b.y, x, y, b.side, 0, 0, 0]);
       }
       // ongoing effects: poison, bleed, regeneration, shortsight wearing off, spawns
       const n0 = all.length;
@@ -1890,6 +1983,7 @@ const Engine = (() => {
         }
         if (b.burn) { // once a second a share of what is left to burn (see BURN)
           const bn = b.burn;
+          if (b.u.regrow) b.searT = t; // still burning: still seared
           bn.t -= dt;
           if (bn.t <= 1e-9) {
             const part = bn.left * BURN.share[bn.k];

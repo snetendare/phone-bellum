@@ -83,6 +83,23 @@ Leaders (characters) work as the run's starting relic. Rarity (common / rare / b
 - UI: a map screen (vertical, scrolls, nodes as icons), reward cards, the shop sheet, an event card. The board, tray and fights are unchanged.
 - Hidden squads for elites reuse the "placed this round" hiding from versus play.
 
+## Enemy units
+
+The enemy-only units and bosses are in `src/roguelike-enemies.json` (same fields as `default-roster.json`, plus `apply`: skill definitions the run applies with `Engine.applySkills`). Stats are first guesses. `act`, `role`, `twist`, `place` and `elite` are for the encounter builder. Two things are not in yet: Burrowers coming up underground (for now they come in from a flank) and the Gold Leech's run rule.
+
+New fight mechanics in `src/engine.js` (any unit can use them; they do nothing unless a unit has the field):
+
+| Field | Unit | What it does |
+|---|---|---|
+| `deathZone: { r, dps, secs }` | Plague Carriers | Where a body falls, a poison patch of radius `r` m: its enemies in it take `dps` a second (past armor) for `secs` s. Drawn as a pool on both boards. |
+| `aura: { radius, hit, aps, pct, armor }` | Bannerman | The existing aura (Reforge) gets `pct` (+% hit size) and `armor` (+flat armor) for allies within `radius` m. |
+| `walls: { at, ahead, hp, armor, half, thick }` | Wall Engineers | At fight time `at`, each body puts up a wall `ahead` m in front of itself (`half`: half its length, across the board). The enemy can't walk or shoot through it (lobbed shots fly over); its own side can. Drawn as the bastion stone wall. |
+| `regrow: { secs, pct, block, by }` | Hydra | A fallen head gets up again after `secs` s with `pct` % health, next to a living head of its squad. Fire on any head (a flame cone, a burn, or a unit named in `by`) within the last `block` s starts the clock again. |
+| `copySkill: true` | Mirror Wraith | The first enemy it hits that has a skill it can take gives it that skill (the first in slot order) for the rest of the fight. Skills that need setting up at the start of a fight (spawns, links, buildings, portals) can't be copied. Units now remember their skills in `skillsHad`. |
+| `raise: { radius, max, pct }` | The Lich | An enemy body that falls within `radius` m gets up on the Lich's side with `pct` % health, `max` per Lich per fight. Uses the same side switch as the Gentleman, so the game counts it as lost for its old squad. Never a structure, construct, linked body, carrier or ram. |
+
+Check: `node tools/tests/roguelike-mechanics.js` (each mechanic, and every enemy in the data file fighting a few roster units).
+
 ## Order of work
 
 1. Headless skeleton: run.js with battle nodes only, a fixed 8-node act, rewards as picks, the bot playing runs. Measure win rate. No UI.

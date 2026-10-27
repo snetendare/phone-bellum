@@ -1,0 +1,44 @@
+{
+  "_about": "Enemy-only units for the roguelike solo mode (docs/ROGUELIKE.md). Same fields as default-roster.json. apply: skill definitions the run applies with Engine.applySkills (shield, ward, shortsight, stealth). Names in spawn / deathSpawn are resolved from the roster when the run loads. place, act and role are for the encounter builder, not the engine. Stats are first guesses, to be balanced with the run sims.",
+  "units": [
+    { "name": "Shieldwall Militia", "act": 1, "role": "teaches: many small hits beat shields", "cost": 100, "bodies": 6, "hp": 90, "hit": 12, "aps": 1, "range": 2, "speed": 4, "splash": 0, "shape": "square", "color": "#8A8F99", "tag": "SHW",
+      "apply": [{ "type": "shield", "params": { "hits": 3 } }] },
+    { "name": "Powder Goblins", "act": 1, "role": "punishes melee blobs", "cost": 100, "bodies": 10, "hp": 30, "hit": 15, "aps": 1.2, "range": 2, "speed": 8, "splash": 0, "shape": "triangle", "color": "#B5562E", "tag": "PWD",
+      "deathBlast": 133, "blastAt": 2 },
+    { "name": "Grave Totem", "act": 1, "role": "teaches: kill the source, not the stream", "cost": 200, "bodies": 1, "hp": 600, "hit": 0, "aps": 1, "range": 0, "speed": 0, "splash": 0, "shape": "square", "color": "#5E6B58", "tag": "TOT",
+      "structure": true, "lesser": true, "idle": true, "place": "back",
+      "spawn": { "unit": "Skeleton Archers", "count": 2, "every": 8, "max": 6 } },
+    { "name": "Iron Sentinel", "act": 1, "role": "punishes one-shot damage", "cost": 300, "bodies": 1, "hp": 1800, "hit": 90, "aps": 0.7, "range": 3, "speed": 2.5, "splash": 0, "shape": "square", "color": "#6D7480", "tag": "SEN",
+      "defense": "ward", "defVal": 60 },
+    { "name": "Hexer", "act": 1, "role": "punishes Sniper-heavy builds", "cost": 200, "bodies": 1, "hp": 240, "hit": 40, "aps": 0.6, "range": 24, "speed": 3, "splash": 0, "shape": "diamond", "color": "#7B4FA0", "tag": "HEX",
+      "place": "back", "apply": [{ "type": "shrink", "params": { "m": 7, "duration": 4 } }] },
+
+    { "name": "Bannerman", "act": 2, "role": "kill priority: take the banner first", "cost": 200, "bodies": 1, "hp": 500, "hit": 0, "aps": 1, "range": 0, "speed": 3, "splash": 0, "shape": "triangle", "color": "#C9A13B", "tag": "BAN",
+      "idle": true, "aura": { "radius": 8, "hit": 0, "aps": 0, "pct": 20, "armor": 2 } },
+    { "name": "Siege Ogre", "act": 2, "role": "goes for your tower and buildings", "cost": 300, "bodies": 1, "hp": 1600, "hit": 260, "aps": 0.3, "range": 3, "speed": 3, "splash": 0, "shape": "circle", "color": "#7A5C3E", "tag": "OGR",
+      "windUp": 1.5, "bldgPct": 300 },
+    { "name": "Burrowers", "act": 2, "role": "keep a guard behind your back line", "cost": 200, "bodies": 4, "hp": 200, "hit": 30, "aps": 1, "range": 2, "speed": 6, "splash": 0, "shape": "triangle", "color": "#8C6E4A", "tag": "BUR",
+      "place": "flank", "todo": "pop up underground behind the back line (for now they come in from a flank)" },
+    { "name": "Plague Carriers", "act": 2, "role": "kill them at range", "cost": 200, "bodies": 3, "hp": 260, "hit": 20, "aps": 0.8, "range": 2, "speed": 3, "splash": 0, "shape": "circle", "color": "#6F8F3A", "tag": "PLG",
+      "deathZone": { "r": 3, "dps": 20, "secs": 6 } },
+    { "name": "Mimic", "act": 2, "role": "elite only: not what it looks like", "cost": 300, "bodies": 1, "hp": 1900, "hit": 150, "aps": 0.9, "range": 15, "speed": 2, "splash": 0, "shape": "circle", "color": "#4F5A66", "tag": "MIM",
+      "disguise": "Goblin Swarm", "elite": true },
+
+    { "name": "Hydra", "act": 3, "role": "burn it: fire stops the heads growing back", "cost": 500, "bodies": 3, "hp": 1000, "hit": 60, "aps": 1, "range": 8, "speed": 2.5, "splash": 0, "shape": "circle", "color": "#2F7A6B", "tag": "HYD",
+      "regrow": { "secs": 10, "pct": 50, "block": 3, "by": ["Fire Mage", "Ember Imps", "Hellfiend"] } },
+    { "name": "Mirror Wraith", "act": 3, "role": "punishes stacking one skill everywhere", "cost": 300, "bodies": 2, "hp": 300, "hit": 50, "aps": 1, "range": 15, "speed": 4, "splash": 0, "shape": "diamond", "color": "#9FB7C9", "tag": "MIR",
+      "copySkill": true, "apply": [{ "type": "stealth", "params": {} }] },
+    { "name": "Wall Engineers", "act": 3, "role": "breaks straight-line pushes", "cost": 200, "bodies": 3, "hp": 180, "hit": 10, "aps": 1, "range": 6, "speed": 3, "splash": 0, "shape": "square", "color": "#9C8F7A", "tag": "ENG",
+      "walls": { "at": 1, "ahead": 9, "hp": 300, "armor": 4, "half": 3, "thick": 1.2 } },
+    { "name": "Gold Leech", "act": 3, "role": "optional loot target", "cost": 200, "bodies": 1, "hp": 400, "hit": 25, "aps": 1, "range": 12, "speed": 5, "splash": 0, "shape": "diamond", "color": "#D4AF37", "tag": "LCH",
+      "runSteal": 50, "todo": "run rule: if it survives the fight it takes 50 run gold, if it dies you get 50" }
+  ],
+  "bosses": [
+    { "name": "The Warden", "act": 1, "twist": "ward and shields together: bring a mix of damage", "cost": 1000, "bodies": 1, "hp": 5000, "hit": 140, "aps": 0.6, "range": 4, "speed": 2, "splash": 2, "shape": "square", "color": "#5A606B", "tag": "WRD",
+      "defense": "ward", "defVal": 80, "spawn": { "unit": "Shieldwall Militia", "count": 6, "every": 15, "max": 12 } },
+    { "name": "The Brood Mother", "act": 2, "twist": "one more Spider per spawn for every round the match lasts", "cost": 1000, "bodies": 1, "hp": 6000, "hit": 80, "aps": 1, "range": 3, "speed": 2, "splash": 0, "shape": "circle", "color": "#3B2F3F", "tag": "BRD",
+      "spawn": { "unit": "Spiders", "count": 3, "every": 8, "max": 15 }, "deathSpawn": { "name": "Spiders", "count": 10, "strength": 1 } },
+    { "name": "The Lich", "act": 3, "twist": "your fallen units fight for him: big single units are a liability", "cost": 1000, "bodies": 1, "hp": 4500, "hit": 90, "aps": 1, "range": 20, "speed": 2.2, "splash": 2, "shape": "diamond", "color": "#4B5D7A", "tag": "LIC",
+      "raise": { "radius": 15, "max": 6, "pct": 50 } }
+  ]
+}
