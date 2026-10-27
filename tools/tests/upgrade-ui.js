@@ -1,11 +1,9 @@
-// Range rings, Level all, upgrade marks, Skip asking first and Look at board, on both boards (a PC window), then
+// Range rings, Level all, Skip asking first and Look at board, on both boards (a PC window), then
 // Level all from a guest in a live match. Screenshots go to the current folder.
 // - Range: the ring under the mouse and the ring of a tapped squad are the same circle (Game.squadReach: a Flame
 //   Wizard's flame cone reaches 1.2x its range); in a fight a tapped body shows its ring too.
 // - Level all: on the sheet when two or more level-ups of a unit's squads are paid for; most XP first, a squad with XP
 //   for two levels gets its second on the next pass; it levels as many as the gold covers.
-// - Upgrade marks: a pulsing gold arrow over a squad whose level-up is paid for, a quiet one for an affordable skill,
-//   and a gold arrow on the shop card of a unit with an upgrade ready.
 // - Skip to result asks first (a second tap skips); after the last round Look at board hides the end screen and Show
 //   result brings it back.
 // - Live: the guest's Level all reaches the host as single level-ups do (levels and gold).
@@ -77,11 +75,6 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
     const tp = await ring(p, '#marks .range.tapped');
     check(!!tp && !!hv && Math.abs(tp.w - hv.w) <= 1 && Math.abs(tp.h - hv.h) <= 1, `${board}: the tapped ring is the hover ring (${tp && tp.w} vs ${hv && hv.w} px)`);
     await p.screenshot({ path: `upgrade-${board}-range.png` });
-    // 3. upgrade marks: pulsing for a paid level-up, on the shop card too
-    let mk = await p.evaluate(() => ({ level: document.querySelectorAll('#upx span.level').length, skill: document.querySelectorAll('#upx span.skill').length }));
-    check(mk.level === 3, `${board}: a pulsing gold arrow over each squad ready to level up (${mk.level})`);
-    check(await p.locator(`#shop .uc2[data-i="${fw.ui}"] .up`).count() === 1, `${board}: and on its shop card`);
-    await p.screenshot({ path: `upgrade-${board}-marks.png` });
     // 2. level all: the order, then only as far as the gold goes
     const plan = await p.evaluate(([ids]) => { const { m, me } = window.__pb(); const q = m.armies[me].find(s => s.id === ids[2]); const keep = q.xp; q.xp = 1e9; const r = Game.levelAllPlan(m, me, q.unit); q.xp = keep; return r; }, [fw.sq.map(s => s.id)]);
     const ids = fw.sq.map(s => s.id);
@@ -97,12 +90,6 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
     check(s.gold === 10 && lvl(ids[0]) === 1 && lvl(ids[1]) === 1 && lvl(ids[2]) === 0, `${board}: Level all levels the two with the most XP and spends the gold (${s.gold} left, levels ${ids.map(lvl)})`);
     check(await p.locator('[data-act="lvl-all"]').count() === 0, `${board}: no Level all once the gold covers fewer than two`);
     await p.click('#close'); await sleep(200);
-    mk = await p.evaluate(() => ({ level: document.querySelectorAll('#upx span').length }));
-    check(mk.level === 0 && await p.locator(`#shop .uc2[data-i="${fw.ui}"] .up`).count() === 0, `${board}: no marks when nothing is affordable (${mk.level})`);
-    await p.evaluate(() => { const { m, me } = window.__pb(); m.gold[me] = 1000; });
-    await redraw(p);
-    mk = await p.evaluate(() => ({ level: document.querySelectorAll('#upx span.level').length, skill: document.querySelectorAll('#upx span.skill').length }));
-    check(mk.level === 1 && mk.skill >= 2, `${board}: with gold: the one still ready pulses, the others show an affordable skill (${mk.level} level, ${mk.skill} skill)`);
     // 5. skip asks first; a tapped body shows its ring in the fight
     await p.evaluate(() => { const { m } = window.__pb(); m.armies[1] = []; m.hp[1] = 1; }); // an empty enemy army on its last health: this fight ends the match
     await p.click('#fight'); await sleep(500);

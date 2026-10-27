@@ -377,18 +377,6 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
 .unx button { position: absolute; pointer-events: auto; width: 16px; height: 16px; margin: -8px 0 0 -8px; padding: 0; border-radius: 50%; border: 1.5px solid var(--you); background: var(--bg); color: var(--ink); font: 700 9px/1 var(--font-body, sans-serif); display: grid; place-items: center; cursor: pointer; box-shadow: 0 1px 3px rgba(0,0,0,0.5); }
 .unx button::before { content: ''; position: absolute; inset: -5px -5px -3px -3px; } /* a bigger target for a finger, reaching out from the tile more than into it */
 .marks .range { fill: none; stroke-width: 2; stroke-linecap: round; stroke-dasharray: 0.1 6; opacity: 0.9; }
-/* upgrade marks over your squads while deploying (either board): a pulsing gold up-arrow when a level-up is ready and
-   paid for, a quiet outlined one when a skill (or its awakening) is affordable. Taps go through to the board. */
-.upx { position: absolute; inset: 0; z-index: 1; pointer-events: none; overflow: hidden; }
-.upx span { position: absolute; width: 18px; height: 18px; margin: -9px 0 0 -9px; border-radius: 50%; display: grid; place-items: center; }
-.upx span svg { display: block; width: 12px; height: 12px; }
-.upx .level { background: var(--gold); color: var(--bg); box-shadow: 0 0 0 1.5px var(--bg), 0 0 10px rgba(230, 184, 74, 0.8); animation: up-pulse 1.2s ease-in-out infinite; }
-.upx .skill { width: 15px; height: 15px; margin: -7.5px 0 0 -7.5px; background: rgba(13, 19, 21, 0.85); color: var(--gold); border: 1.5px solid var(--gold); }
-.upx .skill svg { width: 9px; height: 9px; }
-@keyframes up-pulse { 0%, 100% { transform: translateY(0) scale(1); box-shadow: 0 0 0 1.5px var(--bg), 0 0 4px rgba(230, 184, 74, 0.5); } 50% { transform: translateY(-3px) scale(1.15); box-shadow: 0 0 0 1.5px var(--bg), 0 0 14px rgba(230, 184, 74, 0.95); } }
-.uc2 .up { position: absolute; top: 3px; left: 5px; width: 15px; height: 15px; border-radius: 50%; background: var(--gold); color: var(--bg); display: grid; place-items: center; }
-.uc2 .up svg { width: 9px; height: 9px; display: block; }
-@media (prefers-reduced-motion: reduce) { .upx .level { animation: none; } }
 /* intent: where a squad means to go (arrows to the enemy squads it heads for, dashed straight ahead with nothing in sight yet), whom it attacks in a fight (small rings) */
 .marks .intent, .marks .intent-under { fill: none; stroke-linecap: round; }
 .marks .intent { stroke-width: 2.6; }
@@ -428,7 +416,6 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
     <div class="coach" id="coach" role="status" aria-live="polite" hidden><button class="coach-x" id="coach-x" aria-label="Leave the tutorial">✕</button><p id="coach-text"></p><span class="btnrow" id="coach-btns"></span></div>
     <div class="coach-ring" id="coach-ring" hidden></div>
     <svg class="marks" id="marks" aria-hidden="true"></svg>
-    <div class="upx" id="upx" aria-hidden="true"></div>
     <div class="unx" id="unx"></div>
   </div>
 
@@ -613,7 +600,6 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
   try { if (/[?&]test\b/.test(location.search)) window.__pbRedraw = () => { if (phase === 'deploy') panelDeploy(); render(); }; } catch (e) {} // UI tests that set up a board state: draw it
   let selected = null;      // unit index chosen in the shop
   let rangeOf = null;       // { side, id }: the squad last tapped on the board; its range shows as a dotted ring
-  const UP_SVG = '<svg viewBox="0 0 12 12" aria-hidden="true"><path fill="currentColor" d="M6 1.2 11 6.6H7.9V11H4.1V6.6H1z"/></svg>'; // an upgrade's gold up-arrow (board marks, shop cards)
   let inspect = null, inspectHtml = ''; // a fight: the body tapped (its card shows, see inspectCard), and what the card shows now
   let bt = null;            // battle being played back
   let battlePre = null;     // match as it stood when the running battle began (for the HUD)
@@ -1472,9 +1458,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
   // UI 2.0: a unit's card in the tray (disabled: it can't be bought now; a tap opens its sheet)
   function shopCard2(i, disabled) {
     const u = units[i], free = Game.freeLeft(m, me).filter(x => x === i).length, stars = Engine.SLOTS.filter(k => Game.hasSkill(m, me, i, k)).length;
-    const up = editable() && mode !== 'tutorial' && m.armies[me].some(s => s.unit === i && Game.upgradeOffer(m, me, s)); // a squad of it can level up, or a skill is affordable
-    return `<button class="uc2" data-i="${i}" style="--tier:${tierColor(tierOf(i))}" aria-pressed="${selected === i}" aria-disabled="${disabled}" aria-label="${esc(u.name)}, ${free ? `${free} free` : `${Game.shopCost(m, me, i)} gold`}${up ? ', can be upgraded' : ''}">
-      ${up ? `<span class="up" title="Upgrade ready: tap one of its squads on the board">${UP_SVG}</span>` : ''}
+    return `<button class="uc2" data-i="${i}" style="--tier:${tierColor(tierOf(i))}" aria-pressed="${selected === i}" aria-disabled="${disabled}" aria-label="${esc(u.name)}, ${free ? `${free} free` : `${Game.shopCost(m, me, i)} gold`}">
       ${stars ? `<span class="st">${'★'.repeat(stars)}</span>` : ''}
       <span class="ic" style="color:${u.color}">${Shapes.svg(u.shape, 30)}</span>
       <span class="n">${esc(u.name)}</span>
@@ -3435,35 +3419,6 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     coachClear(mode === 'tutorial' && tutStep() === 'flank' && !cinematic ? tiles : []);
     if (marksHtml !== html) { marksHtml = html; svg.innerHTML = html; } // only on a change, so the blinking runs on
     unplaceMarks(cinematic);
-    upgradeMarks(cinematic);
-  }
-  // a gold up-arrow over each of your squads that can be upgraded now (Game.upgradeOffer): pulsing for a level-up
-  // the gold covers, quiet for an affordable skill. Kept by squad id and only moved, so the pulse runs on while the 3D
-  // camera turns. In the tutorial only level-ups get one.
-  function upgradeMarks(cinematic) {
-    const box = $('upx');
-    if (!box) return;
-    const list = phase === 'deploy' && m && editable() && !cinematic && !choosingPack() && !choosingTower() && !placingTower()
-      ? m.armies[me].map(sq => ({ sq, kind: Game.upgradeOffer(m, me, sq) })).filter(x => x.kind === 'level' || (x.kind === 'skill' && mode !== 'tutorial')) : [];
-    const keep = new Set();
-    if (list.length) {
-      const at = wrapMap(), T = Game.TILE;
-      for (const { sq, kind } of list) {
-        const p = drag && drag.moved && drag.id === sq.id ? drag.over : sq;
-        const n = Game.footprint(m, sq.unit), c = Game.tileToWorld(p.col + (n - 1) / 2, p.row + (n - 1) / 2), h = T * n / 2;
-        // the middle of its tile's (or block's) edge that is highest on the screen, whichever way the board is turned
-        let top = null;
-        for (const [dx, dy] of [[0, -1], [0, 1], [-1, 0], [1, 0]]) { const q = at(c.x + dx * h, c.y + dy * h); if (!top || q[1] < top[1]) top = q; }
-        let el = box.querySelector(`span[data-id="${sq.id}"]`);
-        if (!el) { el = document.createElement('span'); el.dataset.id = sq.id; el.innerHTML = UP_SVG; box.appendChild(el); }
-        if (el.className !== kind) el.className = kind;
-        const l = top[0].toFixed(1) + 'px', tp = top[1].toFixed(1) + 'px';
-        if (el.style.left !== l) el.style.left = l;
-        if (el.style.top !== tp) el.style.top = tp;
-        keep.add(String(sq.id));
-      }
-    }
-    for (const el of [...box.children]) if (!keep.has(el.dataset.id)) el.remove();
   }
   // the X at the top right corner of each squad you placed this round (taps on the squad open its sheet instead).
   // The buttons are kept by squad id and only moved, so one being tapped is never swapped out under the finger.
