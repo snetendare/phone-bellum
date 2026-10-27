@@ -7449,6 +7449,7 @@ const Render2D = (cv, view) => {
     jonah: { title: 'Jonah', file: 'audio/jonah.mp3' },
     long: { title: 'Long', file: 'audio/long.mp3' },
     superCoffee: { title: 'Super coffee', file: 'audio/super-coffee.mp3' },
+    reveal: { title: 'Reveal', file: 'audio/reveal.mp3' },
     bulgaria: { title: 'Bulgaria', file: 'audio/bulgaria.mp3' },
     icyOne: { title: 'Icy one', file: 'audio/icy-one.mp3' },
     sirski: { title: 'SIRSKI', file: 'audio/sirski.mp3' },
@@ -7457,7 +7458,7 @@ const Render2D = (cv, view) => {
   };
   const ARTIST = 'Snetänd';
   const songName = (id) => `“${SONGS[id].title}” - ${ARTIST}`;
-  const PLAYLISTS = { menu: ['long', 'sisi', 'jonah', 'superCoffee'], deploy: ['bulgaria'], battle: ['habbyourmam'] };
+  const PLAYLISTS = { menu: ['long', 'sisi', 'jonah', 'superCoffee', 'reveal'], deploy: ['bulgaria'], battle: ['habbyourmam'] };
   const MAP_MUSIC = { // maps with their own deployment or battle music, in place of PLAYLISTS.deploy / .battle
     ice: { deploy: ['icyOne'], battle: ['knarkkungn'] },
     cavern: { deploy: ['sirski'] },
