@@ -27,6 +27,10 @@ const ok = (c, msg) => { console.log((c ? 'ok   ' : 'FAIL ') + msg); if (!c) pro
   // water, dragged along a row
   await p.click('[data-tool="~"]'); await dragTiles([2, 9], [6, 9]); m = await map();
   ok(m.tiles[9].slice(2, 7) === '~~~~~' && m.tiles[6].slice(2, 7) === '~~~~~', 'water dragged along a row, mirrored');
+  await p.click('[data-tool="s"]'); await tap(9, 10); m = await map();
+  ok(m.tiles[10][9] === 's' && m.tiles[5][9] === 's', 'shallow water');
+  await dragTiles([9, 10], [8, 14]); // a tower may stand in shallow water
+  m = await map(); ok(m.buildings.some(x => x.kind === 'tower' && x.side === 0 && x.col === 8 && x.row === 14), 'painting doesn’t move the tower');
   await p.click('[data-tool="O"]'); await tap(5, 8); m = await map();
   ok(m.tiles[8][5] === 'O' && m.tiles[7][5] === 'O', 'objective');
   await p.click('[data-tool="p"]'); await tap(4, 12); m = await map();
