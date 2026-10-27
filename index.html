@@ -474,6 +474,18 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
 .unx button { position: absolute; pointer-events: auto; width: 16px; height: 16px; margin: -8px 0 0 -8px; padding: 0; border-radius: 50%; border: 1.5px solid var(--you); background: var(--bg); color: var(--ink); font: 700 9px/1 var(--font-body, sans-serif); display: grid; place-items: center; cursor: pointer; box-shadow: 0 1px 3px rgba(0,0,0,0.5); }
 .unx button::before { content: ''; position: absolute; inset: -5px -5px -3px -3px; } /* a bigger target for a finger, reaching out from the tile more than into it */
 .marks .range { fill: none; stroke-width: 2; stroke-linecap: round; stroke-dasharray: 0.1 6; opacity: 0.9; }
+/* upgrade marks over your squads while deploying (either board): a pulsing gold up-arrow when a level-up is ready and
+   paid for, a quiet outlined one when a skill (or its awakening) is affordable. Taps go through to the board. */
+.upx { position: absolute; inset: 0; z-index: 1; pointer-events: none; overflow: hidden; }
+.upx span { position: absolute; width: 18px; height: 18px; margin: -9px 0 0 -9px; border-radius: 50%; display: grid; place-items: center; }
+.upx span svg { display: block; width: 12px; height: 12px; }
+.upx .level { background: var(--gold); color: var(--bg); box-shadow: 0 0 0 1.5px var(--bg), 0 0 10px rgba(230, 184, 74, 0.8); animation: up-pulse 1.2s ease-in-out infinite; }
+.upx .skill { width: 15px; height: 15px; margin: -7.5px 0 0 -7.5px; background: rgba(13, 19, 21, 0.85); color: var(--gold); border: 1.5px solid var(--gold); }
+.upx .skill svg { width: 9px; height: 9px; }
+@keyframes up-pulse { 0%, 100% { transform: translateY(0) scale(1); box-shadow: 0 0 0 1.5px var(--bg), 0 0 4px rgba(230, 184, 74, 0.5); } 50% { transform: translateY(-3px) scale(1.15); box-shadow: 0 0 0 1.5px var(--bg), 0 0 14px rgba(230, 184, 74, 0.95); } }
+.uc2 .up { position: absolute; top: 3px; left: 5px; width: 15px; height: 15px; border-radius: 50%; background: var(--gold); color: var(--bg); display: grid; place-items: center; }
+.uc2 .up svg { width: 9px; height: 9px; display: block; }
+@media (prefers-reduced-motion: reduce) { .upx .level { animation: none; } }
 /* intent: where a squad means to go (arrows to the enemy squads it heads for, dashed straight ahead with nothing in sight yet), whom it attacks in a fight (small rings) */
 .marks .intent, .marks .intent-under { fill: none; stroke-linecap: round; }
 .marks .intent { stroke-width: 2.6; }
@@ -513,6 +525,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
     <div class="coach" id="coach" role="status" aria-live="polite" hidden><button class="coach-x" id="coach-x" aria-label="Leave the tutorial">✕</button><p id="coach-text"></p><span class="btnrow" id="coach-btns"></span></div>
     <div class="coach-ring" id="coach-ring" hidden></div>
     <svg class="marks" id="marks" aria-hidden="true"></svg>
+    <div class="upx" id="upx" aria-hidden="true"></div>
     <div class="unx" id="unx"></div>
   </div>
 
@@ -4664,13 +4677,7 @@ const Game = (() => {
     }
     const t = m.towers && m.towers[side];
     if (t && towerUp(m, side)) {
-      let tu = mageTowerUnit(m, side, towerType(m, side).unit);
-      if (towerType(m, side).id === 'slime') tu = { ...slimeTowerUnit(m, side, tu), slime: true };
-      if (towerSkillOn(m, side, 'bastion')) tu = { ...tu, shield: (tu.shield || 0) + BWALL.shield };
-      if (towerSkill2On(m, side, 'bastion')) tu = { ...tu, bonusArmor: (tu.bonusArmor || 0) + BWALL.towerArmor };
-      if (eagle) tu = { ...tu, range: tu.range + TOWER_SKILL.eagleRange, aps: tu.aps * (1 + TOWER_SKILL.eagleAps / 100) };
-      if (airship) tu = { ...tu, hit: tu.hit + AIRSHIP.sniperHit };
-      if (fx.awake && towerType(m, side).awake) tu = { ...tu, ...towerType(m, side).awake, idle: false, awake: true }; // Core Awoken: the Mecha Tower drives
+      const tu = fightTowerUnit(m, side, fx);
       const w = tileToWorld(t.col, t.row), tb = E.buildSquad(tu, side, w.x, w.y, -2, TILE, idx);
       if (altarBought(m, side, 'walls')) for (const x of tb) x.walls = [ICE.wallHits, ICE.wallHits, ICE.wallHits, ICE.wallHits];
       idx += tb.length; out.push(...tb);
@@ -4782,17 +4789,51 @@ const Game = (() => {
     return out;
   }
 
-  // the range a squad fights at (its skills, Eagle eye, the map's range cut), as bodiesFor works it out.
-  // pub: as the opponent can know it (skills and a tower skill bought this round left out)
-  function squadRange(m, side, sq, pub) {
-    const ui = sq.unit, base = m.units[ui];
-    let u = unitFor(m, side, ui, sq);
-    if (pub) { const defs = E.SLOTS.filter(k => skillVisible(m, side, ui, k)).map(k => skillDef(m, ui, k)); u = withFactionTrait(defs.length ? E.applySkills(base, defs, m.units) : E.withTraits(base), base.faction); }
+  // a side's tower as it fights (bodiesFor): its mage general, the slime skills, its tower skills, Core Awoken
+  function fightTowerUnit(m, side, fx) {
+    const tt = towerType(m, side);
+    let tu = mageTowerUnit(m, side, tt.unit);
+    if (tt.id === 'slime') tu = { ...slimeTowerUnit(m, side, tu), slime: true };
+    if (towerSkillOn(m, side, 'bastion')) tu = { ...tu, shield: (tu.shield || 0) + BWALL.shield };
+    if (towerSkill2On(m, side, 'bastion')) tu = { ...tu, bonusArmor: (tu.bonusArmor || 0) + BWALL.towerArmor };
+    if (towerSkillOn(m, side, 'sniper')) tu = { ...tu, range: tu.range + TOWER_SKILL.eagleRange, aps: tu.aps * (1 + TOWER_SKILL.eagleAps / 100) }; // Eagle eye
+    if (towerSkill2On(m, side, 'sniper')) tu = { ...tu, hit: tu.hit + AIRSHIP.sniperHit };
+    if ((fx || buildingEffects(m, side)).awake && tt.awake) tu = { ...tu, ...tt.awake, idle: false, awake: true }; // Core Awoken: the Mecha Tower drives
+    return tu;
+  }
+
+  // how far an attack reaches from where the unit stands: its range, and a flame cone's longer reach (as in the engine)
+  const reachOfUnit = (u, r) => u.flame > 0 && SETTINGS.flameReach > 1 ? r * SETTINGS.flameReach : r;
+  // the unit a squad fights as and its range (its skills, Eagle eye, the map's range cut and tuning, a devtest aura),
+  // as bodiesFor works it out. pub: as the opponent can know it (its skills and a tower skill bought this round left
+  // out, an awakening from an earlier round in, a disguise as what it pretends to be)
+  function squadRangeOf(m, side, sq, pub) {
+    const ui = pub ? shownUnit(m, 1 - side, side, sq.unit) : sq.unit, base = m.units[ui];
+    let u;
+    if (pub) {
+      const ak = ui === sq.unit && seenAwake(m, sq) ? awakenSlot(m, ui) : -1;
+      const defs = E.SLOTS.filter(k => skillVisible(m, side, ui, k) || k === ak).map(k => skillDef(m, ui, k)).filter(Boolean);
+      u = withFactionTrait(defs.length ? E.applySkills(base, defs, m.units) : E.withTraits(base), base.faction);
+    } else u = unitFor(m, side, ui, sq);
     let r = u.range;
     if (u.name === 'Sniper' && towerSkillOn(m, side, 'sniper') && (!pub || towerSkillVisible(m, side))) r += TOWER_SKILL.eagleRange;
     const mp = mapOf(m);
     if (mp && mp.rangeCut && r > mp.rangeKeep) r = Math.max(mp.rangeKeep, r * (1 - mp.rangeCut / 100));
-    return mapTuned(mp, { name: u.name, range: r, speed: u.speed }).range;
+    r = mapTuned(mp, { name: u.name, range: r, speed: u.speed }).range;
+    const aura = !pub && isDev(m) ? auraFor(m, side, sq.col, sq.row) : null;
+    if (aura && +aura.range) r *= 1 + aura.range / 100;
+    return { u, r };
+  }
+  const squadRange = (m, side, sq, pub) => squadRangeOf(m, side, sq, pub).r;
+  // how far a squad reaches when its fight begins: its range, and a flame cone's longer reach. The one measure for the
+  // ring a squad shows (under the mouse and when tapped); a fight's bodies: Engine's own (Flow state stacks and all)
+  function squadReach(m, side, sq, pub) { const { u, r } = squadRangeOf(m, side, sq, pub); return reachOfUnit(u, r); }
+  // how far a side's tower reaches. pub: as the opponent can know it while deploying (its type once shown, else the outpost)
+  function towerReach(m, side, pub) {
+    if (pub && !towerTypeShown(m, 1 - side, true, side)) return reachOfUnit(OUTPOST.unit, OUTPOST.unit.range);
+    let u = pub ? towerType(m, side).unit : fightTowerUnit(m, side);
+    if (pub && towerSkillOn(m, side, 'sniper') && towerSkillVisible(m, side)) u = { ...u, range: u.range + TOWER_SKILL.eagleRange };
+    return reachOfUnit(u, u.range);
   }
 
   // ---------- Yot-Yot's imps ----------
@@ -5162,6 +5203,39 @@ const Game = (() => {
     sq.level--;
     m.gold[side] += levelCost(m.units[sq.unit]);
     return true;
+  }
+
+  // Level all: every squad of unit ui that is ready to level up, until the gold runs out. A pass levels each ready
+  // squad once, the one with the most XP first (then the oldest); a squad with XP for another level gets it on the
+  // next pass. levelAllPlan: the squad ids in that order (an id twice for two levels), without changing anything;
+  // levelAll does them, one levelUp each (so a guest's side reaches the host like single level-ups), and returns how many.
+  function levelAllPlan(m, side, ui) {
+    const u = m.units[ui], out = [];
+    if (!u) return out;
+    const cost = levelCost(u), sim = m.armies[side].filter(s => s.unit === ui).map(s => ({ s, level: s.level }));
+    let gold = m.gold[side];
+    for (;;) {
+      const ready = sim.filter(x => isReady(m, { ...x.s, level: x.level })).sort((a, b) => b.s.xp - a.s.xp || a.s.id - b.s.id);
+      if (!ready.length) return out;
+      for (const x of ready) {
+        if (gold < cost) return out;
+        gold -= cost; x.level++; out.push(x.s.id);
+      }
+    }
+  }
+  function levelAll(m, side, ui) {
+    let n = 0;
+    for (const id of levelAllPlan(m, side, ui)) if (levelUp(m, side, id)) n++;
+    return n;
+  }
+  // what a player can buy for one of their squads right now (the board's upgrade marks): 'level' when it is ready to
+  // level up and the gold is there, 'skill' when a skill of its unit (or its awakening) is affordable, else ''
+  function upgradeOffer(m, side, sq) {
+    if (!sq || isRider(sq)) return '';
+    if (isReady(m, sq) && m.gold[side] >= levelCost(m.units[sq.unit])) return 'level';
+    if (E.SLOTS.some(k => !isInnate(m, sq.unit, k) && canBuySkill(m, side, sq.unit, k))) return 'skill';
+    if (awakenSlot(m, sq.unit) >= 0 && canAwaken(m, side, sq.id)) return 'skill';
+    return '';
   }
 
   // AI levels up at fight time, using only what it knew at the start of the round.
@@ -5725,7 +5799,7 @@ const Game = (() => {
   const api = {
     TIER_DMG, bankBusy, seenAt, charShown, towerTypeShown, altarShown, elfOwnShown, shroomShown, removingShroom, movedId, canMove, moveSquad, undoMove,
     COLS, ROWS, TILE, ZONE, START_HP, START_GOLD, INCOME, incomeFor, LOSER_BONUS, SQUAD_COST, SETTINGS, XP_STEPS, xpNeeded, unitCostOf,
-    levelCost, isReady, levelUp, undoLevel, seenLevel, aiLevel, AI, CONFIG,
+    levelCost, isReady, levelUp, undoLevel, levelAllPlan, levelAll, upgradeOffer, seenLevel, aiLevel, AI, CONFIG,
     deploysAllowed, deploysLeft, deployedThisRound, canBuyDeploy, buyDeploy, refundDeploy,
     PACKAGE, allPackages, packOf, needsPack, freeLeft, choosePack, ensurePack,
     unlockCost, tierOf, startLevel, shopCost, mapFreeOf, mapFreeLeft, isUnlocked, unlockVisible, unlock, undoUnlock,
@@ -5743,7 +5817,7 @@ const Game = (() => {
     TREASURY, TREASURY_SQ, treasuryOn, treasuryUp, treasurySpot, treasuryAt, treasuryUnit,
     FACTION_MODE, FACTIONS: () => FACTIONS, setFactions, factionInfo, factionsOf, factionTowers, towerTypeById, ownsUnit, withFactionTrait, factionSet,
     createDraft, draftTurn, draftOpen, draftAct, draftDone, draftPossible, aiDraftChoice,
-    zoneRows, inZone, tileToWorld, squadRange, createMatch, place, unplace, bodiesFor, startBattle, battleSetup, seenBy, intentPreview, INTENT, AWARENESS, resolve, aiDeploy, occupied,
+    zoneRows, inZone, tileToWorld, squadRange, squadReach, towerReach, fightTowerUnit, createMatch, place, unplace, bodiesFor, startBattle, battleSetup, seenBy, intentPreview, INTENT, AWARENESS, resolve, aiDeploy, occupied,
     GRID, useGrid,
     DEV, CAT_NAMES, LESSER_SQ, WALL_SQ, setDevData, devBuilding, devPower, devSpell, isDev, towerUp, pickCat, devOffer, pickNow, needsDevPick, devPick, undoDevPick, devShown,
     lessersOf, placedLessers, unplacedLesser, lesserAt, lesserSpotOk, placeLesser, lesserUnit, auraFor, modUnit, powersOf, devGold, devDeploys,
@@ -5896,7 +5970,8 @@ const Art = (() => {
 // dev (Factions devtest only): { bPlacing, castMode, guideMode, guideId, guide }: the building being placed, the spell being
 // cast, and the arrow being drawn (guide: its points so far, for squad guideId).
 // fx: short-lived battle effects as plain data (shots, flames, bolts, heals, deaths), in board metres.
-// rangeOf: { side, id } of the squad whose range shows as a dotted ring while deploying, or null.
+// rangeOf: { side, id } of the squad last tapped, or null (its range ring is drawn by the page, over the board, with the
+// same measure as the ring under the mouse: boardMarks in site-template.html).
 // battleCam: { zoom, x, y } while the battle cam zooms in on the final seconds of a fight (board metres), else null.
 // Calls: size() after the canvas changes size, draw(), tileAt(clientX, clientY) -> { col, row } or null,
 // thumb(match) -> a data URL of a small picture of that match's board (null: a plain board with a question mark),
@@ -6727,15 +6802,7 @@ const Render2D = (cv, view) => {
       if (!Game.garrisonAt(m, side, p.col, p.row)) continue;
       drawSquad({ ...sq, col: p.col, row: p.row, ...(side !== me ? { unit: Game.shownUnit(m, me, side, sq.unit), level: Game.seenLevel(m, sq) } : {}) }, side, side === me && phase === 'deploy' && (sq.round === m.round || sq.movedRound === m.round));
     }
-    // the squad tapped last: its range as a dotted ring round its tile (theirs as you can know it)
-    const rs = rangeOf && phase === 'deploy' && m.armies[rangeOf.side].find(s => s.id === rangeOf.id);
-    if (rs) {
-      const p = rangeOf.side !== me ? Game.seenAt(m, rs) : drag && drag.moved && drag.id === rs.id ? drag.over : rs;
-      const w = Game.tileToWorld(p.col, p.row);
-      ctx.strokeStyle = teamCol(rangeOf.side); ctx.globalAlpha = 0.9; ctx.lineWidth = 1.5; ctx.setLineDash([4, 5]);
-      ctx.beginPath(); ctx.arc(PX(w.x), PY(w.y), Game.squadRange(m, rangeOf.side, rs, rangeOf.side !== me) * S, 0, Math.PI * 2); ctx.stroke();
-      ctx.setLineDash([]); ctx.globalAlpha = 1;
-    }
+    // (the squad tapped last shows its range as a dotted ring drawn by the page over the board: boardMarks)
     drawElfTower(m, true);
     if (Game.isIce(m)) for (const side of [me, foe()]) {
       // Snowgres on their tiles in no man's land (an opponent's new one shows up at the fight)
@@ -7209,8 +7276,10 @@ const Render2D = (cv, view) => {
   let m = null;             // match state (on the guest: a copy kept in step by the host)
   let phase = 'start';      // start | lobby | draft | deploy | battle | result | end
   try { if (/[?&]test\b/.test(location.search)) window.__pb = () => ({ m, me, board3d, board, bt }); } catch (e) {} // read-only peek for UI tests
+  try { if (/[?&]test\b/.test(location.search)) window.__pbRedraw = () => { if (phase === 'deploy') panelDeploy(); render(); }; } catch (e) {} // UI tests that set up a board state: draw it
   let selected = null;      // unit index chosen in the shop
   let rangeOf = null;       // { side, id }: the squad last tapped on the board; its range shows as a dotted ring
+  const UP_SVG = '<svg viewBox="0 0 12 12" aria-hidden="true"><path fill="currentColor" d="M6 1.2 11 6.6H7.9V11H4.1V6.6H1z"/></svg>'; // an upgrade's gold up-arrow (board marks, shop cards)
   let inspect = null, inspectHtml = ''; // a fight: the body tapped (its card shows, see inspectCard), and what the card shows now
   let bt = null;            // battle being played back
   let battlePre = null;     // match as it stood when the running battle began (for the HUD)
@@ -8059,7 +8128,9 @@ const Render2D = (cv, view) => {
   // UI 2.0: a unit's card in the tray (disabled: it can't be bought now; a tap opens its sheet)
   function shopCard2(i, disabled) {
     const u = units[i], free = Game.freeLeft(m, me).filter(x => x === i).length, stars = Engine.SLOTS.filter(k => Game.hasSkill(m, me, i, k)).length;
-    return `<button class="uc2" data-i="${i}" style="--tier:${tierColor(tierOf(i))}" aria-pressed="${selected === i}" aria-disabled="${disabled}" aria-label="${esc(u.name)}, ${free ? `${free} free` : `${Game.shopCost(m, me, i)} gold`}">
+    const up = editable() && mode !== 'tutorial' && m.armies[me].some(s => s.unit === i && Game.upgradeOffer(m, me, s)); // a squad of it can level up, or a skill is affordable
+    return `<button class="uc2" data-i="${i}" style="--tier:${tierColor(tierOf(i))}" aria-pressed="${selected === i}" aria-disabled="${disabled}" aria-label="${esc(u.name)}, ${free ? `${free} free` : `${Game.shopCost(m, me, i)} gold`}${up ? ', can be upgraded' : ''}">
+      ${up ? `<span class="up" title="Upgrade ready: tap one of its squads on the board">${UP_SVG}</span>` : ''}
       ${stars ? `<span class="st">${'★'.repeat(stars)}</span>` : ''}
       <span class="ic" style="color:${u.color}">${Shapes.svg(u.shape, 30)}</span>
       <span class="n">${esc(u.name)}</span>
@@ -8390,7 +8461,20 @@ const Render2D = (cv, view) => {
       speed = +b.dataset.s;
       $('panel').querySelectorAll('[data-s]').forEach(x => x.setAttribute('aria-pressed', String(+x.dataset.s === speed)));
     }));
-    $('skip').addEventListener('click', () => { while (bt.step()) {} finishBattle(); });
+    // asks first, as selling does: the first tap turns it into "Tap again to skip" (gold) for a few seconds
+    const sk = $('skip');
+    sk.addEventListener('click', () => {
+      if (!sk.dataset.sure) {
+        sk.dataset.sure = '1'; sk.textContent = 'Sure? Tap again to skip'; sk.classList.add('primary');
+        clearTimeout(sk.timer);
+        sk.timer = setTimeout(() => { delete sk.dataset.sure; sk.textContent = 'Skip to result'; sk.classList.remove('primary'); }, 3000);
+        return;
+      }
+      clearTimeout(sk.timer);
+      if (phase !== 'battle' || !bt) return;
+      while (bt.step()) {}
+      finishBattle();
+    });
   }
 
   function panelInfo(text, btnLabel, onClick, extra = '') {
@@ -8563,23 +8647,27 @@ const Render2D = (cv, view) => {
     for (const x of (sum.buildings && sum.buildings[foe()]) || []) if (x.built || x.lost) lvLines.push(`<p><span style="color:var(--foe)">${esc(them)}’s ${esc(buildingName(x.id))}</span> ${x.built ? 'is built.' : 'was destroyed.'}</p>`);
     resultShownAt = now();
     if (m.over) {
-      const win = m.winner === me, loss = m.winner === foe();
+      const win = m.winner === me, loss = m.winner === foe(), looking = endLook && phase === 'end'; // still looking at the board: an update (a rematch asked) keeps it so
       phase = 'end'; hud(); netStatus();
       const wait = !solo() && rematch[me];
+      const asked = !solo() && rematch[foe()] && !rematch[me];
       overlay(`<div class="card">
         <span class="eyebrow">After ${m.history.length} rounds</span>
         <h2 class="${win ? 'you' : loss ? 'foe' : ''}">${win ? 'Victory' : loss ? 'Defeat' : 'Draw'}</h2>
         <p class="big">${lines.join(' ')}</p>
-        ${!solo() && rematch[foe()] && !rematch[me] ? '<p>Your opponent wants a rematch.</p>' : ''}
+        ${asked ? '<p>Your opponent wants a rematch.</p>' : ''}
         <div class="btnrow">
           ${solo() ? '<button class="btn primary" id="again">Play again</button>'
             : `<button class="btn primary" id="again" ${wait ? 'disabled' : ''}>${wait ? 'Waiting for opponent…' : 'Rematch'}</button>`}
+          <button class="btn" id="look">Look at board</button>
           <button class="btn" id="menu">Main menu</button>
         </div>
       </div>`);
       $('panel').innerHTML = '';
       $('again').addEventListener('click', mode === 'claude' ? startClaudeMatch : mode === 'ai' ? startAiMatch : askRematch);
       $('menu').addEventListener('click', () => { if (mode === 'host') clearHost(); showStart(); });
+      bindLook(asked ? 'Your opponent wants a rematch.' : `${win ? 'Victory' : loss ? 'Defeat' : 'Draw'} · the board as the last fight ended.`);
+      if (looking) lookAtBoard(true);
       return;
     }
     phase = 'result'; hud(); netStatus();
@@ -8648,10 +8736,32 @@ const Render2D = (cv, view) => {
       <span class="eyebrow">Round ${m.round}</span>
       <h2 class="you">Victory</h2>
       <p class="big">Your opponent forfeited the match.</p>
-      <div class="btnrow"><button class="btn primary" id="menu">Main menu</button></div>
+      <div class="btnrow"><button class="btn primary" id="menu">Main menu</button><button class="btn" id="look">Look at board</button></div>
     </div>`);
     $('panel').innerHTML = '';
     $('menu').addEventListener('click', showStart);
+    bindLook('Victory · your opponent forfeited.');
+  }
+  // the match-over screen: Look at board hides it so the final board can be seen (and turned, on the 3D board, or
+  // hovered for ranges); Show result in the panel brings it back. note: the line beside that button.
+  let endLook = false, endNote = '';
+  function bindLook(note) {
+    endNote = note; endLook = false;
+    if ($('look')) $('look').addEventListener('click', () => lookAtBoard(true));
+  }
+  function lookAtBoard(on) {
+    if (phase !== 'end') return;
+    endLook = on;
+    $('overlay').hidden = on;
+    if (on) {
+      $('panel').innerHTML = `<div class="bar"><span class="hint">${esc(endNote)}</span><button class="btn primary" id="end-back">Show result</button></div>`;
+      $('end-back').addEventListener('click', () => lookAtBoard(false));
+      $('end-back').focus();
+    } else {
+      $('panel').innerHTML = '';
+      const b = $('look'); if (b) b.focus();
+    }
+    dock(); render();
   }
 
   // ---------- match reports ----------
@@ -9710,7 +9820,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       <div class="st">${mine ? 'Yours' : esc(foeName()) + '’s'}${b.level > 0 ? ` · level ${b.level + 1}` : ''}${mates.length > 1 ? ` · ${mates.filter(x => x.alive).length} of ${mates.length} bodies left` : ''}</div>
       <div class="hpb"><i style="width:${Math.max(0, Math.min(100, b.hp / u.hp * 100)).toFixed(1)}%"></i></div>
       <div class="bs"><div><span>Health</span>${Math.max(0, Math.min(Math.round(u.hp), Math.ceil(b.hp)))} / ${Math.round(u.hp)}</div>${u.hit > 0 ? `<div><span>Hit</span>${Math.round(u.hit)}</div><div><span>Attacks/s</span>${r2(u.aps)}</div>` : ''}
-        ${u.range > 0 ? `<div><span>Range</span>${r2(reachOf(u, false))} m</div>` : ''}${u.speed > 0 && !u.structure ? `<div><span>Speed</span>${r2(u.speed)} m/s</div>` : ''}${def}</div>
+        ${u.range > 0 ? `<div><span>Range</span>${r2(bodyReach(b))} m</div>` : ''}${u.speed > 0 && !u.structure ? `<div><span>Speed</span>${r2(u.speed)} m/s</div>` : ''}${def}</div>
       ${st.length ? `<div class="st">${st.join(' · ')}</div>` : ''}`;
     if (!el) {
       el = document.createElement('div'); el.className = 'bcard'; el.id = 'bcard'; el.setAttribute('role', 'status');
@@ -9726,15 +9836,33 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   // so they sit right in every view. Redrawn with the board: render() on 2D, every frame on 3D.
   let marksHtml = '';
   let hoverAny = null; // the tile under the mouse in any phase (hoverTile is the placing preview, while deploying only)
-  // how far a unit reaches, in metres: the map's cut (cut: for a squad's unit; a fight's bodies have it already) and flame cones' longer reach
-  function reachOf(u, cut) {
-    const mp = cut && Game.mapOf(m);
-    let r = u.range || 0;
-    if (mp && mp.rangeCut && r > mp.rangeKeep) r = Math.max(mp.rangeKeep, r * (1 - mp.rangeCut / 100));
-    return u.flame > 0 ? r * Game.SETTINGS.flameReach : r;
+  // ---------- range rings: one measure for the ring under the mouse and the ring of what was tapped ----------
+  // A fight's body: how far it reaches right now, as the engine works it out (its range with Flow state stacks, cut by
+  // Sightweavers while that lasts; a flame cone's longer reach). Its stats already hold its skills, level and the map.
+  function bodyReach(b) {
+    const u = b.u;
+    let r = (u.range || 0) + (b.flow > 0 && u.flow ? b.flow * u.flow.range : 0);
+    if (b.shrinkT > 0) r = Math.max(Math.min(r, 1), r - b.shrinkM);
+    return u.flame > 0 && Game.SETTINGS.flameReach > 1 ? r * Game.SETTINGS.flameReach : r;
+  }
+  const bodyRing = (b) => b && b.alive && b.u.range > 0 ? { x: b.x, y: b.y, r: bodyReach(b), side: b.side } : null;
+  // a squad while deploying (Game.squadReach: its skills, Eagle eye, the map's cut and Test Grid's +2 m, flame
+  // cones), where this screen shows it: yours where it stands or is being dragged to, theirs as you can know it
+  // (where you last saw it, the skills you have seen)
+  function squadRing(side, sq) {
+    if (!sq || Game.isRider(sq)) return null;
+    const mine = side === me, p = !mine ? Game.seenAt(m, sq) : drag && drag.moved && drag.id === sq.id ? drag.over : sq;
+    const n = Game.footprint(m, sq.unit), w = Game.tileToWorld(p.col + (n - 1) / 2, p.row + (n - 1) / 2), r = Game.squadReach(m, side, sq, !mine);
+    return r > 0 ? { x: w.x, y: w.y, r, side } : null;
+  }
+  function towerRing(side) {
+    const t = m.towers && m.towers[side];
+    if (!t) return null;
+    const w = Game.tileToWorld(t.col, t.row);
+    return { x: w.x, y: w.y, r: Game.towerReach(m, side, side !== me), side };
   }
   // what's under the mouse: { x, y, r, side } in metres (its middle, its reach), or null. Only what this screen shows:
-  // the opponent's squads from earlier rounds while deploying (their base unit: skills bought stay theirs), no stealthed enemy in a fight
+  // the opponent's squads from earlier rounds while deploying, no stealthed enemy in a fight
   function hoverRange() {
     const t = hoverAny;
     if (!t || !m) return null;
@@ -9746,17 +9874,21 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
         const d = Math.hypot(b.x - w.x, b.y - w.y);
         if (d < bd) { bd = d; best = b; }
       }
-      return best && best.u.range > 0 ? { x: best.x, y: best.y, r: reachOf(best.u, false), side: best.side } : null;
+      return bodyRing(best);
     }
     if (phase !== 'deploy') return null;
-    for (const side of [me, foe()]) if (towerVisible(side) && Game.towerAt(m, side, t.col, t.row)) {
-      const tt = side === me || towerTypeVisible(side) ? Game.towerType(m, side) : Game.OUTPOST;
-      return { x: w.x, y: w.y, r: reachOf(tt.unit, true), side };
-    }
+    for (const side of [me, foe()]) if (towerVisible(side) && Game.towerAt(m, side, t.col, t.row)) return towerRing(side);
     const own = Game.squadAt(m, me, t.col, t.row);
-    if (own) return { x: w.x, y: w.y, r: reachOf(Game.unitFor(m, me, own.unit, own), true), side: me };
-    const en = m.armies[foe()].find(s => { const p = Game.seenAt(m, s); return !Game.hiddenFromFoe(m, s) && p.col === t.col && p.row === t.row && s.round < m.round; });
-    return en ? { x: w.x, y: w.y, r: reachOf(units[en.unit], true), side: foe() } : null;
+    if (own) return squadRing(me, Game.isRider(own) ? Game.carrierOf(m, me, own) || own : own);
+    const en = m.armies[foe()].find(s => { const p = Game.seenAt(m, s); return !Game.hiddenFromFoe(m, s) && !Game.isRider(s) && p.col === t.col && p.row === t.row && s.round < m.round; });
+    return en ? squadRing(foe(), en) : null;
+  }
+  // the ring of what was tapped: the squad last tapped while deploying (rangeOf), the body tapped in a fight (inspect)
+  function tapRange() {
+    if (!m) return null;
+    if (phase === 'battle' && bt) return inspect && !(inspect.hidden && inspect.side !== me) ? bodyRing(inspect) : null;
+    if (phase !== 'deploy' || !rangeOf) return null;
+    return squadRing(rangeOf.side, m.armies[rangeOf.side].find(s => s.id === rangeOf.id));
   }
   // ---------- intent: where a squad means to go (its movement target, not whom it attacks) ----------
   // While deploying: Game.intentPreview, for the squad last tapped (rangeOf, yours), the one you drag to another tile, or
@@ -9908,16 +10040,21 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     const svg = $('marks');
     if (!svg) return;
     const h = hoverRange(), tiles = mode === 'tutorial' ? tutTiles() : [], ring = mode === 'tutorial' ? tutTarget() : null;
+    let tr = tapRange();
+    if (tr && h && Math.abs(tr.x - h.x) < 1e-6 && Math.abs(tr.y - h.y) < 1e-6 && Math.abs(tr.r - h.r) < 1e-6) tr = null; // the same ring once
     const cinematic = board3d && board3d.camera.level() >= 3; // the ground view shows no markers
     let html = '';
     if (!cinematic && m && (phase === 'deploy' || phase === 'battle')) html += intentMarks(wrapMap());
-    if ((h || tiles.length || ring) && !cinematic) {
+    if ((h || tr || tiles.length || ring) && !cinematic) {
       const at = wrapMap(), pt = (x, y) => at(x, y).map(v => v.toFixed(1)).join(',');
       for (const t of tiles) {
         const c = Game.tileToWorld(t.col, t.row), d = Game.TILE / 2 - 0.4;
         html += `<polygon class="tut-tile" points="${pt(c.x - d, c.y - d)} ${pt(c.x + d, c.y - d)} ${pt(c.x + d, c.y + d)} ${pt(c.x - d, c.y + d)}"/>`;
       }
-      if (h) html += `<polygon class="range" style="stroke:${teamCol(h.side)}" points="${Array.from({ length: 72 }, (_, k) => { const a = k / 72 * Math.PI * 2; return pt(h.x + Math.cos(a) * h.r, h.y + Math.sin(a) * h.r); }).join(' ')}"/>`;
+      // a range ring: the same dotted circle for the mouse and a tap, on either board (projected point by point, so it lies on the 3D ground)
+      const rangeSvg = (c, cls) => `<polygon class="${cls}" style="stroke:${teamCol(c.side)}" points="${Array.from({ length: 72 }, (_, k) => { const a = k / 72 * Math.PI * 2; return pt(c.x + Math.cos(a) * c.r, c.y + Math.sin(a) * c.r); }).join(' ')}"/>`;
+      if (h) html += rangeSvg(h, 'range');
+      if (tr) html += rangeSvg(tr, 'range tapped');
       const el = $('coach-ring');
       if (ring) { const c = Game.tileToWorld(ring.col, ring.row), [x, y] = at(c.x, c.y); el.style.left = x + 'px'; el.style.top = y + 'px'; }
     }
@@ -9925,6 +10062,35 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     coachClear(mode === 'tutorial' && tutStep() === 'flank' && !cinematic ? tiles : []);
     if (marksHtml !== html) { marksHtml = html; svg.innerHTML = html; } // only on a change, so the blinking runs on
     unplaceMarks(cinematic);
+    upgradeMarks(cinematic);
+  }
+  // a gold up-arrow over each of your squads that can be upgraded now (Game.upgradeOffer): pulsing for a level-up
+  // the gold covers, quiet for an affordable skill. Kept by squad id and only moved, so the pulse runs on while the 3D
+  // camera turns. In the tutorial only level-ups get one.
+  function upgradeMarks(cinematic) {
+    const box = $('upx');
+    if (!box) return;
+    const list = phase === 'deploy' && m && editable() && !cinematic && !choosingPack() && !choosingTower() && !placingTower()
+      ? m.armies[me].map(sq => ({ sq, kind: Game.upgradeOffer(m, me, sq) })).filter(x => x.kind === 'level' || (x.kind === 'skill' && mode !== 'tutorial')) : [];
+    const keep = new Set();
+    if (list.length) {
+      const at = wrapMap(), T = Game.TILE;
+      for (const { sq, kind } of list) {
+        const p = drag && drag.moved && drag.id === sq.id ? drag.over : sq;
+        const n = Game.footprint(m, sq.unit), c = Game.tileToWorld(p.col + (n - 1) / 2, p.row + (n - 1) / 2), h = T * n / 2;
+        // the middle of its tile's (or block's) edge that is highest on the screen, whichever way the board is turned
+        let top = null;
+        for (const [dx, dy] of [[0, -1], [0, 1], [-1, 0], [1, 0]]) { const q = at(c.x + dx * h, c.y + dy * h); if (!top || q[1] < top[1]) top = q; }
+        let el = box.querySelector(`span[data-id="${sq.id}"]`);
+        if (!el) { el = document.createElement('span'); el.dataset.id = sq.id; el.innerHTML = UP_SVG; box.appendChild(el); }
+        if (el.className !== kind) el.className = kind;
+        const l = top[0].toFixed(1) + 'px', tp = top[1].toFixed(1) + 'px';
+        if (el.style.left !== l) el.style.left = l;
+        if (el.style.top !== tp) el.style.top = tp;
+        keep.add(String(sq.id));
+      }
+    }
+    for (const el of [...box.children]) if (!keep.has(el.dataset.id)) el.remove();
   }
   // the X at the top right corner of each squad you placed this round (taps on the squad open its sheet instead).
   // The buttons are kept by squad id and only moved, so one being tapped is never swapped out under the finger.
@@ -10554,6 +10720,9 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
         if (Game.isReady(m, sq)) btns.push(m.gold[me] >= cost && editable()
           ? `<button class="btn primary" data-act="lvl-up">Level up · ${cost} gold</button>`
           : `<button class="btn primary" disabled>${editable() ? `Need ${cost} gold` : `Level up · ${cost} gold`}</button>`);
+        // Level all: two or more level-ups of this unit's squads the gold covers (Game.levelAllPlan: most XP first)
+        const all = editable() ? Game.levelAllPlan(m, me, i) : [], readyAll = m.armies[me].filter(s => s.unit === i && Game.isReady(m, s)).length;
+        if (all.length >= 2) btns.push(`<button class="btn${Game.isReady(m, sq) ? '' : ' primary'}" data-act="lvl-all" title="Levels your ${esc(base.name)} squads that are ready, most XP first, while the gold lasts">Level all ${all.length}${all.length < readyAll ? ` of ${readyAll}` : ''} · ${all.length * cost} gold</button>`);
         if (boughtNow && editable()) btns.push(`<button class="btn" data-act="lvl-undo">Undo level-up</button>`);
         if (editable() && Game.canGiveCharm(m, me)) btns.push(`<button class="btn" data-act="charm-give" style="border-color:${CHARM_COL}">Give Charisma</button>`);
         if (editable() && sq.charmGiven === m.round && sq.charm === 1) btns.push(`<button class="btn" data-act="charm-undo">Take back Charisma</button>`);
@@ -10627,6 +10796,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     const after = () => { changed(); reopen(); };
     bindBuildingBlock(root, after);
     on('lvl-up', () => { if (editable() && Game.levelUp(m, me, sq.id)) after(); });
+    on('lvl-all', () => { if (editable() && Game.levelAll(m, me, i)) after(); }); // one levelUp a squad: a guest's side reaches the host like single level-ups
     on('lvl-undo', () => { if (editable() && Game.undoLevel(m, me, sq.id)) after(); });
     on('charm-give', () => { if (editable() && Game.giveCharm(m, me, sq.id)) after(); });
     on('charm-undo', () => { if (editable() && Game.undoCharm(m, me, sq.id)) after(); });

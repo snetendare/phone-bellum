@@ -22,7 +22,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   await sleep(500);
   await guest.click('#ready'); await host.click('#ready');
   await guest.waitForFunction(() => document.getElementById('phase').textContent === 'Battle', null, { timeout: 5000 });
-  await host.click('#skip'); await guest.click('#skip'); await sleep(400);
+  await host.click('#skip').then(() => host.click('#skip')); await guest.click('#skip').then(() => guest.click('#skip')); await sleep(400);
   const hp = (pg) => pg.evaluate(() => document.getElementById('hp-you').textContent + '/' + document.getElementById('hp-foe').textContent);
   console.log('mp hp host', await hp(host), 'guest', await hp(guest));
   console.log('host result:', (await host.locator('#overlay').innerText()).replace(/\s+/g, ' ').slice(0, 100));

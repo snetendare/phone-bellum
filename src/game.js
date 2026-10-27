@@ -1541,13 +1541,7 @@ const Game = (() => {
     }
     const t = m.towers && m.towers[side];
     if (t && towerUp(m, side)) {
-      let tu = mageTowerUnit(m, side, towerType(m, side).unit);
-      if (towerType(m, side).id === 'slime') tu = { ...slimeTowerUnit(m, side, tu), slime: true };
-      if (towerSkillOn(m, side, 'bastion')) tu = { ...tu, shield: (tu.shield || 0) + BWALL.shield };
-      if (towerSkill2On(m, side, 'bastion')) tu = { ...tu, bonusArmor: (tu.bonusArmor || 0) + BWALL.towerArmor };
-      if (eagle) tu = { ...tu, range: tu.range + TOWER_SKILL.eagleRange, aps: tu.aps * (1 + TOWER_SKILL.eagleAps / 100) };
-      if (airship) tu = { ...tu, hit: tu.hit + AIRSHIP.sniperHit };
-      if (fx.awake && towerType(m, side).awake) tu = { ...tu, ...towerType(m, side).awake, idle: false, awake: true }; // Core Awoken: the Mecha Tower drives
+      const tu = fightTowerUnit(m, side, fx);
       const w = tileToWorld(t.col, t.row), tb = E.buildSquad(tu, side, w.x, w.y, -2, TILE, idx);
       if (altarBought(m, side, 'walls')) for (const x of tb) x.walls = [ICE.wallHits, ICE.wallHits, ICE.wallHits, ICE.wallHits];
       idx += tb.length; out.push(...tb);
@@ -1659,17 +1653,51 @@ const Game = (() => {
     return out;
   }
 
-  // the range a squad fights at (its skills, Eagle eye, the map's range cut), as bodiesFor works it out.
-  // pub: as the opponent can know it (skills and a tower skill bought this round left out)
-  function squadRange(m, side, sq, pub) {
-    const ui = sq.unit, base = m.units[ui];
-    let u = unitFor(m, side, ui, sq);
-    if (pub) { const defs = E.SLOTS.filter(k => skillVisible(m, side, ui, k)).map(k => skillDef(m, ui, k)); u = withFactionTrait(defs.length ? E.applySkills(base, defs, m.units) : E.withTraits(base), base.faction); }
+  // a side's tower as it fights (bodiesFor): its mage general, the slime skills, its tower skills, Core Awoken
+  function fightTowerUnit(m, side, fx) {
+    const tt = towerType(m, side);
+    let tu = mageTowerUnit(m, side, tt.unit);
+    if (tt.id === 'slime') tu = { ...slimeTowerUnit(m, side, tu), slime: true };
+    if (towerSkillOn(m, side, 'bastion')) tu = { ...tu, shield: (tu.shield || 0) + BWALL.shield };
+    if (towerSkill2On(m, side, 'bastion')) tu = { ...tu, bonusArmor: (tu.bonusArmor || 0) + BWALL.towerArmor };
+    if (towerSkillOn(m, side, 'sniper')) tu = { ...tu, range: tu.range + TOWER_SKILL.eagleRange, aps: tu.aps * (1 + TOWER_SKILL.eagleAps / 100) }; // Eagle eye
+    if (towerSkill2On(m, side, 'sniper')) tu = { ...tu, hit: tu.hit + AIRSHIP.sniperHit };
+    if ((fx || buildingEffects(m, side)).awake && tt.awake) tu = { ...tu, ...tt.awake, idle: false, awake: true }; // Core Awoken: the Mecha Tower drives
+    return tu;
+  }
+
+  // how far an attack reaches from where the unit stands: its range, and a flame cone's longer reach (as in the engine)
+  const reachOfUnit = (u, r) => u.flame > 0 && SETTINGS.flameReach > 1 ? r * SETTINGS.flameReach : r;
+  // the unit a squad fights as and its range (its skills, Eagle eye, the map's range cut and tuning, a devtest aura),
+  // as bodiesFor works it out. pub: as the opponent can know it (its skills and a tower skill bought this round left
+  // out, an awakening from an earlier round in, a disguise as what it pretends to be)
+  function squadRangeOf(m, side, sq, pub) {
+    const ui = pub ? shownUnit(m, 1 - side, side, sq.unit) : sq.unit, base = m.units[ui];
+    let u;
+    if (pub) {
+      const ak = ui === sq.unit && seenAwake(m, sq) ? awakenSlot(m, ui) : -1;
+      const defs = E.SLOTS.filter(k => skillVisible(m, side, ui, k) || k === ak).map(k => skillDef(m, ui, k)).filter(Boolean);
+      u = withFactionTrait(defs.length ? E.applySkills(base, defs, m.units) : E.withTraits(base), base.faction);
+    } else u = unitFor(m, side, ui, sq);
     let r = u.range;
     if (u.name === 'Sniper' && towerSkillOn(m, side, 'sniper') && (!pub || towerSkillVisible(m, side))) r += TOWER_SKILL.eagleRange;
     const mp = mapOf(m);
     if (mp && mp.rangeCut && r > mp.rangeKeep) r = Math.max(mp.rangeKeep, r * (1 - mp.rangeCut / 100));
-    return mapTuned(mp, { name: u.name, range: r, speed: u.speed }).range;
+    r = mapTuned(mp, { name: u.name, range: r, speed: u.speed }).range;
+    const aura = !pub && isDev(m) ? auraFor(m, side, sq.col, sq.row) : null;
+    if (aura && +aura.range) r *= 1 + aura.range / 100;
+    return { u, r };
+  }
+  const squadRange = (m, side, sq, pub) => squadRangeOf(m, side, sq, pub).r;
+  // how far a squad reaches when its fight begins: its range, and a flame cone's longer reach. The one measure for the
+  // ring a squad shows (under the mouse and when tapped); a fight's bodies: Engine's own (Flow state stacks and all)
+  function squadReach(m, side, sq, pub) { const { u, r } = squadRangeOf(m, side, sq, pub); return reachOfUnit(u, r); }
+  // how far a side's tower reaches. pub: as the opponent can know it while deploying (its type once shown, else the outpost)
+  function towerReach(m, side, pub) {
+    if (pub && !towerTypeShown(m, 1 - side, true, side)) return reachOfUnit(OUTPOST.unit, OUTPOST.unit.range);
+    let u = pub ? towerType(m, side).unit : fightTowerUnit(m, side);
+    if (pub && towerSkillOn(m, side, 'sniper') && towerSkillVisible(m, side)) u = { ...u, range: u.range + TOWER_SKILL.eagleRange };
+    return reachOfUnit(u, u.range);
   }
 
   // ---------- Yot-Yot's imps ----------
@@ -2039,6 +2067,39 @@ const Game = (() => {
     sq.level--;
     m.gold[side] += levelCost(m.units[sq.unit]);
     return true;
+  }
+
+  // Level all: every squad of unit ui that is ready to level up, until the gold runs out. A pass levels each ready
+  // squad once, the one with the most XP first (then the oldest); a squad with XP for another level gets it on the
+  // next pass. levelAllPlan: the squad ids in that order (an id twice for two levels), without changing anything;
+  // levelAll does them, one levelUp each (so a guest's side reaches the host like single level-ups), and returns how many.
+  function levelAllPlan(m, side, ui) {
+    const u = m.units[ui], out = [];
+    if (!u) return out;
+    const cost = levelCost(u), sim = m.armies[side].filter(s => s.unit === ui).map(s => ({ s, level: s.level }));
+    let gold = m.gold[side];
+    for (;;) {
+      const ready = sim.filter(x => isReady(m, { ...x.s, level: x.level })).sort((a, b) => b.s.xp - a.s.xp || a.s.id - b.s.id);
+      if (!ready.length) return out;
+      for (const x of ready) {
+        if (gold < cost) return out;
+        gold -= cost; x.level++; out.push(x.s.id);
+      }
+    }
+  }
+  function levelAll(m, side, ui) {
+    let n = 0;
+    for (const id of levelAllPlan(m, side, ui)) if (levelUp(m, side, id)) n++;
+    return n;
+  }
+  // what a player can buy for one of their squads right now (the board's upgrade marks): 'level' when it is ready to
+  // level up and the gold is there, 'skill' when a skill of its unit (or its awakening) is affordable, else ''
+  function upgradeOffer(m, side, sq) {
+    if (!sq || isRider(sq)) return '';
+    if (isReady(m, sq) && m.gold[side] >= levelCost(m.units[sq.unit])) return 'level';
+    if (E.SLOTS.some(k => !isInnate(m, sq.unit, k) && canBuySkill(m, side, sq.unit, k))) return 'skill';
+    if (awakenSlot(m, sq.unit) >= 0 && canAwaken(m, side, sq.id)) return 'skill';
+    return '';
   }
 
   // AI levels up at fight time, using only what it knew at the start of the round.
@@ -2602,7 +2663,7 @@ const Game = (() => {
   const api = {
     TIER_DMG, bankBusy, seenAt, charShown, towerTypeShown, altarShown, elfOwnShown, shroomShown, removingShroom, movedId, canMove, moveSquad, undoMove,
     COLS, ROWS, TILE, ZONE, START_HP, START_GOLD, INCOME, incomeFor, LOSER_BONUS, SQUAD_COST, SETTINGS, XP_STEPS, xpNeeded, unitCostOf,
-    levelCost, isReady, levelUp, undoLevel, seenLevel, aiLevel, AI, CONFIG,
+    levelCost, isReady, levelUp, undoLevel, levelAllPlan, levelAll, upgradeOffer, seenLevel, aiLevel, AI, CONFIG,
     deploysAllowed, deploysLeft, deployedThisRound, canBuyDeploy, buyDeploy, refundDeploy,
     PACKAGE, allPackages, packOf, needsPack, freeLeft, choosePack, ensurePack,
     unlockCost, tierOf, startLevel, shopCost, mapFreeOf, mapFreeLeft, isUnlocked, unlockVisible, unlock, undoUnlock,
@@ -2620,7 +2681,7 @@ const Game = (() => {
     TREASURY, TREASURY_SQ, treasuryOn, treasuryUp, treasurySpot, treasuryAt, treasuryUnit,
     FACTION_MODE, FACTIONS: () => FACTIONS, setFactions, factionInfo, factionsOf, factionTowers, towerTypeById, ownsUnit, withFactionTrait, factionSet,
     createDraft, draftTurn, draftOpen, draftAct, draftDone, draftPossible, aiDraftChoice,
-    zoneRows, inZone, tileToWorld, squadRange, createMatch, place, unplace, bodiesFor, startBattle, battleSetup, seenBy, intentPreview, INTENT, AWARENESS, resolve, aiDeploy, occupied,
+    zoneRows, inZone, tileToWorld, squadRange, squadReach, towerReach, fightTowerUnit, createMatch, place, unplace, bodiesFor, startBattle, battleSetup, seenBy, intentPreview, INTENT, AWARENESS, resolve, aiDeploy, occupied,
     GRID, useGrid,
     DEV, CAT_NAMES, LESSER_SQ, WALL_SQ, setDevData, devBuilding, devPower, devSpell, isDev, towerUp, pickCat, devOffer, pickNow, needsDevPick, devPick, undoDevPick, devShown,
     lessersOf, placedLessers, unplacedLesser, lesserAt, lesserSpotOk, placeLesser, lesserUnit, auraFor, modUnit, powersOf, devGold, devDeploys,

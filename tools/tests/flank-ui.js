@@ -12,7 +12,7 @@ const ctx2d = require('./board2d'); // these checks are for the 2D board
   await p.click('.ucard >> nth=1'); await tap(5, 13);
   for (let round = 1; round <= 2; round++) {
     if (round === 2) { await p.click('.ucard >> nth=0'); await tap(0, 3); console.log('round 2 flank tap ->', await squads()); }
-    await p.click('#fight'); await p.waitForTimeout(400); await p.click('#skip'); await p.waitForTimeout(300); await p.click('#next'); await p.waitForTimeout(300);
+    await p.click('#fight'); await p.waitForTimeout(400); await p.click('#skip').then(() => p.click('#skip')); await p.waitForTimeout(300); await p.click('#next'); await p.waitForTimeout(300);
   }
   console.log('round 3 hint:', await p.locator('#panel .hint').first().textContent());
   await p.click('.ucard >> nth=0'); await tap(0, 13); await p.waitForTimeout(200); console.log('own edge tile ->', await squads()); await tap(0, 6); await p.waitForTimeout(200); await tap(11, 1); await p.screenshot({ path: 'flank-enemyzone.png' }); await p.waitForTimeout(200);

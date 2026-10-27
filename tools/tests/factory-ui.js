@@ -38,7 +38,7 @@ const R = require('../../src/default-roster.json'), F = require('../../src/facti
       await p.waitForTimeout(board === '3d' ? 6000 : 4000);
       if (mid) await mid();
       await p.screenshot({ path: shot });
-      await p.click('#skip').catch(() => {});
+      await p.click('#skip').then(() => p.click('#skip')).catch(() => {});
       await p.waitForTimeout(800);
       const res = (await p.locator('#overlay').innerText().catch(() => '')).replace(/\s+/g, ' ');
       const next = p.locator('#overlay button').first(); if (await next.count()) await next.click().catch(() => {});

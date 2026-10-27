@@ -73,7 +73,7 @@ const dock = require('./dock'); // the phone layout's deploy drawer
   // a fight draws every frame, and the meter sums it up afterwards
   await p.click('#fight'); await p.waitForTimeout(2200);
   check(await fps() > 0, `fight: ${await fps()} frames in the last second`);
-  if (await p.locator('#skip').count()) await p.click('#skip');
+  if (await p.locator('#skip').count()) await p.click('#skip').then(() => p.click('#skip'));
   await p.waitForFunction(() => /last fight/.test(document.querySelector('.meter3d').textContent), null, { timeout: 15000 }).catch(() => {});
   const sum = (await p.locator('.meter3d').textContent()).split('\n')[1] || '';
   check(/^last fight \d+ fps · slowest second \d+ · \d+ bodies$/.test(sum), `after the fight: ${sum}`);

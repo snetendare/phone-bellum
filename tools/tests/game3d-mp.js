@@ -68,7 +68,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   check(true, 'the fight starts on both phones');
   await sleep(1500);
   await host.screenshot({ path: 'game3d-mp-2-host-fight.png' });
-  await host.click('#skip').catch(() => {}); await guest.click('#skip').catch(() => {});
+  await host.click('#skip').then(() => host.click('#skip')).catch(() => {}); await guest.click('#skip').then(() => guest.click('#skip')).catch(() => {});
   for (const p of [host, guest]) await p.waitForFunction(() => document.getElementById('phase').textContent !== 'Battle', null, { timeout: 60000 });
   await sleep(800);
   const after = (p) => p.evaluate(() => { const { m } = window.__pb(); return { round: m.round, hp: m.hp, gold: m.gold, armies: m.armies.map(a => a.map(q => [q.id, q.unit, q.col, q.row, q.xp || 0, q.level || 0])) }; });

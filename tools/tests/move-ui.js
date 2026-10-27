@@ -20,7 +20,7 @@ const ctx2d = require('./board2d'); // these checks are for the 2D board
   await dragT(a.col, a.row, 9, 14);
   s = await st(); console.log('dragged ->', JSON.stringify(s.army.map(q => [q.col, q.row])), 'gold', s.gold);
   await p.locator('#board').screenshot({ path: 'move-1-dragged.png' });
-  await p.click('#fight'); await p.waitForTimeout(400); await p.click('#skip'); await p.waitForTimeout(300); await p.click('#next'); await p.waitForTimeout(300);
+  await p.click('#fight'); await p.waitForTimeout(400); await p.click('#skip').then(() => p.click('#skip')); await p.waitForTimeout(300); await p.click('#next'); await p.waitForTimeout(300);
   s = await st(); console.log('round 2 hp', s.hp, 'gold', s.gold);
   await p.click('#move-btn'); await p.waitForTimeout(100); console.log('hint:', await hint());
   await tap(9, 14); console.log('hint:', await hint());
