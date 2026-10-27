@@ -1874,7 +1874,7 @@ const Engine = (() => {
             else neutralDamage(b, p.dps * Math.min(dt, p.t)); // poison from a map tile: nobody's damage
             p.t -= dt;
           }
-          b.poison = b.poison.filter(p => p.t > 0);
+          if (b.poison) b.poison = b.poison.filter(p => p.t > 0); // a body won over by a Gentleman just now lost its poison
           if (!b.alive) continue;
         }
         if (b.bleed) { // every BLEED.pulse s: BLEED.dmg, doubled for each stack after the first, and a share of max health at 4 and 5 stacks
