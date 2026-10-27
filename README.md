@@ -30,6 +30,9 @@ Frozen Peak's hailstorm and altar of ice are switched off for now (`iceOff` on t
 - The host's phone runs the match and decides each round. The battle engine only uses arithmetic that gives identical results in every browser, so both phones play back the same fight.
 - Each round has a deploy countdown: 60 seconds in round 1, 30 after that. The fight starts when it runs out, or earlier when both players tap Ready.
 - If either phone drops the page, opening the link again rejoins the match. The host's match is saved on the host's device.
+- **Fight speed:** both phones play a fight at the same speed. A player's pick (1×, 1.5×, 2×) is what they want, and the fight plays at the slower of the two picks: a faster pick is a request ("Opponent wants 2×", that button glowing on the other phone) that takes hold on both once the other picks it too; a slower pick slows both at once. Picks carry over to the next fights of the match; a new match starts at 1×. Against the computer the buttons just set the speed. (`liveSpeed`, `playSpeed`, `showSpeed` in `src/site-template.html`.)
+- **Switching away mid-fight** (another tab or app) pauses the replay where it is; coming back goes on from there. In a live match the other player waits on the results screen meanwhile (the next round needs both), so after 45 s away (`LIVE_AWAY`) the rest of the fight plays out to its result, as before. `tools/tests/playback-mp.js` checks both.
+- **Fair turns:** the engine gives neither side the edge in a tie. The side whose bodies act first alternates every tick; both sides move from where everyone stood when the tick began; a body killed this tick still attacks; heals, lifesteal, Glut, range cuts, knockback, stealth reveals and a fallen tower's penalty take hold once the tick's attacks have landed; side 1's squads stand mirrored (front row first); each side draws dodges and random heals from its own stream. Mirrored armies come out as exact mirrors (`node tools/tests/fairness.js`); before, the host won about 60% of mirrored duels that weren't draws.
 
 ## Editing
 
@@ -132,6 +135,7 @@ Factions go in `src/factions.json`, then run `node tools/counter-table.js` and r
 - Unit names must be unique across all factions.
 - The draft order, picks per player and the map are in `FACTION_MODE` in `src/game.js`. A ban phase later is a matter of adding `{ "who": "A", "act": "ban" }` steps to its order.
 - `node tools/tests/factions.js` checks the draft and faction matches headlessly with six throwaway test factions.
+- `node tools/tests/tutorial.js` checks headlessly that tutorial rounds 1 and 2 come out the same wherever the player places.
 - `node tools/tests/standard-pack.js` checks the Standard pack (units, leaders, packages, towers), the bank's one action a round (a loan or the Major investment) and Frozen Peak with its extras off, headlessly.
 
 ### Factions – devtest

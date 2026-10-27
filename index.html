@@ -460,6 +460,11 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
 .coach .btnrow:empty { display: none; }
 .coach-ring { position: absolute; z-index: 2; width: 56px; height: 56px; margin: -28px 0 0 -28px; border: 2px solid var(--gold); border-radius: 50%; pointer-events: none; animation: coach-ring 1.4s ease-out infinite; }
 .tut-glow { animation: tut-glow 1.4s ease-in-out infinite; }
+/* live fight speed (showSpeed): the opponent's request glows, ours waits with a dashed outline */
+.seg.speeds button.offer { color: var(--gold); box-shadow: inset 0 0 0 1px var(--gold); animation: tut-glow-in 1.4s ease-in-out infinite; }
+.seg.speeds button.asked { outline: 1px dashed var(--gold); outline-offset: -4px; }
+.speed-ask { display: block; margin-top: 6px; color: var(--gold); }
+.speed-ask[hidden] { display: none; }
 .marks .tut-tile { fill: rgba(92, 198, 223, 0.28); stroke: var(--you); stroke-width: 1.5; animation: tut-blink 1.1s ease-in-out infinite; }
 @keyframes tut-blink { 50% { opacity: 0.2; } }
 .ucard.tut-glow { animation-name: tut-glow-in; } /* the shop scrolls sideways and would clip a glow outside the card */
@@ -484,7 +489,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
 .marks .intent-hit { fill: none; stroke-width: 1.6; opacity: 0.9; }
 .marks .intent-n circle { fill: rgba(13, 19, 21, 0.85); stroke-width: 1.2; }
 .marks .intent-n text { fill: var(--ink); font: 700 10px/1 var(--font-body, sans-serif); text-anchor: middle; }
-@media (prefers-reduced-motion: reduce) { .coach, .coach-ring, .tut-glow, .marks .tut-tile { animation: none; } .tut-glow { box-shadow: inset 0 0 0 2px var(--gold); } }
+@media (prefers-reduced-motion: reduce) { .coach, .coach-ring, .tut-glow, .marks .tut-tile, .seg.speeds button.offer { animation: none; } .tut-glow { box-shadow: inset 0 0 0 2px var(--gold); } }
 </style>
 <script>
 // PC or phone: a fine pointer that can hover (a mouse) and room for the board and controls side by side
@@ -1350,15 +1355,16 @@ const Engine = (() => {
       shield: u.shield || 0, // hits left that the Shield skill blocks completely
       frenzy: 0, // hits landed so far (Frenzy skill)
       stunT: 0, lastAtk: 0, // seconds of stun left (chargeStun); fight time of its last attack (stealth returns)
-      spreadTo: u.spread ? spreadSpot(x, y, i, u.spread) : null, // Spread skill: where it runs to before anything else
+      spreadTo: u.spread ? spreadSpot(x, y, i, u.spread, side) : null, // Spread skill: where it runs to before anything else
       spreadT: null, // ...and the seconds it may spend getting there (set on its first step)
     };
   }
-  // Spread: a spot min..max metres from (x, y) in one of 12 directions, picked from the body's index (the same on every device)
+  // Spread: a spot min..max metres from (x, y) in one of 12 directions, picked from the body's index (the same on every device;
+  // side 1's mirrored, toward its own front, so both sides spread alike)
   const DIRS12 = [[1, 0], [0.866025, 0.5], [0.5, 0.866025], [0, 1], [-0.5, 0.866025], [-0.866025, 0.5], [-1, 0], [-0.866025, -0.5], [-0.5, -0.866025], [0, -1], [0.5, -0.866025], [0.866025, -0.5]];
-  function spreadSpot(x, y, i, [min, max]) {
+  function spreadSpot(x, y, i, [min, max], side) {
     const [dx, dy] = DIRS12[(i * 5) % 12], d = min + (max - min) * ((i * 7) % 12) / 11;
-    return { x: x + dx * d, y: y + dy * d };
+    return { x: x + dx * d, y: y + dy * d * (side === 1 ? -1 : 1) };
   }
 
   // Bodies of one squad placed around a point on the board (footprint about `size` metres)
@@ -1370,7 +1376,8 @@ const Engine = (() => {
     const out = [];
     for (let i = 0; i < n; i++) {
       const c = i % cols, r = Math.floor(i / cols);
-      out.push(newBody(u, side, cx + (c - (cols - 1) / 2) * sp, cy + (r - (rows - 1) / 2) * sp, startIndex + i, squad));
+      // rows from the side's own front back, so side 1's squad is side 0's mirrored (the same bodies in front)
+      out.push(newBody(u, side, cx + (c - (cols - 1) / 2) * sp, cy + (r - (rows - 1) / 2) * sp * (side === 1 ? -1 : 1), startIndex + i, squad));
     }
     return out;
   }
@@ -1443,6 +1450,7 @@ const Engine = (() => {
     const minSight = g.minSight == null ? MIN_SIGHT : g.minSight;
     const drift = g.drift == null ? DRIFT : g.drift;
     const cripple = [0, 0];      // seconds left of the tower-down penalty for each side
+    const downNow = [];          // sides whose tower fell this tick: crippled from the next one
     const towerDown = g.towerDown || TOWER_DOWN;
     // a body died: a fallen tower cripples its side; a body with deathBlast explodes (deathBlast % of its max health)
     const fell = (v) => {
@@ -1452,7 +1460,9 @@ const Engine = (() => {
         v.x = v.u.teleport.x; v.y = v.u.teleport.y;
         return;
       }
-      if (v.u.structure && !v.u.lesser) cripple[v.side] = towerDown.secs; // a lesser building (Factions devtest) doesn't cripple its side
+      // a lesser building (Factions devtest) doesn't cripple its side. The penalty starts with the next tick, so the
+      // other side's bodies still to act this tick don't get the better of it (see the end of step)
+      if (v.u.structure && !v.u.lesser) downNow.push(v.side);
       if (v.u.deathBlast > 0) {
         const dmg = v.u.hp * v.u.deathBlast / 100, rad = v.u.blastAt > 0 ? v.u.blastAt : BLAST_RADIUS;
         if (opts.record) shots.push([v.x, v.y, v.x, v.y, v.side, rad, 1, 0, 0]);
@@ -1483,7 +1493,7 @@ const Engine = (() => {
         const ku = { ...rest, hp: base.hp * ds.strength, hit: base.hit * ds.strength };
         for (let k = 0; k < ds.count; k++) {
           const [ox, oy] = SPAWN_SPOTS[k % SPAWN_SPOTS.length], fwd = v.side === 0 ? 1 : -1;
-          pendingKids.push(newBody(ku, v.side, v.x + ox * g.spacing * 0.7, v.y + oy * fwd * g.spacing * 0.7, spawnIdx++, -1));
+          pendingKids.push(newBody(ku, v.side, v.x + ox * g.spacing * 0.7, v.y + oy * fwd * g.spacing * 0.7, spawnNo[v.side]++, -1));
         }
       }
     };
@@ -1519,7 +1529,24 @@ const Engine = (() => {
     // how much of a heal a body gets: none while it bleeds from Too deep (bleedNoHeal), POISON_HEAL % while poisoned
     // (slime units drink poison, so they heal in full)
     const healK = (v) => v.bleed && v.bleed.noHeal ? 0 : v.poison && v.poison.length && !v.u.slime ? POISON_HEAL / 100 : 1;
-    function heal(v, amt) { if (amt > 0 && v.hp < v.u.hp) v.hp = Math.min(v.u.hp, v.hp + amt * healK(v)); }
+    // while a tick's attacks and shots land (healLater is a list), heals wait until they all have, so a heal isn't lost
+    // to full health or saves a body just because of who went first; a body that fell meanwhile gets none
+    let healLater = null;
+    function heal(v, amt) {
+      if (healLater) { if (amt > 0) healLater.push(v, amt * healK(v)); return; }
+      if (amt > 0 && v.hp < v.u.hp) v.hp = Math.min(v.u.hp, v.hp + amt * healK(v));
+    }
+    function healsLand() {
+      const list = healLater;
+      healLater = null;
+      for (let i = 0; i < eatLater.length; i += 2) if (hungry(eatLater[i])) eat(eatLater[i], eatLater[i + 1]); // the Obelisk's meals too
+      eatLater.length = 0;
+      for (const f of hitsLater) f(); // and range cuts and knockbacks
+      hitsLater.length = 0;
+      for (let i = 0; i < list.length; i += 2) { const v = list[i]; if (v.alive && v.hp < v.u.hp) v.hp = Math.min(v.u.hp, v.hp + list[i + 1]); }
+    }
+    // attack speed right now: a slow on it at the start of the tick's attacks (one landing during them counts from the next tick)
+    const atkMul = (b) => b.atkSlow ? 1 - b.atkSlow / 100 : 1;
     // neutral structures (a map's elf tower): they belong to neither side, can't be hit, and shoot at
     // units of both sides in turn. Each is { u, x, y, friends: [bool, bool] }. A side it is friends with
     // (bribed) is never shot; it gets small splash heals instead (u.healHit, u.healAps, u.healSplash).
@@ -1573,9 +1600,13 @@ const Engine = (() => {
     // Where a unit stops walking: by default a little inside its range (g.stopPct: a share of range instead)
     const stopAt = (rg) => g.stopPct > 0 && g.stopPct < 1 ? rg * g.stopPct : rg - Math.min(APPROACH, rg * 0.25);
     // deterministic random numbers for healing targets (same on every device)
-    let seed = (A.length * 7919 + B.length * 104729 + 1) >>> 0;
-    const rnd = () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let x = Math.imul(seed ^ seed >>> 15, 1 | seed); x = x + Math.imul(x ^ x >>> 7, 61 | x) ^ x; return ((x ^ x >>> 14) >>> 0) / 4294967296; };
-    let spawnIdx = A.length + B.length;
+    // one stream per side (for the dodges of its bodies and its healers' picks), seeded alike, so neither side's luck
+    // depends on how often the other side drew first
+    const seeds = [0, 1].map(() => ((A.length + B.length) * 7919 + Math.abs(A.length - B.length) * 104729 + 1) >>> 0);
+    const rnd = (side) => { let seed = seeds[side] | 0; seed = seed + 0x6D2B79F5 | 0; seeds[side] = seed; let x = Math.imul(seed ^ seed >>> 15, 1 | seed); x = x + Math.imul(x ^ x >>> 7, 61 | x) ^ x; return ((x ^ x >>> 14) >>> 0) / 4294967296; };
+    // bodies made during the fight are numbered per side (their reload stagger and spawn spot come from it), so a side's
+    // spawns don't depend on whether the other side spawned first that tick
+    const spawnNo = [A.length + B.length, A.length + B.length];
     // g.bounds = { x0, x1, y0, y1 } (optional): the board; Spread never sends a body off it
     if (g.bounds) for (const b of all) if (b.spreadTo) {
       b.spreadTo.x = Math.max(g.bounds.x0, Math.min(g.bounds.x1, b.spreadTo.x));
@@ -1607,9 +1638,9 @@ const Engine = (() => {
       const ks = owner.u.killStack;
       if (ks && (!(ks.max > 0) || (owner.kills || 0) < ks.max)) owner.kills = (owner.kills || 0) + 1; // the Assassin's trait, Rampager
       if (owner.u.lone > 0 && isLone(x)) { owner.hunt = true; owner.huntT = 0; } // Shadow hunter: a lone kill starts the hunt again
-      if (owner.u.killSpawn > 0 && owner.alive) for (let k = 0; k < owner.u.killSpawn; k++) { // More where that came from: a new body of the killer
-        const [ox, oy] = SPAWN_SPOTS[(spawnIdx + k) % SPAWN_SPOTS.length], fwd = owner.side === 0 ? 1 : -1;
-        pendingKids.push(newBody(owner.u, owner.side, owner.x - ox * g.spacing * 0.6, owner.y - oy * fwd * g.spacing * 0.6, spawnIdx++, -1));
+      if (owner.u.killSpawn > 0 && (owner.alive || owner.diedTick === tick)) for (let k = 0; k < owner.u.killSpawn; k++) { // More where that came from: a new body of the killer (one that fell this tick too: its kill counts, see the attacks)
+        const [ox, oy] = SPAWN_SPOTS[(spawnNo[owner.side] + k) % SPAWN_SPOTS.length], fwd = owner.side === 0 ? 1 : -1;
+        pendingKids.push(newBody(owner.u, owner.side, owner.x - ox * g.spacing * 0.6, owner.y - oy * fwd * g.spacing * 0.6, spawnNo[owner.side]++, -1));
       }
     }
     // an enemy body that falls (not a structure, construct or building) is eaten by an Obelisk: the one that killed it,
@@ -1619,8 +1650,10 @@ const Engine = (() => {
       if (x.u.structure || x.u.construct || x.u.building || x.u.aloft) return;
       let by = owner && owner.side !== x.side && hungry(owner) ? owner : null, bd = EAT_R + 1e-9;
       if (!by) for (const b of sides[1 - x.side]) { if (!hungry(b)) continue; const d = dist(b, x); if (d <= bd) { bd = d; by = b; } }
-      if (by) eat(by, x);
+      if (by && healLater) eatLater.push(by, x); // during the attacks: once they have all landed, like heals (see healsLand)
+      else if (by) eat(by, x);
     }
+    const eatLater = [], hitsLater = [];
     // a stack of Glut: its health grows with its max health, so the stack heals it by what it adds
     function eat(b, x) {
       const gl = b.u.glut, n = b.glutN || 0;
@@ -1736,7 +1769,7 @@ const Engine = (() => {
       if (sheltered(v)) return; // Overwatch: safe inside its building
       const st = stats[owner.side];
       // Dodge: the whole hit misses (the same random numbers on every device)
-      if (v.u.dodge > 0 && rnd() * 100 < v.u.dodge) {
+      if (v.u.dodge > 0 && rnd(v.side) * 100 < v.u.dodge) {
         st.missed += hit;
         if (v.u.windWalk > 0 && !v.u.structure && !v.u.anchored) { // Wind walk: a dash straight back from where the hit came from
           let dx = v.x - fromX, dy = v.y - fromY, d = hyp(dx, dy);
@@ -1810,15 +1843,19 @@ const Engine = (() => {
         v.slowT = Math.max(v.slowT, owner.u.slowDur);
       }
       if (owner.u.frost) frostOn(owner, v);
+      // a range cut and a knockback that land during the attacks take hold once they all have (see healsLand), so the
+      // body hit still gets its own attack from where it stood, with its reach, this tick
       if (owner.u.shrinkM > 0) {
-        v.shrinkM = v.shrinkT > 0 ? Math.max(v.shrinkM, owner.u.shrinkM) : owner.u.shrinkM;
-        v.shrinkT = Math.max(v.shrinkT, owner.u.shrinkDur);
+        const sm = owner.u.shrinkM, sd = owner.u.shrinkDur;
+        const shrink = () => { v.shrinkM = v.shrinkT > 0 ? Math.max(v.shrinkM, sm) : sm; v.shrinkT = Math.max(v.shrinkT, sd); };
+        if (healLater) hitsLater.push(shrink); else shrink();
       }
       if (owner.u.knockback > 0 && knockOn && !v.u.structure && !v.u.anchored && !v.u.unstoppable) {
         // big hits on small bodies push the full distance; on big bodies barely at all
         const push = owner.u.knockback * Math.min(1, hit / v.u.hp);
         const dx = v.x - fromX, dy = v.y - fromY, d = hyp(dx, dy) || 1;
-        v.x += dx / d * push; v.y += dy / d * push;
+        const knock = () => { v.x += dx / d * push; v.y += dy / d * push; };
+        if (healLater) hitsLater.push(knock); else knock();
       }
     }
 
@@ -1917,7 +1954,7 @@ const Engine = (() => {
     }
     // Snow storm: every 1/aps s (slowed like its attacks), its hit and its frost to every enemy within storm.radius
     function stormStep(b) {
-      b.stormCd = (b.stormCd || 0) - dt * (b.slowT > 0 ? 1 - b.slowAtk / 100 : 1);
+      b.stormCd = (b.stormCd || 0) - dt * atkMul(b);
       if (b.stormCd > 1e-9) return;
       const r = b.u.storm.radius, hit = b.u.hit + (b.auraHit || 0);
       const caught = sides[1 - b.side].filter(f => f.alive && !f.u.aloft && !sheltered(f) && gap(f, b) <= r);
@@ -2032,13 +2069,15 @@ const Engine = (() => {
     function fire(b, targets, canCharge) {
       const charged = canCharge && b.u.charge > 1 && b.moved >= CHARGE_RUN;
       b.moved = 0;
-      if (!b.u.aloft && !b.quiet) b.hidden = false; // attacking gives a stealth unit away (it hides again after STEALTH_BACK s without attacking); an airship stays out of reach; Silent blade's first attack doesn't
+      // attacking gives a stealth unit away (it hides again after STEALTH_BACK s without attacking); an airship stays out of
+      // reach; Silent blade's first attack doesn't. During the tick's attacks the enemy sees it from the next tick (healsLand)
+      if (b.hidden && !b.u.aloft && !b.quiet) { if (healLater) hitsLater.push(() => { b.hidden = false; }); else b.hidden = false; }
       b.lastAtk = t; b.revealed = true; // a disguised body (b.mask) shows what it is from its first attack
       if (b.u.healPct > 0) {
         // heal a random wounded ally (not itself)
         const hurtAllies = sides[b.side].filter(a => a.alive && a !== b && a.hp < a.u.hp);
         if (hurtAllies.length) {
-          const a = hurtAllies[Math.min(hurtAllies.length - 1, Math.floor(rnd() * hurtAllies.length))];
+          const a = hurtAllies[Math.min(hurtAllies.length - 1, Math.floor(rnd(b.side) * hurtAllies.length))];
           heal(a, b.u.hit * b.u.healPct / 100 * healMul);
           if (opts.record) shots.push([b.x, b.y, a.x, a.y, b.side, 0, 0, 1]);
         }
@@ -2126,7 +2165,7 @@ const Engine = (() => {
       if (!b.tcd) b.tcd = [];
       let valid = null;
       for (let k = 1; k < b.u.turrets; k++) {
-        b.tcd[k] = (b.tcd[k] || 0) - dt * (b.slowT > 0 ? 1 - b.slowAtk / 100 : 1);
+        b.tcd[k] = (b.tcd[k] || 0) - dt * atkMul(b);
         if (b.tcd[k] > 0) continue;
         if (!valid) valid = validTargets(b);
         const taken = turretTaken(b, k), tgt = valid.find(f => !taken.includes(f));
@@ -2153,8 +2192,9 @@ const Engine = (() => {
       if (opts.record) shots.push([b.x, b.y, tgt.x, tgt.y, b.side, 0, 1, 0, 0]);
       b.rammed = tgt;
       hurt(b, tgt, b.u.hit, b.x, b.y);
-      if (b.alive) { b.hp = 0; b.alive = false; b.diedTick = tick; fell(b); }
+      if (b.alive) rammed.push(b); // it falls once every body has moved, so an enemy ram reaching it this tick still finds it
     }
+    const rammed = [];
 
     // share of its move speed a body walks at right now (slowed, or crippled by its fallen tower)
     const moveMul = (b) => (b.slowT > 0 ? 1 - b.slowMove / 100 : 1) * (cripple[b.side] > 0 ? 1 - towerDown.move / 100 : 1);
@@ -2241,7 +2281,7 @@ const Engine = (() => {
         const off = (k - (n - 1) / 2) * BUILD_GAP;
         let x = b.x - dy * off, y = b.y + dx * off;
         if (g.bounds) { x = Math.max(g.bounds.x0, Math.min(g.bounds.x1, x)); y = Math.max(g.bounds.y0, Math.min(g.bounds.y1, y)); }
-        const kid = newBody(cu, b.side, x, y, spawnIdx++, -1);
+        const kid = newBody(cu, b.side, x, y, spawnNo[b.side]++, -1);
         kid.credit = b; // its XP and damage count for its builder's squad
         pendingKids.push(kid);
       }
@@ -2407,8 +2447,20 @@ const Engine = (() => {
           if (b.lock && b.lock.alive) b.lock.claimDmg += b.u.hit;
         }
       }
-      // movement + targeting
-      for (const b of all) {
+      // Fair turns: the side whose bodies go first alternates every tick (side 0 on odd ticks, side 1 on even ones), so
+      // neither player wins a tie just by being processed first (the host used to: its rams, charges, stuns and slows
+      // always landed before the guest's). See tools/tests/fairness.js.
+      const first = tick % 2 ? 0 : 1;
+      const turnOrder = () => sides[first].concat(sides[1 - first]);
+      // movement + targeting, both sides from where everyone stood when the tick began: the side that goes second sees
+      // the first side's bodies where they were (their steps are put back on after), so nobody reacts to where the
+      // other side has only just stepped (an archer stopping a step early, a sniper setting up first)
+      const order = turnOrder(), nFirst = sides[first].length;
+      let stepsOut = false;
+      for (const a of sides[first]) { a.mvX = a.x; a.mvY = a.y; }
+      for (let i = 0; i < order.length; i++) {
+        if (i === nFirst) { stepsOut = true; for (const a of sides[first]) { const x = a.x, y = a.y; a.x = a.mvX; a.y = a.mvY; a.mvX = x - a.mvX; a.mvY = y - a.mvY; } }
+        const b = order[i];
         if (!b.alive || b.delay > 0) continue;
         b.dashing = false;
         if (b.u.roar && !b.roared) roar(b); // Berserkers roar as they start
@@ -2567,6 +2619,9 @@ const Engine = (() => {
           }
         }
       }
+      if (stepsOut) for (const a of sides[first]) { a.x += a.mvX; a.y += a.mvY; } // the first side's steps (on top of any knockback since)
+      for (const b of rammed) if (b.alive) { b.hp = 0; b.alive = false; b.diedTick = tick; fell(b); } // rams that hit fall
+      rammed.length = 0;
       // Flow state: a body that walked since its last attack has lost its stacks
       for (const b of all) if (b.flow > 0 && b.moved > 1e-6) b.flow = 0;
       // auras (Reforge): other units of the side near one get its bonus to every hit and to attack speed this tick
@@ -2692,9 +2747,7 @@ const Engine = (() => {
         }
       }
       // ongoing effects: poison, bleed, regeneration, shortsight wearing off, spawns
-      const n0 = all.length;
-      for (let i = 0; i < n0; i++) {
-        const b = all[i];
+      for (const b of turnOrder()) { // (the sides take turns going first here too; bodies spawned below start next tick)
         if (!b.alive) continue;
         if (b.poison && b.poison.length) {
           for (const p of b.poison) {
@@ -2755,7 +2808,7 @@ const Engine = (() => {
             list.forEach((pu, k) => {
               let x = b.x + (k - (list.length - 1) / 2) * gap;
               if (g.bounds) x = Math.max(g.bounds.x0, Math.min(g.bounds.x1, x));
-              const kid = newBody(pu, b.side, x, y, spawnIdx++, -1);
+              const kid = newBody(pu, b.side, x, y, spawnNo[b.side]++, -1);
               kid.credit = b;
               pendingKids.push(kid);
             });
@@ -2799,7 +2852,7 @@ const Engine = (() => {
             for (let k = 0; k < n; k++) {
               // spots are relative to the side's forward direction, so both sides spawn in front of the summoner
               const [ox, oy] = SPAWN_SPOTS[(b.kids.length + k) % SPAWN_SPOTS.length], fwd = b.side === 0 ? 1 : -1;
-              const kid = newBody(b.u.spawn.unit, b.side, b.x + ox * g.spacing * 0.7, b.y + oy * fwd * g.spacing * 0.7, spawnIdx++, -1);
+              const kid = newBody(b.u.spawn.unit, b.side, b.x + ox * g.spacing * 0.7, b.y + oy * fwd * g.spacing * 0.7, spawnNo[b.side]++, -1);
               b.kids.push(kid); all.push(kid); sides[b.side].push(kid);
               stats[b.side].totalHp += kid.u.hp;
             }
@@ -2807,13 +2860,18 @@ const Engine = (() => {
         }
       }
       // attacks. A body killed earlier in this same tick still gets its attack, so neither side
-      // wins a trade just by being processed first (side 0 used to win one-shot duels like Sniper vs Sniper)
-      for (const b of all) {
+      // wins a trade just by being processed first (side 0 used to win one-shot duels like Sniper vs Sniper); the sides
+      // take turns going first (see first). Likewise a stun or slow that lands during the attacks only counts from the
+      // next tick (atkStun, atkSlow: as they were when the attacks began), and heals wait for the end (healLater)
+      const attackers = turnOrder();
+      for (const b of attackers) { b.atkStun = b.stunT > 0; b.atkSlow = b.slowT > 0 ? b.slowAtk : 0; }
+      healLater = [];
+      for (const b of attackers) {
         if ((!b.alive && b.diedTick !== tick) || b.delay > 0 || b.u.ram || b.boarded || b.turning) continue;
         if (b.u.roll > 0 || b.follow || b.buildT > 0 || b.siteJob || b.u.idle || b.u.bot) continue; // rollers hit by rolling; healbots, bots and buildings never attack; builders at work don't
-        b.cd -= dt * (b.slowT > 0 ? 1 - b.slowAtk / 100 : 1); // slowed units reload slower
+        b.cd -= dt * atkMul(b); // slowed units reload slower
         if (b.firing >= 0) b.firing += dt;
-        if (b.stunT > 0 || b.channel) continue; // stunned, or summoning
+        if (b.atkStun || b.channel) continue; // stunned, or summoning
         if (b.flurryLeft > 0) { if (b.alive) flurryStep(b); else b.flurryLeft = 0; continue; } // Death flurry: the rest of its blows
         if (b.u.spear && b.alive) forgeSpear(b); // Titanium spears: forged and thrown apart from its own attack
         if (b.u.storm && b.alive) stormStep(b); // Snow storm: apart from its own attack
@@ -3004,6 +3062,7 @@ const Engine = (() => {
         }
         projectiles = next;
       }
+      healsLand(); // the heals of the attacks and shots above
       // bodies won over by a Gentleman switch sides; they start fresh (no target, no burst, no effects from before)
       for (const v of turning) {
         const from = sides[v.side];
@@ -3041,6 +3100,8 @@ const Engine = (() => {
         for (const x of grp) if (x.alive) { s += x.hp; mx += x.u.hp; }
         if (mx > 0) for (const x of grp) if (x.alive) x.hp = x.u.hp * s / mx;
       }
+      for (const sd of downNow) cripple[sd] = towerDown.secs;
+      downNow.length = 0;
       t += dt;
       return true;
     }
@@ -7208,13 +7269,23 @@ const Render2D = (cv, view) => {
   const foe = () => 1 - me;
   let m = null;             // match state (on the guest: a copy kept in step by the host)
   let phase = 'start';      // start | lobby | draft | deploy | battle | result | end
-  try { if (/[?&]test\b/.test(location.search)) window.__pb = () => ({ m, me, board3d, board, bt }); } catch (e) {} // read-only peek for UI tests
+  try { if (/[?&]test\b/.test(location.search)) window.__pb = () => ({ m, me, board3d, board, bt, phase, liveSpeed: liveSpeed.slice(), playSpeed: playSpeed(), away }); } catch (e) {} // read-only peek for UI tests
   let selected = null;      // unit index chosen in the shop
   let rangeOf = null;       // { side, id }: the squad last tapped on the board; its range shows as a dotted ring
   let inspect = null, inspectHtml = ''; // a fight: the body tapped (its card shows, see inspectCard), and what the card shows now
   let bt = null;            // battle being played back
   let battlePre = null;     // match as it stood when the running battle began (for the HUD)
   let speed = 1, lastTs = 0, acc = 0, raf = 0;
+  // Fight speed. Against the computer the 1× / 1.5× / 2× buttons just set `speed`. In a live match both phones play at
+  // the same speed: each player's pick is what they want (liveSpeed[side]) and the fight plays at the slower of the two
+  // (playSpeed). So a faster pick is a request: the other phone shows it ("Opponent wants 2×", that button glowing) and it
+  // takes hold on both once they pick it too; a slower pick slows both phones at once. Picks carry over to the next fights
+  // of the match (each phone sends its pick as a fight starts, so a reconnect can't leave them apart).
+  const SPEEDS = [1, 1.5, 2];
+  let liveSpeed = [1, 1];
+  const playSpeed = () => solo() ? speed : Math.min(liveSpeed[0], liveSpeed[1]);
+  const LIVE_AWAY = 45;                 // seconds a live fight waits for a page in the background (see awayStart)
+  const away = { at: 0, timer: 0 };     // when this page went into the background mid-fight, and the timer for LIVE_AWAY
   let fx = [];
   // battle cam: the last CAM.secs of a high-stakes fight play a little slower, zoomed in on the action.
   // High stakes: both sides still have units fighting then, and the fight ends the match, or a player went into it under
@@ -8381,16 +8452,41 @@ const Render2D = (cv, view) => {
   function panelBattle() {
     $('panel').innerHTML = `
       <div class="bar">
-        <div class="seg" role="group" aria-label="Playback speed">
-          ${[1, 1.5, 2].map(s => `<button data-s="${s}" aria-pressed="${speed === s}">${s}×</button>`).join('')}
+        <div class="seg speeds" role="group" aria-label="Playback speed">
+          ${SPEEDS.map(s => `<button data-s="${s}" aria-pressed="${playSpeed() === s}">${s}×</button>`).join('')}
         </div>
         <button class="btn small" id="skip">Skip to result</button>
-      </div>`;
-    $('panel').querySelectorAll('[data-s]').forEach(b => b.addEventListener('click', () => {
-      speed = +b.dataset.s;
-      $('panel').querySelectorAll('[data-s]').forEach(x => x.setAttribute('aria-pressed', String(+x.dataset.s === speed)));
-    }));
+      </div>
+      <span class="hint speed-ask" id="speed-ask" aria-live="polite" hidden></span>`;
+    $('panel').querySelectorAll('[data-s]').forEach(b => b.addEventListener('click', () => pickSpeed(+b.dataset.s)));
+    showSpeed();
     $('skip').addEventListener('click', () => { while (bt.step()) {} finishBattle(); });
+  }
+
+  // a speed button: the speed (vs the computer), or this player's pick in a live match (see liveSpeed)
+  function pickSpeed(s) {
+    if (!SPEEDS.includes(s)) return;
+    if (solo()) speed = s;
+    else { liveSpeed[me] = s; send({ t: 'speed', s }); }
+    showSpeed();
+  }
+  // the opponent's pick came in (or ours changed): the buttons show the speed playing, a request still open glows
+  function showSpeed() {
+    const bs = phase === 'battle' ? $('panel').querySelectorAll('[data-s]') : [];
+    if (!bs.length) return;
+    const cur = playSpeed(), mine = solo() ? cur : liveSpeed[me], theirs = solo() ? cur : liveSpeed[foe()];
+    bs.forEach(x => {
+      const s = +x.dataset.s;
+      x.setAttribute('aria-pressed', String(s === cur));
+      x.classList.toggle('asked', s === mine && s !== cur);   // ours, waiting for them
+      x.classList.toggle('offer', s === theirs && s !== cur); // theirs, waiting for us
+    });
+    const el = $('speed-ask');
+    if (!el) return;
+    const them = foeName();
+    el.textContent = mine > cur ? `You asked for ${mine}×. Waiting for ${them === 'Opponent' ? 'your opponent' : them} to agree.`
+      : theirs > cur ? `${them} wants ${theirs}×. Tap ${theirs}× to agree.` : '';
+    el.hidden = !el.textContent;
   }
 
   function panelInfo(text, btnLabel, onClick, extra = '') {
@@ -9391,6 +9487,8 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     closeSheet(); overlay(null); hud(); panelBattle(); render();
     cancelAnimationFrame(raf);
     if (reduced) { while (bt.step()) {} finishBattle(); return; }
+    if (!solo()) send({ t: 'speed', s: liveSpeed[me] }); // our pick, so both phones start the fight at the same speed
+    if (document.hidden) awayStart(); // (it began while this page is in the background: it waits for it, see awayStart)
     raf = requestAnimationFrame(loop);
   }
 
@@ -9432,13 +9530,14 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     }
     if (cam && cam.on) { cam.k = Math.min(1, cam.k + dtReal / CAM.ease); camFollow(dtReal); }
     const boost = (bt.time() > 20 ? 2 : 1) * (cam && cam.on ? 1 - (1 - CAM.slow) * cam.k : 1);
-    acc += dtReal * speed * boost;
+    const sp = playSpeed();
+    acc += dtReal * sp * boost;
     while (acc >= Game.SETTINGS.dt) {
       acc -= Game.SETTINGS.dt;
       if (!bt.step()) break;
       absorb();
     }
-    for (const e of fx) e.age += dtReal * speed * boost;
+    for (const e of fx) e.age += dtReal * sp * boost;
     fx = fx.filter(e => e.age < e.life);
     $('clock').textContent = `${bt.time().toFixed(1)} s${cam && cam.on ? ' · final seconds' : boost > 1 ? ' · speeding up' : ''}`;
     render();
@@ -9449,6 +9548,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   function finishBattle() {
     if (phase !== 'battle') return;
     cancelAnimationFrame(raf);
+    clearTimeout(away.timer); away.at = 0;
     fx = []; cam = null;
     const res = bt.result();
     $('clock').textContent = `${res.time.toFixed(1)} s`;
@@ -10810,6 +10910,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     try { if (net.conn) net.conn.close(); } catch (e) {}
     try { if (net.peer) net.peer.destroy(); } catch (e) {}
     net.peer = null; net.conn = null; net.connected = false; net.code = ''; net.tries = 0;
+    liveSpeed = [1, 1]; // a new live match starts at 1x
     // the address bar, not qs: joinMatch puts join= back in it after the first leaveNet
     const u = new URLSearchParams(location.search);
     if (u.has('join')) { u.delete('join'); qs.delete('join'); history.replaceState(null, '', location.pathname + (u.toString() ? '?' + u : '')); }
@@ -10838,6 +10939,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
         if (net.conn && net.conn !== c) { const old = net.conn; net.conn = null; try { old.close(); } catch (e) {} }
         net.conn = c; net.connected = true;
         onFriendConnected();
+        send({ t: 'speed', s: liveSpeed[0] });
       });
       c.on('data', (d) => { if (c === net.conn) hostRecv(d); });
       c.on('close', () => { if (c === net.conn) { net.connected = false; onFriendLost(); } });
@@ -10994,7 +11096,8 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     } else if (d.t === 'dpick') {
       if (phase !== 'draft' || !draft || d.step !== draft.step || !Game.draftAct(draft, 1, String(d.id))) return;
       draftChanged();
-    } else if (d.t === 'forfeit') foeForfeited();
+    } else if (d.t === 'speed') { if (SPEEDS.includes(d.s)) { liveSpeed[1] = d.s; showSpeed(); } }
+    else if (d.t === 'forfeit') foeForfeited();
   }
 
   function applySide(d) {
@@ -11216,6 +11319,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       opened = true; clearTimeout(giveUp);
       if (net.conn && net.conn !== c) { try { net.conn.close(); } catch (e) {} }
       net.conn = c; net.connected = true; net.tries = 0;
+      send({ t: 'speed', s: liveSpeed[1] });
       netStatus();
       if (phase === 'deploy') { sendSide(); panelDeploy(); }
       if (phase === 'lobby' && !m) guestWaiting('Connected. Waiting for your friend to start the match');
@@ -11325,7 +11429,8 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       if (d.rematch) rematch[0] = !!d.rematch[0];
       if (phase === 'deploy') panelDeploy();
       else if (phase === 'end') showResult(lastSummary);
-    } else if (d.t === 'forfeit') foeForfeited();
+    } else if (d.t === 'speed') { if (SPEEDS.includes(d.s)) { liveSpeed[0] = d.s; showSpeed(); } }
+    else if (d.t === 'forfeit') foeForfeited();
   }
 
   function overlayMsg(head, text) {
@@ -11333,11 +11438,31 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     $('ok').addEventListener('click', showStart);
   }
 
+  // The fight in the background: a hidden page gets no animation frames, so the replay simply stops where it is (the
+  // playback clock only moves in loop(), and each frame counts at most 0.1 s) and goes on from there when the page is
+  // back. Nothing in the match waits on it but the next round: in a live match the host starts that once both phones
+  // have seen the result (Next round on both, or NEXT_SECONDS on the results screen), so the other player waits on the
+  // results screen meanwhile and no deploy clock runs. So that they don't wait for long, a live fight left in the
+  // background for LIVE_AWAY seconds plays out to its result: at once on return, or then if the browser still runs timers.
+  function awayStart() {
+    if (away.at) return;
+    away.at = now();
+    clearTimeout(away.timer);
+    if (!solo()) away.timer = setTimeout(() => { if (document.hidden && phase === 'battle' && bt) { while (bt.step()) {} finishBattle(); } }, LIVE_AWAY * 1000);
+  }
+
   // Phones pause pages in the background; reconnect when the page comes back
   document.addEventListener('visibilitychange', () => {
-    // a hidden page gets no animation frames, so the fight replay would stall until it comes back and the other
-    // player would wait: play the rest of it out at once (the result is already known)
-    if (document.hidden && phase === 'battle' && bt) { while (bt.step()) {} finishBattle(); }
+    // the fight replay pauses with the page and goes on from where it was when it is back (see awayStart)
+    if (phase === 'battle' && bt) {
+      if (document.hidden) { cancelAnimationFrame(raf); awayStart(); }
+      else {
+        const long = !solo() && away.at && now() - away.at >= LIVE_AWAY * 1000;
+        clearTimeout(away.timer); away.at = 0;
+        if (long) { while (bt.step()) {} finishBattle(); }
+        else { lastTs = 0; cancelAnimationFrame(raf); raf = requestAnimationFrame(loop); } // lastTs: no catching up on the time away
+      }
+    }
     if (document.hidden || !net.alive || !net.peer) return;
     if (net.peer.disconnected && !net.peer.destroyed) net.peer.reconnect();
     if (mode === 'guest' && !net.connected) retryConnect(300);
