@@ -666,7 +666,7 @@
           }
         }
       ],
-      "text": "Gain stealth"
+      "text": "Hidden until it attacks."
     },
     {
       "id": "spiritWalk",
@@ -1507,7 +1507,7 @@
       ],
       "trait": {
         "name": "Steel armor",
-        "text": "Has 6 armor."
+        "text": "6 armor."
       },
       "skillOr": [
         [
@@ -2143,7 +2143,7 @@
       "bleedEvery": 2,
       "trait": {
         "name": "Apply bleed",
-        "text": "Every second knife it lands on the same target gives it a stack of bleed: it loses 3 health twice a second for 2.5 s. Each new stack starts the 2.5 s again and doubles the damage, up to 5 stacks (48 each time); at 4 stacks it also loses 2% of its max health a second, and at 5 stacks 5%. Bleed goes past armor."
+        "text": "Every 2nd knife on a target adds bleed. Stacks to 5, past armor."
       },
       "skills": [
         "aeroblades",
@@ -2203,7 +2203,11 @@
       "waterHeal": 1,
       "trait": {
         "name": "Waterhealing",
-        "text": "Allies caught in the splash of its attacks heal for its hit. With no enemy in reach and an ally hurt, it shoots at the most wounded ally in reach instead."
+        "text": "Its splash heals allies for its hit."
+      },
+      "trait2": {
+        "name": "Medic",
+        "text": "With no enemy in reach, shoots wounded allies."
       },
       "skills": [
         "waterbomb",
@@ -2266,11 +2270,19 @@
       "bleedHit": 2,
       "trait": {
         "name": "Stealthed",
-        "text": "Can't be targeted until it attacks, and hides again after 1.5 s without attacking. It dashes to a target within 10 m without being seen, and deals 50% less damage to buildings."
+        "text": "Hidden until it attacks. Hides again after 1.5 s."
       },
       "trait2": {
+        "name": "Shadow dash",
+        "text": "Dashes unseen to targets within 10 m."
+      },
+      "trait3": {
         "name": "Bloodrush",
-        "text": "Every hit it lands gives the target 2 stacks of bleed."
+        "text": "Hits add 2 bleed."
+      },
+      "trait4": {
+        "name": "Light blade",
+        "text": "−50% damage to buildings."
       },
       "skills": [
         "silentBlade",
@@ -2339,7 +2351,7 @@
       },
       "trait": {
         "name": "Frost",
-        "text": "Its beam puts Frost on the target: a stack on the first hit and one more every 2.5 s the beam stays on it, up to 3 stacks: 20% / 30% / 40% slower moves and attacks. The stacks melt 2 s after the frost stops."
+        "text": "Beam stacks Frost: up to 40% slower. Melts 2 s after."
       },
       "skills": [
         "deepfreeze",
@@ -2419,13 +2431,13 @@
         "aps": 0
       },
       "lifesteal": 50,
-      "trait2": {
-        "name": "Devour",
-        "text": "Heals for 50% of the damage it deals."
-      },
       "trait": {
         "name": "Glut",
-        "text": "Eats the enemies it kills (not buildings or constructs): each one is a stack of Glut, up to 3 a round and 15 in all, kept for the whole match. Each stack gives +6% health and +6% hit, and it grows."
+        "text": "Eats kills: +6% health, +6% hit each. Max 3 a round, 15 in all."
+      },
+      "trait2": {
+        "name": "Devour",
+        "text": "Heals 50% of damage dealt."
       },
       "skills": [
         "gluttony",

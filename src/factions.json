@@ -7,7 +7,7 @@
       "theme": "Rock elementals with clockwork hearts. They move smooth as magic; the machines they build rattle and smoke.",
       "tower": {
         "name": "Mecha Tower",
-        "text": "A squat clockwork tower that doesn't shoot itself: its drone circles it and shoots any enemy it sees, a Keep's shots at a faster rate. Every round it can send out minebots or repairbots for that round's fight.",
+        "text": "A drone guards it. Sends minebots or repairbots each round.",
         "unit": {
           "hp": 700,
           "hit": 0,
@@ -49,7 +49,7 @@
             "id": "minebots",
             "name": "Minebots",
             "cost": 100,
-            "text": "This round the tower sends out 2 minebots (100 health each). Each walks out into no man's land and plants 3 mines. Only enemies set them off: 200 damage to every enemy within 7 m.",
+            "text": "2 minebots plant mines in no man's land: 200 damage each.",
             "bots": {
               "count": 2,
               "unit": {
@@ -77,7 +77,7 @@
             "id": "repairbots",
             "name": "Repairbots",
             "cost": 50,
-            "text": "This round the tower sends out 2 repairbots (100 health each). Each goes to your nearest damaged or unfinished building (the tower too) and works on it like one builder.",
+            "text": "2 repairbots fix and finish your buildings.",
             "bots": {
               "count": 2,
               "unit": {
@@ -317,7 +317,7 @@
         {
           "id": "brine-well",
           "name": "Brine Well",
-          "text": "Heals the most wounded of your units in range. If it falls you lose 2 health.",
+          "text": "Heals your most wounded unit. Falls: −2 health.",
           "unit": {
             "hp": 450,
             "mend": 30,
@@ -331,7 +331,7 @@
         {
           "id": "spawning-pool",
           "name": "Spawning Pool",
-          "text": "Releases 2 Drowned Swarm every 7 s (up to 6 at once). If it falls you lose 50 gold.",
+          "text": "Spawns 2 Drowned Swarm every 7 s. Falls: −50 gold.",
           "unit": {
             "hp": 500
           },
@@ -390,7 +390,7 @@
       {
         "id": "watchtower",
         "name": "Watchtower",
-        "text": "A long-range turret. If it falls you lose 1 health.",
+        "text": "Long-range turret. Falls: −1 health.",
         "unit": {
           "hp": 400,
           "hit": 25,
@@ -405,7 +405,7 @@
       {
         "id": "war-banner",
         "name": "War banner",
-        "text": "Squads that start next to it deal 15% more damage. If it falls you lose 2 health.",
+        "text": "Nearby squads +15% damage. Falls: −2 health.",
         "unit": {
           "hp": 300
         },
@@ -420,7 +420,7 @@
       {
         "id": "trading-post",
         "name": "Trading post",
-        "text": "+75 gold every round. If it falls you lose 100 gold.",
+        "text": "+75 gold a round. Falls: −100 gold.",
         "unit": {
           "hp": 350
         },
@@ -454,7 +454,7 @@
       {
         "id": "stonemasons",
         "name": "Stonemasons",
-        "text": "Your buildings and tower get +40% health, and you can raise palisades.",
+        "text": "Buildings and tower +40% health. Unlocks palisades.",
         "buildingHp": 40,
         "spell": "palisade"
       },
@@ -470,7 +470,7 @@
     {
       "id": "fire-pot",
       "name": "Fire pot",
-      "text": "3 s into the fight, 160 damage to every enemy within 7 m of the tile.",
+      "text": "160 damage within 7 m, 3 s into the fight.",
       "cost": 75,
       "kind": "strike",
       "at": 3,
@@ -481,7 +481,7 @@
     {
       "id": "palisade",
       "name": "Palisade",
-      "text": "A wooden wall with 700 health, for 2 fights.",
+      "text": "A 700-health wall for 2 fights.",
       "cost": 50,
       "kind": "wall",
       "hp": 700,
@@ -491,7 +491,7 @@
     {
       "id": "healing-spring",
       "name": "Healing spring",
-      "text": "Your units on these 2×2 tiles heal 25 health a second.",
+      "text": "Heals your units 25 a second.",
       "cost": 50,
       "kind": "zone",
       "effect": "mend",
@@ -502,7 +502,7 @@
     {
       "id": "riptide-pool",
       "name": "Riptide pool",
-      "text": "Enemies on these 2×2 tiles move 45% slower.",
+      "text": "Enemies here move 45% slower.",
       "cost": 50,
       "kind": "zone",
       "effect": "mud",
@@ -609,7 +609,7 @@
       "rebuild": 50,
       "levelCost": 100,
       "color": "#B07A3C",
-      "text": "A small, smoking workshop. Your nearest Cog Builder builds it during fights; once built, buy one of its constructs each round.",
+      "text": "Builders build it. Then buy a construct each round.",
       "skills": [
         {
           "id": "fighter",
@@ -700,7 +700,7 @@
       "selfBuild": 0.2,
       "rebuild": 50,
       "color": "#9C8B6E",
-      "text": "A stone ring with the Cog Spire in its middle, standing where four tiles meet. Your nearest free Cog Builder builds it during fights (with none free it builds itself, five times slower); once built, buy one of its blessings each round.",
+      "text": "Builders build it. Then buy a blessing each round.",
       "awake": {
         "speed": 2.5,
         "hit": 38,
@@ -715,7 +715,7 @@
           "id": "blessing",
           "name": "Blessing of the Cycle",
           "cost": 200,
-          "text": "This round all your constructs (turrets, healbots, buildings and what they make) get +25% construct speed, +25% health, +15% move speed, +15% fire rate and regain 2% of their health every second.",
+          "text": "Constructs this round: +25% health, faster, regenerate.",
           "bless": {
             "build": 25,
             "hp": 25,
@@ -729,7 +729,7 @@
           "name": "Cogbot Defensive Force",
           "cost": 500,
           "time": 4,
-          "text": "Four seconds into this round's fight the altar makes 2 Cogbot Fighters and 2 Cogbot Machinegunners.",
+          "text": "Makes 4 cogbots 4 s into the fight.",
           "make": [
             [
               "factory",
@@ -747,7 +747,7 @@
           "id": "awoken",
           "name": "Core Awoken",
           "cost": 800,
-          "text": "This round your construct buildings become units when the fight starts: the Factory rolls out on caterpillar tracks with a big tank gun, the altar rises on four spider legs and its Cog Spire fires 6 beams like a Sun Priest, your turrets get wheels: they keep away from enemies at 4 m/s while lobbing mortar shells at the enemy's back line, and the Mecha Tower drives on wheels at 5 m/s, keeping away from enemies while it lobs mortar shells at their back line (its drone keeps circling it).",
+          "text": "Your buildings and turrets come alive and fight this round.",
           "awake": {
             "built": {
               "speed": 4,

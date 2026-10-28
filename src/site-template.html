@@ -350,6 +350,9 @@ html.dock .bar > .task .task-x { width: 28px; height: 28px; }
 html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
 .task .task-x { flex: none; width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel); font-size: 16px; line-height: 1; display: grid; place-items: center; }
 /* tutorial: the coach line over the board, a ring on what it talks about, and a glow on the next thing to tap */
+.board-banner { position: absolute; left: 0; right: 0; top: 42%; z-index: 4; pointer-events: none; text-align: center; padding: 14px 8px; background: linear-gradient(90deg, transparent, rgba(13, 19, 21, 0.88) 18%, rgba(13, 19, 21, 0.88) 82%, transparent); border-top: 1px solid var(--gold); border-bottom: 1px solid var(--gold); color: var(--gold); font-size: 26px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; animation: banner-in 3.2s ease both; }
+.board-banner small { display: block; margin-top: 4px; font-size: 13px; font-weight: 600; letter-spacing: 0.02em; text-transform: none; color: var(--text, #e8e6df); }
+@keyframes banner-in { 0% { opacity: 0; transform: scale(1.15); } 12% { opacity: 1; transform: scale(1); } 80% { opacity: 1; } 100% { opacity: 0; } }
 .coach { position: absolute; top: 8px; left: 8px; right: 8px; z-index: 3; display: grid; gap: 8px; padding: 10px 12px; border: 1px solid var(--gold); border-radius: 8px; background: rgba(13, 19, 21, 0.92); font-size: 14px; line-height: 1.4; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5); animation: coach-in 0.25s ease both; }
 .coach p { margin: 0; padding-right: 26px; }
 .coach-x { position: absolute; top: 6px; right: 6px; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--muted); font-size: 14px; line-height: 1; }
@@ -417,6 +420,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
     <div class="coach-ring" id="coach-ring" hidden></div>
     <svg class="marks" id="marks" aria-hidden="true"></svg>
     <div class="unx" id="unx"></div>
+    <div class="board-banner" id="banner" aria-live="polite" hidden></div>
   </div>
 
   <div class="panel" id="panel"></div>
@@ -446,35 +450,35 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
   Game.setDevData(FDATA); // the Factions devtest: buildings, Powers, spells
   Game.setBuildings(FDATA.buildings || []); // the factions' buildings (the Mechites' Factory)
   const ROLES = {
-    'Goblin Swarm': 'Fast melee swarm. Soaks shots and overwhelms single-target units.',
-    'Skeleton Archers': 'Cheap ranged squad that deals steady damage from behind.',
-    'Ember Imps': 'Short-range brawlers whose small splash eats swarms up close.',
-    'Fire Mage': 'A lone caster whose medium-range splash clears clumps.',
-    'Sniper': 'Huge single shots from very far away. Sets up before it fires. Wasted on swarms.',
-    'Brute': 'Armored melee bruiser landing quick, heavy blows on one target at a time.',
-    'Leaf Wizard': 'Nimble caster that shoots a quick stream of sharp leaves. Awakened, it becomes a leaf-mech that spins its blades through crowds and fires missiles.',
-    'Earth Wizard': 'Slow, crushing boulders that roll through every enemy in their path.',
-    'Flame Wizard': 'A slow fortress that sprays fire across everything in front of it.',
-    'Steel Wizard': 'Armored heavy caster that hammers everything in reach.',
-    'Shiv': 'A small band of knife throwers. Every second knife on the same target opens a wound that bleeds harder with each one. Melts big targets over time.',
-    'Water Mage': 'Lobs slow water bombs that splash its enemies and heal its allies caught in them. With nobody to hit, it heals its own side.',
-    'Slime Wizard': 'Lobs huge, slow globs of slime that splash over a wide area. Poison heals it and speeds it up.',
-    'Ether Golem': 'A walking wall. Heavy armor shrugs off small hits while it holds its lane.',
-    'Slimeshots': 'A pack of slime spitters lobbing small splashing globs. Shreds packed swarms. Poison heals them and speeds them up.',
-    'Ent': 'Slow tree guardians whose blows crush everything within 2 m of where they land. Awakened, each one explodes when it falls, hurting everything around it.',
-    'Assassin': 'A lone killer that stays hidden, dashes the last 10 m to its target and strikes for 500, leaving its target bleeding. Weak against buildings.',
-    'Sun Priest': 'Channels a beam that burns hotter the longer it holds one target. Melts giants.',
-    'Meteor Caller': 'Drops slow meteors from far behind the lines. Helpless once something reaches it.',
-    'War Mammoth': 'Charges straight through the enemy line, trampling every body in its path, then stands stunned for a moment before it turns to charge again.',
-    'Necromancer': 'Keeps raising skeletons to screen its army from big hits.',
-    'Wisps': 'Spirits firing slow, hard-hitting bolts from range. Fragile up close.',
-    'Crossbow Volley': 'Fires 4-bolt bursts down one line. Lined-up targets take every bolt.',
-    'Ballista': 'Slow piercing bolts from long range. Can’t hit anything close.',
-    'Boar Riders': 'Fast chargers whose first hit doubles and knocks small bodies back.',
-    'Rogue': 'A pair of hidden duelists whose first strike after a run lands four times as hard. They slip out of sight again when they stop attacking.',
-    'Spiders': 'A fast pack of biters. Each spider that falls can split into two smaller spiderlings.',
-    'Truespear': 'A sturdy spear thrower with long range. Each spear hits hard and also cuts away 8% of its target’s health, armor or not, so giants fall fastest.',
-    'Just a horse': 'Just a horse. Gallops past everything to ram the enemy tower, and might have something hiding inside: place a squad on its tile and it rides along unseen until the horse falls.',
+    'Goblin Swarm': 'Fast melee swarm. Overwhelms single targets.',
+    'Skeleton Archers': 'Cheap, steady ranged damage.',
+    'Ember Imps': 'Short-range splash brawlers.',
+    'Fire Mage': 'Medium-range splash caster.',
+    'Sniper': 'Huge shots from far away. Wasted on swarms.',
+    'Brute': 'Armored melee bruiser.',
+    'Leaf Wizard': 'Fast leaf shooter.',
+    'Earth Wizard': 'Rolls boulders through enemy lines.',
+    'Flame Wizard': 'Slow fortress spraying fire.',
+    'Steel Wizard': 'Armored heavy caster.',
+    'Shiv': 'Knife throwers. Bleeds big targets.',
+    'Water Mage': 'Splash that hurts enemies, heals allies.',
+    'Slime Wizard': 'Huge, slow splashing globs.',
+    'Ether Golem': 'A walking, armored wall.',
+    'Slimeshots': 'Splashing slime pack. Shreds swarms.',
+    'Ent': 'Slow trees that crush crowds.',
+    'Assassin': 'Hidden killer. Strikes once, hard.',
+    'Sun Priest': 'Beam that ramps up. Melts giants.',
+    'Meteor Caller': 'Long-range meteors. Helpless up close.',
+    'War Mammoth': 'Charges through lines, trampling.',
+    'Necromancer': 'Raises skeletons as a screen.',
+    'Wisps': 'Slow, hard ranged bolts. Fragile.',
+    'Crossbow Volley': 'Bolt bursts down one line.',
+    'Ballista': 'Long-range piercing bolts.',
+    'Boar Riders': 'Fast chargers that knock back.',
+    'Rogue': 'Hidden duelists. First strike ×4.',
+    'Spiders': 'Fast biters that split on death.',
+    'Truespear': 'Long-range spears that cut % health.',
+    'Just a horse': 'Rams the tower. Can carry a hidden squad.',
   };
   // ---------- role symbols: what a unit is, what it beats, one extra trait, and its range ----------
   // [is, beats, extra] for the built-in units. Units from Counter Lab get theirs from their stats (autoRole).
@@ -602,6 +606,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
   let rangeOf = null;       // { side, id }: the squad last tapped on the board; its range shows as a dotted ring
   let inspect = null, inspectHtml = ''; // a fight: the body tapped (its card shows, see inspectCard), and what the card shows now
   let bt = null;            // battle being played back
+  let lastPre = null;       // the last fight's starting board: what Look at board shows once the match is over
   let battlePre = null;     // match as it stood when the running battle began (for the HUD)
   let speed = 1, lastTs = 0, acc = 0, raf = 0;
   // Fight speed. Against the computer the 1× / 1.5× / 2× buttons just set `speed`. In a live match both phones play at
@@ -779,7 +784,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
           <button data-solo="0" aria-pressed="${!snd.solo}">Keep playing</button><button data-solo="1" aria-pressed="${snd.solo}">Pause them</button>
         </div>
       </div>
-      <p class="hint" style="margin:0">Keep playing: calls (Discord) and music go on under the game, but the silent switch mutes the game. Pause them: the game plays even on silent, and takes over from calls and other apps.</p>` : ''}
+      <p class="hint" style="margin:0">Pause them: plays even on silent.</p>` : ''}
       ${inMatch ? `<div class="bar">
         <span class="hint">Board</span>
         <div class="seg" role="group" aria-label="Board">
@@ -801,10 +806,10 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
       <button class="btn" id="to-menu">Main menu</button>` : ''}
       <div class="songs" role="group" aria-label="Menu music">
         <span class="hint">Menu music</span>
-        <button data-song="" aria-pressed="${!snd.song}">All menu songs<span>${PLAYLISTS.menu.map(songName).join(', ')}</span></button>
+        <button data-song="" aria-pressed="${!snd.song}">All menu songs</button>
         ${Object.keys(SONGS).map(id => `<button data-song="${id}" aria-pressed="${snd.song === id}">${esc(songName(id))}</button>`).join('')}
       </div>
-      <p class="hint" style="margin:0">Menu music plays on the main menu and in the lobby. While you deploy, ${PLAYLISTS.deploy.map(songName).join(', ')} plays, and during fights ${PLAYLISTS.battle.map(songName).join(', ')}. ${Object.keys(MAP_MUSIC).map(id => `${esc(Game.MAPS.find(mp => mp.id === id).name)} has its own: ${Object.values(MAP_MUSIC[id]).flat().map(songName).join(', ')}.`).join(' ')} Your settings are saved on this device.</p>`;
+      `;
     $('sheet-back').hidden = false;
     $('close').addEventListener('click', () => closeSheet(true));
     const showOn = () => $('sheet').querySelectorAll('[data-mute]').forEach(x => x.setAttribute('aria-pressed', String((x.dataset.mute === '0') === musicOn())));
@@ -969,7 +974,8 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
 
   // ---------- board: drawn by the renderer (src/render2d.js), which reads what to show from view() ----------
   const cv = $('board');
-  const boardView = () => ({ m, me, phase, units, mode, bt, battlePre, fx, selected, moving, drag, hoverTile, rangeOf,
+  const lookPre = () => (endLook && phase === 'end' && lastPre) || null; // Look at board after a match: the last fight's start
+  const boardView = () => ({ m: lookPre() || m, me, phase, units, mode, bt: lookPre() ? null : bt, battlePre, fx, selected, moving, drag, hoverTile, rangeOf,
     editable: editable(), placingUnit: placingUnit(), placingElf: placingElf(), placingTower: placingTower(), placingWall: placingWall(),
     dev: m && m.dev ? { bPlacing, castMode, guideMode, guideId: guideDrag ? guideDrag.id : guideMode !== 'pick' ? guideMode : null, guide: guideDrag ? guideDrag.pts : guideMode != null && guideMode !== 'pick' ? guideDraft : null } : null,
     battleCam: cam && cam.k > 0 ? { zoom: 1 + (CAM.zoom - 1) * cam.k, x: cam.x, y: cam.y, k: cam.k } : null,
@@ -1617,37 +1623,37 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
     const freeN = (i) => Game.freeLeft(m, me).filter(x => x === i).length;
     const canBuy = (i) => can && !choosingPack() && !choosingTower() && !devPicking() && !placingTower() && (freeN(i) > 0 || (!locked(i) && g >= price(i) && left > 0));
     let hint;
-    if (!can) hint = mode === 'claude' && claude.fightWaiting ? 'Waiting for Claude to finish its move. The fight starts as soon as it does.' : timeUp ? 'Time’s up. The fight is about to start.' : 'You’re ready. Tap Not ready to make changes.';
+    if (!can) hint = mode === 'claude' && claude.fightWaiting ? 'Waiting for Claude.' : timeUp ? 'Time’s up.' : 'You’re ready.';
     else {
       hint = selected !== null
         ? (canBuy(selected) ? `Tap a tile in your zone${Game.flankOpen(m) ? ' or a flank tile in theirs' : ''} to place ${esc(units[selected].name)}.` : left <= 0 ? 'No deployments left this round.' : `Not enough gold for ${esc(units[selected].name)}.`)
-        : (fresh ? 'Tap a squad to see its range. Drag one you placed this round to move it, or tap its ✕ to take it back.' : 'Pick a unit, then tap a tile in the bottom six rows.');
-      if (left <= 0 && selected === null) hint = Game.canBuyDeploy(m, me) || m.extraDeploys[me] < Game.CONFIG.maxExtraDeploys ? `No deployments left. Buy one more for ${Game.CONFIG.extraDeployCost} gold (once per round), or spend gold on upgrades.` : 'No deployments left this round. Spend gold on upgrades.';
-      if (readyN && selected === null) hint = `${readyN} squad${readyN === 1 ? ' is' : 's are'} ready to level up. Tap ${readyN === 1 ? 'it' : 'one'} to upgrade.`;
-      if (Game.charOf(m, me) === 'zoe' && selected === null && (m.buff && m.buff[me] || []).length) hint += ` Starred tiles are your buff tiles this round: ${(zb => `+${zb.dmg}% damage, +${zb.hp}% health${zb.aps ? ` and +${zb.aps}% attack speed` : ''}`)(Game.zoeBuff(m, me))} for a squad that starts the fight there. The bonus grows every round you use them.`;
+        : (fresh ? 'Drag a squad to move it.' : 'Pick a unit, then tap a tile in your zone.');
+      if (left <= 0 && selected === null) hint = Game.canBuyDeploy(m, me) || m.extraDeploys[me] < Game.CONFIG.maxExtraDeploys ? `No deployments left. +1 costs ${Game.CONFIG.extraDeployCost}.` : 'No deployments left.';
+      if (readyN && selected === null) hint = `${readyN} squad${readyN === 1 ? '' : 's'} ready to level up.`;
+      if (Game.charOf(m, me) === 'zoe' && selected === null && (m.buff && m.buff[me] || []).length) hint += ` Starred tiles: ${(zb => `+${zb.dmg}% damage, +${zb.hp}% health${zb.aps ? `, +${zb.aps}% attack speed` : ''}`)(Game.zoeBuff(m, me))}.`;
       if (Game.hailRound(m) && selected === null && !fresh) hint = `Hail this round: ${Game.ICE.hailDps} damage a second on hail tiles. ${MORE('map-more')}`;
       if (Game.altarRound(m) && selected === null && !fresh) hint = `${Game.hailRound(m) ? 'Hail this round, and the' : 'The'} altar of ice has risen: tap it for ice walls, a push of the hail or a Snowgre. ${MORE('map-more')}`;
-      if (m.round === Game.FLANK.round && selected === null && !fresh) hint = `Flanks are open: you can deploy on the blue edge columns in their half. ${MORE('flank-more')}`;
-      if (m.round === 1 && selected === null && m.armies[me].some(s => s.free)) hint = 'Your package squads are already on the board. Drag them where you want them, or tap the ✕ on one to take it back.';
+      if (m.round === Game.FLANK.round && selected === null && !fresh) hint = `Flanks are open: deploy on the blue edges of their half. ${MORE('flank-more')}`;
+      if (m.round === 1 && selected === null && m.armies[me].some(s => s.free)) hint = 'Your package squads are placed. Drag to move them.';
       if (charmMode && Game.canGiveCharm(m, me)) hint = 'Tap one of your squads to give it a stack of Charisma.';
-      if (moveMode) hint = moving == null ? `Tap one of your squads from an earlier round to move it (${Game.CONFIG.moveCost} gold, once per round).` : `Tap a free tile to move ${esc(units[m.armies[me].find(s => s.id === moving).unit].name)} there, or drag it.`;
+      if (moveMode) hint = moving == null ? `Tap an older squad to move it (${Game.CONFIG.moveCost} gold).` : `Tap a free tile to move ${esc(units[m.armies[me].find(s => s.id === moving).unit].name)} there.`;
       if (selected !== null && !moveMode && m.armies[me].some(q => Game.boardable(m, me, q.col, q.row, selected))) hint += ` Or tap your ${esc(units[m.armies[me].find(q => Game.boardable(m, me, q.col, q.row, selected)).unit].name)} (gold outline) to hide this squad inside it.`;
       if (selected !== null && Game.isCarrier(m, selected)) hint += ` It carries one squad of any other unit, hidden from your opponent: place one on its tile.`;
       const freeL = Game.freeLeft(m, me);
-      if (freeL.length && !placingTower() && selected === null) hint = `Place your free package squads: ${[...new Set(freeL)].map(ui => `${freeL.filter(x => x === ui).length}× ${esc(units[ui].name)}`).join(', ')}. They cost no gold and no deployments.`;
+      if (freeL.length && !placingTower() && selected === null) hint = `Place your free squads: ${[...new Set(freeL)].map(ui => `${freeL.filter(x => x === ui).length}× ${esc(units[ui].name)}`).join(', ')}.`;
       if (choosingPack()) hint = (() => { const mp = Game.mapOf(m); return mp ? `<b>${esc(mp.name)}</b> · ${esc(mp.short || '')} ${mp.plain ? '' : MORE('map-more')}` : 'Choose your start.'; })();
-      if (tskillOffer() && m.round === Game.TOWER_PICK_ROUND && selected === null && !fresh) hint = `Your ${esc(Game.towerType(m, me).name)} has a skill: ${esc(Game.towerType(m, me).skill.name)}. ${esc(Game.towerType(m, me).skill.text)} It isn’t on until you buy it (${Game.towerSkillCost(m, me)} gold, once per match).`;
-      if (choosingTower()) hint = `Choose your tower on the board. The clock starts once ${solo() ? 'you have' : 'both players have'} picked.`;
-      if (placingElf()) hint = 'Tap a free tile in your zone to place your elf tower. Tap anywhere else to cancel.';
-      if (placingWall()) hint = `Tap near the edge of a tile on your side of the board to build a wall along that edge (${Game.bwallsLeft(m, me)} left). Tap a wall you placed this round to take it back.`;
-      if (devPicking()) hint = 'Pick one card on the board. If time runs out you get the first one.';
+      if (tskillOffer() && m.round === Game.TOWER_PICK_ROUND && selected === null && !fresh) hint = `Tower skill: ${esc(Game.towerType(m, me).skill.name)}. ${esc(Game.towerType(m, me).skill.text)} ${Game.towerSkillCost(m, me)} gold.`;
+      if (choosingTower()) hint = 'Choose your tower on the board.';
+      if (placingElf()) hint = 'Tap a tile in your zone for your elf tower.';
+      if (placingWall()) hint = `Tap a tile edge to build a wall (${Game.bwallsLeft(m, me)} left).`;
+      if (devPicking()) hint = 'Pick a card.';
       const pb = bPlacing != null && Game.lessersOf(m, me).find(b => b.key === bPlacing);
       if (pb) hint = `Tap a gold tile to place your ${esc((Game.devBuilding(pb.id) || {}).name || 'building')}.${pb.col != null ? ' Tap anywhere else to leave it where it is.' : ''}`;
       if (castMode) hint = `Tap a tile to cast ${esc((Game.devSpell(castMode) || {}).name || 'the spell')}${(Game.devSpell(castMode) || {}).kind === 'zone' ? ' (its top left corner on your screen)' : ''}. Tap anywhere it can't go to cancel.`;
       if (guideMode === 'pick') hint = 'Tap one of your squads, or drag from it to draw its path.';
       else if (guideMode != null) hint = `Tap tiles for its path (${guideDraft.length} of ${Game.DEV.guidePoints}), or drag from the squad. ✕ when done.`;
-      if (placingBuilding()) hint = `Tap a free tile in your zone to place your ${esc(buildingName(placingBuilding().id))}. Your nearest Cog Builder builds it in the next fight. Tap anywhere else to cancel.`;
-      if (placingTower()) hint = 'Next, place your tower: tap a gold tile on the left or right side of your zone. If it falls in a fight, your army is crippled for a few seconds.';
+      if (placingBuilding()) hint = `Tap a tile in your zone for your ${esc(buildingName(placingBuilding().id))}.`;
+      if (placingTower()) hint = 'Tap a gold tile to place your tower.';
     }
     // Only hints about what the next tap does (or why it can't) stay on the panel; the rest (tips, this round's
     // news) go to the Help sheet, whose button turns gold while there's news not read yet this round.
@@ -1659,7 +1665,12 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
     dockTask = !can ? null : placingTower() ? { text: hint, x: false }
       : moveMode || (charmMode && Game.canGiveCharm(m, me)) || placingElf() || placingWall() || placingBuilding() || devTask ? { text: hint, x: !(bPlacing != null && Game.unplacedLesser(m, me)) } : null;
     const news = can && selected === null && !fresh && !inline && (Game.hailRound(m) || Game.altarRound(m) || m.round === Game.FLANK.round || (tskillOffer() && m.round === Game.TOWER_PICK_ROUND));
+    if (can && !choosingPack() && !choosingTower() && !devPicking()) takeUndoSnap();
+    // round 3: once the tower is picked, a banner across the board says the flanks are open
+    if (m.round === Game.FLANK.round && !choosingPack() && !choosingTower() && !devPicking() && bannerRound !== undoKey()) { bannerRound = undoKey(); setTimeout(() => banner('Flanks are open', 'Deploy on the blue edges of their half'), 150); }
+    const undoable = can && undoSnap && undoSnap.key === undoKey() && sideState() !== undoSnap.state;
     const extraBtns = `<span class="xbtns" style="display:flex;gap:6px;flex-wrap:wrap">
+        ${undoable ? '<button class="btn small" id="undo-all">Undo all</button>' : ''}
         ${loanOffer() ? (Game.loanNow(m, me) ? `<button class="btn small" id="loan-undo" ${can && m.gold[me] >= Game.LOAN.gold ? '' : 'disabled'}>Pay back loan · −${Game.LOAN.gold}</button>` : `<button class="btn small" id="loan" ${can && Game.canTakeLoan(m, me) ? '' : 'disabled'}${Game.investNow(m, me) ? ' title="Not this round: you made the Major investment"' : ''}>Loan · +${Game.LOAN.gold}</button>`) : ''}
         ${mageOffer() ? `<button class="btn small" id="mage-gen" ${can ? '' : 'disabled'}>${Game.mageGenOf(m, me) || Game.mageTpOf(m, me) ? [Game.mageGenOf(m, me), Game.mageTpOf(m, me) && 'teleport'].filter(Boolean).map(id => esc(Game.mageGenInfo(id).name)).join(' + ') : 'Mage general'}…</button>` : ''}
         ${tskillOffer() ? `<button class="btn small" id="buy-tskill" ${can && Game.canBuyTowerSkill(m, me) ? '' : 'disabled'}>${esc(Game.towerType(m, me).skill.name)} · ${Game.towerSkillCost(m, me)}</button>` : ''}
@@ -1752,6 +1763,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
     if ($('charm-btn')) $('charm-btn').addEventListener('click', () => { if (!editable()) return; charmMode = !charmMode; if (charmMode) { selected = null; moveMode = false; moving = null; } changed(); });
     if ($('charm-undo')) $('charm-undo').addEventListener('click', () => { const q = charmGivenNow(); if (editable() && q && Game.undoCharm(m, me, q.id)) changed(); });
     if ($('move-btn')) $('move-btn').addEventListener('click', () => { if (!editable()) return; moveMode = !moveMode; moving = null; if (moveMode) selected = null; changed(); });
+    if ($('undo-all')) $('undo-all').addEventListener('click', undoAll);
     if ($('undo-move')) $('undo-move').addEventListener('click', () => { if (editable() && Game.undoMove(m, me)) changed(); });
     if ($('dev-place')) $('dev-place').addEventListener('click', () => { const b = Game.unplacedLesser(m, me); if (!editable() || !b) return; bPlacing = b.key; selected = null; castMode = null; guideMode = null; panelDeploy(); render(); });
     if ($('dev-spells')) $('dev-spells').addEventListener('click', openSpellSheet);
@@ -1762,6 +1774,36 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
   }
 
   // After the player changes their own side
+  // ---------- Undo all: this player's side as it stood once the round's picks (package, tower, devtest card) were done ----------
+  // Every per-side field of the match ([side 0, side 1] arrays, also inside m.dev) plus this side's entries in the shared
+  // lists (altar buys, shroom removals, devtest casts). Only this side is put back, so the opponent's moves stay.
+  var undoSnap = null;
+  const UNDO_SKIP = new Set(['units', 'matrix', 'history', 'round', 'over', 'winner', 'seed', 'off', 'offTowers', 'rules', 'factions', 'map', 'dev', 'altar', 'hp', 'packages']);
+  const UNDO_NULL = new Set(['chars', 'elfOwn', 'mageGen', 'moved', 'towers', 'woke']); // per-side fields that start as null (see game.js)
+  const undoKey = () => m ? m.seed + ':' + m.round : '';
+  const perSide = (v) => Array.isArray(v) && v.length === 2;
+  function sideState() {
+    const o = { top: {}, dev: {} };
+    for (const [k, v] of Object.entries(m)) if (!UNDO_SKIP.has(k) && perSide(v)) o.top[k] = v[me];
+    if (m.dev) for (const [k, v] of Object.entries(m.dev)) if (k !== 'casts' && perSide(v)) o.dev[k] = v[me];
+    o.altar = (m.altar || []).filter(x => x.side === me);
+    o.removed = ((m.map && m.map.removed) || []).filter(x => x.side === me);
+    o.casts = ((m.dev && m.dev.casts) || []).filter(x => x.side === me);
+    return JSON.stringify(o);
+  }
+  function takeUndoSnap() { if (m && (!undoSnap || undoSnap.key !== undoKey())) undoSnap = { key: undoKey(), state: sideState() }; }
+  function undoAll() {
+    if (!editable() || !undoSnap || undoSnap.key !== undoKey()) return;
+    const o = JSON.parse(undoSnap.state);
+    const blank = (k, v) => Array.isArray(v) ? [] : typeof v === 'number' ? 0 : UNDO_NULL.has(k) || v == null ? null : {};
+    for (const [k, v] of Object.entries(m)) if (!UNDO_SKIP.has(k) && perSide(v)) v[me] = k in o.top ? o.top[k] : blank(k, v[me]);
+    if (m.dev) for (const [k, v] of Object.entries(m.dev)) if (k !== 'casts' && perSide(v)) v[me] = k in o.dev ? o.dev[k] : blank(k, v[me]);
+    if (m.altar || o.altar.length) m.altar = (m.altar || []).filter(x => x.side !== me).concat(o.altar);
+    if (m.map && (m.map.removed || o.removed.length)) m.map.removed = (m.map.removed || []).filter(x => x.side !== me).concat(o.removed);
+    if (m.dev) m.dev.casts = (m.dev.casts || []).filter(x => x.side !== me).concat(o.casts);
+    selected = null; moveMode = false; moving = null; charmMode = false; elfPlacing = false; wallPlacing = false; bPlacing = null; castMode = null; guideMode = null; guideDraft = []; guideDrag = null; rangeOf = null;
+    closeSheet(); changed();
+  }
   function changed() {
     panelDeploy(); render();
     if (mode === 'guest') sendSide();
@@ -2020,7 +2062,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
       $('panel').innerHTML = '';
       $('again').addEventListener('click', mode === 'claude' ? startClaudeMatch : mode === 'ai' ? startAiMatch : askRematch);
       $('menu').addEventListener('click', () => { if (mode === 'host') clearHost(); showStart(); });
-      bindLook(asked ? 'Your opponent wants a rematch.' : `${win ? 'Victory' : loss ? 'Defeat' : 'Draw'} · the board as the last fight ended.`);
+      bindLook(asked ? 'Your opponent wants a rematch.' : `${win ? 'Victory' : loss ? 'Defeat' : 'Draw'} · the board before the last fight.`);
       if (looking) lookAtBoard(true);
       return;
     }
@@ -2084,7 +2126,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
     if (!m || phase === 'end') return;
     if (mode === 'host') clearHost();
     leaveNet(); cancelAnimationFrame(raf);
-    m.over = true; m.winner = me; phase = 'end'; bt = null; battlePre = null; deadline = 0; selected = null; resultShownAt = 0;
+    m.over = true; m.winner = me; phase = 'end'; bt = null; battlePre = null; lastPre = null; deadline = 0; selected = null; resultShownAt = 0;
     closeSheet(true); hud(); setNet(''); $('clock').textContent = ''; render();
     overlay(`<div class="card">
       <span class="eyebrow">Round ${m.round}</span>
@@ -2098,7 +2140,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
   }
   // the match-over screen: Look at board hides it so the final board can be seen (and turned, on the 3D board, or
   // hovered for ranges); Show result in the panel brings it back. note: the line beside that button.
-  let endLook = false, endNote = '';
+  var endLook = false, endNote = '', endClock = '';
   function bindLook(note) {
     endNote = note; endLook = false;
     if ($('look')) $('look').addEventListener('click', () => lookAtBoard(true));
@@ -2107,6 +2149,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
     if (phase !== 'end') return;
     endLook = on;
     $('overlay').hidden = on;
+    if (on) { endClock = $('clock').textContent; $('clock').textContent = 'Before the last fight'; } else $('clock').textContent = endClock || '';
     if (on) {
       $('panel').innerHTML = `<div class="bar"><span class="hint">${esc(endNote)}</span><button class="btn primary" id="end-back">Show result</button></div>`;
       $('end-back').addEventListener('click', () => lookAtBoard(false));
@@ -2294,7 +2337,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
       if (u.build && u.build.unit) { const c = u.build.unit; t.push(`BUILDS once per fight: when an enemy is within ${u.build.range} m it stops for ${n1(u.build.time)} s (faster with other builders next to it) and builds ${u.build.count} ${c.name}${u.build.count > 1 ? 's' : ''} (${n1(c.hp)} health, ${n1(c.hit)} hit, ${n1(c.aps)} attacks/s, ${c.range} m range, never moves, gone after the fight), then fights on`); }
       if (u.link) t.push('linked health: its bodies share one health pool and fall together');
       if (u.escort) t.push(`brings a healbot that heals the squad ${n1(u.escort.pct)}% of max health a second`);
-      for (const x of [u.trait, u.trait2]) if (x && x.name) t.push(`trait ${x.name}: ${x.text || ''}`);
+      for (const x of [u.trait, u.trait2, u.trait3, u.trait4]) if (x && x.name) t.push(`trait ${x.name}: ${x.text || ''}`);
       const need = (k) => Game.skillNeeds(m, i, k).map(j => `"${u.skillDefs[j].name}"`).join(' and ');
       const either = (k) => Game.skillOr(m, i, k).map(j => `"${u.skillDefs[j].name}"`).join(' or ');
       const anyNeed = (k) => Game.skillNeedsAny(m, i, k).map(j => `"${u.skillDefs[j].name}"`).join(' or ');
@@ -2782,12 +2825,21 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   }
 
   function enterDeploy(ms) {
-    phase = 'deploy'; bt = null; watchSq = null; battlePre = null; fx = []; selected = null; rangeOf = null; timeUp = false; resultShownAt = 0; elfPlacing = false; wallPlacing = false; buildPlacing = null;
+    phase = 'deploy'; bt = null; watchSq = null; battlePre = null; lastPre = null; fx = []; selected = null; rangeOf = null; timeUp = false; resultShownAt = 0; elfPlacing = false; wallPlacing = false; buildPlacing = null;
     ready = [false, false];
     heldMs = ms > 0 && mode !== 'guest' && picksPending() ? ms : 0;
     deadline = ms > 0 && !heldMs ? now() + ms : 0;
     $('clock').textContent = '';
     closeSheet(); overlay(null); hud(); netStatus(); panelDeploy(); size(); render();
+  }
+  // a big line across the board that fades out by itself (round events, e.g. flanks opening)
+  var bannerRound = '', bannerTimer = 0;
+  function banner(text, sub) {
+    const b = $('banner'); if (!b) return;
+    b.hidden = true; void b.offsetWidth; // restart the animation
+    b.innerHTML = esc(text) + (sub ? `<small>${esc(sub)}</small>` : '');
+    b.hidden = false;
+    clearTimeout(bannerTimer); bannerTimer = setTimeout(() => { b.hidden = true; }, 3300);
   }
 
   // the players whose tower pick holds the clock: this player, and on the host the guest too
@@ -2848,7 +2900,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
 
   function playBattle(pre) {
     phase = 'battle'; selected = null; deadline = 0; timeUp = false; watchSq = null;
-    battlePre = withUnits(pre);
+    battlePre = withUnits(pre); lastPre = battlePre;
     bt = Game.startBattle(battlePre);
     fx = []; acc = 0; lastTs = 0;
     cam = { end: lastSummary && lastSummary.round === pre.round ? lastSummary.time : null, decided: false, on: false, k: 0, x: 0, y: 0 };
@@ -3300,11 +3352,11 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   // its first pick in words, for its sheet: "Goes for Brute (8), Fire Mage (4) first." The ones too far to call: the way they walk
   function intentWords(r) {
     if (!r) return '';
-    if (!r.moves) return 'Holds its ground: it doesn’t walk.';
+    if (!r.moves) return 'Holds its ground.';
     const name = (g) => g.unit != null ? units[g.unit].name : g.name || 'Enemy';
     const out = [];
     if (r.groups.length) out.push(`Goes for ${r.groups.map(g => `${esc(name(g))}${r.total > 1 ? ` (${g.n})` : ''}`).join(', ')} first.`);
-    if (r.ahead) out.push(`${r.total > 1 ? `${r.ahead.n === r.total ? 'All' : r.ahead.n} head` : 'Heads'} ${wayWords(r.ahead.dx, r.ahead.dy)}: no enemy in sight close enough to say which one yet.`);
+    if (r.ahead) out.push(`${r.total > 1 ? `${r.ahead.n === r.total ? 'All' : r.ahead.n} head` : 'Heads'} ${wayWords(r.ahead.dx, r.ahead.dy)}.`);
     return out.join(' ');
   }
   // the squad tapped in a fight: what its bodies walk to now, by enemy squad (live), and whom they attack
@@ -3703,7 +3755,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       grp.forEach(j => done.add(j));
       parts.push(grp.length > 1 ? orGroup(grp.map(row), 'Pick one · either or') : row(k));
     }
-    return `<div style="display:grid;gap:6px"><h4 style="margin:0;font-size:12px;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted)">Skills${enzo ? ` · Enzo: each unit’s first skill, free with ${Game.CHAR.enzoMin}+ squads of it` : mine ? ' · for all your squads of this unit' : ''}${HOLD_HINT}</h4>${parts.join('')}</div>`;
+    return `<div style="display:grid;gap:6px"><h4 style="margin:0;font-size:12px;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted)">Skills${enzo ? ` · free with ${Game.CHAR.enzoMin}+ squads` : ''}</h4>${parts.join('')}</div>`;
   }
   // an Awaken skill's row: this squad's (sq; from the shop, how many of yours have it). Buttons carry data-act, bound by bindPane.
   function awakenAct(i, k, side, sq) {
@@ -3806,7 +3858,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   const abilityRow = (name, act, text, more) => upRow({ name, act, text, more });
   // rows that rule each other out (either-or), boxed with an OR between them
   const orGroup = (rows, head = 'Pick one') => `<div class="orgrp"><span class="or-h">${head}</span>${rows.join('<div class="or-div" aria-hidden="true">OR</div>')}</div>`;
-  const HOLD_HINT = '<span class="up-k"> · hold one for details</span>';
+  const HOLD_HINT = '';
   // press and hold an upgrade row to open (or close) its whole text; Enter or Space does the same
   {
     let hold = null;
@@ -4039,19 +4091,21 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (sq) {
       const next = sq.level < Engine.MAX_LEVEL ? Math.round(Game.xpNeeded(base, sq.level)) : null;
       const shown = next ? Math.min(Math.round(sq.xp), next) : 0;
-      const charmLine = Game.charmOf(sq) > 0 ? `<p style="margin:0"><span style="color:${CHARM_COL}">Charisma ${Game.charmOf(sq)} / ${Engine.CHARM_MAX}${Game.isGentleman(sq) ? ' · Gentleman' : ''}</span> · ${Game.isGentleman(sq) ? 'the first enemy it would kill each fight joins its side for that fight, at half health' : `kills add a stack and give one to a squad without any; at ${Engine.CHARM_MAX} it becomes a Gentleman`}</p>` : '';
-      const glutMax = u.glut ? u.glut.max : 0, glutLine = glutMax ? `<p style="margin:0"><span style="color:${GLUT_COL}">Glut ${Game.glutOf(sq)} / ${glutMax}${Game.glutOf(sq) >= glutMax ? ' · full' : ''}</span> · ${Game.glutOf(sq) >= glutMax ? 'it can be awakened now' : `eats up to ${u.glut.cap} a round, kept all match`}</p>` : '';
+      const charmLine = Game.charmOf(sq) > 0 ? `<p style="margin:0"><span style="color:${CHARM_COL}">Charisma ${Game.charmOf(sq)} / ${Engine.CHARM_MAX}${Game.isGentleman(sq) ? ' · Gentleman' : ''}</span> · ${Game.isGentleman(sq) ? 'converts its first kill each fight' : `kills spread it; at ${Engine.CHARM_MAX}: Gentleman`}</p>` : '';
+      const glutMax = u.glut ? u.glut.max : 0, glutLine = glutMax ? `<p style="margin:0"><span style="color:${GLUT_COL}">Glut ${Game.glutOf(sq)} / ${glutMax}${Game.glutOf(sq) >= glutMax ? ' · full' : ''}</span> · ${Game.glutOf(sq) >= glutMax ? 'can be awakened' : `up to ${u.glut.cap} a round`}</p>` : '';
       lvl = charmLine + glutLine + `<p style="margin:0"><span style="color:var(--gold)">Level ${sq.level + 1}${sq.level ? ` · ${sq.level + 1}× health and attack` : ''}</span> · ${next ? `${shown.toLocaleString('en-US')} / ${next.toLocaleString('en-US')} XP to level ${sq.level + 2}` : 'max level'}</p>`;
       if (side === me && phase === 'deploy') {
         const cost = Game.levelCost(base);
         const boughtNow = sq.boughtLevels && sq.boughtLevels[m.round] > 0;
         const btns = [];
-        if (Game.isReady(m, sq)) btns.push(m.gold[me] >= cost && editable()
+        // Level all: two or more level-ups of this unit's squads the gold covers (Game.levelAllPlan: most XP first).
+        // A small "+ ALL" glued to the Level up button, in its colour
+        const all = editable() ? Game.levelAllPlan(m, me, i) : [];
+        const allBtn = all.length >= 2 ? `<button class="btn primary lvl-all" data-act="lvl-all" title="Level all ${all.length} · ${all.length * cost} gold">+ ALL</button>` : '';
+        if (Game.isReady(m, sq)) btns.push(`<span class="lvl-pair">${m.gold[me] >= cost && editable()
           ? `<button class="btn primary" data-act="lvl-up">Level up · ${cost} gold</button>`
-          : `<button class="btn primary" disabled>${editable() ? `Need ${cost} gold` : `Level up · ${cost} gold`}</button>`);
-        // Level all: two or more level-ups of this unit's squads the gold covers (Game.levelAllPlan: most XP first)
-        const all = editable() ? Game.levelAllPlan(m, me, i) : [], readyAll = m.armies[me].filter(s => s.unit === i && Game.isReady(m, s)).length;
-        if (all.length >= 2) btns.push(`<button class="btn${Game.isReady(m, sq) ? '' : ' primary'}" data-act="lvl-all" title="Levels your ${esc(base.name)} squads that are ready, most XP first, while the gold lasts">Level all ${all.length}${all.length < readyAll ? ` of ${readyAll}` : ''} · ${all.length * cost} gold</button>`);
+          : `<button class="btn primary" disabled>${editable() ? `Need ${cost} gold` : `Level up · ${cost} gold`}</button>`}${allBtn}</span>`);
+        else if (allBtn) btns.push(`<button class="btn primary" data-act="lvl-all">Level up + ALL · ${all.length * cost} gold</button>`);
         if (boughtNow && editable()) btns.push(`<button class="btn" data-act="lvl-undo">Undo level-up</button>`);
         if (editable() && Game.canGiveCharm(m, me)) btns.push(`<button class="btn" data-act="charm-give" style="border-color:${CHARM_COL}">Give Charisma</button>`);
         if (editable() && sq.charmGiven === m.round && sq.charm === 1) btns.push(`<button class="btn" data-act="charm-undo">Take back Charisma</button>`);
@@ -4063,7 +4117,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
         if (editable() && Game.canGuide(m, me, sq)) btns.push(`<button class="btn" data-act="guide">${sq.guide ? 'Redraw path' : 'Draw path'}</button>`);
         if (editable() && sq.guide) btns.push(`<button class="btn" data-act="unguide">Clear path</button>`);
         if (btns.length) lvl += `<div style="display:flex;gap:8px;flex-wrap:wrap">${btns.join('')}</div>`;
-        else if (next) lvl += `<p class="hint" style="margin:0">Earns XP from damage it deals and takes. Killing leveled enemies pays extra.</p>`;
+        else if (next) lvl += `<p class="hint" style="margin:0">Earns XP by dealing and taking damage.</p>`;
       }
     }
     const row = M[i];
@@ -4103,9 +4157,9 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       ${(() => { const r = roleOf(i, owner === me ? me : null); return `<p class="roleline"><span class="roles">${roleIcons(r)}${rangeSvg(r.range)}</span><span>${r.text}</span></p>`; })()}
       ${unlockBlock(i, side)}
       <p class="role" style="margin:0">${ROLES[u.name] && !customSet ? ROLES[u.name] : customSet ? `From a Counter Lab roster · ${Game.unitCostOf(base)} gold` : ''}</p>
-      ${[u.trait, u.trait2].filter(x => x && x.name).map(x => `<p style="margin:0"><b style="color:var(--gold)">Trait: ${esc(x.name)}</b>${x.text ? ` · ${esc(x.text)}` : ''}</p>`).join('')}
+      ${[u.trait, u.trait2, u.trait3, u.trait4].filter(x => x && x.name).map(x => `<p style="margin:0"><b style="color:var(--gold)">Trait: ${esc(x.name)}</b>${x.text ? ` · ${esc(x.text)}` : ''}</p>`).join('')}
       ${lvl}
-      ${sq && m && side === me && phase === 'deploy' && !Game.isRider(sq) && !units[i].building ? (() => { const w = intentWords(intentFor({ id: sq.id }, true)); return w ? `<p class="hint" style="margin:0"><b style="color:var(--you)">Intent:</b> ${w} From what you can see now; the arrow on the board shows where it means to go, not how the fight ends.</p>` : ''; })() : ''}
+      ${sq && m && side === me && phase === 'deploy' && !Game.isRider(sq) && !units[i].building ? (() => { const w = intentWords(intentFor({ id: sq.id }, true)); return w ? `<p class="hint" style="margin:0"><b style="color:var(--you)">Intent:</b> ${w}</p>` : ''; })() : ''}
       ${sq && m && !compact ? (() => { const q = side === me ? sq : Game.seenAt(m, sq); return shroomBlock(q.col, q.row); })() : ''}
       ${tr.length ? `<div class="traits">${tr.map(x => `<span>${x}</span>`).join('')}</div>` : ''}
       ${skillBlock(i, side, sq)}

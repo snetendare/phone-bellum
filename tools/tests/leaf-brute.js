@@ -23,13 +23,13 @@ const near = (a, b, eps = 1e-6) => Math.abs(a - b) < eps;
   assert.deepStrictEqual(lw.skillNeedsAny, [null, null, null, [1, 2]], 'Leafblade needs one of them');
   assert.deepStrictEqual(['windWalk', 'bouncingBlade', 'petalburst', 'leafblade'].map(id => skill(id).cost), [100, 150, 150, 300]);
   const ww = withSkills('Leaf Wizard', ['windWalk']); assert.ok(!ww.dodge && ww.windWalk.every === 5 && ww.windWalk.step === 4, 'Wind walk: every 5th attack from the first, a 4 m dash');
-  assert.ok(/1st, 6th, 11th/.test(E.describeSkill(skill('windWalk'))), E.describeSkill(skill('windWalk')));
+  assert.ok(/Dodge every 5th attack/.test(E.describeSkill(skill('windWalk'))), E.describeSkill(skill('windWalk')));
   const pb = withSkills('Leaf Wizard', ['petalburst']); assert.ok(near(pb.aps, 2.4) && near(pb.range, lw.range / 2), 'Petalburst: +100% attack speed, -50% range');
   const bb = withSkills('Leaf Wizard', ['bouncingBlade']); assert.deepStrictEqual(bb.bounce, { n: 2, pct: 30, reach: 10 });
   const lb = withSkills('Leaf Wizard', ['petalburst', 'leafblade']);
   assert.ok(lb.mech && lb.spinBlade && lb.flame === 90 && lb.range === 3 && lb.projSpeed === 0 && lb.dash === 8 && near(lb.aps, 2.4), 'Leafblade: a 180° swipe in melee that dashes, Petalburst still speeds it up');
   assert.deepStrictEqual(lb.missiles, { n: 2, every: 10, hit: 150, splash: 2.5, speed: 25, range: 30 });
-  assert.ok(/180° swipe/.test(E.describeSkill(skill('leafblade'))) && /within 30 m/.test(E.describeSkill(skill('leafblade'))));
+  assert.ok(/leaf-mech/.test(E.describeSkill(skill('leafblade'))));
   assert.strictEqual(E.leveled(lb, 1).missiles.hit, 300, 'missiles grow with the level');
   assert.ok(E.describeSkill(skill('leafblade')).length > 50 && E.describeSkill(skill('berserkers')).length > 50 && E.describeSkill(skill('windWalk')) && E.describeSkill(skill('bouncingBlade')));
 }

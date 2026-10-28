@@ -83,7 +83,7 @@ const near = (a, b, eps = 1e-6) => Math.abs(a - b) < eps;
 // Bloodrush: every hit it lands gives the target 2 stacks of bleed (Death Flurry: every blow)
 {
   assert.strictEqual(unit('Assassin').bleedHit, 2);
-  assert.ok(/2 stacks of bleed/.test(unit('Assassin').trait2.text) && unit('Assassin').trait2.name === 'Bloodrush');
+  assert.ok(/2 bleed/.test(unit('Assassin').trait3.text) && unit('Assassin').trait3.name === 'Bloodrush');
   const a = body({ ...unit('Assassin'), aps: 1 }, 0, 0, -1.5), v = body(dummy(1e5), 1, 0, 0); // quicker, so the bleed is still on at the next hit
   const bt = E.createBattle([a], [v], G);
   for (let k = 0; k < 100 && v.hp === v.u.hp; k++) bt.step();

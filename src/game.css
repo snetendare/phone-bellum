@@ -100,3 +100,6 @@ canvas { display: block; width: 100%; height: 100%; }
 .traits { display: flex; flex-wrap: wrap; gap: 6px; }
 .traits span { font-size: 12px; border: 1px solid var(--line); border-radius: 99px; padding: 2px 9px; color: var(--ink); }
 @media (prefers-reduced-motion: reduce) { .hp i { transition: none; } }
+.lvl-pair { display: inline-flex; gap: 2px; }
+.lvl-pair .btn:first-child:not(:only-child) { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.lvl-pair .lvl-all { padding: 10px 10px; font-size: 12px; letter-spacing: 0.04em; border-top-left-radius: 0; border-bottom-left-radius: 0; }

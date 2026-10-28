@@ -34,27 +34,27 @@ const Game = (() => {
   // that round, before the deploy countdown runs, each player picks one of the offered types (towerChoices); the pick
   // can't be changed and stays for the rest of the match.
   const TOWER_PICK_ROUND = 3, TOWER_OFFER = 3;
-  const OUTPOST = { id: 'outpost', name: 'Outpost', text: 'A small watchtower that holds the line until round 3, when you pick your real tower.', unit: { ...TOWER, name: 'Outpost', kind: 'outpost', hp: 400, hit: 18, color: '#A88E6E' } };
+  const OUTPOST = { id: 'outpost', name: 'Outpost', text: 'Holds the line until round 3.', unit: { ...TOWER, name: 'Outpost', kind: 'outpost', hp: 400, hit: 18, color: '#A88E6E' } };
   // the bastion's attack: a ring of fire, its hit 4 times a second to every enemy within its reach (see Engine: moat)
   const MOAT = { hit: 12, aps: 4, range: 5 };
   const TOWER_TYPES = [
-    { id: 'keep', name: 'Keep', text: 'The standard tower: steady, light shots at short range.', unit: { ...TOWER, hp: 700 },
-      skill: { name: 'Guards', text: 'Every fight, 4 guards (reskinned Wisps, without Wisp skills) stand one on each side of the keep for 5 s, shooting anything that comes close, then march on the enemy. A guard that is hit leaves its post at once and goes for whoever hit it.' },
-      skill2: { name: 'Brute guards', cost: 500, needs: true, text: 'Your guards are Brutes instead of Wisps: 4 of them, with every skill you have bought for Brutes. Needs Guards.' } },
-    { id: 'sniper', name: 'Sniper tower', text: 'Shoots across most of the board, slowly, for double damage.', unit: { ...TOWER, name: 'Sniper Tower', kind: 'sniper', hp: 500, hit: 60, aps: 0.4, range: 32, color: '#B9C7D6' },
-      skill: { name: 'Eagle eye', text: 'The sniper tower and all your Sniper squads get +3 m range and +10% attack speed.' },
-      skill2: { name: 'Deploy airship', cost: 500, text: 'Every fight, an airship joins the fight. It can’t be shot down. It takes off in your half of no man’s land, flies toward the enemy, shoots like the sniper tower (Eagle eye included) and drops a paratrooper (a guard, like the keep’s) every 5 s, up to 6 at once. Passive: your sniper tower, the airship and all your Sniper squads deal +30 damage per hit.' } },
-    { id: 'bastion', name: 'Bastion', text: `Much tougher. Its attack is a moat of fire: ${MOAT.hit} damage ${MOAT.aps} times a second to every enemy within ${MOAT.range} m, like a Flame Wizard’s flames.`,
+    { id: 'keep', name: 'Keep', text: 'Steady light shots, short range.', unit: { ...TOWER, hp: 700 },
+      skill: { name: 'Guards', text: '4 Wisp guards defend the keep for 5 s each fight, then attack.' },
+      skill2: { name: 'Brute guards', cost: 500, needs: true, text: 'Guards are Brutes, with your Brute skills. Needs Guards.' } },
+    { id: 'sniper', name: 'Sniper tower', text: 'Slow, huge range, double damage.', unit: { ...TOWER, name: 'Sniper Tower', kind: 'sniper', hp: 500, hit: 60, aps: 0.4, range: 32, color: '#B9C7D6' },
+      skill: { name: 'Eagle eye', text: 'Tower and Snipers: +3 m range, +10% attack speed.' },
+      skill2: { name: 'Deploy airship', cost: 500, text: 'An untouchable airship shoots and drops paratroopers each fight. Snipers, tower and airship: +30 hit.' } },
+    { id: 'bastion', name: 'Bastion', text: `Tough. Burns all enemies within ${MOAT.range} m.`,
       unit: { ...TOWER, name: 'Bastion', kind: 'bastion', hp: 1000, hit: MOAT.hit, aps: MOAT.aps, range: MOAT.range, moat: { ...MOAT }, idle: true, color: '#B79C8A' }, // idle: the moat is its only attack
-      skill: { name: 'Home ground', text: 'The bastion gains a shield that blocks the first 2 hits it takes in every fight. In fights, your units get +2 armor and +10% health while they stand in your own zone. They lose it in no man’s land and get it back if they return.' },
-      skill2: { name: 'Defensive walls', cost: 250, text: 'Gain 3 walls to place anywhere on your side of the board (your zone and your half of no man’s land). Each has 400 health and 4 armor, and stands again in every fight. The enemy can’t walk or shoot through them; your own units can. The bastion also gains 4 armor.' } },
-    { id: 'mage', name: 'Mage tower', text: 'A small sun-priest beam: it locks onto one enemy and hits harder and faster the longer it stays on it. Slow against swarms, but melts big units after a few seconds.', unit: { ...TOWER, name: 'Mage Tower', kind: 'mage', hp: 600, hit: 14, aps: 1.5, range: 12, spinUp: 50, spinHit: 50, color: '#A493DE' },
+      skill: { name: 'Home ground', text: 'Bastion blocks 2 hits a fight. Units in your zone: +2 armor, +10% health.' },
+      skill2: { name: 'Defensive walls', cost: 250, text: 'Place 3 walls on your side that block enemies. Bastion +4 armor.' } },
+    { id: 'mage', name: 'Mage tower', text: 'A beam that ramps up on one target. Melts giants.', unit: { ...TOWER, name: 'Mage Tower', kind: 'mage', hp: 600, hit: 14, aps: 1.5, range: 12, spinUp: 50, spinHit: 50, color: '#A493DE' },
       generals: true }, // no once-per-match skill: a mage general can be called every round instead (MAGE_GENERALS)
-    { id: 'bank', name: 'Bank tower', text: 'Sturdy, with an attack between the keep and the sniper tower: medium range, medium fire rate.', unit: { ...TOWER, name: 'Bank Tower', kind: 'bank', hp: 700, hit: 45, aps: 0.6, range: 18, color: '#D9B95B' },
+    { id: 'bank', name: 'Bank tower', text: 'Sturdy, medium range. Offers loans.', unit: { ...TOWER, name: 'Bank Tower', kind: 'bank', hp: 700, hit: 45, aps: 0.6, range: 18, color: '#D9B95B' },
       loan: true, // a loan can be taken every round (LOAN)
-      skill2: { name: 'Major investment', cost: 500, noFree: true, text: 'Pay 500 gold now and get 1000 gold at the start of next round. Once per match, and not in a round you take a loan.' } }, // see resolve
-    { id: 'slime', name: 'Slime tower', text: 'Lobs splashing slime globs like one Slimeshots body, with 5 m more range.', unit: { ...TOWER, name: 'Slime Tower', kind: 'slime', hit: 7, aps: 0.8, range: 26, splash: 3, projSpeed: 30, spinUp: 0.1, color: '#7BD93F' },
-      passive: { name: 'Slime lore', text: 'Every skill you buy for Slime Wizards or Slimeshots works on the slime tower too.' } }, // see slimeTowerUnit
+      skill2: { name: 'Major investment', cost: 500, noFree: true, text: 'Pay 500 now, get 1000 next round. Once per match.' } }, // see resolve
+    { id: 'slime', name: 'Slime tower', text: 'Lobs splashing slime, long range.', unit: { ...TOWER, name: 'Slime Tower', kind: 'slime', hit: 7, aps: 0.8, range: 26, splash: 3, projSpeed: 30, spinUp: 0.1, color: '#7BD93F' },
+      passive: { name: 'Slime lore', text: 'Your slime unit skills also work on it.' } }, // see slimeTowerUnit
   ];
   // a picked type, or the Outpost until the pick is made (a match saved without a pick past it gets the Keep)
   const towerType = (m, side) => {
@@ -208,10 +208,10 @@ const Game = (() => {
   // m.mageGen[side] = { round, id, tp }: id = the general (or null), tp = teleport called; it counts only in the round
   // it was bought. Hidden from the opponent until the fight.
   const MAGE_GENERALS = [
-    { id: 'meteor', name: 'Meteor mage general', cost: 100, text: 'The tower calls down meteors like a Meteor Caller, with its range and minimum range, but at 25% of its damage and half its fire rate.' },
-    { id: 'lightning', name: 'Lightning mage general', cost: 50, text: 'Lightning at 3 m more than the tower’s normal range: 100 damage to the first enemy, then it jumps up to 5 times to the nearest enemy not hit yet within 6 m, for 60 each.' },
-    { id: 'water', name: 'Water mage general', cost: 50, text: 'The tower stops attacking and heals instead: 100 health to your most wounded unit within 40 m, 0.8 times a second.' },
-    { id: 'teleport', name: 'Teleport mage general', cost: 100, extra: true, text: 'Can be called on top of another general. The tower keeps its attack. When it falls, your army isn’t crippled: instead the tower teleports to a random tile anywhere on the board with 1 health.' },
+    { id: 'meteor', name: 'Meteor mage general', cost: 100, text: 'Tower calls down weak meteors.' },
+    { id: 'lightning', name: 'Lightning mage general', cost: 50, text: 'Chain lightning: 100 damage, jumps 5 times.' },
+    { id: 'water', name: 'Water mage general', cost: 50, text: 'Tower heals your units instead of attacking.' },
+    { id: 'teleport', name: 'Teleport mage general', cost: 100, extra: true, text: 'Stacks with another general. A fallen tower teleports instead of crippling you.' },
   ];
   const MAGE = { meteorHit: 25, meteorAps: 50, boltHit: 100, boltAps: 0.8, boltRange: 3, jumps: 5, jumpHit: 60, jumpReach: 6, waterHeal: 100, waterAps: 0.8, waterRange: 40 };
   const METEOR = { hit: 114, aps: 0.3, range: 50, minRange: 12, burst: 3, splash: 6, windUp: 2, projSpeed: 22 }; // used when the roster has no Meteor Caller
@@ -348,18 +348,18 @@ const Game = (() => {
   // ---------- characters ----------
   // Each starting package comes with a character, who gives that player a passive ability for the whole match.
   const CHARACTERS = [
-    { id: 'cage', name: 'Frickolas Cage', ability: 'All your units have 10% more health.' },
-    { id: 'zoe', name: 'Zoe', ability: 'Every round, 2 random tiles in your zone become buff tiles. A squad that starts the fight on one gets a bonus for the whole fight, and the bonus grows every round you use them: +10% damage and health at first, then +20% / +20% / +5% attack speed, +30% / +30% / +10%, up to +40% / +40% / +15%.' },
-    { id: 'emile', name: 'Emile', ability: 'Tier 1 units are free to unlock.' },
-    { id: 'wilhelm', name: 'Wilhelm', ability: 'Your squads on flank tiles and in no man’s land get +4 armor, and flank squads start twice as fast.' },
-    { id: 'blixten', name: 'Blixten', ability: 'Your first map or tower purchase each round is 100 gold cheaper: a bribe, an offering at the altar of ice, your own elf tower, removing a mushroom tile, a tower skill or a mage general (not the bank’s Major investment).' },
-    { id: 'noah', name: 'Noah - The Bog', ability: 'Squads you buy in the shop start at level 2. Each costs its price plus one upgrade. All your units have 10% less health and damage.' },
-    { id: 'phil', name: 'Phil', ability: 'Tier 4 units are 100 gold cheaper to unlock and 50 gold cheaper to buy.' },
-    { id: 'yotyot', name: 'Yot-Yot', ability: 'Every fight, Ember Imps pop up on random free tiles on your side of the board (your zone, no man’s land and, once open, your flank tiles): 1 in round 1, 2 in round 2, and so on. From round 3 they are level 2, from round 6 level 3. They get the skills you bought for Ember Imps.' },
-    { id: 'mubarak', name: 'Mubarak - Slime Lord', ability: 'Your slime units (Slime Wizards and Slimeshots) get every skill you buy for any slime unit, not just their own.' },
-    { id: 'felix', name: 'Felix', ability: 'From round 3 on, you get 50 more gold every round, and 100 more from round 6 on.' },
-    { id: 'enzo', name: 'Enzo', ability: 'You can’t buy unit skills, but each unit type comes with its first skill, for free, the same for all your squads of it all match (see it under the unit’s i button). The skill only works while you have 2 or more squads of that unit.' },
-    { id: 'matteo', name: 'Matteo - the Gentleman', ability: 'Give one of your squads a stack of Charisma. When a squad with Charisma kills an enemy, it gains a stack and gives one to a squad of yours without any. At 5 stacks a squad is a Gentleman: the first enemy it would kill each fight joins your side for that fight instead, at half health.' },
+    { id: 'cage', name: 'Frickolas Cage', ability: 'Units +10% health.' },
+    { id: 'zoe', name: 'Zoe', ability: '2 buff tiles each round. Their bonus grows each time you use them.' },
+    { id: 'emile', name: 'Emile', ability: 'Tier 1 unlocks are free.' },
+    { id: 'wilhelm', name: 'Wilhelm', ability: 'Flank and no man’s land squads: +4 armor. Flanks start faster.' },
+    { id: 'blixten', name: 'Blixten', ability: 'First map or tower purchase each round: −100 gold.' },
+    { id: 'noah', name: 'Noah - The Bog', ability: 'Bought squads start at level 2 (cost +1 level). Units −10% health and damage.' },
+    { id: 'phil', name: 'Phil', ability: 'Tier 4: −100 unlock, −50 price.' },
+    { id: 'yotyot', name: 'Yot-Yot', ability: 'Free Ember Imps appear each fight: one more every round.' },
+    { id: 'mubarak', name: 'Mubarak - Slime Lord', ability: 'Slime units share all slime skills.' },
+    { id: 'felix', name: 'Felix', ability: '+50 gold a round from round 3, +100 from round 6.' },
+    { id: 'enzo', name: 'Enzo', ability: 'No skill buying. Each unit gets its first skill free with 2+ squads.' },
+    { id: 'matteo', name: 'Matteo - the Gentleman', ability: 'Charisma spreads with kills. At 5, a squad converts its first kill each fight.' },
   ];
   // ---------- the Standard pack ----------
   // A smaller match for new players, picked on the menu: fewer units with clear jobs (one or two of each kind per tier),
@@ -437,13 +437,13 @@ const Game = (() => {
   // with whoever has bribed the elves the most times (see the bribe-off below); with nobody ahead, it shoots both sides in turn.
   const MAPS = [
     { id: 'standard', name: 'Standard', short: 'No special rules.', text: 'No special rules.', plain: true }, // only when picked, never random
-    { id: 'forest', name: 'Forest Clearing', short: 'Bribe the elf tower to fight for you.', text: 'Ents and Earth Wizards have 15% more health. Healing and regeneration are 1.5× as strong. A neutral elf tower in no man’s land sides with whoever has bribed the elves the most times: it heals their units and shoots the other player’s. With bribes level, it shoots both. Bribe as often as you like: 50 gold, and 50 more for each extra bribe in the same round. Totals stay secret; the flag on the tower shows who is ahead. After round 5 the elves hit and heal twice as hard. From the round after 10 bribes have been paid in all, each player who has bribed can buy one elf tower of their own for 400 gold.', boostHp: 15, boostUnits: ['Ent', 'Earth Wizard'], healMul: 1.5, elfTower: true },
-    { id: 'cavern', name: 'Mushroom Cavern', short: 'Shorter range. Mushroom tiles buff, speed up or poison.', text: 'All units have 25% less range (units with 5 m range or less keep theirs). Stealth units deal 20% more damage. Glowing mushroom tiles stay on the same tiles all match, mirrored on both halves. Purple: a squad that starts the fight there gets +10% damage, +10% health and +5% attack speed. Yellow: a unit that starts on it or walks over it moves 30% faster for the rest of the fight. Green: a unit that starts on it or walks over it is poisoned and slowed (slime units are healed and sped up instead). Yellow and green work once per unit, for both sides. Either player can remove a mushroom tile for 50 gold.', stealthDmg: 20, rangeCut: 25, rangeKeep: 5, shrooms: true, pointMirror: true },
+    { id: 'forest', name: 'Forest Clearing', short: 'Bribe the elf tower to fight for you.', text: 'Bribe the elf tower to fight for you. Healing ×1.5.', boostHp: 15, boostUnits: ['Ent', 'Earth Wizard'], healMul: 1.5, elfTower: true },
+    { id: 'cavern', name: 'Mushroom Cavern', short: 'Shorter range. Mushroom tiles buff, speed up or poison.', text: '−25% range. Purple tiles buff, yellow speed up, green poison.', stealthDmg: 20, rangeCut: 25, rangeKeep: 5, shrooms: true, pointMirror: true },
     // Frozen Peak's hailstorm and altar are switched off for now (iceOff): the map is its snowy floor and music with no
     // special rules. To bring them back, take iceOff out and use iceShort / iceText as short / text again.
-    { id: 'ice', name: 'Frozen Peak', short: 'A snowy mountain top. No special rules for now.', text: 'A snowy mountain top. No special rules for now.', iceOff: true,
+    { id: 'ice', name: 'Frozen Peak', short: 'A snowy mountain top. No special rules for now.', text: 'No special rules.', iceOff: true,
       iceShort: 'Hail from round 2. An ice altar rises on even rounds.', iceText: 'Every fight from round 2: a hailstorm drops 10 hail tiles in the storm band (no man’s land at first); units standing in hail take 20 damage per second. Even rounds: the altar of ice rises in the middle of the board. Tap it to buy ice walls for your tower, push the storm band toward your opponent, or summon a Snowgre.', ice: true },
-    { id: 'testgrid', name: 'Test Grid', short: 'A bigger board: each zone is 14 by 7 tiles.', text: 'A test map on a bigger board: each player’s zone is 14 columns wide and 7 rows deep (standard: 12 by 6). The towers are mirrored, as on the Mushroom Cavern. From round 2 each player also has a treasury (400 health) on the other side of their zone from their tower, one tile in toward the middle and one tile forward. A fight it survives pays you 50 gold; if it is destroyed, your opponent steals 50 gold from you instead. Units have 2 m more range (melee units, under 5 m, keep theirs). Units with a move speed of 3 or more move 0.2 m/s slower, and 0.4 slower from 5 on (Shiv and Water Mage keep theirs).', plain: true, grid: { cols: 14, rows: 18, zone: 7 }, pointMirror: true, treasury: true,
+    { id: 'testgrid', name: 'Test Grid', short: 'A bigger board: each zone is 14 by 7 tiles.', text: 'Bigger board. A treasury pays 50 gold per fight it survives.', plain: true, grid: { cols: 14, rows: 18, zone: 7 }, pointMirror: true, treasury: true,
       rangeAdd: 2, rangeAddMin: 5, slowSteps: [[3, 0.2], [5, 0.2]], tuneKeep: ['Shiv', 'Water Mage'] }, // only when picked, never random
   ];
   // ---------- Frozen Peak: hailstorm and the altar of ice ----------
@@ -452,9 +452,9 @@ const Game = (() => {
   const ICE = { hailTiles: 10, hailDps: 20, push: 2, wallHits: 10, costs: { walls: 50, push: 100, snowgre: 150 }, snowStep: 50, snowFirst: 0.25 };
   // what the altar sells, cheapest first
   const ALTAR = [
-    { id: 'walls', name: 'Ice walls', text: `Ice walls rise around your tower for this round’s fight. Each of the 4 walls blocks the first 10 hits coming from its side.` },
-    { id: 'push', name: 'Push the hailstorm', text: `Moves the storm band 2 rows toward your opponent for the rest of the match, starting with the next hailstorm. Buy it as many times as you like. Your opponent can push it back.`, repeat: true },
-    { id: 'snowgre', name: 'Summon a Snowgre', text: 'A white golem made of snow joins your army for the rest of the match. It stands in your half of no man’s land at the start of every fight and doesn’t mind hail. The first is 25% as strong as an Ether Golem, and each one after is twice as strong as the last.' },
+    { id: 'walls', name: 'Ice walls', text: `4 ice walls guard your tower this fight.` },
+    { id: 'push', name: 'Push the hailstorm', text: `Push the hail 2 rows toward the enemy.`, repeat: true },
+    { id: 'snowgre', name: 'Summon a Snowgre', text: 'A snow golem joins your army. Each is twice as strong as the last.' },
   ];
   // the Ether Golem a Snowgre is modelled on (taken from the roster when it has one)
   const GOLEM = { name: 'Ether Golem', cost: 5, bodies: 1, hp: 3450, hit: 69, aps: 0.6, range: 5, speed: 2.5, splash: 3, defense: 'armor', defVal: 6 };
