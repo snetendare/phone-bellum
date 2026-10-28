@@ -89,6 +89,15 @@ header .eyebrow { font-family: var(--font-data); font-size: 11px; letter-spacing
 .saved .item button { padding: 3px 8px; font-size: 12px; }
 .legend { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 4px 10px; font-size: 12px; color: var(--muted); }
 .legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -2px; margin-right: 6px; border: 1px solid rgba(255,255,255,0.2); }
+.players { display: grid; gap: 6px; }
+.prow { display: grid; gap: 6px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
+.prow .phead, .prow .pcnt { display: flex; align-items: center; justify-content: space-between; gap: 6px 12px; flex-wrap: wrap; min-height: 26px; }
+.prow .who { display: flex; align-items: center; gap: 6px; min-width: 0; font-weight: 600; }
+.prow .who i { width: 12px; height: 12px; border-radius: 50%; flex: none; }
+.prow .cnt { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); }
+.prow .stepper button { width: 26px; height: 26px; font-size: 14px; }
+.prow .stepper span { min-width: 22px; }
+.prow .del { padding: 2px 8px; font-size: 12px; }
 .counts { font-family: var(--font-data); font-size: 12px; color: var(--muted); }
 </style>
 </head>
@@ -131,16 +140,19 @@ header .eyebrow { font-family: var(--font-data); font-size: 11px; letter-spacing
         <div class="row"><span>Columns</span><span class="stepper"><button data-k="cols" data-d="-1" aria-label="Fewer columns">−</button><span id="v-cols"></span><button data-k="cols" data-d="1" aria-label="More columns">+</button></span></div>
         <div class="row"><span>Zone rows (each side)</span><span class="stepper"><button data-k="zone" data-d="-1" aria-label="Fewer zone rows">−</button><span id="v-zone"></span><button data-k="zone" data-d="1" aria-label="More zone rows">+</button></span></div>
         <div class="row"><span>No man’s land rows</span><span class="stepper"><button data-k="nml" data-d="-2" aria-label="Fewer no man's land rows">−</button><span id="v-nml"></span><button data-k="nml" data-d="2" aria-label="More no man's land rows">+</button></span></div>
-        <div class="row"><span>Buildings</span>
-          <span class="btnrow">
-            <button class="btn" id="t-treasury" aria-pressed="false">Treasuries</button>
-            <button class="btn" id="t-elf" aria-pressed="false">Elf tower</button>
-          </span>
-        </div>
         <div class="btnrow">
           <button class="btn" id="flank-reset">Default flanks</button>
           <button class="btn" id="clear">Clear tiles</button>
         </div>
+      </div>
+      <div class="card">
+        <h2>Players</h2>
+        <div class="players" id="players"></div>
+        <div class="btnrow">
+          <button class="btn" id="add-player">Add player</button>
+          <button class="btn" id="t-elf">Elf tower</button>
+        </div>
+        <p class="hint">You and the enemy keep your buildings on your own half, and with the mirror on you get the same number. Extra players’ buildings can stand anywhere. Drag any of them to move it.</p>
       </div>
       <div class="card">
         <h2>Start from</h2>
@@ -188,7 +200,8 @@ header .eyebrow { font-family: var(--font-data); font-size: 11px; letter-spacing
 //   nml:    one string per row: 'N' no man's land (nobody deploys there), '.' the deployment zone of the half it is on
 //           (older maps without it: the rows between the two zones)
 //   flank:  one string per row: 'F' a flank tile (the player whose half it is NOT on may deploy there), '.' not
-//   buildings: [{ kind: 'tower' | 'treasury' | 'elf', side: 0 | 1 | 2, col, row }]
+//   players: how many players (2 to MAX_PLAYERS); 0 is you (the bottom half), 1 the enemy (the top half), 2 on extra players
+//   buildings: [{ kind: 'tower' | 'treasury' | 'elf', side: the player (-1 for the elf tower), col, row }]
 const $ = (id) => document.getElementById(id);
 const STORE = 'nml.maps.v1';
 const LIMITS = { cols: [6, 24], zone: [3, 10], nml: [2, 12] };
@@ -225,7 +238,7 @@ const BASES = {
 const treasuryFor = (cols, t, side) => { const c = cols - 1 - t.col; return { col: c + (c < (cols - 1) / 2 ? 1 : -1), row: t.row + (side === 0 ? -1 : 1) }; };
 function fromBase(id) {
   const b = BASES[id], rows = b.zone * 2 + b.nml;
-  const m = { format: 'nml-map', version: 1, name: 'New ' + b.name.toLowerCase(), base: id, cols: b.cols, rows, zone: b.zone, symmetry: b.symmetry,
+  const m = { format: 'nml-map', version: 1, name: 'New ' + b.name.toLowerCase(), base: id, cols: b.cols, rows, zone: b.zone, symmetry: b.symmetry, players: 2,
     tiles: [], shape: [], height: [], nml: [], flank: [], buildings: [] };
   for (let r = 0; r < rows; r++) { m.nml.push(defaultNmlRow(r, rows, b.zone, b.cols)); m.shape.push('.'.repeat(b.cols)); m.tiles.push('.'.repeat(b.cols)); m.height.push('.'.repeat(b.cols)); m.flank.push(defaultFlankRow(b.cols)); }
   b.towers.forEach((t, side) => m.buildings.push({ kind: 'tower', side, col: t.col, row: t.row }));
@@ -254,6 +267,7 @@ const defaultNmlRow = (r, rows, zone, cols) => (r >= zone && r < rows - zone ? '
 const withShape = (m) => {
   if (!Array.isArray(m.shape)) m.shape = blankRows(m.rows, m.cols);
   if (!Array.isArray(m.nml)) m.nml = Array.from({ length: m.rows }, (_, r) => defaultNmlRow(r, m.rows, m.zone, m.cols));
+  if (!(m.players >= 2)) { m.players = 2; (m.buildings || []).forEach(b => { if (b.kind === 'elf') b.side = -1; }); } // older maps: two players, the elf tower was side 2
   return m;
 };
 // the game's flanks: the two edge columns, the whole way down (each half is the other player's)
@@ -329,16 +343,23 @@ function paintOne(c, r) {
 }
 
 // ---------- buildings ----------
-// a player's tower and treasury stay on their own half; nothing stands on a wall or on another building
+const PLAYER_COL = ['#5CC6DF', '#EE6E5C', '#E6B84A', '#B57BFF', '#7BD66A', '#F2A65A', '#FF7AB6', '#E5ECE9'];
+const MAX_PLAYERS = PLAYER_COL.length;
+const ELF_COL = '#D8E68C';
+const playerName = (side) => side === 0 ? 'You' : side === 1 ? 'Enemy' : 'Player ' + (side + 1);
+const ofKind = (side, kind) => map.buildings.filter(b => b.side === side && b.kind === kind);
+// you and the enemy are kept a mirror of each other while the mirror is on
+const mirrored = (side) => map.symmetry !== 'none' && (side === 0 || side === 1);
+// your and the enemy's buildings stay on your own half; nothing stands on a wall or on another building
 function spotOk(b, c, r, ignore) {
   if (!inside(c, r)) return false;
-  if (b.side !== 2 && halfOf(r) !== b.side) return false;
+  if (b.kind !== 'elf' && b.side <= 1 && halfOf(r) !== b.side) return false;
   if ('#~'.includes(tileAt(c, r)) && !isEdge(shapeAt(c, r))) return false;
   const o = buildingAt(c, r);
   return !o || o === b || (ignore && ignore.includes(o));
 }
-// its partner on the other half (the other player's tower / treasury), moved along with it while the mirror is on
-const partnerOf = (b) => b.side === 2 ? null : map.buildings.find(o => o.kind === b.kind && o.side === 1 - b.side) || null;
+// its partner on the other half (the other player's tower / treasury with the same number), moved along with it while the mirror is on
+const partnerOf = (b) => b.kind === 'elf' || b.side > 1 ? null : ofKind(1 - b.side, b.kind)[ofKind(b.side, b.kind).indexOf(b)] || null;
 function moveBuilding(b, c, r) {
   const p = map.symmetry !== 'none' ? partnerOf(b) : null, m = p && mirrorOf(c, r);
   if (m && m.col === c && m.row === r) return false; // the mirror would put both on one tile
@@ -357,21 +378,52 @@ function nearestFree(b, c, r) {
   }
   return best;
 }
-function toggleTreasuries() {
-  const before = snap(), had = map.buildings.some(b => b.kind === 'treasury');
-  if (had) map.buildings = map.buildings.filter(b => b.kind !== 'treasury');
-  else for (const side of [0, 1]) {
-    const t = map.buildings.find(b => b.kind === 'tower' && b.side === side) || { col: 0, row: side ? 0 : map.rows - 1 };
-    const want = treasuryFor(map.cols, t, side), b = { kind: 'treasury', side, col: 0, row: 0 };
-    const at = nearestFree(b, want.col, want.row);
-    if (at) { Object.assign(b, at); map.buildings.push(b); }
-  }
+// where a new building goes: a tower on its half's back row (extra players: the middle of the board), a treasury where
+// the game puts one for the player's first tower; then the nearest free tile
+function wantSpot(side, kind) {
+  const mid = { col: Math.floor(map.cols / 2), row: map.rows / 2 };
+  if (side > 1) return mid;
+  const t = ofKind(side, 'tower')[0];
+  if (kind === 'treasury' && t) return treasuryFor(map.cols, t, side);
+  return { col: Math.floor(map.cols / 2), row: side === 0 ? map.rows - 2 : 1 };
+}
+function placeNew(side, kind, want) {
+  const b = { kind, side, col: 0, row: 0 }, at = want && spotOk(b, want.col, want.row) ? want : nearestFree(b, (want || wantSpot(side, kind)).col, (want || wantSpot(side, kind)).row);
+  if (!at) return null;
+  Object.assign(b, at); map.buildings.push(b); return b;
+}
+// one more tower or treasury for a player (and the enemy's mirror of it, while the mirror is on)
+function addBuilding(side, kind) {
+  const before = snap(), b = placeNew(side, kind);
+  if (!b) { say('No free tile left for it.'); return; }
+  if (mirrored(side)) { const m = mirrorOf(b.col, b.row); if (!placeNew(1 - side, kind, m)) map.buildings.pop(); }
+  remember(before);
+}
+// takes away a player's last tower or treasury (and its mirror)
+function removeBuilding(side, kind) {
+  const before = snap();
+  for (const sd of mirrored(side) ? [side, 1 - side] : [side]) { const l = ofKind(sd, kind); if (l.length) map.buildings.splice(map.buildings.indexOf(l[l.length - 1]), 1); }
+  remember(before);
+}
+function addPlayer() {
+  if (map.players >= MAX_PLAYERS) return;
+  const before = snap(), side = map.players;
+  map.players++;
+  placeNew(side, 'tower', null);
+  remember(before);
+}
+// a player and their buildings go; the players after them move up one
+function removePlayer(side) {
+  if (side < 2) return;
+  const before = snap();
+  map.buildings = map.buildings.filter(b => b.side !== side).map(b => b.side > side ? { ...b, side: b.side - 1 } : b);
+  map.players--;
   remember(before);
 }
 function toggleElf() {
   const before = snap(), had = map.buildings.find(b => b.kind === 'elf');
   if (had) map.buildings = map.buildings.filter(b => b !== had);
-  else { const b = { kind: 'elf', side: 2, col: 0, row: 0 }, at = nearestFree(b, Math.floor(map.cols / 2) - 1, map.rows / 2); if (at) { Object.assign(b, at); map.buildings.push(b); } }
+  else { const b = { kind: 'elf', side: -1, col: 0, row: 0 }, at = nearestFree(b, Math.floor(map.cols / 2) - 1, map.rows / 2); if (at) { Object.assign(b, at); map.buildings.push(b); } }
   remember(before);
 }
 
@@ -406,7 +458,7 @@ function resize(cols, zone, nml) {
   const placed = [];
   map.buildings = o.buildings.map(b => {
     const nb = { ...b }, nr = mapRow(b.row), nc = mapCol(b.col);
-    const wantC = nc < 0 ? Math.min(cols - 1, b.col) : nc, wantR = nr < 0 ? (b.side === 0 ? rows - 1 : 0) : nr;
+    const wantC = nc < 0 ? Math.min(cols - 1, b.col) : nc, wantR = nr < 0 ? (b.side === 0 ? rows - 1 : b.side === 1 ? 0 : rows / 2) : nr;
     map.buildings = placed;
     const at = spotOk(nb, wantC, wantR) ? { col: wantC, row: wantR } : nearestFree(nb, wantC, wantR);
     if (at) { Object.assign(nb, at); placed.push(nb); }
@@ -454,13 +506,14 @@ function shroom(x, y, s, col) {
   g.fillStyle = 'rgba(255,255,255,0.7)'; g.beginPath(); g.arc(cx - s * 0.1, cy - s * 0.09, s * 0.035, 0, 7); g.arc(cx + s * 0.08, cy - s * 0.12, s * 0.03, 0, 7); g.fill();
 }
 function drawBuilding(b, x, y, s, ghost) {
-  const cx = x + s / 2, cy = y + s / 2, col = b.side === 0 ? '#5CC6DF' : b.side === 1 ? '#EE6E5C' : '#D8E68C';
+  const cx = x + s / 2, cy = y + s / 2, col = b.kind === 'elf' ? ELF_COL : PLAYER_COL[b.side] || '#E5ECE9';
   g.globalAlpha = ghost ? 0.45 : 1;
   if (b.kind === 'tower') {
     g.strokeStyle = col; g.lineWidth = Math.max(2, s * 0.08);
     g.fillStyle = 'rgba(13,19,21,0.75)'; g.beginPath(); g.arc(cx, cy, s * 0.42, 0, 7); g.fill(); g.stroke();
     g.fillStyle = col; rrect(cx - s * 0.2, cy - s * 0.2, s * 0.4, s * 0.4, s * 0.05); g.fill();
     g.fillStyle = 'rgba(255,255,255,0.35)'; g.fillRect(cx - s * 0.2, cy - s * 0.2, s * 0.4, s * 0.12);
+    if (b.side > 1 && s >= 20) { g.fillStyle = '#0D1315'; g.font = `700 ${Math.round(s * 0.3)}px "Chakra Petch", sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(b.side + 1, cx, cy + 1); }
   } else if (b.kind === 'treasury') {
     block(x, y, s, '#3A4A40', 1);
     g.strokeStyle = col; g.lineWidth = Math.max(1.5, s * 0.06); rrect(x + s * 0.12, y + s * 0.12, s * 0.76, s * 0.76, s * 0.1); g.stroke();
@@ -598,7 +651,7 @@ function endPointer() {
     if (moved) {
       const before = snap();
       if (moveBuilding(b, at.col, at.row)) remember(before);
-      else say(b.side === 2 ? 'Can’t stand there.' : 'A ' + (b.kind === 'tower' ? 'tower' : 'treasury') + ' stays on its own half, off walls and water' + (map.symmetry !== 'none' ? ', and its mirror spot must be free too.' : '.'));
+      else say(b.kind === 'elf' || b.side > 1 ? 'Can’t stand there: not on walls, water or another building.' : 'A ' + (b.kind === 'tower' ? 'tower' : 'treasury') + ' stays on its own half, off walls and water' + (map.symmetry !== 'none' ? ', and its mirror spot must be free too.' : '.'));
     } else say(buildingName(b) + ': drag it to move it.');
     draw();
   }
@@ -615,7 +668,7 @@ function endPointer() {
 cv.addEventListener('pointerup', endPointer);
 cv.addEventListener('pointercancel', endPointer);
 cv.addEventListener('pointerleave', () => { hover = null; if (!stroke && !drag) { showHover(); draw(); } });
-const buildingName = (b) => b.kind === 'elf' ? 'Elf tower' : (b.side === 0 ? 'Your ' : 'Enemy ') + b.kind;
+const buildingName = (b) => b.kind === 'elf' ? 'Elf tower' : (b.side === 0 ? 'Your ' : b.side === 1 ? 'Enemy ' : playerName(b.side) + ' ') + b.kind;
 let sayTimer = 0;
 function say(t) { $('status').textContent = t; clearTimeout(sayTimer); sayTimer = setTimeout(showHover, 2600); }
 function showHover() {
@@ -641,9 +694,14 @@ function buildTools() {
 }
 function pickTool(id) { tool = id; document.querySelectorAll('.tool').forEach(b => b.setAttribute('aria-pressed', b.dataset.tool === id)); }
 $('tools').addEventListener('click', (e) => { const b = e.target.closest('.tool'); if (b) pickTool(b.dataset.tool); });
-document.querySelectorAll('.stepper button').forEach(b => b.addEventListener('click', () => step(b.dataset.k, +b.dataset.d)));
+document.querySelectorAll('.stepper button[data-k]').forEach(b => b.addEventListener('click', () => step(b.dataset.k, +b.dataset.d)));
 $('sym').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; const before = snap(); map.symmetry = b.dataset.s; remember(before); refresh(); });
-$('t-treasury').addEventListener('click', toggleTreasuries);
+$('add-player').addEventListener('click', addPlayer);
+$('players').addEventListener('click', (e) => {
+  const b = e.target.closest('button'); if (!b || b.disabled) return;
+  if (b.dataset.del) removePlayer(+b.dataset.del);
+  else if (b.dataset.pk) (+b.dataset.pd > 0 ? addBuilding : removeBuilding)(+b.dataset.ps, b.dataset.pk);
+});
 $('t-elf').addEventListener('click', toggleElf);
 $('flank-reset').addEventListener('click', () => { const before = snap(); map.flank = Array.from({ length: map.rows }, () => defaultFlankRow(map.cols)); remember(before); });
 $('clear').addEventListener('click', () => { const before = snap(); map.tiles = map.tiles.map(r => '.'.repeat(r.length)); map.shape = map.shape.map(r => '.'.repeat(r.length)); map.height = map.height.map(r => '.'.repeat(r.length)); remember(before); });
@@ -729,10 +787,17 @@ function refresh() {
   if (document.activeElement !== $('name')) $('name').value = map.name || '';
   $('v-cols').textContent = map.cols; $('v-zone').textContent = map.zone; $('v-nml').textContent = map.rows - map.zone * 2;
   const nml = map.rows - map.zone * 2;
-  for (const b of document.querySelectorAll('.stepper button')) { const v = { cols: map.cols, zone: map.zone, nml }[b.dataset.k] + +b.dataset.d; b.disabled = v < LIMITS[b.dataset.k][0] || v > LIMITS[b.dataset.k][1]; }
+  for (const b of document.querySelectorAll('.stepper button[data-k]')) { const v = { cols: map.cols, zone: map.zone, nml }[b.dataset.k] + +b.dataset.d; b.disabled = v < LIMITS[b.dataset.k][0] || v > LIMITS[b.dataset.k][1]; }
   document.querySelectorAll('#sym button').forEach(b => b.setAttribute('aria-pressed', b.dataset.s === map.symmetry));
-  $('t-treasury').setAttribute('aria-pressed', map.buildings.some(b => b.kind === 'treasury'));
-  $('t-treasury').textContent = map.buildings.some(b => b.kind === 'treasury') ? 'Remove treasuries' : 'Add treasuries';
+  const cnt = (side, kind) => `<span class="cnt">${kind === 'tower' ? 'Towers' : 'Treasuries'}<span class="stepper">
+    <button data-ps="${side}" data-pk="${kind}" data-pd="-1" aria-label="One ${kind} fewer for ${playerName(side)}" ${ofKind(side, kind).length ? '' : 'disabled'}>−</button>
+    <span class="num">${ofKind(side, kind).length}</span>
+    <button data-ps="${side}" data-pk="${kind}" data-pd="1" aria-label="One more ${kind} for ${playerName(side)}">+</button></span></span>`;
+  $('players').innerHTML = Array.from({ length: map.players }, (_, side) => `<div class="prow">
+    <div class="phead"><span class="who"><i style="background:${PLAYER_COL[side]}"></i>${playerName(side)}</span>
+    ${side > 1 ? `<button class="btn del" data-del="${side}" aria-label="Remove ${playerName(side)}">Remove</button>` : ''}</div>
+    <div class="pcnt">${cnt(side, 'tower')}${cnt(side, 'treasury')}</div></div>`).join('');
+  $('add-player').disabled = map.players >= MAX_PLAYERS;
   $('t-elf').textContent = map.buildings.some(b => b.kind === 'elf') ? 'Remove elf tower' : 'Add elf tower';
   if (!$('json-box').hidden && document.activeElement !== $('json')) $('json').value = JSON.stringify(map);
   $('undo').disabled = !undoStack.length; $('redo').disabled = !redoStack.length;

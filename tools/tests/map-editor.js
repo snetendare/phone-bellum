@@ -92,7 +92,7 @@ const ok = (c, msg) => { console.log((c ? 'ok   ' : 'FAIL ') + msg); if (!c) pro
   await p.click('[data-k="nml"][data-d="2"]'); m = await map();
   ok(m.rows === 18 && m.tiles[7][3] === '#' && m.tiles[10][3] === '#' && tw(0).row === 15, 'more no man’s land: rows added in the middle');
   // treasuries and elf tower
-  await p.click('#t-treasury'); await p.click('#t-elf'); m = await map();
+  await p.click('[data-ps="0"][data-pk="treasury"][data-pd="1"]'); await p.click('#t-elf'); m = await map();
   ok(m.buildings.filter(x => x.kind === 'treasury').length === 2 && m.buildings.some(x => x.kind === 'elf'), 'treasuries and an elf tower added');
   // save, start over, open it again
   await p.fill('#name', 'Test arena'); await p.click('#save');
@@ -103,6 +103,20 @@ const ok = (c, msg) => { console.log((c ? 'ok   ' : 'FAIL ') + msg); if (!c) pro
   await p.click('[data-load="Test arena"]'); m = await map();
   ok(m.name === 'Test arena' && m.cols === 14 && m.tiles[7][3] === '#' && m.buildings.length === 5, 'saved map opened again');
   ok(await p.evaluate(() => Editor.validMap(Editor.map)), 'the map is valid');
+  // more players, more towers and treasuries
+  const count = (side, kind) => m.buildings.filter(x => x.side === side && x.kind === kind).length;
+  await p.click('#add-player'); m = await map();
+  ok(m.players === 3 && count(2, 'tower') === 1, 'a third player with a tower');
+  await p.click('[data-ps="2"][data-pk="tower"][data-pd="1"]'); await p.click('[data-ps="2"][data-pk="treasury"][data-pd="1"]'); m = await map();
+  ok(count(2, 'tower') === 2 && count(2, 'treasury') === 1, 'player 3: two towers and a treasury');
+  await p.click('[data-ps="0"][data-pk="tower"][data-pd="1"]'); m = await map();
+  const t2 = m.buildings.filter(x => x.kind === 'tower' && x.side < 2);
+  ok(count(0, 'tower') === 2 && count(1, 'tower') === 2 && t2[2].col === (m.symmetry === 'point' ? m.cols - 1 - t2[3].col : t2[3].col) && t2[2].row === m.rows - 1 - t2[3].row, 'a second tower for you, and its mirror for the enemy');
+  await p.click('#add-player'); await p.click('[data-del="2"]'); m = await map();
+  ok(m.players === 3 && count(2, 'tower') === 1 && count(2, 'treasury') === 0 && count(3, 'tower') === 0, 'player 3 removed, player 4 is player 3 now');
+  await p.click('[data-ps="1"][data-pk="tower"][data-pd="-1"]'); m = await map();
+  ok(count(0, 'tower') === 1 && count(1, 'tower') === 1, 'one tower fewer each');
+  ok(await p.evaluate(() => Editor.validMap(Editor.map)), 'still valid');
   await p.screenshot({ path: process.env.SHOT || '/tmp/map-editor.png', fullPage: true });
   await b.close();
 })();
