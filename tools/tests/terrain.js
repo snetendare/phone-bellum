@@ -138,3 +138,45 @@ console.log('terrain ok');
   }
 }
 console.log('terrain: attacks stop at walls ok');
+// ---------- the bridge objective ----------
+{
+  // engine: more units in the zone for 5 s in a row wins it; a tie stops the clock
+  const zone = { secs: 5, rects: [{ x0: -3, x1: 3, y0: -3, y1: 3 }] };
+  const stand = (n, side, x, y) => Array.from({ length: n }, (_, i) => one(unit({ speed: 0, hit: 0, range: 1 }), side, x + i * 0.5, y)).flat();
+  const hold = (nA, nZ, secs) => {
+    const bt = E.createBattle(stand(nA, 0, -1, 0), stand(nZ, 1, -1, 2).concat(stand(1, 1, 8, 8)), g, { objective: zone });
+    for (let k = 0; k < secs / g.dt && bt.step(); k++);
+    return bt;
+  };
+  assert.strictEqual(hold(3, 2, 4.9).objective().won, -1, 'not yet at 4.9 s');
+  assert.strictEqual(hold(3, 2, 5.1).objective().won, 0, 'more units for 5 s: won');
+  assert.strictEqual(hold(2, 3, 5.1).objective().won, 1);
+  assert.strictEqual(hold(2, 2, 8).objective().won, -1, 'a tie wins nothing');
+  const bt = hold(3, 2, 6); bt.step();
+  assert.strictEqual(bt.result().objective, 0);
+  assert.deepStrictEqual(hold(3, 2, 1).objective().n, [3, 2]);
+  // game: the bridge's raised tiles are the zone, and the winner gets 50 gold more
+  const mm = mk(4);
+  assert.deepStrictEqual(Game.objectiveTiles(mm).length, 16, 'the bridge: 2 x 8 raised tiles');
+  Game.aiDeploy(mm, 0); Game.aiDeploy(mm, 1);
+  const sim = Game.startBattle(mm); while (sim.step()) {}
+  const res = sim.result(); res.objective = 1;
+  const sum = Game.resolve(mm, res);
+  assert.deepStrictEqual(sum.objective, [0, 50]);
+  // other maps have none
+  const plain = Game.createMatch(demo.units, demo.matrix, 4, 'testgrid');
+  assert.strictEqual(Game.objectiveOf(plain), null);
+  // how often it is won in AI matches
+  let won = [0, 0], none = 0;
+  for (let seed = 1; seed <= 4; seed++) {
+    const x = mk(seed);
+    for (let guard = 0; !x.over && guard < 30; guard++) {
+      Game.aiDeploy(x, 0); Game.aiDeploy(x, 1);
+      const s = Game.startBattle(x); while (s.step()) {}
+      const r = s.result(); if (r.objective >= 0) won[r.objective]++; else none++;
+      Game.resolve(x, r);
+    }
+  }
+  console.log('bridge objective in AI fights: won by side 0', won[0], 'side 1', won[1], 'nobody', none);
+}
+console.log('terrain: bridge objective ok');

@@ -505,8 +505,8 @@ const Game = (() => {
     { id: 'testgrid', name: 'Test Grid', short: 'A bigger board: each zone is 14 by 7 tiles.', text: 'Bigger board. A treasury pays 50 gold per fight it survives.', plain: true, grid: { cols: 14, rows: 18, zone: 7 }, pointMirror: true, treasury: true,
       rangeAdd: 2, rangeAddMin: 5, slowSteps: [[3, 0.2], [5, 0.2]], tuneKeep: ['Shiv', 'Water Mage'] }, // only when picked, never random
     // the Test Grid's board and rules, with two rivers and a raised bridge between them across no man's land
-    { id: 'bridge', name: 'Bridge', short: 'A raised bridge between two rivers. High ground shoots further and harder.', text: 'Two rivers nobody can wade across, a raised bridge between them. From higher ground: +1 m range and +2% damage per level above the target. A treasury pays 50 gold per fight it survives.', plain: true,
-      grid: { cols: 14, rows: 18, zone: 7 }, pointMirror: true, treasury: true, terrain: EDITOR_MAPS.bridge,
+    { id: 'bridge', name: 'Bridge', short: 'Hold the raised bridge between two rivers for 50 gold. High ground shoots further and harder.', text: 'Two rivers nobody can wade across, a raised bridge between them. Hold the bridge with more units than your opponent for 5 seconds in a row to win it: +50 gold. From higher ground: +1 m range and +2% damage per level above the target, as much less shooting uphill. A treasury pays 50 gold per fight it survives.', plain: true,
+      grid: { cols: 14, rows: 18, zone: 7 }, pointMirror: true, treasury: true, terrain: EDITOR_MAPS.bridge, objective: { secs: 5, gold: 50 },
       rangeAdd: 2, rangeAddMin: 5, slowSteps: [[3, 0.2], [5, 0.2]], tuneKeep: ['Shiv', 'Water Mage'] }, // only when picked, never random
   ];
   // ---------- terrain: walls, water, bushes and ground height (a map's `terrain`, from the map editor) ----------
@@ -532,6 +532,16 @@ const Game = (() => {
   }
   // nothing can be placed on a wall or water tile (an edge wall leaves its tile free)
   const terrainBlocks = (m, col, row) => { const t = terrainTile(m, col, row); return (t.ch === '#' || t.ch === '~') && !EDGE_FORMS.includes(t.shape); };
+  // The map objective (a map's `objective` = { secs, gold }: the Bridge): its zone is the raised ground (every walkable
+  // tile above level 0). In a fight, the side with more units standing on it for secs s in a row wins it (Engine's
+  // objective), once a fight, and gets gold more in the next round (resolve).
+  const objectiveOf = (m) => { const mp = mapOf(m); return mp && mp.objective && mp.terrain ? mp.objective : null; };
+  function objectiveTiles(m) {
+    if (!objectiveOf(m)) return [];
+    const out = [];
+    for (let row = 0; row < ROWS; row++) for (let col = 0; col < COLS; col++) { const tl = terrainTile(m, col, row); if (tl.h > 0 && tl.ch !== '#' && tl.ch !== '~') out.push({ col, row }); }
+    return out;
+  }
   // the engine's terrain grid for a map (opts.terrain), made once per map: see Engine's terrain
   function terrainOf(m) {
     const mp = mapOf(m), t = mp && mp.terrain;
@@ -1940,7 +1950,8 @@ const Game = (() => {
     if (AWARENESS) g = { ...g, aware2: true, ...(isDev(m) && DEV.awareLane != null ? { awareLane: DEV.awareLane } : {}) };
     const neutrals = elf ? [{ u: elfUnit(m), x: elf.x, y: elf.y, friends: [bribeLeader(m) === 0, bribeLeader(m) === 1] }] : [];
     for (const side of [0, 1]) { const e = elfOwnOf(m, side); if (e) { const w = tileToWorld(e.col, e.row); neutrals.push({ u: elfUnit(m), x: w.x, y: w.y, friends: [side === 0, side === 1], side }); } }
-    return { g, opts: { tiles, strikes: fx.strikes, neutrals, charm: [charmMap(m, 0), charmMap(m, 1)], terrain: terrainOf(m) } };
+    const ob = objectiveOf(m), objective = ob ? { secs: ob.secs, rects: objectiveTiles(m).map(t => { const w = tileToWorld(t.col, t.row); return { x0: w.x - T2, x1: w.x + T2, y0: w.y - T2, y1: w.y + T2 }; }) } : null;
+    return { g, opts: { tiles, strikes: fx.strikes, neutrals, charm: [charmMap(m, 0), charmMap(m, 1)], terrain: terrainOf(m), objective } };
   }
 
   // ---------- intent: whom a squad goes for ----------
@@ -2197,6 +2208,9 @@ const Game = (() => {
       m.gold[sd] -= take; m.gold[1 - sd] += take;
       summary.treasury[sd].lost = take; summary.treasury[1 - sd].stole = take;
     }
+    // the map objective: who won it this fight gets its gold
+    summary.objective = [0, 1].map(sd => objectiveOf(m) && res.objective === sd ? objectiveOf(m).gold : 0);
+    for (const sd of [0, 1]) m.gold[sd] += summary.objective[sd];
     // Mark Bounty: a Sniper took the marked squad's last body
     summary.markBounty = [0, 1].map(sd => res.markKill && res.markKill[sd] ? MARK.bounty : 0);
     for (const sd of [0, 1]) m.gold[sd] += summary.markBounty[sd];
@@ -2859,7 +2873,7 @@ const Game = (() => {
     TOWER, TOWER_TYPES, OUTPOST, TOWER_PICK_ROUND, towerType, towerChoices, needsTowerPick, setTowerType, settleTowerPicks, TOWER_SKILL, towerSkillOf, towerSkillVisible, towerPicked, canBuyTowerSkill, buyTowerSkill, undoTowerSkill, towerSkillCost, towerSkill2Of, towerSkill2Visible, towerSkill2Cost, canBuyTowerSkill2, buyTowerSkill2, undoTowerSkill2, towerSkill2On, AIRSHIP, MOAT, BWALL, BWALL_SQ, EDGES, bwallsOf, bwallOn, edgeOf, bwallWorld, bwallsLeft, bwallShown, bwallSpotOk, placeBwall, unplaceBwall, ensureBwalls, bwallUnit, INVEST, MAGE_GENERALS, mageGenPrice, MAGE, mageGenInfo, mageGenOf, mageTpOf, isExtraGen, mageGenCost, canBuyMageGen, buyMageGen, undoMageGen, mageTowerUnit, generalUnit, LOAN, loanNow, investNow, bankBusy, investNow, bankBusy, canTakeLoan, takeLoan, undoLoan, towerRounds, troundInfo, troundOn, troundCost, canBuyTround, buyTround, undoTround, SLIME_UNITS, slimeTowerUnit, slimeSkillDefs, TOWER_MID, towerColOk, towerAt, needsTower, placeTower, ensureTower,
     FLANK, flankRows, flankOpen, isFlank, reserved, canPlaceAt, isOff, enemyHolds, inNoMans, hasSkillType, garrisonAt, garrisonFree, inBuilding, WATCH_SQ, watchUnit, freeMover,
     STANDARD_PACK, ICE, ALTAR, GOLEM, isIce, hailRound, altarRound, stormShift, stormRows, hailTiles, altarCost, altarRefund, altarCount, pushRoom, altarBought, addAltar, buyAltar, undoAltar, snowgres, snowgreUnit,
-    MAPS, EDITOR_MAPS, TERRAIN, SHAPE_PATH, terrainTile, terrainBlocks, terrainOf, groundHeight, ELF_TOWER, SHROOM, SHROOM_SPLIT, shroomAt, shroomTileAt, shroomRemoval, SHROOM_REMOVE, shroomCost, removeShroom, undoRemoveShroom, mapOf, elfSpot, rollMap, BRIBE_COST, bribeList, bribeGold, bribeCount, bribeNow, bribeCost, bribeRefund, ELF_POWER, elfPowered, elfUnit, ELF_OWN, elfOwnCost, elfOwnOf, elfOwnAt, elfOwnUnlocked, elfOwnOffered, canBuyElfOwn, elfOwnSpotOk, buyElfOwn, undoElfOwn, bribeLeader, canBribe, bribe, undoBribe,
+    MAPS, EDITOR_MAPS, TERRAIN, objectiveOf, objectiveTiles, SHAPE_PATH, terrainTile, terrainBlocks, terrainOf, groundHeight, ELF_TOWER, SHROOM, SHROOM_SPLIT, shroomAt, shroomTileAt, shroomRemoval, SHROOM_REMOVE, shroomCost, removeShroom, undoRemoveShroom, mapOf, elfSpot, rollMap, BRIBE_COST, bribeList, bribeGold, bribeCount, bribeNow, bribeCost, bribeRefund, ELF_POWER, elfPowered, elfUnit, ELF_OWN, elfOwnCost, elfOwnOf, elfOwnAt, elfOwnUnlocked, elfOwnOffered, canBuyElfOwn, elfOwnSpotOk, buyElfOwn, undoElfOwn, bribeLeader, canBribe, bribe, undoBribe,
     CHARACTERS, CHAR, charOf, charInfo, enzoSkill, enzoActive, charmOf, isGentleman, canGiveCharm, giveCharm, undoCharm, ensureCharm, felixGold, isTier1, rollBuffTiles, onBuffTile, zoeBuff, yotImps, yotLevel, TOWER_SPOT, towerSpot,
     TREASURY, TREASURY_SQ, treasuryOn, treasuryUp, treasurySpot, treasuryAt, treasuryUnit, deployCost, FORTIFY, fortifyOf, canFortify, fortify, bwallsFighting, VAULT, vaultOn, MARK, markOf, markLost, markOn, markCost, markTarget, canMark, placeMark, markShown,
     FACTION_MODE, FACTIONS: () => FACTIONS, setFactions, factionInfo, factionsOf, factionTowers, towerTypeById, ownsUnit, withFactionTrait, factionSet,

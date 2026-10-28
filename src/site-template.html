@@ -2144,6 +2144,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
     if (sum.invest && sum.invest[me]) gold.push(`+${sum.invest[me]} investment`);
     if (sum.loan && sum.loan[me]) gold.push(`−${sum.loan[me]} loan`);
     if (sum.markBounty && sum.markBounty[me]) gold.push(`+${sum.markBounty[me]} mark bounty`);
+    if (sum.objective && sum.objective[me]) gold.push(`+${sum.objective[me]} bridge held`);
     const tr = sum.treasury && sum.treasury[me];
     if (tr && tr.gold) gold.push(`+${tr.gold} treasury`);
     if (tr && tr.stole) gold.push(`+${tr.stole} stolen from their treasury`);
@@ -3040,12 +3041,20 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     for (const e of fx) e.age += dtReal * sp * boost;
     Art.frostFollow(fx);
     fx = fx.filter(e => e.age < e.life);
-    $('clock').textContent = `${bt.time().toFixed(1)} s${cam && cam.on ? ' · final seconds' : boost > 1 ? ' · speeding up' : ''}`;
+    $('clock').textContent = `${bt.time().toFixed(1)} s${cam && cam.on ? ' · final seconds' : boost > 1 ? ' · speeding up' : ''}${objectiveLine()}`;
     render();
     if (bt.isOver()) { finishBattle(); return; }
     raf = requestAnimationFrame(loop);
   }
 
+  // the map objective while a fight plays (the Bridge): who holds it, by how many, and for how long; or who won it
+  function objectiveLine() {
+    const o = bt && bt.objective && bt.objective();
+    if (!o) return '';
+    const who = (sd) => sd === me ? 'you' : foeName();
+    if (o.won >= 0) return ` · bridge won by ${who(o.won)}`;
+    return ` · bridge ${o.n[me]}–${o.n[1 - me]}${o.lead >= 0 ? ` · ${who(o.lead)} ${Math.min(o.hold, o.secs).toFixed(1)}/${o.secs} s` : ''}`;
+  }
   function finishBattle() {
     if (phase !== 'battle') return;
     cancelAnimationFrame(raf);

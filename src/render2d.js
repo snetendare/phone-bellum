@@ -294,6 +294,31 @@ const Render2D = (cv, view) => {
     terBg = { key, cv: oc };
     return oc;
   }
+  // the map objective's zone (the Bridge): a dashed gold line round it; in a fight, in the colour of whoever holds it
+  // (solid once it is won)
+  function drawObjective(v) {
+    const t = tilePx(), set = new Set(Game.objectiveTiles(v).map(q => q.col + ',' + q.row));
+    const o = phase === 'battle' && bt && bt.objective ? bt.objective() : null, who = o ? (o.won >= 0 ? o.won : o.lead) : -1;
+    ctx.strokeStyle = who >= 0 ? teamCol(who) : css('--gold'); ctx.globalAlpha = 0.9; ctx.lineWidth = Math.max(1.5, t * 0.05);
+    if (!(o && o.won >= 0)) ctx.setLineDash([t * 0.16, t * 0.1]);
+    ctx.beginPath();
+    for (const k of set) {
+      const [col, row] = k.split(',').map(Number), x = scol(col) * t, y = srow(row) * t;
+      for (const [dc, dr, ax, ay, bx, by] of [[0, -1, 0, 0, 1, 0], [1, 0, 1, 0, 1, 1], [0, 1, 0, 1, 1, 1], [-1, 0, 0, 0, 0, 1]]) {
+        if (set.has((col + dc) + ',' + (row + dr))) continue;
+        const f = me === 1 ? -1 : 1, ox = f === 1 ? 0 : 1, oy = f === 1 ? 0 : 1; // the board is turned round for side 1
+        ctx.moveTo(x + Math.abs(ox - ax) * t, y + Math.abs(oy - ay) * t); ctx.lineTo(x + Math.abs(ox - bx) * t, y + Math.abs(oy - by) * t);
+      }
+    }
+    ctx.stroke(); ctx.setLineDash([]);
+    // in a fight, how long it has been held, as a bar along its near end
+    if (o && o.won < 0 && o.lead >= 0) {
+      const xs = [...set].map(k => scol(+k.split(',')[0]) * t), ys = [...set].map(k => srow(+k.split(',')[1]) * t);
+      const x0 = Math.min(...xs), x1 = Math.max(...xs) + t, y1 = Math.max(...ys) + t;
+      ctx.fillStyle = teamCol(o.lead); ctx.fillRect(x0, y1 + 2, (x1 - x0) * Math.min(1, o.hold / o.secs), Math.max(3, t * 0.08));
+    }
+    ctx.globalAlpha = 1;
+  }
   const ICE_COL = '#BFE3F5';
   // the storm band (a faint frost) and this round's hail tiles (animated during the fight)
   function drawStorm(v) {
@@ -387,6 +412,7 @@ const Render2D = (cv, view) => {
     if (mp && BACKGROUNDS[mp.id]) ctx.drawImage(mapBackground(mp.id), 0, 0, W, H);
     else { ctx.fillStyle = css('--board'); ctx.fillRect(0, 0, W, H); }
     if (mp && mp.terrain) ctx.drawImage(terrainLayer(v), 0, 0, W, H);
+    if (mp && mp.objective) drawObjective(v);
     if (!plain) {
       ctx.globalAlpha = 0.08;
       ctx.fillStyle = css('--foe'); ctx.fillRect(0, 0, W, t * Z);

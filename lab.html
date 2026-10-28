@@ -1663,6 +1663,19 @@ const Engine = (() => {
       for (let k = 1; k < n; k++) if (wallCell(cellOf(ax + (bx - ax) * k / n, ay + (by - ay) * k / n))) return true;
       return false;
     }
+    // A map objective (opts.objective = { rects: [{ x0, x1, y0, y1 }], secs }, the Bridge): the side with more of its
+    // units standing in the zone (not structures, airships or constructs) holds it; holding it secs s in a row wins it,
+    // once a fight (result().objective: the side, or -1). objective() tells the boards how it stands.
+    const obj = opts.objective && opts.objective.rects && opts.objective.rects.length ? { ...opts.objective, n: [0, 0], lead: -1, hold: 0, won: -1 } : null;
+    const inZone = (b) => obj.rects.some(r => b.x >= r.x0 && b.x <= r.x1 && b.y >= r.y0 && b.y <= r.y1);
+    function objectiveStep() {
+      obj.n = [0, 0];
+      for (const b of all) if (b.alive && counts(b) && !b.boarded && !b.turning && inZone(b)) obj.n[b.side]++;
+      const lead = obj.n[0] > obj.n[1] ? 0 : obj.n[1] > obj.n[0] ? 1 : -1;
+      obj.hold = lead >= 0 && lead === obj.lead ? obj.hold + dt : lead >= 0 ? dt : 0;
+      obj.lead = lead;
+      if (obj.won < 0 && lead >= 0 && obj.hold >= obj.secs - 1e-9) obj.won = lead;
+    }
     // current range: shortsight can shrink it for a while, but never below 1 m (or the unit's own range if shorter)
     // Flow state stacks add to it
     const R = (b) => { const r = b.flow > 0 ? b.u.range + b.flow * b.u.flow.range : b.u.range; return b.shrinkT > 0 ? Math.max(Math.min(r, 1), r - b.shrinkM) : r; };
@@ -2882,6 +2895,7 @@ const Engine = (() => {
       }
       // walls and water: a body that ended up in one (pushed by allies, knocked back, cutting a corner) steps back out
       if (terBlock) for (const b of all) if (b.alive && !b.u.aloft && !b.u.structure && !b.u.anchored && !sheltered(b) && !b.boarded) keepOut(b);
+      if (obj) objectiveStep();
       for (const s of strikes) {
         if (s.done || t + 1e-9 < s.t) continue;
         s.done = true;
@@ -3310,7 +3324,7 @@ const Engine = (() => {
         winner, timeout, time: t, frac,
         score: frac[0] - frac[1],
         survivors: [aliveA, aliveB], counts: [A.length, B.length],
-        stats, squads, markKill: markKill.slice(),
+        stats, squads, markKill: markKill.slice(), objective: obj ? obj.won : -1,
         charm, // charisma stacks after the fight, by side and squad id (null for a side without)
         converted: [0, 1].map(k => all.filter(b => b.convert && b.side === k).length), // bodies each side won over
         // each building: still standing, seconds of building done at the end (null when it was already built), whether any was done this fight
@@ -3318,7 +3332,8 @@ const Engine = (() => {
       };
     }
 
-    return { step, frame, result, bodies: all, neutrals, mines: () => mines, pools: () => pools, portals: () => portals.filter(p => t >= p.t0 && t < p.t0 + p.secs), isOver: () => over, time: () => t, lastShots: () => shots, projectiles: () => projectiles, crippled: (side) => cripple[side], charm: (side, squad) => (charm[side] && charm[side][squad]) || 0 };
+    return { step, frame, result, bodies: all, neutrals, mines: () => mines, pools: () => pools, portals: () => portals.filter(p => t >= p.t0 && t < p.t0 + p.secs), isOver: () => over, time: () => t, lastShots: () => shots, projectiles: () => projectiles, crippled: (side) => cripple[side], charm: (side, squad) => (charm[side] && charm[side][squad]) || 0,
+      objective: () => obj && { n: obj.n.slice(), lead: obj.lead, hold: obj.hold, secs: obj.secs, won: obj.won } };
   }
 
   function matrix(units, g) {
