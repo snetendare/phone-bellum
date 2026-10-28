@@ -27,13 +27,13 @@ const ok = (c, msg) => { console.log((c ? 'ok   ' : 'FAIL ') + msg); if (!c) pro
   ok(m.tiles[7][3] === '#' && m.tiles[8][3] === '#', 'a solid wall and its mirror');
   // tapping it again: corner, line, diagonal, block (the mirror turned over); Rotate turns it
   const forms = [];
-  for (let k = 0; k < 4; k++) { await tap(3, 7); m = await map(); forms.push(m.shape[7][3] + m.shape[8][3]); }
-  ok(forms.join(' ') === '└┌ ── ╱╲ ..' && m.tiles[7][3] === '#', 'forms cycle: ' + forms.join(' '));
+  for (let k = 0; k < 5; k++) { await tap(3, 7); m = await map(); forms.push(m.shape[7][3] + m.shape[8][3]); }
+  ok(forms.join(' ') === '└┌ ── ╱╲ ▔▁ ..' && m.tiles[7][3] === '#', 'forms cycle: ' + forms.join(' '));
   await tap(3, 7); await p.click('[data-tool="rotate"]'); await tap(3, 7); m = await map();
   ok(m.shape[7][3] === '┌' && m.shape[8][3] === '└', 'rotated corner, mirror kept');
   await tap(3, 7); await tap(3, 7); await tap(3, 7); m = await map();
   ok(m.shape[7][3] === '└' && m.shape[8][3] === '┌', 'four turns go round');
-  await p.click('[data-tool="#"]'); for (let k = 0; k < 3; k++) await tap(3, 7); m = await map();
+  await p.click('[data-tool="#"]'); for (let k = 0; k < 4; k++) await tap(3, 7); m = await map();
   ok(m.shape[7][3] === '.', 'back to a block');
   await dragTiles([3, 7], [4, 7]); m = await map();
   ok(m.tiles[7][4] === '#' && m.shape[7][3] === '.', 'a drag from a wall paints on, without changing its form');
@@ -68,6 +68,12 @@ const ok = (c, msg) => { console.log((c ? 'ok   ' : 'FAIL ') + msg); if (!c) pro
   await dragTiles([8, 14], [3, 13]); m = await map();
   const tw = (s) => m.buildings.find(x => x.kind === 'tower' && x.side === s);
   ok(tw(0).col === 3 && tw(0).row === 13 && tw(1).col === 3 && tw(1).row === 2, 'tower moved, the enemy tower mirrored');
+  await p.click('[data-tool="#"]'); await tap(5, 13); for (let k = 0; k < 4; k++) await tap(5, 13);
+  await p.click('[data-tool="rotate"]'); await tap(5, 13); m = await map();
+  ok(m.shape[13][5] === '▕' && m.shape[2][5] === '▕', 'edge wall turned to the right side, mirrored across');
+  await dragTiles([3, 13], [5, 13]); m = await map();
+  ok(tw(0).col === 5 && tw(0).row === 13, 'a tower can stand on a tile with an edge wall');
+  await dragTiles([5, 13], [3, 13]); m = await map();
   await dragTiles([3, 13], [3, 3]); m = await map();
   ok(tw(0).row === 13, 'a tower can’t leave its own half');
   // resize: more columns keeps the edges

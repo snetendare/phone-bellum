@@ -117,7 +117,7 @@ header .eyebrow { font-family: var(--font-data); font-size: 11px; letter-spacing
       <div class="card">
         <h2>Paint</h2>
         <div class="tools" id="tools"></div>
-        <p class="hint">Drag across the board to paint. Tap a wall, water, shallow water or bush again with its own tool to change its form: corner, line, diagonal, then block again. Drag a tower or building to move it, whatever tool is picked.</p>
+        <p class="hint">Drag across the board to paint. Tap a wall, water, shallow water or bush again with its own tool to change its form: corner, line, diagonal, edge wall (along one side of the tile, which can still be walked on), then block again. Drag a tower or building to move it, whatever tool is picked.</p>
       </div>
       <div class="card">
         <h2>Board</h2>
@@ -183,7 +183,8 @@ header .eyebrow { font-family: var(--font-data); font-size: 11px; letter-spacing
 //   height: one string per row: 'L' -2, 'l' -1, '.' 0, 'h' +1, 'H' +2
 //   shape:  one string per row, the form of a wall, water, shallow water or bush tile: '.' a full block, '└' '┌' '┐' '┘'
 //           a corner (joining the tile's middle to two of its edges: └ up and right), '─' '│' a line through the middle,
-//           '╱' '╲' a diagonal (older maps without it are all blocks)
+//           '╱' '╲' a diagonal, '▔' '▕' '▁' '▏' an edge wall along the tile's top, right, bottom or left side (the tile
+//           itself can be walked on) (older maps without it are all blocks)
 //   flank:  one string per row: 'F' a flank tile (the player whose half it is NOT on may deploy there), '.' not
 //   buildings: [{ kind: 'tower' | 'treasury' | 'elf', side: 0 | 1 | 2, col, row }]
 const $ = (id) => document.getElementById(id);
@@ -230,16 +231,19 @@ function fromBase(id) {
 }
 // ---------- tile forms: tapping a wall, water, shallow water or bush tile again with its own tool goes block → corner → line → diagonal → block ----------
 const SHAPED = '#~sb';
-const SHAPE_CYCLE = ['.', '└', '─', '╱'];
-const SHAPE_KIND = { '.': 0, '└': 1, '┌': 1, '┐': 1, '┘': 1, '─': 2, '│': 2, '╱': 3, '╲': 3 };
-const SHAPE_NAME = ['block', 'corner', 'line', 'diagonal'];
-const ROT = { '.': '.', '└': '┌', '┌': '┐', '┐': '┘', '┘': '└', '─': '│', '│': '─', '╱': '╲', '╲': '╱' }; // a quarter turn clockwise
-const FLIP = { '└': '┌', '┌': '└', '┐': '┘', '┘': '┐', '╱': '╲', '╲': '╱' }; // turned over top to bottom
+const SHAPE_CYCLE = ['.', '└', '─', '╱', '▔'];
+const SHAPE_KIND = { '.': 0, '└': 1, '┌': 1, '┐': 1, '┘': 1, '─': 2, '│': 2, '╱': 3, '╲': 3, '▔': 4, '▕': 4, '▁': 4, '▏': 4 };
+const SHAPE_NAME = ['block', 'corner', 'line', 'diagonal', 'edge wall'];
+const ROT = { '.': '.', '└': '┌', '┌': '┐', '┐': '┘', '┘': '└', '─': '│', '│': '─', '╱': '╲', '╲': '╱', '▔': '▕', '▕': '▁', '▁': '▏', '▏': '▔' }; // a quarter turn clockwise
+const FLIP = { '└': '┌', '┌': '└', '┐': '┘', '┘': '┐', '╱': '╲', '╲': '╱', '▔': '▁', '▁': '▔' }; // turned over top to bottom
+// an edge wall stands on one side of its tile: units can still stand on the tile, and buildings too
+const isEdge = (sh) => SHAPE_KIND[sh] === 4;
 // the form on the mirrored tile: half a turn for the rotated mirror, turned over for the mirror across
 const mirrorShape = (ch, sym = map.symmetry) => sym === 'point' ? ROT[ROT[ch]] : sym === 'mirror' ? (FLIP[ch] || ch) : ch;
 // the line through a form, in tile units (0 to 1)
 const SHAPE_PATH = { '─': [[0, .5], [1, .5]], '│': [[.5, 0], [.5, 1]], '└': [[.5, 0], [.5, .5], [1, .5]], '┌': [[1, .5], [.5, .5], [.5, 1]],
-  '┐': [[.5, 1], [.5, .5], [0, .5]], '┘': [[0, .5], [.5, .5], [.5, 0]], '╱': [[0, 1], [1, 0]], '╲': [[0, 0], [1, 1]] };
+  '┐': [[.5, 1], [.5, .5], [0, .5]], '┘': [[0, .5], [.5, .5], [.5, 0]], '╱': [[0, 1], [1, 0]], '╲': [[0, 0], [1, 1]],
+  '▔': [[0, .11], [1, .11]], '▕': [[.89, 0], [.89, 1]], '▁': [[0, .89], [1, .89]], '▏': [[.11, 0], [.11, 1]] }; // edge walls: up, right, down, left
 const blankRows = (rows, cols) => Array.from({ length: rows }, () => '.'.repeat(cols));
 // older maps have no shape layer: every tile a block
 const withShape = (m) => { if (!Array.isArray(m.shape)) m.shape = blankRows(m.rows, m.cols); return m; };
@@ -317,7 +321,7 @@ function paintOne(c, r) {
 function spotOk(b, c, r, ignore) {
   if (!inside(c, r)) return false;
   if (b.side !== 2 && halfOf(r) !== b.side) return false;
-  if ('#~'.includes(tileAt(c, r))) return false;
+  if ('#~'.includes(tileAt(c, r)) && !isEdge(shapeAt(c, r))) return false;
   const o = buildingAt(c, r);
   return !o || o === b || (ignore && ignore.includes(o));
 }
@@ -456,9 +460,9 @@ function drawBuilding(b, x, y, s, ghost) {
   }
   g.globalAlpha = 1;
 }
-// a corner, line or diagonal: a thick bar along its path, in its tile's colours
+// a corner, line, diagonal or edge wall: a bar along its path, in its tile's colours (an edge wall a thin one)
 function drawShaped(ch, sh, x, y) {
-  const pts = SHAPE_PATH[sh], w = T * 0.34;
+  const pts = SHAPE_PATH[sh], w = T * (isEdge(sh) ? 0.22 : 0.34);
   const path = () => { g.beginPath(); pts.forEach(([px, py], i) => i ? g.lineTo(x + px * T, y + py * T) : g.moveTo(x + px * T, y + py * T)); };
   g.save(); g.beginPath(); g.rect(x, y, T, T); g.clip();
   g.lineJoin = 'round'; g.lineCap = 'butt';
