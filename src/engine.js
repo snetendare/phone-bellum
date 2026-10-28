@@ -1065,6 +1065,15 @@ const Engine = (() => {
       const a = cellOf(b.x, b.y), z = cellOf(f.x, f.y);
       return a < 0 || z < 0 || losCells(a, z);
     };
+    // whether a wall (a cell that stops both walking and sight) stands on the straight line between two points: shots
+    // and everything else that flies along a line stop at it
+    const wallCell = (i) => i >= 0 && ter.block[i] === 1 && ter.sight[i] === 1;
+    function wallOnLine(ax, ay, bx, by) {
+      if (!terSight) return false;
+      const d = hyp(bx - ax, by - ay), n = Math.ceil(d / (TC * 0.25));
+      for (let k = 1; k < n; k++) if (wallCell(cellOf(ax + (bx - ax) * k / n, ay + (by - ay) * k / n))) return true;
+      return false;
+    }
     // current range: shortsight can shrink it for a while, but never below 1 m (or the unit's own range if shorter)
     // Flow state stacks add to it
     const R = (b) => { const r = b.flow > 0 ? b.u.range + b.flow * b.u.flow.range : b.u.range; return b.shrinkT > 0 ? Math.max(Math.min(r, 1), r - b.shrinkM) : r; };
@@ -1393,7 +1402,7 @@ const Engine = (() => {
       const foes = sides[1 - owner.side];
       const hitSet = new Set();
       if (owner.u.splash > 0) {
-        for (const f of foes) if (f.alive && hyp(f.x - px, f.y - py) <= owner.u.splash) hitSet.add(f);
+        for (const f of foes) if (f.alive && hyp(f.x - px, f.y - py) <= owner.u.splash && !wallOnLine(px, py, f.x, f.y)) hitSet.add(f); // a wall shelters what is behind it
       } else {
         let v = null;
         if (direct && direct.alive && (!owner.u.projSpeed || direct.u.barrier > 0)) v = direct;
@@ -1412,7 +1421,7 @@ const Engine = (() => {
           const rx = f.x - px, ry = f.y - py;
           const along = rx * dirX + ry * dirY;
           const across = Math.abs(rx * dirY - ry * dirX);
-          if (along > 0 && along <= PIERCE_DEPTH && across <= PIERCE_WIDTH) cand.push([along, f]);
+          if (along > 0 && along <= PIERCE_DEPTH && across <= PIERCE_WIDTH && !wallOnLine(px, py, f.x, f.y)) cand.push([along, f]);
         }
         cand.sort((a, b) => a[0] - b[0]);
         for (let k = 0; k < Math.min(owner.u.pierce, cand.length); k++) hitSet.add(cand[k][1]);
@@ -1432,7 +1441,7 @@ const Engine = (() => {
       for (const f of sides[1 - owner.side]) {
         if (!f.alive || f.hidden || sheltered(f) || f.u.aloft || done.includes(f)) continue;
         const d = hyp(f.x - v.x, f.y - v.y);
-        if (d <= nd) { nd = d; nx = f; }
+        if (d <= nd && !wallOnLine(v.x, v.y, f.x, f.y)) { nd = d; nx = f; }
       }
       if (!nx) return;
       const d = nd || 1;
@@ -1460,7 +1469,7 @@ const Engine = (() => {
     // there are enough
     function salvo(b) {
       const ms = b.u.missiles, list = [];
-      for (const f of sides[1 - b.side]) if (pickable(b, f) && !f.u.aloft && !(gap(f, b) > ms.range + 1e-9)) list.push([(f.u.structure ? 1e6 : 0) + dist(f, b), f]); // only within its missile range
+      for (const f of sides[1 - b.side]) if (pickable(b, f) && !f.u.aloft && !(gap(f, b) > ms.range + 1e-9) && inSight(b, f)) list.push([(f.u.structure ? 1e6 : 0) + dist(f, b), f]); // only within its missile range
       if (!list.length) return false;
       list.sort((p, q) => p[0] - q[0]);
       for (let k = 0; k < ms.n; k++) {
@@ -1586,7 +1595,7 @@ const Engine = (() => {
       for (const f of sides[1 - b.side]) {
         if (!f.alive) continue;
         const fx = f.x - b.x, fy = f.y - b.y, fl = hyp(fx, fy);
-        if (gap(f, b) > reach || fl < b.u.minRange) continue;
+        if (gap(f, b) > reach || fl < b.u.minRange || (f !== primary && wallOnLine(b.x, b.y, f.x, f.y))) continue;
         if (f === primary || !al || !fl || (ax * fx + ay * fy) / (al * fl) >= c - 1e-12) out.push(f);
       }
       if (!out.includes(primary)) out.push(primary);
@@ -1654,7 +1663,7 @@ const Engine = (() => {
           for (const f of sides[1 - b.side]) {
             if (!f.alive || f.hidden || sheltered(f) || done.includes(f)) continue;
             const d = hyp(f.x - lx, f.y - ly);
-            if (d <= nd) { nd = d; nx = f; }
+            if (d <= nd && !wallOnLine(lx, ly, f.x, f.y)) { nd = d; nx = f; }
           }
           if (!nx) break;
           if (opts.record) shots.push([lx, ly, nx.x, nx.y, b.side, 0, 0, 0, 0, 1, 1]);
@@ -1904,7 +1913,7 @@ const Engine = (() => {
       if (!v) {
         let bd = Infinity;
         for (const f of sides[1 - b.side]) {
-          if (!pickable(b, f) || f.u.structure || f.u.anchored || f.u.barrier || f.u.construct || f.u.unstoppable || (f.rootedBy && f.rootedBy.alive && f.rootedBy.rootTgt === f)) continue;
+          if (!pickable(b, f) || !inSight(b, f) || f.u.structure || f.u.anchored || f.u.barrier || f.u.construct || f.u.unstoppable || (f.rootedBy && f.rootedBy.alive && f.rootedBy.rootTgt === f)) continue;
           const d = gap(f, b);
           if (d >= rt.min - 1e-9 && d <= rt.max + 1e-9 && d < bd) { bd = d; v = f; }
         }
@@ -2465,7 +2474,7 @@ const Engine = (() => {
             const [ux, uy] = b.burstDir;
             let first = null, fa = Infinity;
             for (const f of sides[1 - b.side]) {
-              if (!f.alive) continue;
+              if (!f.alive || wallOnLine(b.x, b.y, f.x, f.y)) continue;
               const rx = f.x - b.x, ry = f.y - b.y;
               const along = rx * ux + ry * uy;
               const across = Math.abs(rx * uy - ry * ux);
@@ -2611,6 +2620,7 @@ const Engine = (() => {
           while (mv > 0 && !done) {
             const sub = Math.min(0.5, mv, p.left);
             p.x += p.dirX * sub; p.y += p.dirY * sub; p.left -= sub; mv -= sub;
+            if (terSight && !(p.owner.u.lob && !p.spear) && wallCell(cellOf(p.x, p.y))) { stats[p.owner.side].missed += p.hit; done = true; break; } // into a wall: it stops there
             if ((!p.owner.u.lob || p.spear) && !p.homing) for (const f of foes) { // a bounce or a missile only lands on what it follows
               if (f.alive && hyp(f.x - p.x, f.y - p.y) <= PROJ_HIT_RADIUS) {
                 land();

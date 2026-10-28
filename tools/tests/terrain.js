@@ -113,3 +113,28 @@ const one = (u, side, x, y) => E.buildSquad(u, side, x, y, side, 1);
   assert.ok(fight(0, 0, 5.5) > 0);
 }
 console.log('terrain ok');
+// every kind of attack stops at a wall: bursts, pierce, splash, chain lightning, projectiles
+{
+  const kinds = { burst: { burst: 3 }, pierce: { pierce: 3 }, splash: { splash: 4 }, chain: { chain: { jumps: 3, hit: 50, reach: 12 } }, projectile: { projSpeed: 30 }, flame: { flame: 40 } };
+  for (const [k, o] of Object.entries(kinds)) {
+    const run = (wall) => {
+      // a target in the open (the shooter sees it) and two bodies straight behind the wall from it
+      const a = one(unit({ range: 20, speed: 0, ...o }), 0, 9, -6), z = [...one(unit({ speed: 0, hit: 0 }), 1, 9, -2), ...one(unit({ speed: 0, hit: 0 }), 1, 7, 3), ...one(unit({ speed: 0, hit: 0 }), 1, 8, 6)];
+      const bt = E.createBattle(a, z, g, { terrain: grid(wall) });
+      // the wall: cells 0..7 of row 4 plus the gap, so the line from (9, -6) up is blocked past y = 0
+      for (let k = 0; k < 60; k++) bt.step();
+      return z.slice(1).reduce((s, b) => s + b.u.hp - b.hp, 0);
+    };
+    const full = () => { const gr = grid(true); for (let c = 0; c < 10; c++) { gr.block[40 + c] = 1; gr.sight[40 + c] = 1; } return gr; };
+    const runFull = () => {
+      const a = one(unit({ range: 20, speed: 0, ...o }), 0, 9, -6), z = [...one(unit({ speed: 0, hit: 0 }), 1, 9, -2), ...one(unit({ speed: 0, hit: 0 }), 1, 7, 3), ...one(unit({ speed: 0, hit: 0 }), 1, 8, 6)];
+      const bt = E.createBattle(a, z, g, { terrain: full() });
+      for (let k = 0; k < 60; k++) bt.step();
+      return [z[0].u.hp - z[0].hp, z.slice(1).reduce((s, b) => s + b.u.hp - b.hp, 0)];
+    };
+    const [front, behind] = runFull();
+    assert.ok(front > 0, k + ': hits the one in the open');
+    assert.strictEqual(behind, 0, k + ': nothing behind the wall');
+  }
+}
+console.log('terrain: attacks stop at walls ok');
