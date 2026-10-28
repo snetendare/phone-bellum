@@ -12,7 +12,7 @@ assert.deepStrictEqual(m.towers, [{ col: 10, row: 16 }, { col: 3, row: 1 }], 'to
 assert.deepStrictEqual(Game.treasurySpot(m, 0), { col: 4, row: 15 }, 'the other side of the zone, one column in, one row forward');
 assert.deepStrictEqual(Game.treasurySpot(m, 1), { col: 9, row: 2 });
 assert.ok(Game.occupied(m, 0, 4, 15) && Game.occupied(m, 1, 9, 2), 'its tile is kept free from round 1');
-assert.ok(!Game.bodiesFor(m, 0).some(b => b.squad === Game.TREASURY_SQ), 'no treasury in round 1');
+assert.ok(Game.treasuryUp(m), 'a treasury from round 1');
 assert.strictEqual(Game.treasurySpot(Game.createMatch(demo.units, demo.matrix, 5, 'standard'), 0), null, 'other maps have none');
 
 // AI vs AI to the end: from round 2 every fight has both treasuries, and the gold follows what happened to them

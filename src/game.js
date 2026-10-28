@@ -702,7 +702,7 @@ const Game = (() => {
   // of their zone from their tower, one column in toward the middle and one row forward of the tower's row (so
   // point-mirrored like the towers). Its tile is kept free all match. Like the tower it stands again, at full health, in every fight. A fight
   // it survives pays its owner TREASURY.gold; when it is destroyed, the opponent steals TREASURY.steal gold from its owner.
-  const TREASURY = { round: 2, hp: 400, gold: 50, steal: 50, stealPct: 25, stealMax: 200 }; // see treasurySteal
+  const TREASURY = { round: 1, hp: 400, gold: 50, steal: 50, stealPct: 25, stealMax: 200 }; // see treasurySteal
   // Treasury raid: the owner's gold left unspent at the fight, times stealPct %, to the nearest 50; at least `steal`,
   // at most `stealMax`, never more than the owner has
   const treasurySteal = (banked) => Math.min(TREASURY.stealMax, Math.max(TREASURY.steal, Math.round(Math.max(0, banked) * TREASURY.stealPct / 100 / 50) * 50));
