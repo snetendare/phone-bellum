@@ -419,7 +419,7 @@ const Render2D = (cv, view) => {
       ctx.fillStyle = css('--you'); ctx.fillRect(0, mine, W, t * Z);
       if (v) for (const side of [0, 1]) { // flank tiles inside the other zone: reserved from the start, usable from round 3
         ctx.fillStyle = side === me ? css('--you') : css('--foe'); ctx.globalAlpha = Game.flankOpen(v) ? 0.22 : 0.12;
-        for (const col of Game.FLANK.cols) for (const row of Game.flankRows(side)) ctx.fillRect(scol(col) * t, srow(row) * t, t, t);
+        for (const { col, row } of Game.flankTiles(side)) ctx.fillRect(scol(col) * t, srow(row) * t, t, t);
       }
     }
     ctx.globalAlpha = 1;

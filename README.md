@@ -81,6 +81,12 @@ The Bridge map (only when picked, never random) was made in the map editor: the 
 
 `node tools/tests/terrain.js` checks the map, the objective, placement, AI matches on it (nobody ever stands in the water) and, on a small made-up grid, walking round a wall, walls blocking shots and the height bonus.
 
+## Rush map, and maps from the map editor
+
+Maps made in the map editor go into `EDITOR_MAPS` (`src/game.js`) as the editor's JSON, and `editorMap(id, json, extra)` makes their `MAPS` entry: the grid (columns, rows, zone depth; no man's land is what is left between the zones), the towers' and treasuries' tiles (`spots`, used by `towerSpot` and `treasurySpot`), the flank tiles when they differ from the game's edge columns (`flankSet`; `useGrid` switches `isFlank` to them, and `flankTiles(side)` lists them), the terrain when there is any, and the Test Grid's tuning for maps made on it. `extra` adds the name, texts and rules (the Bridge's objective). Both are only when picked, never random.
+
+**Rush:** zones of 14 by 8 tiles with only 2 rows of no man's land between them, so the armies meet almost at once; the towers one column further in (column 9 / 4), the treasuries one column further out, and the two back corners of each half are flank tiles as well. `node tools/tests/editor-maps.js` checks every editor map's grid, towers, treasuries, flanks and no man's land against its JSON, and plays AI matches on it to the end.
+
 ## Shiv, Water Mage and bleed
 
 - **Unit traits:** a unit's `trait: { name, text }` shows on its sheet as "Trait: name". Shiv: Apply bleed; Water Mage: Waterhealing; Steel Wizard: Steel armor (6 armor).

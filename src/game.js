@@ -493,7 +493,25 @@ const Game = (() => {
         '......HH......', '......HH......', '......HH......', '......hh......', '..............', '..............', '..............', '..............', '..............'],
       flank: Array(18).fill('F............F'),
       buildings: [{ kind: 'tower', side: 0, col: 10, row: 16 }, { kind: 'tower', side: 1, col: 3, row: 1 }, { kind: 'treasury', side: 0, col: 4, row: 15 }, { kind: 'treasury', side: 1, col: 9, row: 2 }] },
+    rush: { format: 'nml-map', version: 1, name: 'Rush', base: 'testgrid', cols: 14, rows: 18, zone: 8, symmetry: 'point',
+      tiles: Array(18).fill('..............'), shape: Array(18).fill('..............'), height: Array(18).fill('..............'),
+      nml: Array(18).fill('..............').map((r, i) => i === 8 || i === 9 ? 'NNNNNNNNNNNNNN' : r),
+      flank: Array(18).fill('F............F').map((r, i) => i === 0 || i === 17 ? 'FF..........FF' : r),
+      buildings: [{ kind: 'tower', side: 0, col: 9, row: 16 }, { kind: 'tower', side: 1, col: 4, row: 1 }, { kind: 'treasury', side: 0, col: 4, row: 15 }, { kind: 'treasury', side: 1, col: 9, row: 2 }] },
   };
+  // A map entry for MAPS from an editor map: its grid, its towers' and treasuries' tiles (spots), its flank tiles (when
+  // they differ from the game's: flankSet) and its terrain (when it has any). Rules on top come in `extra`. Maps made on
+  // the Test Grid get its tuning (rangeAdd, slowSteps, tuneKeep: the bigger board).
+  function editorMap(id, ed, extra) {
+    const at = (kind, side) => { const b = ed.buildings.find(x => x.kind === kind && x.side === side); return b ? { col: b.col, row: b.row } : null; };
+    const flank = new Set(); ed.flank.forEach((r, row) => [...r].forEach((ch, col) => { if (ch === 'F') flank.add(col + ',' + row); }));
+    const plainFlank = ed.flank.every(r => r === 'F' + '.'.repeat(ed.cols - 2) + 'F');
+    const terrainUsed = ed.tiles.some(r => /[#~sb]/.test(r)) || ed.height.some(r => /[LlhH]/.test(r));
+    return { id, name: ed.name, plain: true, grid: { cols: ed.cols, rows: ed.rows, zone: ed.zone }, pointMirror: ed.symmetry === 'point',
+      treasury: ed.buildings.some(b => b.kind === 'treasury'), spots: { tower: [at('tower', 0), at('tower', 1)], treasury: [at('treasury', 0), at('treasury', 1)] },
+      ...(plainFlank ? {} : { flankSet: flank }), ...(terrainUsed ? { terrain: ed } : {}),
+      ...(ed.base === 'testgrid' ? { rangeAdd: 2, rangeAddMin: 5, slowSteps: [[3, 0.2], [5, 0.2]], tuneKeep: ['Shiv', 'Water Mage'] } : {}), ...extra };
+  }
   const MAPS = [
     { id: 'standard', name: 'Standard', short: 'No special rules.', text: 'No special rules.', plain: true }, // only when picked, never random
     { id: 'forest', name: 'Forest Clearing', short: 'Bribe the elf tower to fight for you.', text: 'Bribe the elf tower to fight for you. Healing ×1.5.', boostHp: 15, boostUnits: ['Ent', 'Earth Wizard'], healMul: 1.5, elfTower: true },
@@ -505,9 +523,10 @@ const Game = (() => {
     { id: 'testgrid', name: 'Test Grid', short: 'A bigger board: each zone is 14 by 7 tiles.', text: 'Bigger board. A treasury pays 50 gold per fight it survives.', plain: true, grid: { cols: 14, rows: 18, zone: 7 }, pointMirror: true, treasury: true,
       rangeAdd: 2, rangeAddMin: 5, slowSteps: [[3, 0.2], [5, 0.2]], tuneKeep: ['Shiv', 'Water Mage'] }, // only when picked, never random
     // the Test Grid's board and rules, with two rivers and a raised bridge between them across no man's land
-    { id: 'bridge', name: 'Bridge', short: 'Hold the raised bridge between two rivers for 50 gold. High ground shoots further and harder.', text: 'Two rivers nobody can wade across, a raised bridge between them. Hold the bridge with more units than your opponent for 5 seconds in a row to win it: +50 gold. From higher ground: +1 m range and +2% damage per level above the target, as much less shooting uphill. A treasury pays 50 gold per fight it survives.', plain: true,
-      grid: { cols: 14, rows: 18, zone: 7 }, pointMirror: true, treasury: true, terrain: EDITOR_MAPS.bridge, objective: { secs: 5, gold: 50 },
-      rangeAdd: 2, rangeAddMin: 5, slowSteps: [[3, 0.2], [5, 0.2]], tuneKeep: ['Shiv', 'Water Mage'] }, // only when picked, never random
+    editorMap('bridge', EDITOR_MAPS.bridge, { name: 'Bridge', short: 'Hold the raised bridge between two rivers for 50 gold. High ground shoots further and harder.', text: 'Two rivers nobody can wade across, a raised bridge between them. Hold the bridge with more units than your opponent for 5 seconds in a row to win it: +50 gold. From higher ground: +1 m range and +2% damage per level above the target, as much less shooting uphill. A treasury pays 50 gold per fight it survives.',
+      objective: { secs: 5, gold: 50 } }), // only when picked, never random
+    // deeper zones (8 rows) and only 2 rows of no man's land: the armies meet almost at once
+    editorMap('rush', EDITOR_MAPS.rush, { short: 'Deep zones, only 2 rows of no man’s land: the armies meet at once.', text: 'Each zone is 14 by 8 tiles, with only 2 rows of no man’s land between them, so the armies meet almost at once. The towers stand one column further in, and the back corners are flank tiles too. A treasury pays 50 gold per fight it survives.' }), // only when picked, never random
   ];
   // ---------- terrain: walls, water, bushes and ground height (a map's `terrain`, from the map editor) ----------
   // A wall ('#') stops walking, shots and sight; water ('~') stops walking only; shallow water ('s') slows whoever wades
@@ -830,6 +849,7 @@ const Game = (() => {
   // second tower moves to the flipped column too (on your right for you means on their right for them).
   const towerSpot = (m, side) => {
     const t = TOWER_SPOT[side], mp = mapOf(m);
+    if (mp && mp.spots && mp.spots.tower[side]) return { ...mp.spots.tower[side] }; // an editor map's own tile
     return side === 1 && mp && mp.pointMirror ? { col: COLS - 1 - t.col, row: t.row } : { ...t };
   };
   const mapOf = (m) => (m && m.map && MAPS.find(x => x.id === m.map.id)) || null;
@@ -858,6 +878,8 @@ const Game = (() => {
   const treasuryUp = (m) => treasuryOn(m) && m.round >= TREASURY.round;
   const treasurySpot = (m, side) => {
     if (!treasuryOn(m)) return null;
+    const mp = mapOf(m);
+    if (mp && mp.spots && mp.spots.treasury[side]) return { ...mp.spots.treasury[side] }; // an editor map's own tile
     const t = (m.towers && m.towers[side]) || towerSpot(m, side), col = COLS - 1 - t.col;
     return { col: col + (col < (COLS - 1) / 2 ? 1 : -1), row: t.row + (side === 0 ? -1 : 1) };
   };
@@ -886,7 +908,11 @@ const Game = (() => {
     return zone.concat(nml);
   };
   const flankOpen = (m) => !!m && m.round >= FLANK.round;
-  const isFlank = (side, col, row) => FLANK.cols.includes(col) && flankRows(side).includes(row);
+  // an editor map's own flank tiles (FLANK_SET, set by useGrid; null: the edge columns) on the enemy's half
+  let FLANK_SET = null;
+  const isFlank = (side, col, row) => (FLANK_SET ? FLANK_SET.has(col + ',' + row) : FLANK.cols.includes(col)) && flankRows(side).includes(row);
+  // every flank tile a side may deploy on, edge columns first
+  const flankTiles = (side) => { const out = []; for (let col = 0; col < COLS; col++) for (const row of flankRows(side)) if (isFlank(side, col, row)) out.push({ col, row }); return out; };
   // a tile the other player already holds with a squad (or tower) you can see
   // Where the other player sees a squad: a squad moved this round still shows on its old tile until the fight
   const seenAt = (m, sq) => sq.from && sq.movedRound === m.round ? sq.from : sq;
@@ -969,6 +995,7 @@ const Game = (() => {
   function useGrid(mOrId) {
     const id = mOrId && typeof mOrId === 'object' ? (mOrId.map && mOrId.map.id) : mOrId;
     const mp = id ? MAPS.find(x => x.id === id) : null, g = (mp && mp.grid) || GRID;
+    FLANK_SET = (mp && mp.flankSet) || null;
     if (g.cols === COLS && g.rows === ROWS && g.zone === ZONE) return false;
     COLS = g.cols; ROWS = g.rows; ZONE = g.zone;
     const mid = (COLS - 1) / 2;
@@ -2871,7 +2898,7 @@ const Game = (() => {
     buildingXpNeeded, buildingLevelCost, buildingReady, levelBuilding, undoLevelBuilding, constructBuff, buildingBodies, canBuySkill, buySkill, undoSkill, sellValue, sell,
     isRider, hiddenFromFoe, isCarrier, riderOf, carrierOf, squadAt, boardable, unplaceSquad,
     TOWER, TOWER_TYPES, OUTPOST, TOWER_PICK_ROUND, towerType, towerChoices, needsTowerPick, setTowerType, settleTowerPicks, TOWER_SKILL, towerSkillOf, towerSkillVisible, towerPicked, canBuyTowerSkill, buyTowerSkill, undoTowerSkill, towerSkillCost, towerSkill2Of, towerSkill2Visible, towerSkill2Cost, canBuyTowerSkill2, buyTowerSkill2, undoTowerSkill2, towerSkill2On, AIRSHIP, MOAT, BWALL, BWALL_SQ, EDGES, bwallsOf, bwallOn, edgeOf, bwallWorld, bwallsLeft, bwallShown, bwallSpotOk, placeBwall, unplaceBwall, ensureBwalls, bwallUnit, INVEST, MAGE_GENERALS, mageGenPrice, MAGE, mageGenInfo, mageGenOf, mageTpOf, isExtraGen, mageGenCost, canBuyMageGen, buyMageGen, undoMageGen, mageTowerUnit, generalUnit, LOAN, loanNow, investNow, bankBusy, investNow, bankBusy, canTakeLoan, takeLoan, undoLoan, towerRounds, troundInfo, troundOn, troundCost, canBuyTround, buyTround, undoTround, SLIME_UNITS, slimeTowerUnit, slimeSkillDefs, TOWER_MID, towerColOk, towerAt, needsTower, placeTower, ensureTower,
-    FLANK, flankRows, flankOpen, isFlank, reserved, canPlaceAt, isOff, enemyHolds, inNoMans, hasSkillType, garrisonAt, garrisonFree, inBuilding, WATCH_SQ, watchUnit, freeMover,
+    FLANK, flankRows, flankOpen, isFlank, flankTiles, reserved, canPlaceAt, isOff, enemyHolds, inNoMans, hasSkillType, garrisonAt, garrisonFree, inBuilding, WATCH_SQ, watchUnit, freeMover,
     STANDARD_PACK, ICE, ALTAR, GOLEM, isIce, hailRound, altarRound, stormShift, stormRows, hailTiles, altarCost, altarRefund, altarCount, pushRoom, altarBought, addAltar, buyAltar, undoAltar, snowgres, snowgreUnit,
     MAPS, EDITOR_MAPS, TERRAIN, objectiveOf, objectiveTiles, SHAPE_PATH, terrainTile, terrainBlocks, terrainOf, groundHeight, ELF_TOWER, SHROOM, SHROOM_SPLIT, shroomAt, shroomTileAt, shroomRemoval, SHROOM_REMOVE, shroomCost, removeShroom, undoRemoveShroom, mapOf, elfSpot, rollMap, BRIBE_COST, bribeList, bribeGold, bribeCount, bribeNow, bribeCost, bribeRefund, ELF_POWER, elfPowered, elfUnit, ELF_OWN, elfOwnCost, elfOwnOf, elfOwnAt, elfOwnUnlocked, elfOwnOffered, canBuyElfOwn, elfOwnSpotOk, buyElfOwn, undoElfOwn, bribeLeader, canBribe, bribe, undoBribe,
     CHARACTERS, CHAR, charOf, charInfo, enzoSkill, enzoActive, charmOf, isGentleman, canGiveCharm, giveCharm, undoCharm, ensureCharm, felixGold, isTier1, rollBuffTiles, onBuffTile, zoeBuff, yotImps, yotLevel, TOWER_SPOT, towerSpot,
