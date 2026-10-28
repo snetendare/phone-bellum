@@ -796,7 +796,7 @@ const Engine = (() => {
   // keepLos: lines of sight kept
   const NAV = { look: 9, ahead: 14, every: 0.25, clear: 0.6, body: 0.5, keep: 600, keepLos: 300000 };
   const SIGHT_NEAR = 3;        // metres from which a body in a bush is seen anyway
-  const HEIGHT = { range: 1, dmg: 2 }; // per level of higher ground over the target: +1 m range, +2 % damage
+  const HEIGHT = { range: 1, dmg: 2 }; // per level above the target: +1 m range, +2 % damage (per level below: as much less)
 
   const LEVEL_BONUS = 1;       // each upgrade adds +100% of starting health and hit (2x, then 3x)
   const MAX_LEVEL = 2;         // two upgrades on top of the base unit
@@ -1502,11 +1502,12 @@ const Engine = (() => {
     const cellX = (i) => ter.x0 + (i % ter.cols + 0.5) * TC, cellY = (i) => ter.y1 - (Math.floor(i / ter.cols) + 0.5) * TC;
     const blocked = (i) => i >= 0 && ter.block[i] === 1;
     // Height: a body on higher ground than its target gets HEIGHT.range m more range and HEIGHT.dmg % more damage per
-    // level of difference (from +2 down to -2: 4 levels, 4x). Lower ground costs nothing.
+    // level of difference (from +2 down to -2: 4 levels, 4x); shooting uphill takes as much off (range never below 1 m,
+    // or its own range if shorter).
     const heightRange = g.heightRange == null ? HEIGHT.range : g.heightRange, heightDmg = g.heightDmg == null ? HEIGHT.dmg : g.heightDmg;
     const levelOf = (b) => { const i = cellOf(b.x, b.y); return i < 0 ? 0 : ter.level[i]; };
-    const above = (b, f) => terHeight && !b.u.aloft && !f.u.aloft ? Math.max(0, levelOf(b) - levelOf(f)) : 0;
-    const upRange = (b, f) => f ? above(b, f) * heightRange : 0;
+    const above = (b, f) => terHeight && !b.u.aloft && !f.u.aloft ? levelOf(b) - levelOf(f) : 0; // levels above f (below: negative)
+    const reachTo = (r, b, f) => { const k = f ? above(b, f) : 0; return k ? Math.max(Math.min(r, 1), r + k * heightRange) : r; };
     // whether a body could walk the straight line from (ax, ay) to (bx, by): its middle and both its sides (NAV.clear m
     // out) stay off blocked cells. Off the board counts as open (the board's edge stops bodies anyway).
     function clearWalk(ax, ay, bx, by) {
@@ -2095,7 +2096,7 @@ const Engine = (() => {
       for (const f of sides[1 - b.side]) {
         if (!pickable(b, f)) continue;
         const d = gap(f, b);
-        if (d <= reachOf(b) + upRange(b, f) + 0.01 && d >= b.u.minRange && inSight(b, f)) valid.push([b.u.healthiest ? (f.u.structure ? 1e9 : 0) - poolHp(f) : d, f]); // healthiest: most health first, units before structures
+        if (d <= reachTo(reachOf(b), b, f) + 0.01 && d >= b.u.minRange && inSight(b, f)) valid.push([b.u.healthiest ? (f.u.structure ? 1e9 : 0) - poolHp(f) : d, f]); // healthiest: most health first, units before structures
       }
       valid.sort((p, q) => b.u.backline ? q[0] - p[0] : p[0] - q[0]);
       return valid.map(v => v[1]);
@@ -2223,7 +2224,7 @@ const Engine = (() => {
         if (wl && targets.flame) { if (walled.has(wl)) continue; walled.add(wl); }
         const dx = tgt.x - b.x, dy = tgt.y - b.y, d = hyp(dx, dy) || 1;
         const dirX = dx / d, dirY = dy / d;
-        const hk = tgt.u ? hit * (1 + above(b, tgt) * heightDmg / 100) : hit; // from higher ground (see HEIGHT)
+        const hk = tgt.u ? hit * (1 + above(b, tgt) * heightDmg / 100) : hit; // from higher or lower ground (see HEIGHT)
         if (targets.flame || targets.stomp) {
           hurt(b, tgt, hk, b.x, b.y); // flames and stomps land at once, no splash or pierce
         } else if (b.u.projSpeed > 0) {
@@ -2691,7 +2692,7 @@ const Engine = (() => {
         if (b.guide && b.guide.length) {
           const p = b.guide[0], gx = p.x - b.x, gy = p.y - b.y, gd = hyp(gx, gy);
           if (gd < 1.5) { b.guide.shift(); if (!b.guide.length) b.guide = null; continue; }
-          if (near && !unseen && nd <= reachOf(b) + upRange(b, near)) continue; // something in reach: stand and fight it
+          if (near && !unseen && nd <= reachTo(reachOf(b), b, near)) continue; // something in reach: stand and fight it
           const step = spd(b) * (b.slowT > 0 ? 1 - b.slowMove / 100 : 1) * (cripple[b.side] > 0 ? 1 - towerDown.move / 100 : 1) * dt;
           const [ux, uy] = steer(b, p.x, p.y, gx / gd, gy / gd);
           if (b.hx === undefined) { b.hx = ux; b.hy = uy; }
@@ -2707,8 +2708,8 @@ const Engine = (() => {
         let blind = unseen; // walking to an enemy it can't see
         if (g.aware2 && b.engaged && near) { const gl = goalOf(b, rg); if (gl) { near = gl; nd = gap(gl, b); blind = false; } }
         if (b.avenge) { if (b.avenge.alive && !b.avenge.hidden) { near = b.avenge; nd = gap(near, b); blind = !inSight(b, near); } else b.avenge = null; } // a guard going for its attacker
-        // higher ground reaches further (see HEIGHT); an enemy out of sight is never in reach
-        const rgN = blind ? -1 : rg + upRange(b, near);
+        // higher ground reaches further, lower ground less (see HEIGHT); an enemy out of sight is never in reach
+        const rgN = blind ? -1 : reachTo(rg, b, near);
         // its movement target: whom it goes for once engaged (or a guard's attacker), or whom it stands at in reach
         if (near && (b.engaged || b.avenge || nd <= (g.stopPct > 0 && g.stopPct < 1 && b.engaged ? stopAt(rgN) : rgN))) b.intent = near;
         if (near && nd > (g.stopPct > 0 && g.stopPct < 1 && b.engaged ? stopAt(rgN) : rgN)) {

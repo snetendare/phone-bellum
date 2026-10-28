@@ -91,7 +91,7 @@ const one = (u, side, x, y) => E.buildSquad(u, side, x, y, side, 1);
   assert.strictEqual(run(true), 0, 'nothing through the wall');
   assert.ok(run(false) > 0, 'open ground: it shoots');
 }
-// height: +1 m range and +2% damage per level above the target; 4 levels (+2 over -2): +4 m and +8%
+// height: +1 m range and +2% damage per level above the target; 4 levels (+2 over -2): +4 m and +8%; below: as much less
 {
   const fight = (hA, hZ, gap) => {
     const a = one(unit({ range: 6, speed: 0, hit: 100 }), 0, 0, -gap / 2), z = one(unit({ speed: 0, hit: 0, hp: 1e6 }), 1, 0, gap / 2);
@@ -107,6 +107,9 @@ const one = (u, side, x, y) => E.buildSquad(u, side, x, y, side, 1);
   assert.ok(flat > 0);
   assert.ok(Math.abs(up4 / flat - 1.08) < 1e-9, '+8% for 4 levels: ' + up4 / flat);
   assert.ok(Math.abs(up1 / flat - 1.02) < 1e-9, '+2% for 1 level');
-  assert.strictEqual(down, flat, 'shooting up costs nothing');
+  assert.strictEqual(down, 0, 'shooting up 4 levels: 4 m less range, out of reach at 5 m');
+  assert.ok(Math.abs(fight(-2, 2, 1.5) / fight(0, 0, 1.5) - 0.92) < 1e-9, '-8% shooting up 4 levels');
+  assert.strictEqual(fight(-1, 0, 5.5), 0, 'and 1 m less range a level: out of reach at 5.5 m');
+  assert.ok(fight(0, 0, 5.5) > 0);
 }
 console.log('terrain ok');
