@@ -12,7 +12,7 @@ assert.deepStrictEqual(m.towers, [{ col: 10, row: 16 }, { col: 3, row: 1 }], 'to
 assert.deepStrictEqual(Game.treasurySpot(m, 0), { col: 4, row: 15 }, 'the other side of the zone, one column in, one row forward');
 assert.deepStrictEqual(Game.treasurySpot(m, 1), { col: 9, row: 2 });
 assert.ok(Game.occupied(m, 0, 4, 15) && Game.occupied(m, 1, 9, 2), 'its tile is kept free from round 1');
-assert.ok(!Game.bodiesFor(m, 0).some(b => b.squad === Game.TREASURY_SQ), 'no treasury in round 1');
+assert.ok(Game.treasuryUp(m), 'a treasury from round 1');
 assert.strictEqual(Game.treasurySpot(Game.createMatch(demo.units, demo.matrix, 5, 'standard'), 0), null, 'other maps have none');
 
 // AI vs AI to the end: from round 2 every fight has both treasuries, and the gold follows what happened to them
@@ -56,5 +56,6 @@ const st = Game.treasurySteal(g3[1]); // a share of what side 1 left unspent, to
 assert.strictEqual(m3.gold[0], base(0) + T.gold + st);
 assert.strictEqual(m3.gold[1], base(1) - st);
 // the raid: 25% of unspent gold, to the nearest 50, 50 to 200
-assert.deepStrictEqual([0, 150, 300, 500, 700, 2000].map(Game.treasurySteal), [50, 50, 100, 150, 200, 200]);
+assert.deepStrictEqual([0, 150, 300, 500, 700, 2000].map(x => Game.treasurySteal(x)), [50, 50, 100, 150, 200, 200]);
+assert.deepStrictEqual([0, 300, 400, 600, 2000].map(x => Game.treasurySteal(x, true)), [50, 50, 50, 100, 100], "a Vault halves the raid");
 console.log('treasury ok');

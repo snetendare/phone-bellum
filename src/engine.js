@@ -380,7 +380,7 @@ const Engine = (() => {
       case 'bull': return `Every ${+P('every') === 3 ? '3rd' : `${n('every')}th`} attack charges ${n('run')} m through enemies for ${n('hit')}.`;
       case 'flare': return `Idle time stores attack speed. Next attack fires it as extra shots.`;
       case 'portal': return `Sacrifices itself after ${n('secs')} s to summon a ${String(P('unit')) === 'Brute' ? 'Hellfiend' : String(P('unit'))}.`;
-      case 'overwatch': return 'Can garrison a building: untouchable until it falls.';
+      case 'overwatch': return 'Can garrison a building: untouchable until it falls. Sees stealthed units in its range.';
       case 'freeMove': return 'Moves are free.';
       case 'silent': return 'Its first attack keeps it hidden.';
       case 'firstHit': return `First attack +${n('pct')}% hit.`;
@@ -503,7 +503,7 @@ const Engine = (() => {
             speed: Math.max(0.5, P('speed')), flame: Math.max(1, Math.min(180, P('cone'))), slam: true, pierce: 0, burst: 1, pellets: 1, shape: 'imp', color: '#B3261E', summoned: true }) };
           break;
         }
-        case 'overwatch': u.overwatch = { hp: Math.max(1, P('hp')) }; break;
+        case 'overwatch': u.overwatch = { hp: Math.max(1, P('hp')) }; u.trueSight = true; break; // also sees stealthed units within its range
         case 'freeMove': u.freeMove = true; break;
         case 'silent': u.silent = true; break;
         case 'firstHit': u.firstHit = (u.firstHit || 0) + Math.max(0, P('pct')); break;
@@ -933,6 +933,8 @@ const Engine = (() => {
         if (owner) owner.xp += x.u.hp * x.level;
         fell(x);
         if (owner) killed(owner, x);
+        // Mark Bounty: a Sniper lands the blow that takes the marked squad's last body
+        if (owner && owner.sniperMark > 0 && x.marked && owner.side !== x.side && !sides[x.side].some(y => y.alive && y.squad === x.squad)) markKill[owner.side] = true;
         devour(owner, x);
       }
     }
@@ -958,6 +960,7 @@ const Engine = (() => {
       else if (by) eat(by, x);
     }
     const eatLater = [], hitsLater = [];
+    const markKill = [false, false]; // see kill(): a side's Sniper finished the squad it marked
     // a stack of Glut: its health grows with its max health, so the stack heals it by what it adds
     function eat(b, x) {
       const gl = b.u.glut, n = b.glutN || 0;
@@ -1004,7 +1007,10 @@ const Engine = (() => {
     }
     // a target b may pick: not hidden, not sheltered, a lone one while it hunts, and not the tower for a body that
     // ignores it (noTower) while anything else is left to pick
-    const pickable = (b, f) => f.alive && !f.hidden && !sheltered(f) && !(b.hunt && !isLone(f)) && !(b.u.noTower && isTower(f) && othersThan(f.side));
+    // seesHidden: b can pick f although f is stealthed: Overwatch (u.trueSight) within b's range, or a Sniper
+    // (b.sniperMark, set by the game) looking for the squad its side's Sniper tower marked (f.marked)
+    const seesHidden = (b, f) => f.u.stealth && !f.u.aloft && ((f.marked && b.sniperMark > 0) || (b.u.trueSight && gap(f, b) <= b.u.range + 1e-9));
+    const pickable = (b, f) => f.alive && (!f.hidden || seesHidden(b, f)) && !sheltered(f) && !(b.hunt && !isLone(f)) && !(b.u.noTower && isTower(f) && othersThan(f.side));
     // damage that skips armor and ward (poison)
     function direct(owner, v, amount) {
       if (v.turning || v.u.aloft || sheltered(v)) return;
@@ -1126,6 +1132,7 @@ const Engine = (() => {
       if (v.guard && owner.alive && owner.side !== v.side && !owner.u.aloft && !(v.avenge && v.avenge.alive)) { v.holdT = 0; v.avenge = owner; v.engaged = true; }
       if (owner.u.bldgPct > 0 && v.u.structure) hit = hit * owner.u.bldgPct / 100; // weaker against buildings (the Assassin)
       let pct = owner.u.pctHit > 0 && !v.u.structure ? v.u.hp * owner.u.pctHit / 100 : 0;
+      if (owner.sniperMark > 0 && v.marked && owner.side !== v.side) { hit = hit * (1 + owner.sniperMark / 100); pct = pct * (1 + owner.sniperMark / 100); } // Mark Bounty (sniper tower)
       if (cripple[owner.side] > 0) { hit = hit * (1 - towerDown.attack / 100); pct = pct * (1 - towerDown.attack / 100); }
       // Shield: the whole hit is blocked, however big, and it brings no poison
       if (v.shield > 0) { v.shield--; st.blocked += hit + pct; return; }
@@ -2504,7 +2511,7 @@ const Engine = (() => {
         winner, timeout, time: t, frac,
         score: frac[0] - frac[1],
         survivors: [aliveA, aliveB], counts: [A.length, B.length],
-        stats, squads,
+        stats, squads, markKill: markKill.slice(),
         charm, // charisma stacks after the fight, by side and squad id (null for a side without)
         converted: [0, 1].map(k => all.filter(b => b.convert && b.side === k).length), // bodies each side won over
         // each building: still standing, seconds of building done at the end (null when it was already built), whether any was done this fight
