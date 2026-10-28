@@ -62,6 +62,16 @@ const ok = (c, msg) => { console.log((c ? 'ok   ' : 'FAIL ') + msg); if (!c) pro
   await tap(4, 4); m = await map();
   ok(m.flank[4][4] === 'F', 'flank tile added');
   // undo / redo
+  // no man's land: painted into a zone, and back
+  ok(m.nml[6].replace(/N/g, '').length === 0 && m.nml[5] === '.'.repeat(12), 'no man’s land on the rows between the zones');
+  await p.click('[data-tool="nml"]'); await dragTiles([5, 5], [6, 5]); m = await map();
+  ok(m.nml[5].slice(5, 7) === 'NN' && m.nml[10].slice(5, 7) === 'NN', 'no man’s land painted into the enemy zone, mirrored into yours');
+  await tap(6, 5); m = await map();
+  ok(m.nml[5][6] === '.' && m.nml[10][6] === '.', 'and back to zone');
+  await tap(4, 7); m = await map();
+  ok(m.nml[7][4] === '.' && m.nml[8][4] === '.', 'a no man’s land tile made zone');
+  await tap(4, 7); m = await map();
+  await p.click('[data-tool="flank"]'); await tap(4, 4); await tap(4, 4); m = await map();
   await p.click('#undo'); m = await map(); ok(m.flank[4][4] === '.', 'undo');
   await p.click('#redo'); m = await map(); ok(m.flank[4][4] === 'F', 'redo');
   // move your tower: the enemy's follows across

@@ -185,6 +185,8 @@ header .eyebrow { font-family: var(--font-data); font-size: 11px; letter-spacing
 //           a corner (joining the tile's middle to two of its edges: └ up and right), '─' '│' a line through the middle,
 //           '╱' '╲' a diagonal, '▔' '▕' '▁' '▏' an edge wall along the tile's top, right, bottom or left side (the tile
 //           itself can be walked on) (older maps without it are all blocks)
+//   nml:    one string per row: 'N' no man's land (nobody deploys there), '.' the deployment zone of the half it is on
+//           (older maps without it: the rows between the two zones)
 //   flank:  one string per row: 'F' a flank tile (the player whose half it is NOT on may deploy there), '.' not
 //   buildings: [{ kind: 'tower' | 'treasury' | 'elf', side: 0 | 1 | 2, col, row }]
 const $ = (id) => document.getElementById(id);
@@ -207,6 +209,7 @@ const TOOLS = [
   { id: 'raise', key: '6', name: 'Raise ground', sub: 'Up to +2', col: '#F2C318' },
   { id: 'lower', key: '7', name: 'Lower ground', sub: 'Down to −2', col: '#E5483F' },
   { id: 'flank', key: '8', name: 'Flank tiles', sub: 'Add or remove', col: '#3C6E74' },
+  { id: 'nml', key: '9', name: 'No man’s land', sub: 'Add or remove', col: '#1A2324' },
   { id: 'p', key: 'p' }, { id: 'y', key: 'y' }, { id: 'g', key: 'g' },
   { id: 'rotate', key: 'r', name: 'Rotate', sub: 'Turn a corner, line or diagonal', col: '#55636A' },
   { id: 'erase', key: 'e', name: 'Erase', sub: 'Tile and ground', col: '#13201F' },
@@ -223,8 +226,8 @@ const treasuryFor = (cols, t, side) => { const c = cols - 1 - t.col; return { co
 function fromBase(id) {
   const b = BASES[id], rows = b.zone * 2 + b.nml;
   const m = { format: 'nml-map', version: 1, name: 'New ' + b.name.toLowerCase(), base: id, cols: b.cols, rows, zone: b.zone, symmetry: b.symmetry,
-    tiles: [], shape: [], height: [], flank: [], buildings: [] };
-  for (let r = 0; r < rows; r++) { m.shape.push('.'.repeat(b.cols)); m.tiles.push('.'.repeat(b.cols)); m.height.push('.'.repeat(b.cols)); m.flank.push(defaultFlankRow(b.cols)); }
+    tiles: [], shape: [], height: [], nml: [], flank: [], buildings: [] };
+  for (let r = 0; r < rows; r++) { m.nml.push(defaultNmlRow(r, rows, b.zone, b.cols)); m.shape.push('.'.repeat(b.cols)); m.tiles.push('.'.repeat(b.cols)); m.height.push('.'.repeat(b.cols)); m.flank.push(defaultFlankRow(b.cols)); }
   b.towers.forEach((t, side) => m.buildings.push({ kind: 'tower', side, col: t.col, row: t.row }));
   if (b.treasury) b.towers.forEach((t, side) => m.buildings.push({ kind: 'treasury', side, ...treasuryFor(b.cols, t, side) }));
   return m;
@@ -245,8 +248,14 @@ const SHAPE_PATH = { '─': [[0, .5], [1, .5]], '│': [[.5, 0], [.5, 1]], '└'
   '┐': [[.5, 1], [.5, .5], [0, .5]], '┘': [[0, .5], [.5, .5], [.5, 0]], '╱': [[0, 1], [1, 0]], '╲': [[0, 0], [1, 1]],
   '▔': [[0, .11], [1, .11]], '▕': [[.89, 0], [.89, 1]], '▁': [[0, .89], [1, .89]], '▏': [[.11, 0], [.11, 1]] }; // edge walls: up, right, down, left
 const blankRows = (rows, cols) => Array.from({ length: rows }, () => '.'.repeat(cols));
-// older maps have no shape layer: every tile a block
-const withShape = (m) => { if (!Array.isArray(m.shape)) m.shape = blankRows(m.rows, m.cols); return m; };
+// the rows between the two zones are no man's land, the rest the zone of their half
+const defaultNmlRow = (r, rows, zone, cols) => (r >= zone && r < rows - zone ? 'N' : '.').repeat(cols);
+// older maps have no shape layer (every tile a block) and no no man's land layer (the rows between the zones)
+const withShape = (m) => {
+  if (!Array.isArray(m.shape)) m.shape = blankRows(m.rows, m.cols);
+  if (!Array.isArray(m.nml)) m.nml = Array.from({ length: m.rows }, (_, r) => defaultNmlRow(r, m.rows, m.zone, m.cols));
+  return m;
+};
 // the game's flanks: the two edge columns, the whole way down (each half is the other player's)
 const defaultFlankRow = (cols) => Array.from({ length: cols }, (_, c) => c === 0 || c === cols - 1 ? 'F' : '.').join('');
 
@@ -261,7 +270,8 @@ const tileAt = (c, r) => map.tiles[r][c], hAt = (c, r) => CHH[map.height[r][c]],
 const buildingAt = (c, r) => map.buildings.find(b => b.col === c && b.row === r) || null;
 const inside = (c, r) => c >= 0 && r >= 0 && c < map.cols && r < map.rows;
 const halfOf = (r) => r >= map.rows / 2 ? 0 : 1; // the side whose half a row is on
-const zoneOf = (r) => r >= map.rows - map.zone ? 0 : r < map.zone ? 1 : null;
+// the side whose deployment zone a tile is in, or null for no man's land
+const zoneOf = (c, r) => map.nml[r][c] === 'N' ? null : halfOf(r);
 // the tile mirrored onto the other half, or null with the mirror off
 function mirrorOf(c, r, sym = map.symmetry) {
   if (sym === 'point') return { col: map.cols - 1 - c, row: map.rows - 1 - r };
@@ -307,6 +317,8 @@ function paintOne(c, r) {
     setAt(map.height, c, r, HCH[h]);
   } else if (tool === 'flank') {
     setAt(map.flank, c, r, stroke.flank ? 'F' : '.');
+  } else if (tool === 'nml') {
+    setAt(map.nml, c, r, stroke.nml ? 'N' : '.');
   } else if (tool === 'erase') {
     setAt(map.tiles, c, r, '.'); setAt(map.height, c, r, '.'); setAt(map.shape, c, r, '.');
   } else if (FEATURE[tool]) {
@@ -380,12 +392,12 @@ function resize(cols, zone, nml) {
     if (d >= Math.floor(cols / 2) + (cols % 2 && left ? 1 : 0)) return -1;
     return left ? d : cols - 1 - d;
   };
-  const n = { ...o, cols, rows, zone, tiles: [], shape: [], height: [], flank: [] };
-  for (let r = 0; r < rows; r++) { n.shape.push('.'.repeat(cols)); n.tiles.push('.'.repeat(cols)); n.height.push('.'.repeat(cols)); n.flank.push(defaultFlankRow(cols)); }
+  const n = { ...o, cols, rows, zone, tiles: [], shape: [], height: [], nml: [], flank: [] };
+  for (let r = 0; r < rows; r++) { n.nml.push(defaultNmlRow(r, rows, zone, cols)); n.shape.push('.'.repeat(cols)); n.tiles.push('.'.repeat(cols)); n.height.push('.'.repeat(cols)); n.flank.push(defaultFlankRow(cols)); }
   for (let r = 0; r < o.rows; r++) for (let c = 0; c < o.cols; c++) {
     const nr = mapRow(r), nc = mapCol(c);
     if (nr < 0 || nc < 0) continue;
-    setAt(n.tiles, nc, nr, o.tiles[r][c]); setAt(n.shape, nc, nr, o.shape[r][c]); setAt(n.height, nc, nr, o.height[r][c]);
+    setAt(n.tiles, nc, nr, o.tiles[r][c]); setAt(n.shape, nc, nr, o.shape[r][c]); setAt(n.nml, nc, nr, o.nml[r][c]); setAt(n.height, nc, nr, o.height[r][c]);
     const edge = nc === 0 || nc === cols - 1, wasEdge = c === 0 || c === o.cols - 1;
     if (!(edge && !wasEdge)) setAt(n.flank, nc, nr, wasEdge && !edge ? '.' : o.flank[r][c]); // edges stay edges
   }
@@ -479,10 +491,10 @@ function draw() {
   const W = T * map.cols, H = T * map.rows, half = map.rows / 2;
   g.clearRect(0, 0, W, H);
   // halves and zones
-  for (let r = 0; r < map.rows; r++) {
-    const z = zoneOf(r);
+  for (let r = 0; r < map.rows; r++) for (let c = 0; c < map.cols; c++) {
+    const z = zoneOf(c, r);
     g.fillStyle = z === 1 ? '#231C1A' : z === 0 ? '#11262A' : r < half ? '#151B1B' : '#111D1F';
-    g.fillRect(0, r * T, W, T);
+    g.fillRect(c * T, r * T, T, T);
   }
   // ground height under everything else
   for (let r = 0; r < map.rows; r++) for (let c = 0; c < map.cols; c++) {
@@ -505,10 +517,20 @@ function draw() {
   g.strokeStyle = 'rgba(141,161,161,0.12)'; g.lineWidth = 1;
   for (let c = 1; c < map.cols; c++) { g.beginPath(); g.moveTo(c * T + 0.5, 0); g.lineTo(c * T + 0.5, H); g.stroke(); }
   for (let r = 1; r < map.rows; r++) { g.beginPath(); g.moveTo(0, r * T + 0.5); g.lineTo(W, r * T + 0.5); g.stroke(); }
-  // zone fronts (dashed) and the centre line
+  // zone fronts (dashed, wherever a zone tile meets no man's land) and the centre line
   g.setLineDash([6, 5]); g.lineWidth = 1.5;
-  g.strokeStyle = 'rgba(238,110,92,0.7)'; g.beginPath(); g.moveTo(0, map.zone * T); g.lineTo(W, map.zone * T); g.stroke();
-  g.strokeStyle = 'rgba(92,198,223,0.7)'; g.beginPath(); g.moveTo(0, (map.rows - map.zone) * T); g.lineTo(W, (map.rows - map.zone) * T); g.stroke();
+  for (const side of [0, 1]) {
+    g.strokeStyle = side ? 'rgba(238,110,92,0.7)' : 'rgba(92,198,223,0.7)'; g.beginPath();
+    for (let r = 0; r < map.rows; r++) for (let c = 0; c < map.cols; c++) {
+      if (zoneOf(c, r) !== side) continue;
+      const x = c * T, y = r * T, open = (cc, rr) => inside(cc, rr) && zoneOf(cc, rr) === null;
+      if (open(c, r - 1)) { g.moveTo(x, y); g.lineTo(x + T, y); }
+      if (open(c, r + 1)) { g.moveTo(x, y + T); g.lineTo(x + T, y + T); }
+      if (open(c - 1, r)) { g.moveTo(x, y); g.lineTo(x, y + T); }
+      if (open(c + 1, r)) { g.moveTo(x + T, y); g.lineTo(x + T, y + T); }
+    }
+    g.stroke();
+  }
   g.strokeStyle = 'rgba(229,236,233,0.18)'; g.setLineDash([2, 6]); g.beginPath(); g.moveTo(0, half * T); g.lineTo(W, half * T); g.stroke();
   g.setLineDash([]);
   // tiles
@@ -557,7 +579,7 @@ cv.addEventListener('pointerdown', (e) => {
   cv.setPointerCapture(e.pointerId);
   const b = buildingAt(p.col, p.row);
   if (b) { drag = { b, from: p, at: p, moved: false }; draw(); return; }
-  stroke = { before: snap(), done: new Set(), flank: !flankAt(p.col, p.row) };
+  stroke = { before: snap(), done: new Set(), flank: !flankAt(p.col, p.row), nml: zoneOf(p.col, p.row) !== null };
   if (SHAPED.includes(tool) && tileAt(p.col, p.row) === tool) { // maybe a tap to change its form: decided when the pointer lifts
     stroke.cycle = p; withMirror(p.col, p.row).forEach(q => stroke.done.add(q.col + ',' + q.row));
   } else paint(p.col, p.row);
@@ -598,7 +620,7 @@ let sayTimer = 0;
 function say(t) { $('status').textContent = t; clearTimeout(sayTimer); sayTimer = setTimeout(showHover, 2600); }
 function showHover() {
   if (!hover) { $('status').textContent = ''; return; }
-  const { col, row } = hover, ch = tileAt(col, row), h = hAt(col, row), b = buildingAt(col, row), z = zoneOf(row);
+  const { col, row } = hover, ch = tileAt(col, row), h = hAt(col, row), b = buildingAt(col, row), z = zoneOf(col, row);
   const bits = [`col ${col}, row ${row}`, z === 0 ? 'your zone' : z === 1 ? 'enemy zone' : 'no man’s land'];
   if (b) bits.push(buildingName(b));
   if (ch !== '.') bits.push(FEATURE[ch].name.toLowerCase() + (SHAPED.includes(ch) && shapeAt(col, row) !== '.' ? ' (' + SHAPE_NAME[SHAPE_KIND[shapeAt(col, row)]] + ')' : ''));
@@ -645,7 +667,7 @@ const writeSaved = (all) => { try { localStorage.setItem(STORE, JSON.stringify(a
 function validMap(m) {
   if (!m || m.format !== 'nml-map' || !(m.cols > 0) || !(m.rows > 0) || !(m.zone > 0)) return false;
   if (m && m.rows > 0 && m.cols > 0) withShape(m);
-  for (const k of ['tiles', 'shape', 'height', 'flank']) if (!Array.isArray(m[k]) || m[k].length !== m.rows || m[k].some(r => typeof r !== 'string' || r.length !== m.cols)) return false;
+  for (const k of ['tiles', 'shape', 'height', 'nml', 'flank']) if (!Array.isArray(m[k]) || m[k].length !== m.rows || m[k].some(r => typeof r !== 'string' || r.length !== m.cols)) return false;
   return Array.isArray(m.buildings);
 }
 // a question in the Save panel, in place of a dialog (the page may run where dialogs are blocked)
@@ -714,11 +736,11 @@ function refresh() {
   $('t-elf').textContent = map.buildings.some(b => b.kind === 'elf') ? 'Remove elf tower' : 'Add elf tower';
   if (!$('json-box').hidden && document.activeElement !== $('json')) $('json').value = JSON.stringify(map);
   $('undo').disabled = !undoStack.length; $('redo').disabled = !redoStack.length;
-  $('info').textContent = `${map.cols}×${map.rows} · zones ${map.cols}×${map.zone}`;
+  $('info').textContent = `${map.cols}×${map.rows} tiles`;
   const n = {}; map.tiles.join('').split('').forEach(ch => { n[ch] = (n[ch] || 0) + 1; });
   const hs = map.height.join(''), fl = map.flank.join('');
   $('counts').textContent = [`${n['#'] || 0} solid`, `${n['~'] || 0} water`, `${n.s || 0} shallow`, `${n.b || 0} bush`, `${n.O || 0} objective`, `${(n.p || 0) + (n.y || 0) + (n.g || 0)} shrooms`,
-    `${(hs.match(/[hH]/g) || []).length} raised`, `${(hs.match(/[lL]/g) || []).length} lowered`, `${(fl.match(/F/g) || []).length} flank`].join(' · ');
+    `${(hs.match(/[hH]/g) || []).length} raised`, `${(hs.match(/[lL]/g) || []).length} lowered`, `${(fl.match(/F/g) || []).length} flank`, `${(map.nml.join('').match(/N/g) || []).length} no man’s land`].join(' · ');
   fit();
 }
 window.addEventListener('resize', fit);
