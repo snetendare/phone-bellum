@@ -1259,7 +1259,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
         key: x.id,
         art: `<canvas data-ticon="${x.id}" width="96" height="96" style="width:48px;height:48px" aria-hidden="true"></canvas>`,
         name: esc(x.name), who: '', sub: `${x.unit.hp} hp · ${towerAttack(x.unit).range} m`,
-        det: mode === 'tutorial' && TUT.towers[x.id] ? `<b>${esc(x.name)}</b> · ${esc(TUT.towers[x.id])}` : `<b>${esc(x.name)}</b> · ${x.unit.hp} hp · ${(a => `${x.unit.drone ? 'drone ' : ''}hit ${a.hit} × ${a.aps}/s · ${a.range} m${a.splash ? ` · ${a.splash} m splash` : ''}`)(towerAttack(x.unit))}<br>${esc(x.text)}${(x.rounds || []).map(r => `<br><span style="color:var(--gold)">${esc(r.name)}, every round, ${r.cost} gold:</span> ${esc(r.text)}`).join('')}${x.skill ? `<br><span style="color:var(--gold)">Skill, bought separately for ${Game.TOWER_SKILL.cost} gold: ${esc(x.skill.name)}.</span> ${esc(x.skill.text)}` : ''}${x.skill2 ? `<br><span style="color:var(--gold)">Skill, bought separately for ${x.skill2.cost} gold: ${esc(x.skill2.name)}.</span> ${esc(x.skill2.text)}` : ''}${x.loan ? `<br><span style="color:var(--gold)">Loan, every round:</span> ${esc(loanText())}` : ''}${x.passive ? `<br><span style="color:var(--gold)">${esc(x.passive.name)} (always on):</span> ${esc(x.passive.text)}` : ''}${x.generals ? `<br><span style="color:var(--gold)">Mage generals, one per round, for that round's fight:</span> ${Game.MAGE_GENERALS.map(g => `<b>${esc(g.name)}</b> (${g.cost} gold): ${esc(g.text)}`).join(' ')}` : ''}`,
+        det: mode === 'tutorial' && TUT.towers[x.id] ? `<b>${esc(x.name)}</b> · ${esc(TUT.towers[x.id])}` : `<b>${esc(x.name)}</b> · ${x.unit.hp} hp · ${(a => `${x.unit.drone ? 'drone ' : ''}hit ${a.hit} × ${a.aps}/s · ${a.range} m${a.splash ? ` · ${a.splash} m splash` : ''}`)(towerAttack(x.unit))}<br>${esc(x.text)}${towerRundown(x).map(([n, t, tag]) => `<br><span style="color:var(--gold)">${esc(n)} · ${esc(tag)}:</span> ${esc(t)}`).join('')}`,
       })),
     };
     return null;
@@ -2021,16 +2021,9 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
         ${(u.skillDefs || []).map(d => d ? row(d.name, esc(Engine.describeSkill(d)), d.cost != null ? `${d.cost} gold` : '') : '').join('')}`;
     } else if (view === 'towers') {
       head = 'Towers';
-      const extra = (t) => [t.skill && [t.skill.name, t.skill.text, `skill · ${Game.TOWER_SKILL.cost} gold`], t.skill2 && [t.skill2.name, t.skill2.text, `skill · ${t.skill2.cost} gold${t.skill2.needs ? ` · needs ${t.skill.name}` : ''}`],
-        t.mark && [t.mark.name, t.mark.text, `${t.mark.cost} gold`], t.fortify && [t.fortify.name, t.fortify.text, `every round · ${t.fortify.cost} gold`],
-        t.creditLine && [t.creditLine.name, t.creditLine.text, 'always on'], t.muster && [t.muster.name, t.muster.text, 'always on'], t.vault && [t.vault.name, t.vault.text, 'always on'], t.passive && [t.passive.name, t.passive.text, 'always on'],
-        ...(t.generals ? Game.MAGE_GENERALS.map(gn => [gn.name, gn.text, `every round · ${gn.cost} gold`, gn.cost]) : []),
-        ...(t.rounds || []).map(x => [x.name, x.text || '', `every round · ${+x.cost || 0} gold`, +x.cost || 0])].filter(Boolean)
-        .map(x => x.length > 3 ? x : [...x, /always on/.test(x[2]) ? 0 : +((x[2].match(/(\d+) gold/) || [])[1] || 0)])
-        .sort((a, b) => a[3] - b[3]); // cheapest first, as on the tower sheet
       body = back('') + `<p class="hint" style="margin:0">Everyone starts with an Outpost and picks a tower in round ${Game.TOWER_PICK_ROUND}. A fallen tower cripples its army for ${Engine.TOWER_DOWN.secs} s and costs ${Game.TOWER_FALL_HP} health. Anyone may take a loan once a round: +${Game.LOAN.gold} now, ${Game.LOAN.payback} less next round.</p>`
         + Game.TOWER_TYPES.map(t => `<div style="display:grid;gap:6px;border-top:1px solid var(--line);padding-top:8px"><h4 style="margin:0;font-family:var(--font-display);font-size:16px">${esc(t.name)}</h4>
-          <p class="role" style="margin:0">${esc(t.text)}</p>${towerStats(t.unit)}${extra(t).map(([n, x, tag]) => row(n, esc(x), tag)).join('')}</div>`).join('');
+          <p class="role" style="margin:0">${esc(t.text)}</p>${towerStats(t.unit)}${towerRundown(t).map(([n, x, tag]) => row(n, esc(x), tag)).join('')}</div>`).join('');
     } else if (view === 'leaders') {
       head = 'Leaders';
       body = back('') + `<p class="hint" style="margin:0">Each starting package comes with a leader.</p>` + Game.CHARACTERS.map(c => `<p style="margin:0">${charLine(c.id)}</p>`).join('');
@@ -3900,6 +3893,14 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (side === me && phase === 'deploy') act = w ? `<button class="btn small" id="tfort-undo" ${editable() ? '' : 'disabled'}>Undo · +${Game.FORTIFY.cost}</button>` : `<button class="btn small${editable() && Game.canFortify(m, me) ? ' primary' : ''}" id="tfort" ${editable() && Game.canFortify(m, me) ? '' : 'disabled'}>Place · ${Game.FORTIFY.cost} gold</button>`;
     return abilityRow(tt.fortify.name, act, esc(tt.fortify.text));
   }
+  // a tower type's abilities as [name, text, tag, cost], cheapest first, as on the tower sheet (the Encyclopedia, the round 3 pick)
+  const towerRundown = (t) => [t.skill && [t.skill.name, t.skill.text, `skill · ${Game.TOWER_SKILL.cost} gold`], t.skill2 && [t.skill2.name, t.skill2.text, `skill · ${t.skill2.cost} gold${t.skill2.needs ? ` · needs ${t.skill.name}` : ''}`],
+    t.mark && [t.mark.name, t.mark.text, `${t.mark.cost} gold`], t.fortify && [t.fortify.name, t.fortify.text, `every round · ${t.fortify.cost} gold`],
+    t.creditLine && [t.creditLine.name, t.creditLine.text, 'always on'], t.muster && [t.muster.name, t.muster.text, 'always on'], t.vault && [t.vault.name, t.vault.text, 'always on'], t.passive && [t.passive.name, t.passive.text, 'always on'],
+    ...(t.generals ? Game.MAGE_GENERALS.map(gn => [gn.name, gn.text, `every round · ${gn.cost} gold`, gn.cost]) : []),
+    ...(t.rounds || []).map(x => [x.name, x.text || '', `every round · ${+x.cost || 0} gold`, +x.cost || 0])].filter(Boolean)
+    .map(x => x.length > 3 ? x : [...x, /always on/.test(x[2]) ? 0 : +((x[2].match(/(\d+) gold/) || [])[1] || 0)])
+    .sort((a, b) => a[3] - b[3]);
   // the tower's abilities on its sheet, cheapest at the top: free ones (traits, the loan), then by list price
   // (a group of every-round buys by its cheapest). Same price: the order below.
   const towerCosts = (tt) => ({

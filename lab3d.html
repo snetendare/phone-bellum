@@ -2943,23 +2943,23 @@ const Game = (() => {
   const MOAT = { hit: 12, aps: 4, range: 5 };
   const TOWER_TYPES = [
     { id: 'keep', name: 'Keep', text: 'Steady light shots, short range.', unit: { ...TOWER, hp: 700 },
-      skill: { name: 'Guards', text: '4 Wisp guards defend the keep for 5 s each fight, then attack.' },
-      skill2: { name: 'Brute guards', cost: 400, needs: true, text: 'Guards are Brutes, with your Brute skills. Needs Guards.' },
-      muster: { name: 'Muster', text: 'Your extra deployment each round is free.' } }, // see deployCost
+      skill: { name: 'Guards', text: '4 Wisps guard it 5 s each fight, then attack.' },
+      skill2: { name: 'Brute guards', cost: 400, needs: true, text: 'Guards are Brutes, with your Brute skills.' },
+      muster: { name: 'Muster', text: 'Extra deployment each round is free.' } }, // see deployCost
     { id: 'sniper', name: 'Sniper tower', text: 'Slow, huge range, double damage.', unit: { ...TOWER, name: 'Sniper Tower', kind: 'sniper', hp: 500, hit: 60, aps: 0.4, range: 32, color: '#B9C7D6' },
       skill: { name: 'Eagle eye', text: 'Tower and Snipers: +3 m range, +10% attack speed.' },
-      skill2: { name: 'Deploy airship', cost: 400, text: 'An untouchable airship shoots like a level 3 Sniper and drops paratroopers each fight. Snipers and tower: +30 hit.' },
-      mark: { name: 'Mark Bounty', cost: 50, text: 'Mark one enemy squad for the rest of the match. Your Snipers deal it +15% damage and see it through stealth; +100 gold each fight a Sniper takes its last body. The mark can’t be moved; if they sell the squad, place it again for free.' } }, // see MARK
+      skill2: { name: 'Deploy airship', cost: 400, text: 'Untouchable airship: shoots like a level 3 Sniper, drops paratroopers each fight. Snipers and tower +30 hit.' },
+      mark: { name: 'Mark Bounty', cost: 50, text: 'Mark an enemy squad for the match: Snipers deal it +15% and see it in stealth; +100 gold when a Sniper finishes it. Can’t move; free again if it’s sold.' } }, // see MARK
     { id: 'bastion', name: 'Bastion', text: `Tough. Burns all enemies within ${MOAT.range} m.`,
       unit: { ...TOWER, name: 'Bastion', kind: 'bastion', hp: 1000, hit: MOAT.hit, aps: MOAT.aps, range: MOAT.range, moat: { ...MOAT }, idle: true, color: '#B79C8A' }, // idle: the moat is its only attack
       skill: { name: 'Home ground', text: 'Bastion blocks 2 hits a fight. Units in your zone: +2 armor, +10% health.' },
       skill2: { name: 'Defensive walls', cost: 250, text: 'Place 3 walls on your side that block enemies. Bastion +4 armor.' },
-      fortify: { name: 'Fortify', cost: 50, text: 'Once a round: one extra wall on your side for this round’s fight only.' }, // see FORTIFY
-      vault: { name: 'Vault', text: 'Your treasury has +6 armor, and a raid on it steals half as much.' } }, // see VAULT
+      fortify: { name: 'Fortify', cost: 50, text: 'One extra wall for this round’s fight.' }, // see FORTIFY
+      vault: { name: 'Vault', text: 'Treasury +6 armor; raids steal half.' } }, // see VAULT
     { id: 'mage', name: 'Mage tower', text: 'A beam that ramps up on one target. Melts giants.', unit: { ...TOWER, name: 'Mage Tower', kind: 'mage', hp: 600, hit: 14, aps: 1.5, range: 12, spinUp: 50, spinHit: 50, color: '#A493DE' },
       generals: true }, // no once-per-match skill: a mage general can be called every round instead (MAGE_GENERALS)
-    { id: 'bank', name: 'Bank tower', text: 'Sturdy, medium range. Credit line: your loans are 200 (pay back 300).', unit: { ...TOWER, name: 'Bank Tower', kind: 'bank', hp: 700, hit: 45, aps: 0.6, range: 18, color: '#D9B95B' },
-      loan: true, creditLine: { name: 'Credit line', text: 'Your loans are 200 gold (pay back 300) instead of 100 (pay back 200).' }, // see loanTerms
+    { id: 'bank', name: 'Bank tower', text: 'Sturdy, medium range.', unit: { ...TOWER, name: 'Bank Tower', kind: 'bank', hp: 700, hit: 45, aps: 0.6, range: 18, color: '#D9B95B' },
+      loan: true, creditLine: { name: 'Credit line', text: 'Loans are 200 (pay back 300), not 100 (200).' }, // see loanTerms
       skill2: { name: 'Major investment', cost: 500, noFree: true, text: 'Pay 500 now, get 800 next round. Once per match.' } }, // see resolve
     { id: 'slime', name: 'Slime tower', text: 'Lobs splashing slime, long range.', unit: { ...TOWER, name: 'Slime Tower', kind: 'slime', hit: 7, aps: 0.8, range: 26, splash: 3, projSpeed: 30, spinUp: 0.1, color: '#7BD93F' },
       passive: { name: 'Slime lore', text: 'Your slime unit skills also work on it.' } }, // see slimeTowerUnit
