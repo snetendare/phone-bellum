@@ -63,6 +63,13 @@ Still to try on phones: the phone layout, the Tilted view and the 3D battle cam 
   - To update any of them: `node src/build.js && node tools/build-artifact.js`, then publish `phone-bellum.html`, `game3d-artifact.html` or `lab3d-artifact.html` to its URL. `vendor/` is already published next to the two 3D ones; `phone-bellum.html` needs nothing next to it.
 - **3D test page** `lab3d.html` (`src/lab3d.js`, `src/lab3d-template.html`): deploy blue against the AI with unlimited gold, with Strategic / Angled / Ground buttons.
 
+## Map scenery (2026-10-28, first pass)
+
+- `src/scenery3d.js` lays out the land around the board (trees, bushes, rocks, grass) and small plants on it, instanced, purely visual, seeded per map (both players get the same land). Looks per map in `BIOMES`: meadow (Standard, Bridge, Rush, Test Grid; also paints the meadow floor through Render2D's new `opts.ground`, with darker grid lines), forest, ice, cavern (these keep their own painted floors).
+- Models: Quaternius Stylized Nature MegaKit (CC0) from the owner's D:\3DASSETS, packed into `models/scenery.bin` (1.7 MB) by `tools/scenery/build-scenery.js <MegaKit glTF folder>` (needs @gltf-transform/core, @gltf-transform/functions, meshoptimizer, sharp). The artifact builds inline it as `window.PB_SCENERY`.
+- Cost: about 1.1 M triangles a frame with shadows on (trees are ~4000 each; only trees within 16 m of the board cast shadows). Not tried on a phone yet; the too-slow fallback still applies. Other packs there (KayKit Forest/Dungeon/ResourceBits, Kenney mini-forest) are unused so far.
+- The "Phone Bellum" artifact wasn't republished (its live copy is an older build); the website has it.
+
 ## Checks
 
 - **Setup.** Serve the repo on port 8766 (`python3 -m http.server 8766`). Two-player checks also need `node tools/peer-server.js` on port 9000. Install with `cd tools && npm i`. Run each check with `NODE_PATH=<repo>/tools/node_modules node <repo>/tools/tests/<name>.js` from a scratch folder, because the checks write screenshots.
