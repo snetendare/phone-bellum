@@ -103,11 +103,24 @@ const Render3D = (THREE, el, view, opts = {}) => {
       if (tl.ch !== '#') continue;
       const c = hF === 1 ? col : Game.COLS - 1 - col, r = hF === 1 ? row : Game.ROWS - 1 - row, x0 = c * T - BW / 2, z0 = r * T - BD / 2, y0 = tl.h * Game.TERRAIN.step;
       const path = Game.SHAPE_PATH[tl.shape];
-      if (!path) { stones.push([x0 + T / 2, y0, z0 + T / 2, T, T, 0]); continue; }
+      if (!path) { stones.push([x0 + T / 2, y0, z0 + T / 2, T, T, 0, WALL_H]); continue; }
       const wide = '▔▕▁▏'.includes(tl.shape) ? 0.2 : 0.32, at = ([u, w]) => [x0 + (hF === 1 ? u : 1 - u) * T, z0 + (hF === 1 ? w : 1 - w) * T];
       for (let k = 1; k < path.length; k++) { // a block along each piece of the line, a little longer so the corners meet
         const [ax, az] = at(path[k - 1]), [bx, bz] = at(path[k]), L = Math.hypot(bx - ax, bz - az);
-        stones.push([(ax + bx) / 2, y0, (az + bz) / 2, L + T * wide, T * wide, Math.atan2(-(bz - az), bx - ax)]);
+        stones.push([(ax + bx) / 2, y0, (az + bz) / 2, L + T * wide, T * wide, Math.atan2(-(bz - az), bx - ax), WALL_H]);
+      }
+    }
+    // raised ground ending at water: a stone side from the water up to it, along the edge (over the bank)
+    for (let row = 0; row < Game.ROWS; row++) for (let col = 0; col < Game.COLS; col++) {
+      const tl = Game.terrainTile(src, col, row);
+      if (tl.ch === '#' || tl.ch === '~' || tl.h <= 0) continue;
+      for (const [dc, dr] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const o = Game.terrainTile(src, col + dc, row + dr);
+        if (o.ch !== '~' || o.h >= tl.h || col + dc < 0 || row + dr < 0 || col + dc >= Game.COLS || row + dr >= Game.ROWS) continue;
+        const c = hF === 1 ? col : Game.COLS - 1 - col, r = hF === 1 ? row : Game.ROWS - 1 - row, sc = dc * hF, sr = dr * hF; // as this side sees it
+        const lo = o.h * Game.TERRAIN.step - Game.TERRAIN.sink, hi = tl.h * Game.TERRAIN.step, th = T / HK + 0.1;
+        const x = (c + 0.5) * T - BW / 2 + sc * (T / 2 + th / 2 - 0.05), z = (r + 0.5) * T - BD / 2 + sr * (T / 2 + th / 2 - 0.05);
+        stones.push([x, lo, z, sc ? th : T, sc ? T : th, 0, hi - lo + 0.15]);
       }
     }
   }
@@ -120,7 +133,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
   }
   function drawStones() {
     const g = group('stones', beamGeo, stoneMat, stones.length);
-    stones.forEach(([x, y, z, len, wide, ang], i) => { tmpP.set(x, y + WALL_H / 2, z); tmpQ.setFromAxisAngle(up, ang); tmpS.set(len, WALL_H, wide); g.setMatrixAt(i, tmpM.compose(tmpP, tmpQ, tmpS)); });
+    stones.forEach(([x, y, z, len, wide, ang, h], i) => { tmpP.set(x, y + h / 2, z); tmpQ.setFromAxisAngle(up, ang); tmpS.set(len, h, wide); g.setMatrixAt(i, tmpM.compose(tmpP, tmpQ, tmpS)); });
     finish(g, stones.length);
   }
   const ids = new WeakMap(); let nextId = 1;

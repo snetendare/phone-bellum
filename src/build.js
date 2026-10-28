@@ -37,7 +37,8 @@ const game = src('site-template.html').replace('/*BASECSS*/', () => src('game.cs
   .replace('/*SHAPES*/', () => shapes).replace('/*ENGINE*/', () => eng)
   .replace('/*GAME*/', () => src('game.js'))
   .replace('/*ART*/', () => src('art.js')).replace('/*RENDER2D*/', () => src('render2d.js')).replace('/*DATA*/', () => src('demo-units.json'))
-  .replace('/*FACTIONS*/', () => src('faction-units.json'));
+  .replace('/*FACTIONS*/', () => src('faction-units.json'))
+  .replace('/*V3D*/', () => require('crypto').createHash('sha1').update(['camera3d.js', 'models3d.js', 'render3d.js', 'game.js', 'engine.js'].map(src).join('')).digest('hex').slice(0, 10));
 game.split('<script>').slice(1).map(s => s.split('</script>')[0]).forEach(s => new Function(s));
 // the 3D board's code is loaded on its own when 3D starts: make sure it parses too
 for (const f of ['camera3d.js', 'models3d.js', 'render3d.js']) new Function(src(f));

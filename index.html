@@ -3999,7 +3999,7 @@ const Game = (() => {
   // cells a tile, and the cells the form runs through take it. Bodies walk round what stops them (Engine: steer).
   // Ground height is a level per tile (-2 .. 2): the engine gives higher ground more range and damage (Engine.HEIGHT),
   // and the boards draw it TERRAIN.step m up per level, sloping smoothly between walkable tiles.
-  const TERRAIN = { sub: 3, wade: 30, step: 1.5, sink: 0.6 };
+  const TERRAIN = { sub: 3, wade: 30, step: 3, sink: 1 };
   const CHH = { L: -2, l: -1, '.': 0, h: 1, H: 2 };
   // the line through a tile's form, in tile units (0 to 1, y down), as in the map editor
   const SHAPE_PATH = { '─': [[0, .5], [1, .5]], '│': [[.5, 0], [.5, 1]], '└': [[.5, 0], [.5, .5], [1, .5]], '┌': [[1, .5], [.5, .5], [.5, 1]],
@@ -10948,6 +10948,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   // It falls back to the 2D board when it can't start (no WebGL), when the phone drops the WebGL context, and when
   // fights run under 20 fps at low quality (slower fights step the quality down first), with one line on the board.
   const THREE_URL = './vendor/three.module.min.js'; // the artifact build points this at jsDelivr
+  const V3D = '009bfdbc1a'; // the 3D code's version (src/build.js puts a hash of it here)
   const B3D_STORE = 'phone-bellum-board';
   const force2d = /[?&]board=2d\b/.test(location.search);
   const force3d = !force2d && (/[?&]board=3d\b/.test(location.search) || window.PB_FORCE3D === true);
@@ -10963,7 +10964,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       let b = null, loaded = false;
       try {
         const THREE = await import(THREE_URL);
-        if (typeof Render3D !== 'function') for (const f of ['camera3d', 'models3d', 'render3d']) await load(`src/${f}.js`);
+        if (typeof Render3D !== 'function') for (const f of ['camera3d', 'models3d', 'render3d']) await load(`src/${f}.js?v=${V3D}`); // V3D: a new name each build, so a browser never runs an old copy
         loaded = true;
         if (!want3d) return; // switched back to 2D while loading
         el.className = 'board3d';

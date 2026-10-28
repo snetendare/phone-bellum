@@ -516,7 +516,7 @@ const Game = (() => {
   // cells a tile, and the cells the form runs through take it. Bodies walk round what stops them (Engine: steer).
   // Ground height is a level per tile (-2 .. 2): the engine gives higher ground more range and damage (Engine.HEIGHT),
   // and the boards draw it TERRAIN.step m up per level, sloping smoothly between walkable tiles.
-  const TERRAIN = { sub: 3, wade: 30, step: 1.5, sink: 0.6 };
+  const TERRAIN = { sub: 3, wade: 30, step: 3, sink: 1 };
   const CHH = { L: -2, l: -1, '.': 0, h: 1, H: 2 };
   // the line through a tile's form, in tile units (0 to 1, y down), as in the map editor
   const SHAPE_PATH = { '─': [[0, .5], [1, .5]], '│': [[.5, 0], [.5, 1]], '└': [[.5, 0], [.5, .5], [1, .5]], '┌': [[1, .5], [.5, .5], [.5, 1]],
