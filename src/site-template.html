@@ -665,11 +665,14 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
   };
   const ARTIST = 'Snetänd';
   const songName = (id) => `“${SONGS[id].title}” - ${ARTIST}`;
-  const PLAYLISTS = { menu: ['long', 'sisi', 'jonah', 'superCoffee', 'reveal'], deploy: ['bulgaria'], battle: ['habbyourmam'] };
+  const PLAYLISTS = { deploy: ['bulgaria'], battle: ['habbyourmam'] };
   const MAP_MUSIC = { // maps with their own deployment or battle music, in place of PLAYLISTS.deploy / .battle
     ice: { deploy: ['icyOne'], battle: ['knarkkungn'] },
     cavern: { deploy: ['sirski'] },
   };
+  // the menu playlist: every song that isn't deployment or battle music (a new song shows up in it by itself)
+  const phaseSongs = new Set([...PLAYLISTS.deploy, ...PLAYLISTS.battle, ...Object.values(MAP_MUSIC).flatMap(o => Object.values(o).flat())]);
+  PLAYLISTS.menu = Object.keys(SONGS).filter(id => !phaseSongs.has(id));
   const FADE_IN = 1, FADE_OUT = 1; // seconds
   const DEFAULT_VOL = 60;
   // song: the one menu song the player picked ('' = the menu playlist); solo: on an iPhone, take over the phone's sound (see setAudioSession)
@@ -682,17 +685,21 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
   const saveSound = () => { try { localStorage.setItem(SOUND_STORE, JSON.stringify(snd)); } catch (e) {} };
   const musicLevel = () => snd.muted ? 0 : snd.vol / 100;
   let actx = null, musicUnlocked = false;
-  // one player per playlist: starts on a random track (the menu one on its first), then plays the rest in order
-  // and loops; a paused playlist picks up where it stopped
-  function playlist(tracks, fromStart) {
-    let track = fromStart ? 0 : Math.floor(Math.random() * tracks.length), gain = null, stopT = 0;
+  // one player per playlist: starts on a random track and, when it ends, goes on to another random one (never the
+  // same song twice in a row) for as long as the phase lasts; a paused playlist picks up where it stopped
+  function playlist(tracks) {
+    const pickNext = (cur) => { if (tracks.length < 2) return 0; let t = Math.floor(Math.random() * (tracks.length - 1)); return t >= cur ? t + 1 : t; };
+    let track = Math.floor(Math.random() * tracks.length), gain = null, stopT = 0;
     const el = new Audio(SONGS[tracks[track]].file);
     el.preload = 'none';
     const pl = { el, playing: false };
-    el.addEventListener('ended', () => { track = (track + 1) % tracks.length; el.src = SONGS[tracks[track]].file; if (pl.playing) el.play().catch(() => {}); });
-    pl.tracks = (list) => { // switch to another list of songs, from the start of its first one
+    el.addEventListener('ended', () => {
+      track = pickNext(track); el.src = SONGS[tracks[track]].file;
+      if (pl.playing) el.play().catch(() => {});
+    });
+    pl.tracks = (list) => { // switch to another list of songs, from the start of a random one
       if (list.join() === tracks.join()) return;
-      tracks = list; track = 0; el.src = SONGS[tracks[0]].file;
+      tracks = list; track = Math.floor(Math.random() * tracks.length); el.src = SONGS[tracks[track]].file;
       if (pl.playing) el.play().catch(() => {});
     };
     pl.ramp = (v, secs) => {
@@ -723,7 +730,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
     return pl;
   }
   const menuSongs = () => snd.song ? [snd.song] : PLAYLISTS.menu;
-  const music = { menu: playlist(menuSongs(), true), deploy: playlist(PLAYLISTS.deploy), battle: playlist(PLAYLISTS.battle) };
+  const music = { menu: playlist(menuSongs()), deploy: playlist(PLAYLISTS.deploy), battle: playlist(PLAYLISTS.battle) };
   for (const id in MAP_MUSIC) for (const k in MAP_MUSIC[id]) music[k + '-' + id] = playlist(MAP_MUSIC[id][k]);
   function syncMusic() {
     const on = musicUnlocked && musicLevel() > 0;
@@ -1428,7 +1435,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
         <li>Drag a squad you placed this round to move it, or tap the ✕ on its top right corner to take it back. Your round 1 package squads are free.</li>
         <li>A squad with a gold badge can level up: tap it. Tap an older squad, a tower or an enemy squad to see what it does.</li>
         ${document.documentElement.classList.contains('dock') ? '<li>Hold the blue tab on the deploy panel and slide it up or down (or tap it). Picking a unit puts it down so you can see every tile; the ✕ on the board stops placing.</li>' : ''}
-        ${board3d ? '<li>3D board: spread two fingers (or scroll) to go in a view: Strategic, Tilted (your side up close, still for placing), Angled, Cinematic. Pinch (or press Esc) to go back.</li>' : ''}
+        ${board3d ? '<li>3D board: spread two fingers (or scroll) to go in a view: Strategic, Tilted (your side up close, still for placing; twist two fingers, right-drag or Q/E to turn it), Angled, Cinematic. Pinch (or press Esc) to go back.</li>' : ''}
       </ul>
       <div class="bar"><span></span><button class="btn small" id="help-how">How to play</button></div>`;
     $('sheet-back').hidden = false;
@@ -3230,12 +3237,21 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (b.channel) st.push('Summoning');
     if (b.delay > 0) st.push(`Arrives in ${b.delay.toFixed(1)} s`);
     if (b.inside && b.inside.alive) st.push('Sheltered');
+    // the upgrades its squad fights with: bought skills (built-in ones left out), Enzo's free one, an awakening
+    const sq = b.squad >= 0 && !u.structure && m ? m.armies[b.side].find(q => q.id === b.squad) : null;
+    const ups = [];
+    if (sq && units[sq.unit] && units[sq.unit].name === u.name) {
+      const ui = sq.unit, defs = units[ui].skillDefs || [];
+      const ek = Game.enzoActive(m, b.side, ui) ? Game.enzoSkill(m, b.side, sq) : null, ak = sq.awaken > 0 ? Game.awakenSlot(m, ui) : -1;
+      Engine.SLOTS.forEach(k => { if (defs[k] && !Game.isInnate(m, ui, k) && (Game.hasSkill(m, b.side, ui, k) || k === ek || k === ak)) ups.push(defs[k].name); });
+    }
     const def = u.defense === 'armor' && u.defVal ? `<div><span>Armor</span>${r2(u.defVal)}</div>` : u.defense === 'ward' && u.defVal ? `<div><span>Ward</span>${r2(u.defVal)}</div>` : '';
     const html = `<div class="bh"><span style="color:${u.color || 'var(--ink)'};display:inline-flex">${Shapes.svg(u.shape || 'circle', 16)}</span><b>${esc(name)}</b><button class="bx" id="bcard-x" aria-label="Close">✕</button></div>
       <div class="st">${mine ? 'Yours' : esc(foeName()) + '’s'}${b.level > 0 ? ` · level ${b.level + 1}` : ''}${mates.length > 1 ? ` · ${mates.filter(x => x.alive).length} of ${mates.length} bodies left` : ''}</div>
       <div class="hpb"><i style="width:${Math.max(0, Math.min(100, b.hp / u.hp * 100)).toFixed(1)}%"></i></div>
       <div class="bs"><div><span>Health</span>${Math.max(0, Math.min(Math.round(u.hp), Math.ceil(b.hp)))} / ${Math.round(u.hp)}</div>${u.hit > 0 ? `<div><span>Hit</span>${Math.round(u.hit)}</div><div><span>Attacks/s</span>${r2(u.aps)}</div>` : ''}
         ${u.range > 0 ? `<div><span>Range</span>${r2(bodyReach(b))} m</div>` : ''}${u.speed > 0 && !u.structure ? `<div><span>Speed</span>${r2(u.speed)} m/s</div>` : ''}${def}</div>
+      ${ups.length ? `<div class="st"><span style="color:var(--gold)">Upgrades:</span> ${ups.map(esc).join(' · ')}</div>` : ''}
       ${st.length ? `<div class="st">${st.join(' · ')}</div>` : ''}`;
     if (!el) {
       el = document.createElement('div'); el.className = 'bcard'; el.id = 'bcard'; el.setAttribute('role', 'status');

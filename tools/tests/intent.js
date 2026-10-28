@@ -54,6 +54,7 @@ for (const seed of [3, 7, 11]) {
   Game.aiDeploy(m, 0); // only side 0 acts this round: everything of side 1 is from earlier rounds, all in sight
   const mm = clone(m), real = Game.startBattle(mm); // (startBattle settles the match: walls, packages)
   const first = new Map(), held = new Map();
+  const home = new Map(real.bodies.map(b => [b, b.squad])); // a body won over later in the fight changes squad
   for (let k = 0; k < Math.round(Game.INTENT.secs / Game.SETTINGS.dt); k++) {
     if (!real.step()) break;
     for (const b of real.bodies) {
@@ -68,7 +69,7 @@ for (const seed of [3, 7, 11]) {
     const pv = Game.intentPreview(mm, 0, { id: sq.id });
     if (!pv || !pv.moves) continue;
     const by = {};
-    for (const [b, k] of first) if (b.squad === sq.id && k) by[k] = (by[k] || 0) + 1;
+    for (const [b, k] of first) if ((home.has(b) ? home.get(b) : b.squad) === sq.id && k) by[k] = (by[k] || 0) + 1;
     assert.deepStrictEqual(order(pv.picks), order(Object.entries(by)), `seed ${seed} squad ${sq.id} (${demo.units[sq.unit].name})`);
     assert.ok(pv.groups.length + (pv.ahead ? 1 : 0) <= 2, 'two arrows at most');
     for (const g of pv.groups) assert.ok(pv.picks.some(([k, n]) => k === g.side + ':' + g.squad && n >= g.n), 'a named arrow is one of its picks');

@@ -20,7 +20,7 @@ const FULL = process.argv.includes('--full');
 // --seed: the saved tables are known to be up to date (just computed): only add the signatures, run no battles
 const SEED = process.argv.includes('--seed');
 const ENGINE = hash(fs.readFileSync(path.join(__dirname, '../src/engine.js'), 'utf8'));
-const DISPLAY = new Set(['shape', 'color', 'trait', 'trait2', 'trait3', 'trait4', 'unlock', 'faction']); // never change a fight
+const DISPLAY = new Set(['shape', 'color', 'trait', 'trait2', 'trait3', 'trait4', 'unlock', 'faction', 'noPack']); // never change a fight
 const sigOf = (u) => hash(JSON.stringify(u, (k, v) => DISPLAY.has(k) ? undefined : v));
 // the battles in pairs, split over the CPU cores
 function runPairs(bu, g, pairs) {

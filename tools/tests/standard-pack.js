@@ -23,6 +23,10 @@ for (let seed = 1; seed <= 40; seed++) {
   for (const sd of [0, 1]) for (const t of Game.towerChoices(m, sd)) assert.ok(!SP.offTowers.includes(t.id), `no ${t.id} tower on offer`);
   assert.ok(Game.isOff(m, units.findIndex(u => u.name === 'Slime Wizard')), 'Slime Wizard is out');
 }
+// the Shiv is never in a starting package, with or without the pack; each tier of the pack has five or four units
+const shiv = units.findIndex(u => u.name === 'Shiv');
+assert.ok(units[shiv].noPack && !Game.allPackages(units).some(p => p.units.includes(shiv)), 'no Shiv in starting packages');
+assert.deepStrictEqual([1, 2, 3, 4].map(t => SP.units.filter(n => Game.tierOf(units, units.findIndex(u => u.name === n)) === t).length), [5, 5, 4, 4], 'units a tier');
 // without the pack, every tower can be on offer
 const seen = new Set();
 for (let seed = 1; seed <= 40; seed++) { const m = Game.createMatch(units, demo.matrix, seed, 'standard'); m.round = Game.TOWER_PICK_ROUND; Game.towerChoices(m, 0).forEach(t => seen.add(t.id)); }

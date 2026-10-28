@@ -50,7 +50,7 @@
       { "name": "Disguise", "text": "looks like another unit until its first attack" } ] },
     { "name": "Affliction", "color": "#c2e08a", "keywords": [
       { "name": "Burn", "text": "damage over time from fire" },
-      { "name": "Poison", "text": "damage over time that ignores armor" } ] }
+      { "name": "Poison", "text": "damage over time that ignores armor; poisoned units move 20% slower and heal 50% less" } ] }
   ],
   "skillTypes": {
     "_about": "What each skill type gives the unit that buys it. has = the unit has or gives it, makes = puts it on the board for others, feeds = gets a payoff from it.",

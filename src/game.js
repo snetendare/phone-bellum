@@ -370,8 +370,9 @@ const Game = (() => {
   // the leaders with simple abilities, and no mage or slime tower. Units by name, so a Counter Lab roster just keeps
   // the ones it has (with none of them, the pack leaves nothing out).
   const STANDARD_PACK = {
-    units: ['Goblin Swarm', 'Skeleton Archers', 'Fire Mage', 'Sniper', 'Brute', 'Leaf Wizard', 'Earth Wizard', 'Shiv',
-      'Flame Wizard', 'Steel Wizard', 'Water Mage', 'Ether Golem', 'Sun Priest', 'War Mammoth'],
+    units: ['Goblin Swarm', 'Skeleton Archers', 'Fire Mage', 'Sniper', 'Wisps', 'Brute', 'Leaf Wizard', 'Earth Wizard', 'Shiv',
+      'Slimeshots', 'Flame Wizard', 'Steel Wizard', 'Water Mage', 'Frost Wizard', 'Ether Golem', 'Sun Priest', 'War Mammoth',
+      'Necromancer'],
     chars: ['cage', 'zoe', 'emile', 'wilhelm', 'phil', 'felix'],
     offTowers: ['mage', 'slime'],
   };

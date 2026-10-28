@@ -12,7 +12,9 @@
 // While opts.placing() is true (the player is deploying), the angled view takes taps, drags and hover the same way;
 // a drag that the page doesn't take still looks around, and setLevel(k) (or a pinch, the wheel, Esc) changes view.
 // Level 1 is the tilted view: most of the board from your side at TILT degrees, gentler than the angled view; it works
-// like the strategic view (taps and drags go to the page, nothing to pan). Levels 2 and 3 are cinematic: angled, then
+// like the strategic view (taps and drags go to the page, nothing to pan), but it can be rotated round the middle of the
+// board: twist two fingers (or right/middle drag, Q/E). The turn carries on into the views further in and goes when
+// the camera is back at the strategic view. Levels 2 and 3 are cinematic: angled, then
 // close to the ground. In a cinematic view you can only look around: drag to move, twist (or right/middle drag, Q/E) to rotate, and a tap
 // goes back to the strategic view.
 // Every step in goes the same way: Strategic -> Tilted -> Angled -> Ground.
@@ -49,7 +51,7 @@ const Camera3D = (THREE, camera, el, opts) => {
   const ZMIN = 0, ZMAX = MAX;
   let z = 0;
   let target = new THREE.Vector3(); // the point a cinematic view looks at (on the ground)
-  let yaw = 0;                // rotation of a cinematic view around the vertical axis (radians, 0 = from your side)
+  let yaw = 0;                // rotation of the tilted and cinematic views around the vertical axis (radians, 0 = from your side)
   let settle = null;          // { from, to, t } while z glides to a level
   let aspect = 1, viewH = 1;
   let tilt = { pitch: TILT, dist: 100, tz: 0 }; // the tilted view: distance and look point that fit the board (fitTilted)
@@ -100,10 +102,12 @@ const Camera3D = (THREE, camera, el, opts) => {
   }
   function apply() {
     let { pitch, dist } = pose(z);
-    // strategic to tilted, the look point slides to the tilted one; from tilted in to angled, the look point and
-    // the turn grow from the tilted one / no turn
-    const w = Math.max(0, Math.min(1, z - 1)), z0 = tilt.tz * Math.max(0, Math.min(1, z)), yw = yaw * w;
-    let tx = target.x * w, tz = z0 + (target.z - z0) * w;
+    // strategic to tilted, the look point slides to the tilted one and the turn grows from none (the tilted view turns
+    // round the middle of the board, its look point with it); from tilted in to angled, the look point slides on to
+    // the cinematic one
+    const s1 = Math.max(0, Math.min(1, z)), w = Math.max(0, Math.min(1, z - 1)), yw = yaw * s1, z0 = tilt.tz * s1;
+    const lx = Math.sin(yw) * z0, lz = Math.cos(yw) * z0;
+    let tx = lx + (target.x - lx) * w, tz = lz + (target.z - lz) * w;
     // the battle cam, on the strategic and tilted views only (it fades as the player goes in)
     const fk = foc.k * (1 - w);
     if (fk > 0) {
@@ -121,6 +125,7 @@ const Camera3D = (THREE, camera, el, opts) => {
   // the views where taps, drags and hover go to the page: strategic, tilted, and angled while the player is placing
   const handsOn = () => strategic() || (!settle && (Math.abs(z - 1) < 0.01 || (Math.abs(z - 2) < 0.01 && !!(opts.placing && opts.placing()))));
   const cinematic = () => z > 1.01; // in from the tilted view: the look point and turn count
+  const turnable = () => z > 0.7; // the tilted view and further in can be rotated
   function settleTo(to) {
     to = Math.max(ZMIN, Math.min(ZMAX, to));
     settle = { from: z, to, t: 0 };
@@ -150,7 +155,7 @@ const Camera3D = (THREE, camera, el, opts) => {
   function aimAt(cx, cy) {
     const g = groundAt(cx, cy);
     if (g) { target.set(g.x, 0, g.z); clampTarget(); }
-    yaw = 0;
+    if (z < 0.5) yaw = 0; // from the tilted view the turn stays
   }
   // move the look point so the ground follows a drag of dx, dy px
   function pan(dx, dy) {
@@ -183,7 +188,7 @@ const Camera3D = (THREE, camera, el, opts) => {
     woke();
     if (e.pointerType === 'mouse' && e.button !== 0) {
       e.preventDefault();
-      if (cinematic()) rotDrag = { x: e.clientX };
+      if (turnable()) rotDrag = { x: e.clientX };
       try { el.setPointerCapture(e.pointerId); } catch (err) {}
       return;
     }
@@ -208,7 +213,7 @@ const Camera3D = (THREE, camera, el, opts) => {
     if (pts.size === 2 && two) {
       const p = pair(), s = Math.log(p.d / two.d0), turn = Math.atan2(Math.sin(p.ang - two.a0), Math.cos(p.ang - two.a0));
       if (!two.zooming && Math.abs(s) > PINCH_DEAD) { two.zooming = true; two.sOff = Math.sign(s) * PINCH_DEAD; }
-      if (!two.turning && Math.abs(turn) > TWIST_DEAD && z > 1.3) { two.turning = true; two.aOff = Math.sign(turn) * TWIST_DEAD; }
+      if (!two.turning && Math.abs(turn) > TWIST_DEAD && turnable()) { two.turning = true; two.aOff = Math.sign(turn) * TWIST_DEAD; }
       if (two.zooming) z = Math.max(ZMIN, Math.min(ZMAX, two.z0 + (s - two.sOff) / PINCH_PER_LEVEL));
       if (two.turning) yaw = two.yaw0 + (turn - two.aOff); // the view turns the way the fingers twist
       if (z > 1.3) pan(p.mx - two.mx, p.my - two.my); // the two fingers moving together drag the view too
@@ -279,19 +284,20 @@ const Camera3D = (THREE, camera, el, opts) => {
       settle.t = Math.min(1, settle.t + dt / 0.3);
       const e = 1 - Math.pow(1 - settle.t, 3); // ease out
       z = settle.from + (settle.to - settle.from) * e;
-      if (settle.t >= 1) { z = settle.to; settle = null; if (z <= 1) yaw = 0; }
+      if (settle.t >= 1) { z = settle.to; settle = null; if (z < 0.5) yaw = 0; }
     }
     if (foc.k !== focT.k) {
       foc.k += (focT.k - foc.k) * Math.min(1, dt * 3);
       if (Math.abs(foc.k - focT.k) < 0.002) foc.k = focT.k;
     }
     if (focT.k > 0) { foc.x = focT.x; foc.z = focT.z; }
-    if (cinematic()) { if (keys.has('q')) yaw += dt * 1.6; if (keys.has('e')) yaw -= dt * 1.6; }
+    if (turnable() && !settle) { if (keys.has('q')) yaw += dt * 1.6; if (keys.has('e')) yaw -= dt * 1.6; }
     apply();
   }
   // go to a level; into the angled view from the strategic or tilted one, it looks at your own half of the board
+  // (the half nearest the camera, when the tilted view was turned)
   function setLevel(k) {
-    if (k > 1 && !cinematic()) { target.set(0, 0, D / 4); yaw = 0; }
+    if (k > 1 && !cinematic()) { if (z < 0.5) yaw = 0; target.set(Math.sin(yaw) * D / 4, 0, Math.cos(yaw) * D / 4); }
     settleTo(k);
   }
   function resize(width, height) { aspect = width / height; viewH = height; camera.aspect = aspect; fitTilted(); apply(); }

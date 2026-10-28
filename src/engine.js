@@ -146,8 +146,9 @@ const Engine = (() => {
   // bleeding from it can't heal or regenerate until the bleed runs out; u.bleedStun: a body it brings to BLEED.max
   // stacks is stunned that many seconds.
   const BLEED = { dmg: 3, pulse: 0.5, secs: 2.5, max: 5, pct: { 4: 2, 5: 5 } };
-  // Poisoned bodies heal POISON_HEAL % as much (slime units drink poison and heal fully)
-  const POISON_HEAL = 50;
+  // Poisoned bodies heal POISON_HEAL % as much (slime units drink poison and heal fully) and move POISON_SLOW % slower
+  // while the poison lasts (the stronger of this and any other slow counts; not slime units or Berserkers)
+  const POISON_HEAL = 50, POISON_SLOW = 20;
   // waterHeal: allies inside the splash of its attacks heal for its hit; with no enemy in reach it shoots at the most
   // wounded ally in reach instead (structures aren't healed)
   // pools = { pct, speed, secs }: where its attacks land they leave a pool the size of their splash, for the rest of the
@@ -2111,6 +2112,10 @@ const Engine = (() => {
           }
           if (b.poison) b.poison = b.poison.filter(p => p.t > 0); // a body won over by a Gentleman just now lost its poison
           if (!b.alive) continue;
+          if (b.poison && b.poison.length && !b.u.slime && !b.u.unstoppable) { // poison slows (see POISON_SLOW)
+            if (!(b.slowT > 0)) { b.slowMove = 0; b.slowAtk = 0; }
+            b.slowMove = Math.max(b.slowMove, POISON_SLOW); b.slowT = Math.max(b.slowT, dt * 1.5);
+          }
         }
         if (b.bleed) { // every BLEED.pulse s: BLEED.dmg, doubled for each stack after the first, and a share of max health at 4 and 5 stacks
           const bl = b.bleed;
@@ -2528,6 +2533,6 @@ const Engine = (() => {
     return m;
   }
 
-  return { DASH_SPEED, LONE_R, WATCH_IDLE, BURN, FROST_ON, EAT_R, glutUnit, TOWER_DOWN, RULES, ruleOn, STEALTH_BACK, SKILL_SLOTS, SLOTS, SKILL_TYPES, skillParam, describeSkill, applySkills, innateUnit, fairBudget, battle, makeArmy, matrix, createBattle, buildSquad, rawStrength, squadsFor, withTraits, leveled, TRAIT_DEFAULTS, SPIN_CAP, CHARGE_RUN, TRAMPLE_RUN, BLAST_RADIUS, BLEED, POISON_HEAL, RAM_REACH, ROLL_START, ROLL_PAST, BUILD_GAP, BUILD_COOP, SITE_REACH, MINE_TRIGGER, REPAIR_SECS, LEVEL_BONUS, levelHpK, MAX_LEVEL, CHARM_MAX, CONVERT_HP, CONVERT_SQUAD };
+  return { POISON_SLOW, DASH_SPEED, LONE_R, WATCH_IDLE, BURN, FROST_ON, EAT_R, glutUnit, TOWER_DOWN, RULES, ruleOn, STEALTH_BACK, SKILL_SLOTS, SLOTS, SKILL_TYPES, skillParam, describeSkill, applySkills, innateUnit, fairBudget, battle, makeArmy, matrix, createBattle, buildSquad, rawStrength, squadsFor, withTraits, leveled, TRAIT_DEFAULTS, SPIN_CAP, CHARGE_RUN, TRAMPLE_RUN, BLAST_RADIUS, BLEED, POISON_HEAL, RAM_REACH, ROLL_START, ROLL_PAST, BUILD_GAP, BUILD_COOP, SITE_REACH, MINE_TRIGGER, REPAIR_SECS, LEVEL_BONUS, levelHpK, MAX_LEVEL, CHARM_MAX, CONVERT_HP, CONVERT_SQUAD };
 })();
 if (typeof module !== 'undefined') module.exports = Engine;

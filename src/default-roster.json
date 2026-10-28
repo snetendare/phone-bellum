@@ -2137,6 +2137,7 @@
       "unlock": 50,
       "name": "Shiv",
       "cost": 200,
+      "noPack": 1,
       "bodies": 4,
       "hp": 150,
       "hit": 13,
