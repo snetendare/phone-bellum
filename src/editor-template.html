@@ -178,7 +178,7 @@ header .eyebrow { font-family: var(--font-data); font-size: 11px; letter-spacing
 // ===== Map editor: tiles, flanks, ground height and buildings, saved on this device or as a .json file =====
 // side 0 is the bottom player (you, rows ROWS-ZONE .. ROWS-1), side 1 the top one, as in src/game.js.
 // A map: { format, version, name, base, cols, rows, zone, symmetry, tiles, height, flank, buildings }
-//   tiles:  one string per row, a char per column: '.' open, '#' solid wall, '~' water, 's' shallow water, 'O' objective,
+//   tiles:  one string per row, a char per column: '.' open, '#' solid wall, '~' water, 's' shallow water, 'b' bush, 'O' objective,
 //           'p' / 'y' / 'g' purple / yellow / green mushroom tile
 //   height: one string per row: 'L' -2, 'l' -1, '.' 0, 'h' +1, 'H' +2
 //   flank:  one string per row: 'F' a flank tile (the player whose half it is NOT on may deploy there), '.' not
@@ -192,18 +192,20 @@ const FEATURE = { // tile char -> how it looks and what it is
   '#': { name: 'Solid wall', sub: 'Blocks shots and sight', col: '#1F3A60' },
   '~': { name: 'Water', sub: 'Shots and sight pass', col: '#4FCBEA' },
   's': { name: 'Shallow water', sub: 'Walkable, slows', col: '#2E86B0' },
+  'b': { name: 'Bush', sub: 'Blocks sight, walkable', col: '#2F6B34' },
   'O': { name: 'Objective', sub: 'Rules to come', col: '#22C55E' },
   'p': { name: 'Purple shroom', sub: '+dmg, +health', col: SHROOM_COL.purple },
   'y': { name: 'Yellow shroom', sub: 'Speed', col: SHROOM_COL.yellow },
   'g': { name: 'Green shroom', sub: 'Poison', col: SHROOM_COL.green },
 };
 const TOOLS = [
-  { id: '#', key: '1' }, { id: '~', key: '2' }, { id: 's', key: '3' }, { id: 'O', key: '4' },
-  { id: 'raise', key: '5', name: 'Raise ground', sub: 'Up to +2', col: '#F2C318' },
-  { id: 'lower', key: '6', name: 'Lower ground', sub: 'Down to −2', col: '#E5483F' },
-  { id: 'flank', key: '7', name: 'Flank tiles', sub: 'Add or remove', col: '#3C6E74' },
-  { id: 'p', key: '8' }, { id: 'y', key: '9' }, { id: 'g', key: '0' },
-  { id: 'erase', key: 'e', name: 'Erase', sub: 'Tile and ground', col: '#13201F' },
+  { id: '#', key: '1' }, { id: '~', key: '2' }, { id: 's', key: '3' }, { id: 'b', key: '4' }, { id: 'O', key: '5' },
+  { id: 'raise', key: '6', name: 'Raise ground', sub: 'Up to +2', col: '#F2C318' },
+  { id: 'lower', key: '7', name: 'Lower ground', sub: 'Down to −2', col: '#E5483F' },
+  { id: 'flank-add', key: '8', name: 'Add flank', sub: 'Make it a flank tile', col: '#3C6E74' },
+  { id: 'flank-del', key: '9', name: 'Remove flank', sub: 'Tile stays as it is', col: '#1C3236' },
+  { id: 'p', key: 'p' }, { id: 'y', key: 'y' }, { id: 'g', key: 'g' },
+  { id: 'normal', key: 'n', name: 'Normal tile', sub: 'Open, flat, no flank', col: '#13201F' },
 ];
 TOOLS.forEach(t => { if (FEATURE[t.id]) Object.assign(t, FEATURE[t.id]); });
 
@@ -257,7 +259,7 @@ function undo() { if (!undoStack.length) return; redoStack.push(snap()); map = J
 function redo() { if (!redoStack.length) return; undoStack.push(snap()); map = JSON.parse(redoStack.pop()); dirty = true; refresh(); }
 
 // ---------- painting ----------
-// stroke: the tiles already touched (ground goes up or down once per tile a stroke) and the flank tool's mode
+// stroke: the tiles already touched (ground goes up or down once per tile a stroke)
 let stroke = null;
 function paint(c, r) {
   for (const p of withMirror(c, r)) {
@@ -271,10 +273,10 @@ function paintOne(c, r) {
   if (tool === 'raise' || tool === 'lower') {
     const h = Math.max(-2, Math.min(2, hAt(c, r) + (tool === 'raise' ? 1 : -1)));
     setAt(map.height, c, r, HCH[h]);
-  } else if (tool === 'flank') {
-    setAt(map.flank, c, r, stroke.flank ? 'F' : '.');
-  } else if (tool === 'erase') {
-    setAt(map.tiles, c, r, '.'); setAt(map.height, c, r, '.');
+  } else if (tool === 'flank-add' || tool === 'flank-del') {
+    setAt(map.flank, c, r, tool === 'flank-add' ? 'F' : '.');
+  } else if (tool === 'normal') { // back to a plain tile: open, flat and no flank
+    setAt(map.tiles, c, r, '.'); setAt(map.height, c, r, '.'); setAt(map.flank, c, r, '.');
   } else if (FEATURE[tool]) {
     if ((tool === '#' || tool === '~') && buildingAt(c, r)) { say('Walls can’t go under a building. Move it first.'); return; }
     setAt(map.tiles, c, r, tool);
@@ -473,6 +475,12 @@ function draw() {
       g.fillStyle = 'rgba(46,134,176,0.55)'; g.fillRect(x, y, T, T);
       g.strokeStyle = 'rgba(160,225,245,0.55)'; g.lineWidth = Math.max(1, T * 0.04);
       for (const [fx, fy, rr] of [[0.32, 0.36, 0.12], [0.68, 0.64, 0.14]]) { g.beginPath(); g.ellipse(x + T * fx, y + T * fy, T * rr, T * rr * 0.5, 0, 0, 7); g.stroke(); }
+    } else if (ch === 'b') { // a bush: low leafy clumps (it can be walked through)
+      g.fillStyle = 'rgba(30,70,34,0.6)'; g.fillRect(x, y, T, T);
+      for (const [fx, fy, rr, col] of [[0.3, 0.62, 0.22, '#2F6B34'], [0.7, 0.62, 0.22, '#2F6B34'], [0.5, 0.4, 0.25, '#3E8A44'], [0.28, 0.36, 0.15, '#3E8A44'], [0.72, 0.36, 0.15, '#4C9C50']]) {
+        g.fillStyle = col; g.beginPath(); g.arc(x + T * fx, y + T * fy, T * rr, 0, 7); g.fill();
+      }
+      g.fillStyle = 'rgba(190,240,170,0.35)'; g.beginPath(); g.arc(x + T * 0.44, y + T * 0.32, T * 0.07, 0, 7); g.arc(x + T * 0.64, y + T * 0.52, T * 0.05, 0, 7); g.fill();
     } else if (ch === 'O') {
       g.fillStyle = 'rgba(34,197,94,0.22)'; g.fillRect(x - T * 0.3, y - T * 0.3, T * 1.6, T * 1.6);
       g.shadowColor = '#22C55E'; g.shadowBlur = T * 0.5; block(x + T * 0.12, y + T * 0.12, T * 0.76, '#22C55E'); g.shadowBlur = 0;
@@ -500,7 +508,7 @@ cv.addEventListener('pointerdown', (e) => {
   cv.setPointerCapture(e.pointerId);
   const b = buildingAt(p.col, p.row);
   if (b) { drag = { b, from: p, at: p, moved: false }; draw(); return; }
-  stroke = { before: snap(), done: new Set(), flank: !flankAt(p.col, p.row) };
+  stroke = { before: snap(), done: new Set() };
   paint(p.col, p.row); draw();
 });
 cv.addEventListener('pointermove', (e) => {
@@ -544,7 +552,7 @@ function buildTools() {
   $('tools').innerHTML = TOOLS.map(t => `<button class="tool" data-tool="${t.id}" aria-pressed="${t.id === tool}" title="${t.name} (${t.key})">
     <span class="sw" style="background:${t.col}"></span><span>${t.name}<small>${t.sub}</small></span></button>`).join('');
   $('legend').innerHTML = [
-    ['#1F3A60', 'Solid wall: blocks shots and sight'], ['#4FCBEA', 'Water: shots and sight pass'], ['#2E86B0', 'Shallow water: walkable, slows'], ['#22C55E', 'Objective'],
+    ['#1F3A60', 'Solid wall: blocks shots and sight'], ['#4FCBEA', 'Water: shots and sight pass'], ['#2E86B0', 'Shallow water: walkable, slows'], ['#2F6B34', 'Bush: blocks sight, walkable'], ['#22C55E', 'Objective'],
     ['#F2C318', 'Raised ground'], ['#E5483F', 'Lowered ground'], ['#3C6E74', 'Flank tile (stripes: who may deploy)'],
     [SHROOM_COL.purple, 'Purple shroom: +10% dmg, hp'], [SHROOM_COL.yellow, 'Yellow shroom: +30% speed'], [SHROOM_COL.green, 'Green shroom: poison, slow'],
   ].map(([c, t]) => `<span><i style="background:${c}"></i>${t}</span>`).join('');
@@ -568,7 +576,7 @@ document.addEventListener('keydown', (e) => {
   if (e.target.matches('input')) return;
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); return; }
-  const t = TOOLS.find(t => t.key === e.key); if (t && !e.ctrlKey && !e.metaKey && !e.altKey) pickTool(t.id);
+  const t = TOOLS.find(t => t.key === e.key.toLowerCase()); if (t && !e.ctrlKey && !e.metaKey && !e.altKey) pickTool(t.id);
 });
 
 // ---------- saving ----------
@@ -648,7 +656,7 @@ function refresh() {
   $('info').textContent = `${map.cols}×${map.rows} · zones ${map.cols}×${map.zone}`;
   const n = {}; map.tiles.join('').split('').forEach(ch => { n[ch] = (n[ch] || 0) + 1; });
   const hs = map.height.join(''), fl = map.flank.join('');
-  $('counts').textContent = [`${n['#'] || 0} solid`, `${n['~'] || 0} water`, `${n.s || 0} shallow`, `${n.O || 0} objective`, `${(n.p || 0) + (n.y || 0) + (n.g || 0)} shrooms`,
+  $('counts').textContent = [`${n['#'] || 0} solid`, `${n['~'] || 0} water`, `${n.s || 0} shallow`, `${n.b || 0} bush`, `${n.O || 0} objective`, `${(n.p || 0) + (n.y || 0) + (n.g || 0)} shrooms`,
     `${(hs.match(/[hH]/g) || []).length} raised`, `${(hs.match(/[lL]/g) || []).length} lowered`, `${(fl.match(/F/g) || []).length} flank`].join(' · ');
   fit();
 }

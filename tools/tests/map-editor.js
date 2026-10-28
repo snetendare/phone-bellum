@@ -11,8 +11,9 @@ const ok = (c, msg) => { console.log((c ? 'ok   ' : 'FAIL ') + msg); if (!c) pro
   await p.goto('file://' + path.resolve('editor.html'));
   const map = () => p.evaluate(() => JSON.parse(JSON.stringify(Editor.map)));
   // tap the middle of a tile
-  const tap = async (col, row) => { const m = await map(), r = await p.locator('#board').boundingBox(); await p.mouse.click(r.x + (col + 0.5) * r.width / m.cols, r.y + (row + 0.5) * r.height / m.rows); };
+  const tap = async (col, row) => { await p.locator('#board').scrollIntoViewIfNeeded(); const m = await map(), r = await p.locator('#board').boundingBox(); await p.mouse.click(r.x + (col + 0.5) * r.width / m.cols, r.y + (row + 0.5) * r.height / m.rows); };
   const dragTiles = async (from, to) => {
+    await p.locator('#board').scrollIntoViewIfNeeded();
     const m = await map(), r = await p.locator('#board').boundingBox(), at = (t) => [r.x + (t[0] + 0.5) * r.width / m.cols, r.y + (t[1] + 0.5) * r.height / m.rows];
     await p.mouse.move(...at(from)); await p.mouse.down(); await p.mouse.move(...at(to), { steps: 8 }); await p.mouse.up();
   };
@@ -40,10 +41,15 @@ const ok = (c, msg) => { console.log((c ? 'ok   ' : 'FAIL ') + msg); if (!c) pro
   ok(m.height[10][1] === 'H' && m.height[5][1] === 'H', 'raised to +2 and no further');
   await p.click('[data-tool="lower"]'); await tap(8, 11); m = await map();
   ok(m.height[11][8] === 'l', 'lowered');
-  // flanks: off, then back on
-  await p.click('[data-tool="flank"]'); await tap(0, 2); m = await map();
-  ok(m.flank[2][0] === '.' && m.flank[13][0] === '.', 'flank tile removed (and its mirror)');
-  await tap(4, 4); m = await map();
+  await p.click('[data-tool="b"]'); await tap(2, 4); m = await map();
+  ok(m.tiles[4][2] === 'b' && m.tiles[11][2] === 'b', 'bush');
+  // flanks: off, then on; a normal tile is open, flat and no flank
+  await p.click('[data-tool="flank-del"]'); await tap(0, 2); await tap(0, 2); m = await map();
+  ok(m.flank[2][0] === '.' && m.flank[13][0] === '.', 'flank tile removed (and its mirror), a second tap keeps it off');
+  await p.click('[data-tool="normal"]'); await tap(0, 3); m = await map();
+  ok(m.flank[3][0] === '.' && m.flank[12][0] === '.', 'normal tile: no flank');
+  await p.click('[data-tool="flank-add"]'); await tap(0, 3); await tap(4, 4); m = await map();
+  ok(m.flank[3][0] === 'F', 'flank tile back');
   ok(m.flank[4][4] === 'F', 'flank tile added');
   // undo / redo
   await p.click('#undo'); m = await map(); ok(m.flank[4][4] === '.', 'undo');
@@ -56,7 +62,7 @@ const ok = (c, msg) => { console.log((c ? 'ok   ' : 'FAIL ') + msg); if (!c) pro
   ok(tw(0).row === 13, 'a tower can’t leave its own half');
   // resize: more columns keeps the edges
   await p.click('[data-k="cols"][data-d="1"]'); await p.click('[data-k="cols"][data-d="1"]'); m = await map();
-  ok(m.cols === 14 && m.tiles[7][3] === '#' && m.flank.every((r, i) => r[13] === 'F' || i === 2 || i === 13), 'two more columns, walls and edge flanks kept');
+  ok(m.cols === 14 && m.tiles[7][3] === '#' && m.flank.every((r, i) => r[13] === 'F' || i === 2 || i === 13 || i === 3 || i === 14), 'two more columns, walls and edge flanks kept');
   await p.click('[data-k="nml"][data-d="2"]'); m = await map();
   ok(m.rows === 18 && m.tiles[7][3] === '#' && m.tiles[10][3] === '#' && tw(0).row === 15, 'more no man’s land: rows added in the middle');
   // treasuries and elf tower
