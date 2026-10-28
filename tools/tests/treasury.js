@@ -31,7 +31,7 @@ for (let seed = 1; seed <= 8; seed++) {
     for (const sd of [0, 1]) {
       const f = sum.treasuryFell[sd], tr = sum.treasury[sd];
       if (round < T.round) { assert.strictEqual(f, null); assert.strictEqual(tr.gold, 0); continue; }
-      if (f) { fell++; assert.strictEqual(tr.gold, 0); assert.strictEqual(tr.lost, T.steal); assert.strictEqual(sum.treasury[1 - sd].stole, T.steal); }
+      if (f) { fell++; assert.strictEqual(tr.gold, 0); assert.ok(tr.lost % 50 === 0 && tr.lost <= T.stealMax, 'steal ' + tr.lost); assert.ok(tr.lost === Game.treasurySteal(before[sd]) || tr.lost < Game.treasurySteal(before[sd]), 'steal ' + tr.lost); assert.strictEqual(sum.treasury[1 - sd].stole, tr.lost); }
       else { stood++; assert.strictEqual(tr.gold, T.gold); assert.strictEqual(tr.lost, 0); }
     }
     assert.ok(mm.gold.every(g => g >= 0) && before.length === 2);
@@ -41,7 +41,7 @@ for (let seed = 1; seed <= 8; seed++) {
 console.log('treasuries stood', stood, 'fell', fell);
 assert.ok(stood > 0);
 
-// a destroyed treasury: no gold from it, and the opponent steals T.steal from its owner
+// a destroyed treasury: no gold from it, and the opponent steals a share of its owner's unspent gold
 const m3 = mk(11);
 Game.aiDeploy(m3, 0); Game.aiDeploy(m3, 1);
 let s3 = m3.round === 1 && Game.startBattle(m3); while (s3.step()) {} Game.resolve(m3, s3.result());
@@ -52,6 +52,9 @@ assert.ok(r3.squads[key]); r3.squads[key].alive = 0; r3.squads['0:' + Game.TREAS
 const g3 = m3.gold.slice(), sum3 = Game.resolve(m3, r3);
 assert.deepStrictEqual(sum3.treasuryFell, [false, true]);
 const base = (sd) => g3[sd] + sum3.income + (sum3.bonusTo === sd ? Game.LOSER_BONUS : 0) + sum3.felix[sd] + sum3.invest[sd] - sum3.loan[sd];
-assert.strictEqual(m3.gold[0], base(0) + T.gold + T.steal);
-assert.strictEqual(m3.gold[1], base(1) - T.steal);
+const st = Game.treasurySteal(g3[1]); // a share of what side 1 left unspent, to the nearest 50
+assert.strictEqual(m3.gold[0], base(0) + T.gold + st);
+assert.strictEqual(m3.gold[1], base(1) - st);
+// the raid: 25% of unspent gold, to the nearest 50, 50 to 200
+assert.deepStrictEqual([0, 150, 300, 500, 700, 2000].map(Game.treasurySteal), [50, 50, 100, 150, 200, 200]);
 console.log('treasury ok');

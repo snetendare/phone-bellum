@@ -3276,7 +3276,8 @@ const Game = (() => {
   // COLS, ROWS and ZONE while a match on it is in play (see useGrid); every other map keeps these.
   const TILE = 6, GRID = { cols: 12, rows: 16, zone: 6 };
   let COLS = GRID.cols, ROWS = GRID.rows, ZONE = GRID.zone;
-  const START_HP = 100, MAX_ROUND_DMG = 35, START_GOLD = 250, INCOME = 250, LOSER_BONUS = 50;
+  const START_HP = 100, MAX_ROUND_DMG = 35, START_GOLD = 250, INCOME = 250, LOSER_BONUS = 50, LOSER_BONUS_ROUND = 3; // no loser gold for rounds 1-2
+  const TOWER_FALL_HP = 10; // a player whose tower falls in a fight loses this much health too (on top of the round's damage)
   const SQUAD_COST = 100;
   const SETTINGS = { dt: 0.05, timeCap: 60, spacing: 3.5, minDmgPct: 15, absorbXp: 1, armorXp: 0.5, sight: 15, minSight: 18, drift: 15, flameReach: 1.2 }; // sight: metres beyond range a unit notices an enemy (at least minSight), drift: it leans toward one this much further out. flameReach: flame cones reach 1.2x the unit's range
   // XP a squad needs in total to reach level 1, 2, 3, as multiples of its own starting health.
@@ -3320,9 +3321,9 @@ const Game = (() => {
       skill2: { name: 'Defensive walls', cost: 250, text: 'Place 3 walls on your side that block enemies. Bastion +4 armor.' } },
     { id: 'mage', name: 'Mage tower', text: 'A beam that ramps up on one target. Melts giants.', unit: { ...TOWER, name: 'Mage Tower', kind: 'mage', hp: 600, hit: 14, aps: 1.5, range: 12, spinUp: 50, spinHit: 50, color: '#A493DE' },
       generals: true }, // no once-per-match skill: a mage general can be called every round instead (MAGE_GENERALS)
-    { id: 'bank', name: 'Bank tower', text: 'Sturdy, medium range. Offers loans.', unit: { ...TOWER, name: 'Bank Tower', kind: 'bank', hp: 700, hit: 45, aps: 0.6, range: 18, color: '#D9B95B' },
-      loan: true, // a loan can be taken every round (LOAN)
-      skill2: { name: 'Major investment', cost: 500, noFree: true, text: 'Pay 500 now, get 1000 next round. Once per match.' } }, // see resolve
+    { id: 'bank', name: 'Bank tower', text: 'Sturdy, medium range. Credit line: your loans are 200 (pay back 300).', unit: { ...TOWER, name: 'Bank Tower', kind: 'bank', hp: 700, hit: 45, aps: 0.6, range: 18, color: '#D9B95B' },
+      loan: true, creditLine: { name: 'Credit line', text: 'Your loans are 200 gold (pay back 300) instead of 100 (pay back 200).' }, // see loanTerms
+      skill2: { name: 'Major investment', cost: 500, noFree: true, text: 'Pay 500 now, get 800 next round. Once per match.' } }, // see resolve
     { id: 'slime', name: 'Slime tower', text: 'Lobs splashing slime, long range.', unit: { ...TOWER, name: 'Slime Tower', kind: 'slime', hit: 7, aps: 0.8, range: 26, splash: 3, projSpeed: 30, spinUp: 0.1, color: '#7BD93F' },
       passive: { name: 'Slime lore', text: 'Your slime unit skills also work on it.' } }, // see slimeTowerUnit
   ];
@@ -3472,7 +3473,7 @@ const Game = (() => {
   // Deploy airship (sniper tower): squad id -4, can't be hit (Engine: aloft), stops hover m short of its target;
   // drops one paratrooper every `every` s, up to `max` alive; +sniperHit damage per hit for the tower, the airship and Snipers
   const AIRSHIP = { speed: 3, hover: 14, every: 5, max: 6, sniperHit: 30 };
-  const INVEST = { gold: 1000 }; // Major investment (bank): paid back at the start of the next round
+  const INVEST = { gold: 800 }; // Major investment (bank): paid back at the start of the next round
   // Mage tower: each round its owner may call one mage general, who swaps the tower's attack for that round's fight
   // only, and/or the teleport general (extra: called on top of another general, or alone).
   // m.mageGen[side] = { round, id, tp }: id = the general (or null), tp = teleport called; it counts only in the round
@@ -3555,26 +3556,29 @@ const Game = (() => {
     }
     return u;
   }
-  // Bank tower: once a round, a loan of LOAN.gold right away; the next round's gold (income, loser bonus and
-  // the rest) is LOAN.payback less, never below nothing. m.loan[side] = the round the last loan was taken in.
-  const LOAN = { gold: 200, payback: 300 };
+  // Loans (everyone, every map, from round 1): once a round, LOAN.gold right away; the next round's gold (income,
+  // loser bonus and the rest) is LOAN.payback less, never below nothing. A Bank tower's Credit line makes it
+  // CREDIT_LINE instead. m.loan[side] = the round the last loan was taken in.
+  const LOAN = { gold: 100, payback: 200 }, CREDIT_LINE = { gold: 200, payback: 300 };
+  const loanTerms = (m, side) => towerPicked(m, side) && towerType(m, side).id === 'bank' ? CREDIT_LINE : LOAN;
   const loanNow = (m, side) => !!(m && m.loan && m.loan[side] === m.round);
   // the bank does one thing a round: a loan or the Major investment, not both. bankBusy(m, side, want): the other one
   // was used this round, so `want` ('loan' or 'invest') can't be
   const investNow = (m, side) => !!(m && m.towerSkill2 && m.towerSkill2[side] === m.round && towerType(m, side).id === 'bank');
   const bankBusy = (m, side, want) => towerType(m, side).id === 'bank' && (want === 'loan' ? investNow(m, side) : loanNow(m, side));
-  const canTakeLoan = (m, side) => towerPicked(m, side) && towerType(m, side).id === 'bank' && !loanNow(m, side) && !bankBusy(m, side, 'loan');
+  const canTakeLoan = (m, side) => !!m && !m.over && !loanNow(m, side) && !bankBusy(m, side, 'loan');
   function takeLoan(m, side) {
     if (!canTakeLoan(m, side)) return false;
     if (!m.loan) m.loan = [0, 0];
     m.loan[side] = m.round;
-    m.gold[side] += LOAN.gold;
+    m.gold[side] += loanTerms(m, side).gold;
     return true;
   }
   function undoLoan(m, side) {
-    if (!loanNow(m, side) || m.gold[side] < LOAN.gold) return false;
+    const L = loanTerms(m, side);
+    if (!loanNow(m, side) || m.gold[side] < L.gold) return false;
     m.loan[side] = 0;
-    m.gold[side] -= LOAN.gold;
+    m.gold[side] -= L.gold;
     return true;
   }
   // Tower skills bought every round (a faction tower's `rounds`, the Mecha Tower's bots): each works in that round's
@@ -3968,7 +3972,10 @@ const Game = (() => {
   // of their zone from their tower, one column in toward the middle and one row forward of the tower's row (so
   // point-mirrored like the towers). Its tile is kept free all match. Like the tower it stands again, at full health, in every fight. A fight
   // it survives pays its owner TREASURY.gold; when it is destroyed, the opponent steals TREASURY.steal gold from its owner.
-  const TREASURY = { round: 2, hp: 400, gold: 50, steal: 50 };
+  const TREASURY = { round: 2, hp: 400, gold: 50, steal: 50, stealPct: 25, stealMax: 200 }; // see treasurySteal
+  // Treasury raid: the owner's gold left unspent at the fight, times stealPct %, to the nearest 50; at least `steal`,
+  // at most `stealMax`, never more than the owner has
+  const treasurySteal = (banked) => Math.min(TREASURY.stealMax, Math.max(TREASURY.steal, Math.round(Math.max(0, banked) * TREASURY.stealPct / 100 / 50) * 50));
   const TREASURY_SQ = -150; // its squad id in fights
   const treasuryOn = (m) => { const mp = mapOf(m); return !!(mp && mp.treasury); };
   const treasuryUp = (m) => treasuryOn(m) && m.round >= TREASURY.round;
@@ -5227,6 +5234,7 @@ const Game = (() => {
       if (sq.glut > was) glut[side].push({ id: sq.id, unit: sq.unit, gained: sq.glut - was, glut: sq.glut, full: sq.glut >= max });
     }
     const towerFell = [0, 1].map(sd => { const q = res.squads[sd + ':-2']; return !!(q && q.alive === 0); });
+    for (const sd of [0, 1]) if (towerFell[sd]) m.hp[sd] = Math.max(0, m.hp[sd] - TOWER_FALL_HP); // a fallen tower costs health too
     const treasuryFell = [0, 1].map(sd => { const q = res.squads[sd + ':' + TREASURY_SQ]; return q ? q.alive === 0 : null; }); // null: no treasury in this fight
     const buildingNews = settleBuildings(m, res);
     // Matteo: the squads keep the charisma they ended the fight with; note the ones that became Gentlemen
@@ -5293,14 +5301,14 @@ const Game = (() => {
       summary.devGold = [0, 1].map(sd => devGold(m, sd));
       for (const sd of [0, 1]) m.gold[sd] = Math.max(0, m.gold[sd] + summary.devGold[sd] - summary.devLoss[sd].gold);
     }
-    const loser = dmg[0] > dmg[1] ? 0 : dmg[1] > dmg[0] ? 1 : -1;
+    const loser = summary.round >= LOSER_BONUS_ROUND ? (dmg[0] > dmg[1] ? 0 : dmg[1] > dmg[0] ? 1 : -1) : -1;
     if (loser >= 0) m.gold[loser] += LOSER_BONUS;
     summary.bonusTo = loser;
     // treasuries: one that stood through the fight pays its owner; a destroyed one lets the opponent steal from its owner
     summary.treasury = [0, 1].map(sd => ({ gold: treasuryFell[sd] === false ? TREASURY.gold : 0, lost: 0 }));
     for (const sd of [0, 1]) m.gold[sd] += summary.treasury[sd].gold;
     for (const sd of [0, 1]) if (treasuryFell[sd]) {
-      const take = Math.min(TREASURY.steal, m.gold[sd]);
+      const take = Math.min(treasurySteal(before[sd]), m.gold[sd]);
       m.gold[sd] -= take; m.gold[1 - sd] += take;
       summary.treasury[sd].lost = take; summary.treasury[1 - sd].stole = take;
     }
@@ -5310,7 +5318,7 @@ const Game = (() => {
     // a bank loan taken in the round just fought is paid back out of this round's gold (never below nothing)
     summary.loan = [0, 1].map(sd => {
       if (!(m.loan && m.loan[sd] === m.round - 1)) return 0;
-      const cut = Math.min(LOAN.payback, m.gold[sd] - before[sd]);
+      const cut = Math.min(loanTerms(m, sd).payback, m.gold[sd] - before[sd]);
       m.gold[sd] -= cut;
       return cut;
     });
@@ -5794,7 +5802,7 @@ const Game = (() => {
     if (needsTowerPick(m, side)) { const ch = towerChoices(m, side); setTowerType(m, side, ch[Math.floor(rng(m.seed + side * 7477)() * ch.length)].id); } // own stream: the rest of the AI rolls stay as they were
     if (canBuyTowerSkill(m, side) && rng(m.seed + m.round * 331 + side * 17)() < 0.5) buyTowerSkill(m, side); // own stream, as above
     if (canBuyTowerSkill2(m, side) && m.gold[side] - towerSkill2Cost(m, side) >= SQUAD_COST && rng(m.seed + m.round * 347 + side * 19)() < 0.35) buyTowerSkill2(m, side);
-    if (canTakeLoan(m, side) && m.gold[side] < SQUAD_COST * 3 && rng(m.seed + m.round * 613 + side * 37)() < 0.4) takeLoan(m, side); // short on gold: sometimes a loan
+    if (canTakeLoan(m, side) && loanTerms(m, side) === CREDIT_LINE && m.gold[side] < SQUAD_COST * 3 && rng(m.seed + m.round * 613 + side * 37)() < 0.4) takeLoan(m, side); // short on gold: sometimes a loan
     for (const x of towerRounds(m, side)) { // the Mecha Tower's bots: some rounds, if they leave gold for a squad
       if (canBuyTround(m, side, x.id) && m.gold[side] - troundCost(m, side, x.id) >= SQUAD_COST && rng(m.seed + m.round * 619 + side * 41 + x.id.length)() < 0.45) buyTround(m, side, x.id);
     }
@@ -5940,7 +5948,7 @@ const Game = (() => {
 
   const api = {
     MAX_ROUND_DMG, TIER_DMG, bankBusy, seenAt, charShown, towerTypeShown, altarShown, elfOwnShown, shroomShown, removingShroom, movedId, canMove, moveSquad, undoMove,
-    COLS, ROWS, TILE, ZONE, START_HP, START_GOLD, INCOME, incomeFor, LOSER_BONUS, SQUAD_COST, SETTINGS, XP_STEPS, xpNeeded, unitCostOf,
+    COLS, ROWS, TILE, ZONE, START_HP, START_GOLD, INCOME, incomeFor, LOSER_BONUS, LOSER_BONUS_ROUND, TOWER_FALL_HP, CREDIT_LINE, loanTerms, treasurySteal, SQUAD_COST, SETTINGS, XP_STEPS, xpNeeded, unitCostOf,
     levelCost, isReady, levelUp, undoLevel, levelAllPlan, levelAll, upgradeOffer, seenLevel, aiLevel, AI, CONFIG,
     deploysAllowed, deploysLeft, deployedThisRound, canBuyDeploy, buyDeploy, refundDeploy,
     PACKAGE, allPackages, packOf, needsPack, freeLeft, choosePack, ensurePack,
@@ -8278,8 +8286,8 @@ const Render2D = (cv, view) => {
     $('sheet-back').hidden = false;
     $('close').addEventListener('click', closeSheet);
   }
-  const loanText = () => `Take ${Game.LOAN.gold} gold right away; next round you get ${Game.LOAN.payback} gold less (never less than nothing). Once a round, and not in the round you make the Major investment.`;
-  const loanOffer = () => !!m && Game.towerPicked(m, me) && !Game.needsTowerPick(m, me) && Game.towerType(m, me).id === 'bank';
+  const loanText = (side = me) => { const L = Game.loanTerms(m, side); return `Take ${L.gold} gold right away; next round you get ${L.payback} gold less (never less than nothing). Once a round${L === Game.CREDIT_LINE ? ' (Credit line), and not in the round you make the Major investment' : ''}.`; };
+  const loanOffer = () => !!m && !choosingPack() && !(Game.towerPicked(m, me) && Game.needsTowerPick(m, me)); // everyone can borrow
   const mageOffer = () => !!m && Game.towerPicked(m, me) && !Game.needsTowerPick(m, me) && Game.towerType(m, me).id === 'mage';
   const tskillOffer = () => !!m && Game.towerPicked(m, me) && !Game.needsTowerPick(m, me) && !Game.towerSkillOf(m, me) && !!Game.towerType(m, me).skill;
   // a unit's card in the shop (disabled: it can't be picked now)
@@ -8507,7 +8515,7 @@ const Render2D = (cv, view) => {
     const undoable = can && undoSnap && undoSnap.key === undoKey() && sideState() !== undoSnap.state;
     const extraBtns = `<span class="xbtns" style="display:flex;gap:6px;flex-wrap:wrap">
         ${undoable ? '<button class="btn small" id="undo-all">Undo all</button>' : ''}
-        ${loanOffer() ? (Game.loanNow(m, me) ? `<button class="btn small" id="loan-undo" ${can && m.gold[me] >= Game.LOAN.gold ? '' : 'disabled'}>Pay back loan · −${Game.LOAN.gold}</button>` : `<button class="btn small" id="loan" ${can && Game.canTakeLoan(m, me) ? '' : 'disabled'}${Game.investNow(m, me) ? ' title="Not this round: you made the Major investment"' : ''}>Loan · +${Game.LOAN.gold}</button>`) : ''}
+        ${loanOffer() ? (Game.loanNow(m, me) ? `<button class="btn small" id="loan-undo" ${can && m.gold[me] >= Game.loanTerms(m, me).gold ? '' : 'disabled'}>Pay back loan · −${Game.loanTerms(m, me).gold}</button>` : `<button class="btn small" id="loan" title="${esc(loanText())}" ${can && Game.canTakeLoan(m, me) ? '' : 'disabled'}${Game.investNow(m, me) ? ' title="Not this round: you made the Major investment"' : ''}>Loan · +${Game.loanTerms(m, me).gold}</button>`) : ''}
         ${mageOffer() ? `<button class="btn small" id="mage-gen" ${can ? '' : 'disabled'}>${Game.mageGenOf(m, me) || Game.mageTpOf(m, me) ? [Game.mageGenOf(m, me), Game.mageTpOf(m, me) && 'teleport'].filter(Boolean).map(id => esc(Game.mageGenInfo(id).name)).join(' + ') : 'Mage general'}…</button>` : ''}
         ${tskillOffer() ? `<button class="btn small" id="buy-tskill" ${can && Game.canBuyTowerSkill(m, me) ? '' : 'disabled'}>${esc(Game.towerType(m, me).skill.name)} · ${Game.towerSkillCost(m, me)}</button>` : ''}
         ${can && m.extraDeploys[me] > 0 && left > 0 ? `<button class="btn small" id="refund-deploy">Refund unused</button>` : ''}
@@ -8858,8 +8866,8 @@ const Render2D = (cv, view) => {
     if (sum.dmg[foe()]) lines.push(`${them} takes <b class="num">${sum.dmg[foe()]}</b> damage.`);
     if (sum.dmg[me]) lines.push(`You take <b class="num">${sum.dmg[me]}</b> damage.`);
     if (!sum.dmg[0] && !sum.dmg[1]) lines.push('Nobody takes damage.');
-    if (sum.towerFell && sum.towerFell[foe()]) lines.push(`You broke ${mode === 'claude' ? 'Claude’s' : 'the enemy’s'} tower.`);
-    if (sum.towerFell && sum.towerFell[me]) lines.push('Your tower fell.');
+    if (sum.towerFell && sum.towerFell[foe()]) lines.push(`You broke ${mode === 'claude' ? 'Claude’s' : 'the enemy’s'} tower: −${Game.TOWER_FALL_HP} health for them.`);
+    if (sum.towerFell && sum.towerFell[me]) lines.push(`Your tower fell: −${Game.TOWER_FALL_HP} health.`);
     if (sum.devLoss) { // Factions devtest: buildings destroyed in the fight
       const fell = (sd) => sum.devLoss[sd].fell.map(id => esc((Game.devBuilding(id) || {}).name || id)).join(', ');
       if (sum.devLoss[foe()].fell.length) lines.push(`You destroyed ${esc(foeName().toLowerCase() === 'enemy' ? 'the enemy’s' : foeName() + '’s')} ${fell(foe())}${sum.devLoss[foe()].hp ? ` (−${sum.devLoss[foe()].hp} health)` : ''}.`);
@@ -9229,7 +9237,7 @@ RULES
 - Board: columns 0-${Game.COLS - 1}, rows 0-${Game.ROWS - 1}, tiles ${Game.TILE} m wide. Your zone is rows 0-${Game.ZONE - 1}; row ${Game.ZONE - 1} is your front line, nearest the enemy, and row 0 is the back. Rows ${Game.ZONE}-${Game.ROWS - Game.ZONE - 1} are no man's land. From round ${Game.FLANK.round} each player may also deploy on flank tiles: columns ${Game.FLANK.cols.join(' and ')}, on the OPPONENT's half of the board: their whole zone plus their half of no man's land (yours: rows ${Math.min(...Game.flankRows(1))}-${Math.max(...Game.flankRows(1))}; theirs: rows ${Math.min(...Game.flankRows(0))}-${Math.max(...Game.flankRows(0))})${Game.flankOpen(m) ? ', OPEN NOW' : ''}. You can't use a tile the opponent already holds with a squad or their tower. Their flank columns on YOUR half (columns ${Game.FLANK.cols.join(' and ')}, rows ${Math.min(...Game.flankRows(0))}-${Math.max(...Game.flankRows(0))}) are reserved for them for the whole match: you can never place a squad or your tower there. Squads there start inside the enemy's lines, good for hitting their tower or backline from the side, so guard your own edges against theirs. A squad placed on a flank can't move or attack for the first ${Game.FLANK.delay} s of the first fight after it was placed; from the next round on it starts normally. The enemy zone is rows ${Game.ROWS - Game.ZONE}-${Game.ROWS - 1}; row ${Game.ROWS - Game.ZONE} is their front. One squad per tile. Squads keep their tile, except: once per round you may move ONE of your squads from an earlier round to another free tile you could place on, for ${Game.CONFIG.moveCost} gold ("move"). The opponent sees it on its old tile until the fight.
 - The fight is automatic. Every body marches straight ahead in its own column (a squad on a flank tile marches sideways, toward the middle of the board, instead) until an enemy comes within its range + ${Game.SETTINGS.sight} m in any direction (at least ${Game.SETTINGS.minSight} m), then turns toward the nearest enemy and attacks once in range, staying on that enemy until it dies or leaves its range. Within ${Game.SETTINGS.drift} m beyond that it already starts curving toward the nearest enemy. Once no enemy is ahead of it, it turns toward the nearest one. So columns are lanes: a squad fights what stands in or near its lane, a squad in an empty lane far from the enemy walks past and hits the enemy from the side or behind, and long-range units in the back only get attacked once the front is gone. Short-range units in front shield long-range units behind. Spreading out limits splash damage.
 - The round's loser loses health: for each surviving enemy squad, by its tier (${Object.entries(Game.TIER_DMG).map(([t, d]) => `tier ${t}: ${d}`).join(', ')}), scaled by the share of its bodies alive. If time runs out, both sides take damage. A round costs the loser at most ${Game.MAX_ROUND_DMG} health. Health starts at ${Game.START_HP} and the match ends at 0.
-- Gold: both players get ${Game.incomeFor(2)} going into round 2, and ${Game.CONFIG.incomeStep} more every round after that (next round: +${Game.incomeFor(m.round + 1)}). The round's loser gets +${Game.LOSER_BONUS} extra. Unspent gold carries over.
+- Gold: both players get ${Game.incomeFor(2)} going into round 2, and ${Game.CONFIG.incomeStep} more every round after that (next round: +${Game.incomeFor(m.round + 1)}). From round ${Game.LOSER_BONUS_ROUND}, the round's loser gets +${Game.LOSER_BONUS} extra. A player whose tower falls in a fight also loses ${Game.TOWER_FALL_HP} health. Unspent gold carries over.
 - This round you may place ${Game.deploysAllowed(m, 1)} new squad(s). You may buy ONE extra deployment per round for ${Game.CONFIG.extraDeployCost} gold.
 - Squads earn XP by dealing and taking damage. A squad marked READY TO LEVEL UP can be upgraded for its unit's level-up cost: level 2 doubles health and hit, level 3 triples them. Leveling up chaff (many cheap bodies) gives the enemy lots of XP when they die.
 ${Game.needsPack(m, 1) ? `- STARTING PACKAGE (round 1, choose first): add "package": N to your reply. Each one unlocks its two units for free and gives you its squads for free (no gold, no deployment); you place them with "place" like any squad, and any you leave out are placed for you. Your options:
@@ -9265,7 +9273,7 @@ ${theirSkills.length ? 'Their skills: ' + theirSkills.join(', ') : ''}
 TOWERS
 - Each player has one tower. It never moves, is rebuilt every round and doesn't count for winning a round. If a tower falls during a fight, its owner's whole army deals ${Engine.TOWER_DOWN.attack}% less damage, moves ${Engine.TOWER_DOWN.move}% slower and takes ${Engine.TOWER_DOWN.taken}% more damage for ${Engine.TOWER_DOWN.secs} s. Sending a squad down an empty lane to break their tower can turn a fight; guard the lane to yours.
 - Until round ${Game.TOWER_PICK_ROUND} each tower is an Outpost (${Game.OUTPOST.unit.hp} hp, hit ${Game.OUTPOST.unit.hit} x ${Game.OUTPOST.unit.aps}/s, range ${Game.OUTPOST.unit.range} m). In round ${Game.TOWER_PICK_ROUND} each player picks a tower type that stays for the rest of the match: ${Game.towerChoices(m, 1).map(x => `"${x.id}" ${x.name}: ${x.unit.hp} hp, hit ${x.unit.hit} x ${x.unit.aps}/s, range ${x.unit.range} m${x.unit.splash ? `, ${x.unit.splash} m splash` : ''}`).join('; ')}.${Game.needsTowerPick(m, 1) ? ` ROUND ${Game.TOWER_PICK_ROUND}: pick yours now with "towerType" in your reply.` : ''}
-- Tower skills (one per tower type, ${Game.TOWER_SKILL.cost} gold, bought once per match after the pick with "towerSkill": true): ${Game.TOWER_TYPES.filter(x => x.skill).map(x => `${x.name}: "${x.skill.name}", ${x.skill.text}`).join(' ')} Second tower skills (bought once per match, each for its own price, with "towerSkill2": true): ${Game.TOWER_TYPES.filter(x => x.skill2).map(x => `${x.name}: "${x.skill2.name}" (${x.skill2.cost} gold), ${x.skill2.text}`).join(' ')}${Game.towerSkill2Of(m, 1) ? ' You own yours.' : ''} Every round the Bank tower may also take a loan with "loan": true: +${Game.LOAN.gold} gold now, ${Game.LOAN.payback} less gold next round (never below nothing). The bank does one thing a round: a loan or Major investment, never both in the same round.${Game.loanNow(m, 1) ? ' You took one this round.' : ''} The Slime tower has no skill to buy; every skill you buy for Slime Wizards or Slimeshots also works on it. The Mage tower has no such skill; instead, every round you may call ONE mage general with "mageGeneral": "${Game.MAGE_GENERALS.filter(g => !g.extra).map(g => g.id).join('" | "')}", and/or the teleport general on top of it (e.g. "mageGeneral": ["lightning", "teleport"]), for that round's fight only: ${Game.MAGE_GENERALS.map(g => `"${g.id}" ${g.name} (${g.cost} gold): ${g.text}`).join(' ')}${Game.towerSkillOf(m, 1) ? ' You own yours.' : Game.towerPicked(m, 1) || Game.needsTowerPick(m, 1) ? ' You can buy yours this round.' : ''}${Game.towerRounds(m, 1).length ? ` Your ${Game.towerType(m, 1).name} has skills you can buy every round, each for that round's fight only, with "towerRounds": [ids]: ${Game.towerRounds(m, 1).map(x => `"${x.id}" ${x.name} (${x.cost} gold): ${x.text}`).join(' ')}` : ''}
+- Tower skills (one per tower type, ${Game.TOWER_SKILL.cost} gold, bought once per match after the pick with "towerSkill": true): ${Game.TOWER_TYPES.filter(x => x.skill).map(x => `${x.name}: "${x.skill.name}", ${x.skill.text}`).join(' ')} Second tower skills (bought once per match, each for its own price, with "towerSkill2": true): ${Game.TOWER_TYPES.filter(x => x.skill2).map(x => `${x.name}: "${x.skill2.name}" (${x.skill2.cost} gold), ${x.skill2.text}`).join(' ')}${Game.towerSkill2Of(m, 1) ? ' You own yours.' : ''} Every round anyone may take a loan with "loan": true: +${Game.loanTerms(m, 1).gold} gold now, ${Game.loanTerms(m, 1).payback} less gold next round (never below nothing). The Bank tower's Credit line makes it +${Game.CREDIT_LINE.gold} now, ${Game.CREDIT_LINE.payback} less next round; a bank does one thing a round: a loan or Major investment, never both in the same round.${Game.loanNow(m, 1) ? ' You took one this round.' : ''} The Slime tower has no skill to buy; every skill you buy for Slime Wizards or Slimeshots also works on it. The Mage tower has no such skill; instead, every round you may call ONE mage general with "mageGeneral": "${Game.MAGE_GENERALS.filter(g => !g.extra).map(g => g.id).join('" | "')}", and/or the teleport general on top of it (e.g. "mageGeneral": ["lightning", "teleport"]), for that round's fight only: ${Game.MAGE_GENERALS.map(g => `"${g.id}" ${g.name} (${g.cost} gold): ${g.text}`).join(' ')}${Game.towerSkillOf(m, 1) ? ' You own yours.' : Game.towerPicked(m, 1) || Game.needsTowerPick(m, 1) ? ' You can buy yours this round.' : ''}${Game.towerRounds(m, 1).length ? ` Your ${Game.towerType(m, 1).name} has skills you can buy every round, each for that round's fight only, with "towerRounds": [ids]: ${Game.towerRounds(m, 1).map(x => `"${x.id}" ${x.name} (${x.cost} gold): ${x.text}`).join(' ')}` : ''}
 - Your tower: ${Game.towerType(m, 1).name}, col ${m.towers[1].col}, row ${m.towers[1].row} (fixed; squads can't share its tile).
 - Their tower: ${m.round !== Game.TOWER_PICK_ROUND ? Game.towerType(m, 0).name + (Game.towerSkillVisible(m, 0) && Game.towerType(m, 0).skill ? ` with "${Game.towerType(m, 0).skill.name}"` : '') + (Game.towerSkill2Visible(m, 0) && Game.towerType(m, 0).skill2 ? ` with "${Game.towerType(m, 0).skill2.name}"` : '') + ', ' : 'type hidden until the fight, '}col ${m.towers[0].col}, row ${m.towers[0].row}.${buildingsPrompt()}
 
@@ -9553,7 +9561,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (!Game.towerPicked(m, me) || Game.needsTowerPick(m, me)) return '';
     const tt = Game.towerType(m, me);
     if (tt.skill && !Game.towerSkillOf(m, me)) return `<button class="btn small" id="t-skill" ${editable() && Game.canBuyTowerSkill(m, me) ? '' : 'disabled'}>${esc(tt.skill.name)} · ${Game.towerSkillCost(m, me)}</button>`;
-    if (tt.loan && !Game.loanNow(m, me)) return `<button class="btn small" id="t-loan">Loan · +${Game.LOAN.gold}</button>`;
+    if (tt.loan && !Game.loanNow(m, me)) return `<button class="btn small" id="t-loan">Loan · +${Game.loanTerms(m, me).gold}</button>`;
     if (tt.generals) return '<button class="btn small" id="t-sheet">Mage general…</button>';
     return '';
   }
@@ -9604,7 +9612,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     else if (step === 'tskill') {
       const tt = Game.towerType(m, me), later = [['Later', () => { tut.tskillSeen = true; panelDeploy(); }]];
       coach(tt.skill ? `Your <b>${esc(tt.name)}</b> has a skill, <b>${esc(tt.skill.name)}</b>: the glowing button buys it, once per match.`
-        : tt.loan ? `Your <b>${esc(tt.name)}</b> can lend you gold, once a round: the glowing button.` : `Your <b>${esc(tt.name)}</b> can call a general every round: the glowing button.`, later);
+        : tt.loan ? `Your <b>${esc(tt.name)}</b> has a Credit line: bigger loans, once a round. The glowing button.` : `Your <b>${esc(tt.name)}</b> can call a general every round: the glowing button.`, later);
       glow($('t-skill') || $('t-loan') || $('t-sheet'));
     } else if (step === 'level') coach(`Your <b>${esc(units[tutTarget().unit].name)}</b> earned enough experience to level up: tap them.`);
     else if (step === 'sheet') coach(`You can also <b>Move</b> them (${Game.CONFIG.moveCost} gold, once a round), <b>Sell</b> them (for half their worth) or buy <b>Skills</b>: one buy upgrades every squad of that unit.`, [['Next', () => { tut.sheetSeen = true; closeSheet(); panelDeploy(); render(); }, true]]);
@@ -9953,7 +9961,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (myWall && (placingWall() || byEdge) && editable() && Game.unplaceBwall(m, me, t.col, t.row, te.edge)) { wallPlacing = true; changed(); return; } // a wall placed this round: taken back
     if (placingWall()) { if (editable() && Game.placeBwall(m, me, t.col, t.row, te.edge)) { if (!Game.bwallsLeft(m, me)) wallPlacing = false; changed(); } else { wallPlacing = false; render(); hud(); panelDeploy(); } return; }
     if (myWall && byEdge && !Game.squadAt(m, me, t.col, t.row)) { overlayMsgSheet('Your wall', `A defensive wall along the edge of a tile: ${Game.BWALL.hp} health, ${Game.BWALL.armor} armor. It stands again at full health in every fight. The enemy can't walk or shoot through it; your own units can, and squads stand on the tiles on both sides of it.`); return; }
-    if (Game.treasuryAt(m, me, t.col, t.row) || Game.treasuryAt(m, foe(), t.col, t.row)) { const mine = Game.treasuryAt(m, me, t.col, t.row); overlayMsgSheet(mine ? 'Your treasury' : `${foeName()}'s treasury`, `${Game.treasuryUp(m) ? '' : `It is built in round ${Game.TREASURY.round}. `}A treasury pays its owner ${Game.TREASURY.gold} gold after every fight it survives. If it is destroyed, the other player steals ${Game.TREASURY.steal} gold from its owner instead. It has ${Game.TREASURY.hp} health and stands again at full health in every fight, and losing it doesn't cripple the army. ${mine ? 'Keep it out of reach, or guard it.' : 'Destroy it to steal their gold.'}`); return; }
+    if (Game.treasuryAt(m, me, t.col, t.row) || Game.treasuryAt(m, foe(), t.col, t.row)) { const mine = Game.treasuryAt(m, me, t.col, t.row); overlayMsgSheet(mine ? 'Your treasury' : `${foeName()}'s treasury`, `${Game.treasuryUp(m) ? '' : `It is built in round ${Game.TREASURY.round}. `}A treasury pays its owner ${Game.TREASURY.gold} gold after every fight it survives. If it is destroyed, the other player steals ${Game.TREASURY.stealPct}% of the gold its owner left unspent (to the nearest 50, ${Game.TREASURY.steal} to ${Game.TREASURY.stealMax}) instead. It has ${Game.TREASURY.hp} health and stands again at full health in every fight, and losing it doesn't cripple the army. ${mine ? 'Keep it out of reach, or guard it.' : 'Destroy it to steal their gold.'}`); return; }
     if (placingBuilding()) { const p = buildPlacing; buildPlacing = null; if (editable() && Game.buyBuilding(m, me, p.ui, p.k, t.col, t.row)) changed(); else { render(); hud(); panelDeploy(); } return; }
     if (Game.elfOwnAt(m, me, t.col, t.row)) { openMapSheet(); return; }
     if (Game.isDev(m)) { // Factions devtest: placing a building, casting a spell, drawing an arrow; building and spell sheets
@@ -10721,14 +10729,14 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   // the bank tower's loan: take one this round (yours), or whether they took one (theirs, once the fight is on)
   function loanBlock(side, tt) {
     if (!tt.loan) return '';
-    const L = Game.LOAN, took = Game.loanNow(m, side), chip = (txt, col) => `<span class="chip" style="color:${col};border:1px solid currentColor;border-radius:99px;padding:1px 8px;font-size:12px">${txt}</span>`;
+    const L = Game.loanTerms(m, side), took = Game.loanNow(m, side), chip = (txt, col) => `<span class="chip" style="color:${col};border:1px solid currentColor;border-radius:99px;padding:1px 8px;font-size:12px">${txt}</span>`;
     let act;
     if (side !== me) act = took && phase !== 'deploy' ? chip('Took one', 'var(--foe)') : '';
     else if (took) act = chip('Taken', 'var(--gold)') + (phase === 'deploy' && editable() ? ` <button class="btn small" id="tloan-undo" ${m.gold[me] >= L.gold ? '' : 'disabled'}>Pay back · −${L.gold}</button>` : '');
     else if (phase === 'deploy' && Game.investNow(m, me)) act = `<button class="btn small" disabled>Not with the investment</button>`;
     else if (phase === 'deploy') act = `<button class="btn small${editable() ? ' primary' : ''}" id="tloan" ${editable() ? '' : 'disabled'}>Take · +${L.gold} gold</button>`;
     else act = '';
-    return abilityRow('Loan', act, esc(loanText()) + (side === me && took ? ` Next round: −${L.payback}.` : ''), side === me && tt.skill2 ? `The bank does one thing a round: a loan or the ${esc(tt.skill2.name)}, not both.` : '');
+    return abilityRow(tt.creditLine ? `Loan (${tt.creditLine.name})` : 'Loan', act, esc(loanText(side)) + (side === me && took ? ` Next round: −${L.payback}.` : ''), side === me && tt.skill2 ? `The bank does one thing a round: a loan or the ${esc(tt.skill2.name)}, not both.` : '');
   }
   // tower skills bought every round (the Mecha Tower's bots): buy any of them for this round's fight (yours), or the
   // ones they bought (theirs, once the fight is on)
@@ -11470,7 +11478,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     // the guest's bank loan: an earlier one stays (it is paid back after this round's fight), one sent for this round is taken
     if (!m.loan) m.loan = [0, 0];
     if (!(m.loan[1] > 0 && m.loan[1] < m.round)) m.loan[1] = 0;
-    if ((d.loan | 0) === m.round && Game.towerPicked(m, 1) && Game.towerType(m, 1).id === 'bank' && !Game.investNow(m, 1)) m.loan[1] = m.round; // one bank action a round
+    if ((d.loan | 0) === m.round && !Game.investNow(m, 1)) m.loan[1] = m.round; // anyone may borrow; a bank does one thing a round
     // the guest's Mecha Tower bots for this round (gold was checked on their side)
     if (!m.tround) m.tround = [{}, {}];
     m.tround[1] = {};
