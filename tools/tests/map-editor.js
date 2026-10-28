@@ -25,6 +25,19 @@ const ok = (c, msg) => { console.log((c ? 'ok   ' : 'FAIL ') + msg); if (!c) pro
   // solid wall, mirrored straight across
   await tap(3, 7); m = await map();
   ok(m.tiles[7][3] === '#' && m.tiles[8][3] === '#', 'a solid wall and its mirror');
+  // tapping it again: corner, line, diagonal, block (the mirror turned over); Rotate turns it
+  const forms = [];
+  for (let k = 0; k < 4; k++) { await tap(3, 7); m = await map(); forms.push(m.shape[7][3] + m.shape[8][3]); }
+  ok(forms.join(' ') === '└┌ ── ╱╲ ..' && m.tiles[7][3] === '#', 'forms cycle: ' + forms.join(' '));
+  await tap(3, 7); await p.click('[data-tool="rotate"]'); await tap(3, 7); m = await map();
+  ok(m.shape[7][3] === '┌' && m.shape[8][3] === '└', 'rotated corner, mirror kept');
+  await tap(3, 7); await tap(3, 7); await tap(3, 7); m = await map();
+  ok(m.shape[7][3] === '└' && m.shape[8][3] === '┌', 'four turns go round');
+  await p.click('[data-tool="#"]'); for (let k = 0; k < 3; k++) await tap(3, 7); m = await map();
+  ok(m.shape[7][3] === '.', 'back to a block');
+  await dragTiles([3, 7], [4, 7]); m = await map();
+  ok(m.tiles[7][4] === '#' && m.shape[7][3] === '.', 'a drag from a wall paints on, without changing its form');
+  await p.click('[data-tool="erase"]'); await tap(4, 7); await p.click('[data-tool="#"]');
   // water, dragged along a row
   await p.click('[data-tool="~"]'); await dragTiles([2, 9], [6, 9]); m = await map();
   ok(m.tiles[9].slice(2, 7) === '~~~~~' && m.tiles[6].slice(2, 7) === '~~~~~', 'water dragged along a row, mirrored');

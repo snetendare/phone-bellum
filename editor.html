@@ -117,7 +117,7 @@ header .eyebrow { font-family: var(--font-data); font-size: 11px; letter-spacing
       <div class="card">
         <h2>Paint</h2>
         <div class="tools" id="tools"></div>
-        <p class="hint">Drag across the board to paint. Drag a tower or building to move it, whatever tool is picked.</p>
+        <p class="hint">Drag across the board to paint. Tap a wall, water, shallow water or bush again with its own tool to change its form: corner, line, diagonal, then block again. Drag a tower or building to move it, whatever tool is picked.</p>
       </div>
       <div class="card">
         <h2>Board</h2>
@@ -181,6 +181,9 @@ header .eyebrow { font-family: var(--font-data); font-size: 11px; letter-spacing
 //   tiles:  one string per row, a char per column: '.' open, '#' solid wall, '~' water, 's' shallow water, 'b' bush, 'O' objective,
 //           'p' / 'y' / 'g' purple / yellow / green mushroom tile
 //   height: one string per row: 'L' -2, 'l' -1, '.' 0, 'h' +1, 'H' +2
+//   shape:  one string per row, the form of a wall, water, shallow water or bush tile: '.' a full block, '└' '┌' '┐' '┘'
+//           a corner (joining the tile's middle to two of its edges: └ up and right), '─' '│' a line through the middle,
+//           '╱' '╲' a diagonal (older maps without it are all blocks)
 //   flank:  one string per row: 'F' a flank tile (the player whose half it is NOT on may deploy there), '.' not
 //   buildings: [{ kind: 'tower' | 'treasury' | 'elf', side: 0 | 1 | 2, col, row }]
 const $ = (id) => document.getElementById(id);
@@ -204,6 +207,7 @@ const TOOLS = [
   { id: 'lower', key: '7', name: 'Lower ground', sub: 'Down to −2', col: '#E5483F' },
   { id: 'flank', key: '8', name: 'Flank tiles', sub: 'Add or remove', col: '#3C6E74' },
   { id: 'p', key: 'p' }, { id: 'y', key: 'y' }, { id: 'g', key: 'g' },
+  { id: 'rotate', key: 'r', name: 'Rotate', sub: 'Turn a corner, line or diagonal', col: '#55636A' },
   { id: 'erase', key: 'e', name: 'Erase', sub: 'Tile and ground', col: '#13201F' },
 ];
 TOOLS.forEach(t => { if (FEATURE[t.id]) Object.assign(t, FEATURE[t.id]); });
@@ -218,12 +222,27 @@ const treasuryFor = (cols, t, side) => { const c = cols - 1 - t.col; return { co
 function fromBase(id) {
   const b = BASES[id], rows = b.zone * 2 + b.nml;
   const m = { format: 'nml-map', version: 1, name: 'New ' + b.name.toLowerCase(), base: id, cols: b.cols, rows, zone: b.zone, symmetry: b.symmetry,
-    tiles: [], height: [], flank: [], buildings: [] };
-  for (let r = 0; r < rows; r++) { m.tiles.push('.'.repeat(b.cols)); m.height.push('.'.repeat(b.cols)); m.flank.push(defaultFlankRow(b.cols)); }
+    tiles: [], shape: [], height: [], flank: [], buildings: [] };
+  for (let r = 0; r < rows; r++) { m.shape.push('.'.repeat(b.cols)); m.tiles.push('.'.repeat(b.cols)); m.height.push('.'.repeat(b.cols)); m.flank.push(defaultFlankRow(b.cols)); }
   b.towers.forEach((t, side) => m.buildings.push({ kind: 'tower', side, col: t.col, row: t.row }));
   if (b.treasury) b.towers.forEach((t, side) => m.buildings.push({ kind: 'treasury', side, ...treasuryFor(b.cols, t, side) }));
   return m;
 }
+// ---------- tile forms: tapping a wall, water, shallow water or bush tile again with its own tool goes block → corner → line → diagonal → block ----------
+const SHAPED = '#~sb';
+const SHAPE_CYCLE = ['.', '└', '─', '╱'];
+const SHAPE_KIND = { '.': 0, '└': 1, '┌': 1, '┐': 1, '┘': 1, '─': 2, '│': 2, '╱': 3, '╲': 3 };
+const SHAPE_NAME = ['block', 'corner', 'line', 'diagonal'];
+const ROT = { '.': '.', '└': '┌', '┌': '┐', '┐': '┘', '┘': '└', '─': '│', '│': '─', '╱': '╲', '╲': '╱' }; // a quarter turn clockwise
+const FLIP = { '└': '┌', '┌': '└', '┐': '┘', '┘': '┐', '╱': '╲', '╲': '╱' }; // turned over top to bottom
+// the form on the mirrored tile: half a turn for the rotated mirror, turned over for the mirror across
+const mirrorShape = (ch, sym = map.symmetry) => sym === 'point' ? ROT[ROT[ch]] : sym === 'mirror' ? (FLIP[ch] || ch) : ch;
+// the line through a form, in tile units (0 to 1)
+const SHAPE_PATH = { '─': [[0, .5], [1, .5]], '│': [[.5, 0], [.5, 1]], '└': [[.5, 0], [.5, .5], [1, .5]], '┌': [[1, .5], [.5, .5], [.5, 1]],
+  '┐': [[.5, 1], [.5, .5], [0, .5]], '┘': [[0, .5], [.5, .5], [.5, 0]], '╱': [[0, 1], [1, 0]], '╲': [[0, 0], [1, 1]] };
+const blankRows = (rows, cols) => Array.from({ length: rows }, () => '.'.repeat(cols));
+// older maps have no shape layer: every tile a block
+const withShape = (m) => { if (!Array.isArray(m.shape)) m.shape = blankRows(m.rows, m.cols); return m; };
 // the game's flanks: the two edge columns, the whole way down (each half is the other player's)
 const defaultFlankRow = (cols) => Array.from({ length: cols }, (_, c) => c === 0 || c === cols - 1 ? 'F' : '.').join('');
 
@@ -231,6 +250,9 @@ const defaultFlankRow = (cols) => Array.from({ length: cols }, (_, c) => c === 0
 let map = fromBase('standard'), tool = '#', undoStack = [], redoStack = [], dirty = false;
 const snap = () => JSON.stringify(map);
 const setAt = (arr, c, r, ch) => { arr[r] = arr[r].slice(0, c) + ch + arr[r].slice(c + 1); };
+const shapeAt = (c, r) => map.shape[r][c];
+// sets a tile's form and its mirror's
+function setShape(c, r, ch) { withMirror(c, r).forEach((p, i) => setAt(map.shape, p.col, p.row, i ? mirrorShape(ch) : ch)); }
 const tileAt = (c, r) => map.tiles[r][c], hAt = (c, r) => CHH[map.height[r][c]], flankAt = (c, r) => map.flank[r][c] === 'F';
 const buildingAt = (c, r) => map.buildings.find(b => b.col === c && b.row === r) || null;
 const inside = (c, r) => c >= 0 && r >= 0 && c < map.cols && r < map.rows;
@@ -261,6 +283,13 @@ function redo() { if (!redoStack.length) return; undoStack.push(snap()); map = J
 // stroke: the tiles already touched (ground goes up or down once per tile a stroke) and the flank tool's mode
 let stroke = null;
 function paint(c, r) {
+  if (tool === 'rotate') { // turned on this tile, then set on its mirror, so the mirror stays a mirror
+    const ps = withMirror(c, r);
+    if (ps.some(p => stroke.done.has(p.col + ',' + p.row))) return;
+    ps.forEach(p => stroke.done.add(p.col + ',' + p.row));
+    if (SHAPED.includes(tileAt(c, r)) && shapeAt(c, r) !== '.') setShape(c, r, ROT[shapeAt(c, r)]);
+    return;
+  }
   for (const p of withMirror(c, r)) {
     const k = p.col + ',' + p.row;
     if (stroke.done.has(k)) continue;
@@ -275,9 +304,10 @@ function paintOne(c, r) {
   } else if (tool === 'flank') {
     setAt(map.flank, c, r, stroke.flank ? 'F' : '.');
   } else if (tool === 'erase') {
-    setAt(map.tiles, c, r, '.'); setAt(map.height, c, r, '.');
+    setAt(map.tiles, c, r, '.'); setAt(map.height, c, r, '.'); setAt(map.shape, c, r, '.');
   } else if (FEATURE[tool]) {
     if ((tool === '#' || tool === '~') && buildingAt(c, r)) { say('Walls can’t go under a building. Move it first.'); return; }
+    if (tileAt(c, r) !== tool) setAt(map.shape, c, r, '.'); // a new tile starts as a block
     setAt(map.tiles, c, r, tool);
   }
 }
@@ -346,12 +376,12 @@ function resize(cols, zone, nml) {
     if (d >= Math.floor(cols / 2) + (cols % 2 && left ? 1 : 0)) return -1;
     return left ? d : cols - 1 - d;
   };
-  const n = { ...o, cols, rows, zone, tiles: [], height: [], flank: [] };
-  for (let r = 0; r < rows; r++) { n.tiles.push('.'.repeat(cols)); n.height.push('.'.repeat(cols)); n.flank.push(defaultFlankRow(cols)); }
+  const n = { ...o, cols, rows, zone, tiles: [], shape: [], height: [], flank: [] };
+  for (let r = 0; r < rows; r++) { n.shape.push('.'.repeat(cols)); n.tiles.push('.'.repeat(cols)); n.height.push('.'.repeat(cols)); n.flank.push(defaultFlankRow(cols)); }
   for (let r = 0; r < o.rows; r++) for (let c = 0; c < o.cols; c++) {
     const nr = mapRow(r), nc = mapCol(c);
     if (nr < 0 || nc < 0) continue;
-    setAt(n.tiles, nc, nr, o.tiles[r][c]); setAt(n.height, nc, nr, o.height[r][c]);
+    setAt(n.tiles, nc, nr, o.tiles[r][c]); setAt(n.shape, nc, nr, o.shape[r][c]); setAt(n.height, nc, nr, o.height[r][c]);
     const edge = nc === 0 || nc === cols - 1, wasEdge = c === 0 || c === o.cols - 1;
     if (!(edge && !wasEdge)) setAt(n.flank, nc, nr, wasEdge && !edge ? '.' : o.flank[r][c]); // edges stay edges
   }
@@ -426,6 +456,21 @@ function drawBuilding(b, x, y, s, ghost) {
   }
   g.globalAlpha = 1;
 }
+// a corner, line or diagonal: a thick bar along its path, in its tile's colours
+function drawShaped(ch, sh, x, y) {
+  const pts = SHAPE_PATH[sh], w = T * 0.34;
+  const path = () => { g.beginPath(); pts.forEach(([px, py], i) => i ? g.lineTo(x + px * T, y + py * T) : g.moveTo(x + px * T, y + py * T)); };
+  g.save(); g.beginPath(); g.rect(x, y, T, T); g.clip();
+  g.lineJoin = 'round'; g.lineCap = 'butt';
+  path(); g.strokeStyle = 'rgba(255,255,255,0.28)'; g.lineWidth = w + 2; g.stroke();
+  path(); g.strokeStyle = { '#': '#1F3A60', '~': '#4FCBEA', s: '#2E86B0', b: '#2F6B34' }[ch]; g.lineWidth = w; g.stroke();
+  if (ch === '~' || ch === 's') { path(); g.strokeStyle = 'rgba(255,255,255,0.5)'; g.lineWidth = Math.max(1, T * 0.04); g.stroke(); }
+  if (ch === 'b') for (let i = 1; i < pts.length; i++) for (const t of [0.2, 0.55, 0.9]) { // leaves along it
+    const px = x + T * (pts[i - 1][0] + (pts[i][0] - pts[i - 1][0]) * t), py = y + T * (pts[i - 1][1] + (pts[i][1] - pts[i - 1][1]) * t);
+    g.fillStyle = '#3E8A44'; g.beginPath(); g.arc(px, py, w * 0.42, 0, 7); g.fill();
+  }
+  g.restore();
+}
 function draw() {
   const W = T * map.cols, H = T * map.rows, half = map.rows / 2;
   g.clearRect(0, 0, W, H);
@@ -465,7 +510,8 @@ function draw() {
   // tiles
   for (let r = 0; r < map.rows; r++) for (let c = 0; c < map.cols; c++) {
     const ch = tileAt(c, r), x = c * T, y = r * T;
-    if (ch === '#') block(x, y, T, '#1F3A60');
+    if (SHAPED.includes(ch) && shapeAt(c, r) !== '.') drawShaped(ch, shapeAt(c, r), x, y);
+    else if (ch === '#') block(x, y, T, '#1F3A60');
     else if (ch === '~') {
       block(x, y, T, '#4FCBEA', 0.72);
       g.strokeStyle = 'rgba(255,255,255,0.55)'; g.lineWidth = Math.max(1, T * 0.05);
@@ -508,7 +554,10 @@ cv.addEventListener('pointerdown', (e) => {
   const b = buildingAt(p.col, p.row);
   if (b) { drag = { b, from: p, at: p, moved: false }; draw(); return; }
   stroke = { before: snap(), done: new Set(), flank: !flankAt(p.col, p.row) };
-  paint(p.col, p.row); draw();
+  if (SHAPED.includes(tool) && tileAt(p.col, p.row) === tool) { // maybe a tap to change its form: decided when the pointer lifts
+    stroke.cycle = p; withMirror(p.col, p.row).forEach(q => stroke.done.add(q.col + ',' + q.row));
+  } else paint(p.col, p.row);
+  draw();
 });
 cv.addEventListener('pointermove', (e) => {
   const p = tileOf(e);
@@ -527,7 +576,15 @@ function endPointer() {
     } else say(buildingName(b) + ': drag it to move it.');
     draw();
   }
-  if (stroke) { const s = stroke; stroke = null; remember(s.before); }
+  if (stroke) {
+    const s = stroke; stroke = null;
+    if (s.cycle && s.done.size <= withMirror(s.cycle.col, s.cycle.row).length) { // a tap, not a drag
+      const { col, row } = s.cycle, next = SHAPE_CYCLE[(SHAPE_KIND[shapeAt(col, row)] + 1) % SHAPE_CYCLE.length];
+      setShape(col, row, next); say(FEATURE[tileAt(col, row)].name + ': ' + SHAPE_NAME[SHAPE_KIND[next]] + (next !== '.' ? '. Rotate turns it.' : '.'));
+      draw();
+    }
+    remember(s.before);
+  }
 }
 cv.addEventListener('pointerup', endPointer);
 cv.addEventListener('pointercancel', endPointer);
@@ -540,7 +597,7 @@ function showHover() {
   const { col, row } = hover, ch = tileAt(col, row), h = hAt(col, row), b = buildingAt(col, row), z = zoneOf(row);
   const bits = [`col ${col}, row ${row}`, z === 0 ? 'your zone' : z === 1 ? 'enemy zone' : 'no man’s land'];
   if (b) bits.push(buildingName(b));
-  if (ch !== '.') bits.push(FEATURE[ch].name.toLowerCase());
+  if (ch !== '.') bits.push(FEATURE[ch].name.toLowerCase() + (SHAPED.includes(ch) && shapeAt(col, row) !== '.' ? ' (' + SHAPE_NAME[SHAPE_KIND[shapeAt(col, row)]] + ')' : ''));
   if (h) bits.push((h > 0 ? 'raised ' : 'lowered ') + Math.abs(h));
   if (flankAt(col, row)) bits.push('flank for ' + (halfOf(row) === 0 ? 'the enemy' : 'you'));
   $('status').textContent = bits.join(' · ');
@@ -563,7 +620,7 @@ $('sym').addEventListener('click', (e) => { const b = e.target.closest('button')
 $('t-treasury').addEventListener('click', toggleTreasuries);
 $('t-elf').addEventListener('click', toggleElf);
 $('flank-reset').addEventListener('click', () => { const before = snap(); map.flank = Array.from({ length: map.rows }, () => defaultFlankRow(map.cols)); remember(before); });
-$('clear').addEventListener('click', () => { const before = snap(); map.tiles = map.tiles.map(r => '.'.repeat(r.length)); map.height = map.height.map(r => '.'.repeat(r.length)); remember(before); });
+$('clear').addEventListener('click', () => { const before = snap(); map.tiles = map.tiles.map(r => '.'.repeat(r.length)); map.shape = map.shape.map(r => '.'.repeat(r.length)); map.height = map.height.map(r => '.'.repeat(r.length)); remember(before); });
 $('undo').addEventListener('click', undo);
 $('redo').addEventListener('click', redo);
 $('name').addEventListener('input', () => { map.name = $('name').value; dirty = true; });
@@ -583,7 +640,8 @@ const readSaved = () => { try { return JSON.parse(localStorage.getItem(STORE) ||
 const writeSaved = (all) => { try { localStorage.setItem(STORE, JSON.stringify(all)); return true; } catch (e) { return false; } };
 function validMap(m) {
   if (!m || m.format !== 'nml-map' || !(m.cols > 0) || !(m.rows > 0) || !(m.zone > 0)) return false;
-  for (const k of ['tiles', 'height', 'flank']) if (!Array.isArray(m[k]) || m[k].length !== m.rows || m[k].some(r => typeof r !== 'string' || r.length !== m.cols)) return false;
+  if (m && m.rows > 0 && m.cols > 0) withShape(m);
+  for (const k of ['tiles', 'shape', 'height', 'flank']) if (!Array.isArray(m[k]) || m[k].length !== m.rows || m[k].some(r => typeof r !== 'string' || r.length !== m.cols)) return false;
   return Array.isArray(m.buildings);
 }
 // a question in the Save panel, in place of a dialog (the page may run where dialogs are blocked)
@@ -613,7 +671,7 @@ const esc = (s) => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt
 $('saved').addEventListener('click', (e) => {
   const all = readSaved(), l = e.target.closest('[data-load]'), d = e.target.closest('[data-del]');
   if (l && all[l.dataset.load]) {
-    const before = snap(); const { saved, ...m } = all[l.dataset.load]; map = m; remember(before); dirty = false; refresh();
+    const before = snap(); const { saved, ...m } = all[l.dataset.load]; map = withShape(m); remember(before); dirty = false; refresh();
     say('Opened “' + l.dataset.load + '”. Undo brings back what was here.');
   }
   if (d) { const n = d.dataset.del; ask(`Delete the saved map “${n}”?`, 'Delete', () => { const a = readSaved(); delete a[n]; writeSaved(a); renderSaved(); say('Deleted “' + n + '”.'); }); }
