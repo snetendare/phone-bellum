@@ -144,7 +144,7 @@ const Engine = (() => {
   // health a second (BLEED.pct[n] %: 4 stacks, 5 stacks; not structures). Bleed skips armor and ward, like poison. The stacks belong to the target, so
   // every source adds to the same ones. u.bleedLonger: its stacks last that many seconds more; u.bleedNoHeal: a body
   // bleeding from it can't heal or regenerate until the bleed runs out; u.bleedStun: a body it brings to BLEED.max
-  // stacks is stunned that many seconds.
+  // stacks is stunned that many seconds. Buildings (structures and u.building) never bleed, nor take poison.
   const BLEED = { dmg: 3, pulse: 0.5, secs: 2.5, max: 5, pct: { 4: 2, 5: 5 } };
   // Poisoned bodies heal POISON_HEAL % as much (slime units drink poison and heal fully)
   const POISON_HEAL = 50;
@@ -608,6 +608,19 @@ const Engine = (() => {
     return { squads: s, bodies: n, hp, dps, strength: hp * dps };
   }
 
+  // A body's attack as it stands right now (also what the fight card shows). Attacks a second: an ally's aura, Flow
+  // state stacks, kill stacks, Frenzy (up to its cap, never below the base rate) and an enemy Berserker's roar
+  function liveAps(b) {
+    const a = b.u.aps + (b.auraAps || 0) + (b.flow > 0 ? b.flow * b.u.flow.aps : 0) + (b.kills > 0 ? b.kills * b.u.killStack.aps : 0);
+    const roared = b.roarAtk > 0 ? 1 - b.roarAtk / 100 : 1;
+    if (!(b.u.frenzyPct > 0) || !b.frenzy) return a * roared;
+    return Math.max(a, Math.min(b.u.frenzyCap, a * (1 + b.frenzy * b.u.frenzyPct / 100))) * roared;
+  }
+  // its hit: damage spin-up and a charge on the unit's own hit, then an ally's aura on top
+  const liveHit = (b, charged) => b.u.hit * (charged ? b.u.charge : 1) * (b.u.spinHit > 0 ? Math.min(SPIN_CAP, 1 + b.u.spinHit / 100 * Math.max(0, b.firing)) : 1) + (b.auraHit || 0);
+  // a unit's armor and ward: its own and its skills' (bonusArmor, bonusWard; the lower ward counts)
+  const armorOf = (u) => (u.defense === 'armor' ? u.defVal : 0) + (u.bonusArmor || 0);
+  const wardOf = (u) => { const w = [u.defense === 'ward' ? u.defVal : 0, u.bonusWard || 0].filter(x => x > 0); return w.length ? Math.min(...w) : 0; };
   function damageAfterDefense(hit, target, g) {
     const u = target.u;
     const armor = (u.defense === 'armor' ? u.defVal : 0) + (u.bonusArmor || 0) + (u.bull && target.trampleLeft > 0 ? u.bull.armor : 0); // Bullhead: tougher while it charges
@@ -1023,9 +1036,11 @@ const Engine = (() => {
       if (poolHp(v) <= 1e-9 && finishing(owner, v)) return;
       if (poolHp(v) <= 1e-9) kill(owner, v);
     }
+    // buildings (towers, treasuries, walls, the factory...) neither bleed nor take poison
+    const isBuilt = (v) => !!(v.u.structure || v.u.building);
     // n stacks of bleed from owner on v (see BLEED). The stacks are v's own: every source adds to them
     function bleedOn(owner, v, n) {
-      if (!v.alive || v.turning || v.u.aloft || sheltered(v) || !(n > 0)) return;
+      if (!v.alive || v.turning || v.u.aloft || isBuilt(v) || sheltered(v) || !(n > 0)) return;
       const bl = v.bleed || (v.bleed = { n: 0, t: 0, pulse: BLEED.pulse, src: owner, noHeal: false });
       const before = bl.n;
       bl.n = Math.min(BLEED.max, bl.n + n); bl.src = owner;
@@ -1089,6 +1104,7 @@ const Engine = (() => {
       seen[tl.type] = true;
       if (tl.type === 'speed' || tl.type === 'haste') { b.u = { ...b.u, speed: b.u.speed * (1 + tl.speed / 100) }; b.fast = true; }
       if (tl.type === 'toxic') {
+        if (isBuilt(b)) return;
         (b.poison || (b.poison = [])).push({ src: null, dps: b.u.hp * tl.poisonPct / 100, t: tl.poisonDur });
         // slime units get it the other way round: the poison heals them (see the ongoing effects) and the slow speeds them up
         if (b.u.slime) { if (!(b.slowT > 0)) { b.slowMove = -tl.slowMove; b.slowAtk = -tl.slowAtk; b.slowT = tl.slowDur; } return; }
@@ -1175,7 +1191,7 @@ const Engine = (() => {
       }
       if (owner.u.bleedHit > 0) bleedOn(owner, v, owner.u.bleedHit); // Bloodrush: stacks of bleed with every hit
       if (owner.u.stunHit > 0 && !v.u.structure) v.stunT = Math.max(v.stunT, owner.u.stunHit);
-      if (owner.u.poisonPct > 0) {
+      if (owner.u.poisonPct > 0 && !isBuilt(v)) {
         // poison: a share of the hit, spread over its duration. Each attacker keeps one dose on the target;
         // its next hit refreshes that dose. Doses from different attackers add up.
         const dps = hit * owner.u.poisonPct / 100 / owner.u.poisonDur;
@@ -1414,12 +1430,7 @@ const Engine = (() => {
     }
 
     // attacks per second right now: Frenzy speeds it up with every hit landed, up to its cap (never below the base rate)
-    function apsOf(b) {
-      const a = b.u.aps + (b.auraAps || 0) + (b.flow > 0 ? b.flow * b.u.flow.aps : 0) + (b.kills > 0 ? b.kills * b.u.killStack.aps : 0); // an ally's aura, Flow state stacks, kill stacks
-      const roared = b.roarAtk > 0 ? 1 - b.roarAtk / 100 : 1; // an enemy Berserker's roar
-      if (!(b.u.frenzyPct > 0) || !b.frenzy) return a * roared;
-      return Math.max(a, Math.min(b.u.frenzyCap, a * (1 + b.frenzy * b.u.frenzyPct / 100))) * roared;
-    }
+    function apsOf(b) { return liveAps(b); } // (an ally's aura, Flow state and kill stacks, Frenzy, a roar: see liveAps)
 
     function fire(b, targets, canCharge) {
       const charged = canCharge && b.u.charge > 1 && b.moved >= CHARGE_RUN && !(t < (b.chargeAt || 0));
@@ -1440,7 +1451,7 @@ const Engine = (() => {
       }
       const opening = b.u.firstHit > 0 && !b.firstDone ? 1 + b.u.firstHit / 100 : 1; // Shadowborn: the first attack of the fight hits harder
       b.firstDone = true;
-      const hit = (b.u.hit * (charged ? b.u.charge : 1) * (b.u.spinHit > 0 ? Math.min(SPIN_CAP, 1 + b.u.spinHit / 100 * Math.max(0, b.firing)) : 1) + (b.auraHit || 0)) * opening; // an ally's aura adds to every hit
+      const hit = liveHit(b, charged) * opening; // an ally's aura adds to every hit
       // trample: a charged hit doesn't stop the unit; it runs on through its target and over every body in its path
       if (charged && b.u.trample > 0 && targets.length && !targets.flame) {
         const tgt = targets[0], dx = tgt.x - b.x, dy = tgt.y - b.y, d = hyp(dx, dy);
@@ -2535,6 +2546,6 @@ const Engine = (() => {
     return m;
   }
 
-  return { DASH_SPEED, LONE_R, WATCH_IDLE, BURN, FROST_ON, EAT_R, glutUnit, TOWER_DOWN, RULES, ruleOn, STEALTH_BACK, SKILL_SLOTS, SLOTS, SKILL_TYPES, skillParam, describeSkill, applySkills, innateUnit, fairBudget, battle, makeArmy, matrix, createBattle, buildSquad, rawStrength, squadsFor, withTraits, leveled, TRAIT_DEFAULTS, SPIN_CAP, CHARGE_RUN, TRAMPLE_RUN, BLAST_RADIUS, BLEED, POISON_HEAL, RAM_REACH, ROLL_START, ROLL_PAST, BUILD_GAP, BUILD_COOP, SITE_REACH, MINE_TRIGGER, REPAIR_SECS, LEVEL_BONUS, levelHpK, MAX_LEVEL, CHARM_MAX, CONVERT_HP, CONVERT_SQUAD };
+  return { DASH_SPEED, LONE_R, WATCH_IDLE, BURN, FROST_ON, EAT_R, glutUnit, TOWER_DOWN, RULES, ruleOn, STEALTH_BACK, SKILL_SLOTS, SLOTS, SKILL_TYPES, skillParam, describeSkill, applySkills, innateUnit, fairBudget, battle, makeArmy, matrix, createBattle, buildSquad, rawStrength, squadsFor, withTraits, leveled, liveAps, liveHit, armorOf, wardOf, TRAIT_DEFAULTS, SPIN_CAP, CHARGE_RUN, TRAMPLE_RUN, BLAST_RADIUS, BLEED, POISON_HEAL, RAM_REACH, ROLL_START, ROLL_PAST, BUILD_GAP, BUILD_COOP, SITE_REACH, MINE_TRIGGER, REPAIR_SECS, LEVEL_BONUS, levelHpK, MAX_LEVEL, CHARM_MAX, CONVERT_HP, CONVERT_SQUAD };
 })();
 if (typeof module !== 'undefined') module.exports = Engine;

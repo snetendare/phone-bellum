@@ -2417,7 +2417,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
       const u = units[s.unit], need = s.level < Engine.MAX_LEVEL ? Math.round(Game.xpNeeded(u, s.level)) : null;
       return `- id ${s.id}: ${u.name} at col ${s.col}, row ${s.row}${Game.isRider(s) ? ` (riding inside your ${units[(Game.carrierOf(m, 1, s) || s).unit].name}, id ${s.in})` : ''}, level ${s.level + 1}${need ? `, XP ${Math.round(s.xp)}/${need}` : ', max level'}${Game.isReady(m, s) ? ', READY TO LEVEL UP' : ''}${s.awaken > 0 ? ', AWAKENED' : ''}${s.round < m.round ? `, sells for ${Game.sellValue(m, s)}` : ''}${Game.enzoSkill(m, 1, s) != null ? `, has skill "${u.skillDefs[Game.enzoSkill(m, 1, s)].name}" (Enzo${Game.enzoActive(m, 1, s.unit) ? '' : `; off until you have ${Game.CHAR.enzoMin} squads of this unit`})` : ''}${Game.charmOf(s) ? `, charisma ${Game.charmOf(s)}/${Engine.CHARM_MAX}${Game.isGentleman(s) ? ' (Gentleman)' : ''}` : ''}${Game.glutMax(m, 1, s) ? `, Glut ${Game.glutOf(s)}/${Game.glutMax(m, 1, s)}${Game.glutFull(m, 1, s) ? ' (full: can be awakened)' : ''}` : ''}`;
     });
-    const theirs = m.armies[0].filter(s => s.round < m.round && !Game.hiddenFromFoe(m, s)).map(s => { const p = Game.seenAt(m, s); return `- ${units[s.unit].name} at col ${p.col}, row ${p.row}, level ${Game.seenLevel(m, s) + 1}${Game.seenAwake(m, s) ? ', awakened' : ''}`; });
+    const theirs = Game.shownArmy(m, 0).filter(s => s.round < m.round && !Game.hiddenFromFoe(m, s)).map(s => { const p = Game.seenAt(m, s); return `- ${units[s.unit].name} at col ${p.col}, row ${p.row}, level ${Game.seenLevel(m, s) + 1}${Game.seenAwake(m, s) ? ', awakened' : ''}`; });
     const theirSkills = [];
     units.forEach((u, i) => Engine.SLOTS.forEach(k => { if (Game.skillVisible(m, 0, i, k)) theirSkills.push(`${(u.skillDefs[k] || {}).name} on ${u.name}`); }));
     const hist = m.history.slice(-4).map(h => `- round ${h.round}: ${h.timeout ? 'time ran out' : h.winner === 1 ? 'you won' : h.winner === 0 ? 'you lost' : 'draw'}; you took ${h.dmg[1]} damage, they took ${h.dmg[0]}`);
@@ -3179,7 +3179,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       if (gs && Game.inBuilding(m, me, gs) && !(had && had.side === me && had.id === gs.id)) { rangeOf = { side: me, id: gs.id }; openSheet(gs.unit, gs, me); return; }
     }
     if (pickingMark()) { // Mark Bounty: the enemy squad on this tile, after a check (it can't be moved once placed)
-      const fs = Game.squadAt(m, foe(), t.col, t.row);
+      const fs = Game.shownArmy(m, foe()).find(s => { const p = Game.seenAt(m, s); return !Game.hiddenFromFoe(m, s) && s.round < m.round && Game.blockOf(m, s.unit, p.col, p.row).some(([c, r]) => c === t.col && r === t.row); }); // where you see it
       markPicking = false;
       if (fs && Game.markTarget(m, me, fs.id)) askMark(fs); else { render(); hud(); panelDeploy(); }
       return;
@@ -3235,7 +3235,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     const freeTile = !Game.occupied(m, me, t.col, t.row);
     if (Game.altarRound(m) && selected === null && freeTile && Math.abs(t.col - (Game.COLS - 1) / 2) < 1 && Math.abs(t.row - (Game.ROWS - 1) / 2) < 1) { openAltarSheet(); return; }
     if (Game.hailRound(m) && selected === null && freeTile && Game.hailTiles(m).some(h => h.col === t.col && h.row === t.row)) { openMapSheet(); return; }
-    if ((shroomShown(m, t.col, t.row) || myRemovalNow(t.col, t.row)) && selected === null && !Game.occupied(m, me, t.col, t.row) && !m.armies[foe()].some(s => { const p = Game.seenAt(m, s); return p.col === t.col && p.row === t.row && s.round < m.round; })) { openMapSheet(t); return; }
+    if ((shroomShown(m, t.col, t.row) || myRemovalNow(t.col, t.row)) && selected === null && !Game.occupied(m, me, t.col, t.row) && !Game.shownArmy(m, foe()).some(s => { const p = Game.seenAt(m, s); return p.col === t.col && p.row === t.row && s.round < m.round; })) { openMapSheet(t); return; }
     const own = Game.squadAt(m, me, t.col, t.row);
     // a unit selected in the shop goes inside your horse (or other carrier) with room
     if (own && selected !== null && editable() && Game.boardable(m, me, t.col, t.row, selected)) {
@@ -3251,7 +3251,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       else openSheet(own.unit, own, me); // one placed this round is taken back with the X on its top right corner
       return;
     }
-    const enemy = m.armies[foe()].find(s => { const p = Game.seenAt(m, s); return !Game.hiddenFromFoe(m, s) && Game.blockOf(m, s.unit, p.col, p.row).some(([c, r]) => c === t.col && r === t.row) && s.round < m.round; });
+    const enemy = Game.shownArmy(m, foe()).find(s => { const p = Game.seenAt(m, s); return !Game.hiddenFromFoe(m, s) && Game.blockOf(m, s.unit, p.col, p.row).some(([c, r]) => c === t.col && r === t.row) && s.round < m.round; });
     if (enemy) { rangeOf = { side: foe(), id: enemy.id }; openSheet(Game.shownUnit(m, me, foe(), enemy.unit), { ...enemy, unit: Game.shownUnit(m, me, foe(), enemy.unit) }, foe()); return; } // a disguise shows as what it pretends to be
     if (selected !== null && editable() && Game.canPlaceAt(m, me, t.col, t.row, selected)) {
       const sq = Game.place(m, me, selected, t.col, t.row);
@@ -3303,11 +3303,14 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (b.channel) st.push('Summoning');
     if (b.delay > 0) st.push(`Arrives in ${b.delay.toFixed(1)} s`);
     if (b.inside && b.inside.alive) st.push('Sheltered');
-    const def = u.defense === 'armor' && u.defVal ? `<div><span>Armor</span>${r2(u.defVal)}</div>` : u.defense === 'ward' && u.defVal ? `<div><span>Ward</span>${r2(u.defVal)}</div>` : '';
+    if (b.auraHit > 0 || b.auraAps > 0) st.push(`Aura +${r2(b.auraHit || 0)} hit, +${r2(b.auraAps || 0)} attacks/s`);
+    // armor and ward with its skills' (Heavy metal, Reforge, Home ground...), hit and attacks a second as they are now
+    const arm = Engine.armorOf(u), wd = Engine.wardOf(u), hit = Engine.liveHit(b, false), aps = Engine.liveAps(b);
+    const def = `${arm > 0 ? `<div><span>Armor</span>${r2(arm)}</div>` : ''}${wd > 0 ? `<div><span>Ward</span>${r2(wd)}</div>` : ''}`;
     const html = `<div class="bh"><span style="color:${u.color || 'var(--ink)'};display:inline-flex">${Shapes.svg(u.shape || 'circle', 16)}</span><b>${esc(name)}</b><button class="bx" id="bcard-x" aria-label="Close">✕</button></div>
       <div class="st">${mine ? 'Yours' : esc(foeName()) + '’s'}${b.level > 0 ? ` · level ${b.level + 1}` : ''}${mates.length > 1 ? ` · ${mates.filter(x => x.alive).length} of ${mates.length} bodies left` : ''}</div>
       <div class="hpb"><i style="width:${Math.max(0, Math.min(100, b.hp / u.hp * 100)).toFixed(1)}%"></i></div>
-      <div class="bs"><div><span>Health</span>${Math.max(0, Math.min(Math.round(u.hp), Math.ceil(b.hp)))} / ${Math.round(u.hp)}</div>${u.hit > 0 ? `<div><span>Hit</span>${Math.round(u.hit)}</div><div><span>Attacks/s</span>${r2(u.aps)}</div>` : ''}
+      <div class="bs"><div><span>Health</span>${Math.max(0, Math.min(Math.round(u.hp), Math.ceil(b.hp)))} / ${Math.round(u.hp)}</div>${u.hit > 0 ? `<div><span>Hit</span>${Math.round(hit)}</div><div><span>Attacks/s</span>${r2(aps)}</div>` : ''}
         ${u.range > 0 ? `<div><span>Range</span>${r2(bodyReach(b))} m</div>` : ''}${u.speed > 0 && !u.structure ? `<div><span>Speed</span>${r2(u.speed)} m/s</div>` : ''}${def}</div>
       ${st.length ? `<div class="st">${st.join(' · ')}</div>` : ''}`;
     if (!el) {
@@ -3368,7 +3371,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     for (const side of [me, foe()]) if (towerVisible(side) && Game.towerAt(m, side, t.col, t.row)) return towerRing(side);
     const own = Game.squadAt(m, me, t.col, t.row);
     if (own) return squadRing(me, Game.isRider(own) ? Game.carrierOf(m, me, own) || own : own);
-    const en = m.armies[foe()].find(s => { const p = Game.seenAt(m, s); return !Game.hiddenFromFoe(m, s) && !Game.isRider(s) && p.col === t.col && p.row === t.row && s.round < m.round; });
+    const en = Game.shownArmy(m, foe()).find(s => { const p = Game.seenAt(m, s); return !Game.hiddenFromFoe(m, s) && !Game.isRider(s) && p.col === t.col && p.row === t.row && s.round < m.round; });
     return en ? squadRing(foe(), en) : null;
   }
   // the ring of what was tapped: the squad last tapped while deploying (rangeOf), the body tapped in a fight (inspect)
@@ -3376,7 +3379,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (!m) return null;
     if (phase === 'battle' && bt) return inspect && !(inspect.hidden && inspect.side !== me) ? bodyRing(inspect) : null;
     if (phase !== 'deploy' || !rangeOf) return null;
-    return squadRing(rangeOf.side, m.armies[rangeOf.side].find(s => s.id === rangeOf.id));
+    return squadRing(rangeOf.side, (rangeOf.side === me ? m.armies[me] : Game.shownArmy(m, rangeOf.side)).find(s => s.id === rangeOf.id));
   }
   // ---------- intent: where a squad means to go (its movement target, not whom it attacks) ----------
   // While deploying: Game.intentPreview, for the squad last tapped (rangeOf, yours), the one you drag to another tile, or
@@ -3534,9 +3537,10 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     let html = '';
     if (!cinematic && m && (phase === 'deploy' || phase === 'battle')) html += intentMarks(wrapMap());
     if (!cinematic && m && phase === 'deploy') for (const sd of [0, 1]) { // Mark Bounty: crosshairs on the marked squad
-      const k = Game.markOn(m, sd) && Game.markShown(m, me, true, sd) ? Game.markOf(m, sd) : null, q = k && m.armies[1 - sd].find(x => x.id === k.squad);
+      const k = Game.markOn(m, sd) && Game.markShown(m, me, true, sd) ? Game.markOf(m, sd) : null, q = k && (sd === me ? Game.shownArmy(m, 1 - sd) : m.armies[1 - sd]).find(x => x.id === k.squad);
       if (!q) continue;
-      const at = wrapMap(), n = Game.footprint(m, q.unit), c = Game.tileToWorld(q.col + (n - 1) / 2, q.row + (n - 1) / 2), [x, y] = at(c.x, c.y), r = 14;
+      const p = sd === me ? Game.seenAt(m, q) : q; // their squad where you last saw it
+      const at = wrapMap(), n = Game.footprint(m, q.unit), c = Game.tileToWorld(p.col + (n - 1) / 2, p.row + (n - 1) / 2), [x, y] = at(c.x, c.y), r = 14;
       html += `<g class="markx" style="stroke:${sd === me ? 'var(--gold)' : 'var(--foe)'}"><circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${r}"/><path d="M${(x - r - 5).toFixed(1)} ${y.toFixed(1)}h10M${(x + r - 5).toFixed(1)} ${y.toFixed(1)}h10M${x.toFixed(1)} ${(y - r - 5).toFixed(1)}v10M${x.toFixed(1)} ${(y + r - 5).toFixed(1)}v10"/></g>`;
     }
     if ((h || tr || tiles.length || ring) && !cinematic) {
@@ -3856,7 +3860,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
 
   // Mark Bounty: check before the mark goes on (it stays for the match)
   function askMark(sq) {
-    const name = units[sq.unit].name, cost = Game.markCost(m, me);
+    const name = units[Game.shownUnit(m, me, foe(), sq.unit)].name, cost = Game.markCost(m, me);
     $('sheet').innerHTML = `<div class="bar"><h3 id="sheet-h">Mark their ${esc(name)}?</h3><button class="btn small" id="close">Close</button></div>
       <p style="margin:0">${esc(Game.towerType(m, me).mark.text)}</p>
       <div style="display:flex;gap:8px"><button class="btn primary" id="mark-yes">Mark it${cost ? ` · ${cost} gold` : ' · free'}</button><button class="btn" id="mark-no">Cancel</button></div>`;
@@ -3868,10 +3872,10 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   function markBlock(side, tt) {
     if (!tt.mark) return '';
     const chip = (txt, col) => `<span class="chip" style="color:${col};border:1px solid currentColor;border-radius:99px;padding:1px 8px;font-size:12px">${txt}</span>`;
-    const k = Game.markOf(m, side), shown = Game.markShown(m, me, phase === 'deploy', side), q = k && m.armies[1 - side].find(x => x.id === k.squad);
+    const k = Game.markOf(m, side), shown = Game.markShown(m, me, phase === 'deploy', side), q = k && (side === me && phase === 'deploy' ? Game.shownArmy(m, 1 - side) : m.armies[1 - side]).find(x => x.id === k.squad);
     let act = '';
     if (side === me && phase === 'deploy' && Game.canMark(m, me)) act = `<button class="btn small${editable() ? ' primary' : ''}" id="tmark" ${editable() ? '' : 'disabled'}>${k ? 'Mark again · free' : `Mark · ${Game.MARK.cost} gold`}</button>`;
-    else if (shown && q) act = chip(`On ${side === me ? 'their' : 'your'} ${esc(units[q.unit].name)}`, side === me ? 'var(--gold)' : 'var(--foe)');
+    else if (shown && q) act = chip(`On ${side === me ? 'their' : 'your'} ${esc(units[side === me ? Game.shownUnit(m, me, 1 - side, q.unit) : q.unit].name)}`, side === me ? 'var(--gold)' : 'var(--foe)');
     return abilityRow(tt.mark.name, act, esc(tt.mark.text));
   }
   function fortifyBlock(side, tt) {
@@ -4202,7 +4206,13 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     const base = units[i];
     const owner = side === undefined ? me : side;
     if (sq && m && owner !== me && phase === 'deploy') sq = { ...sq, level: Game.seenLevel(m, sq), awaken: Game.seenAwake(m, sq) ? sq.awaken : 0 }; // their level-ups and awakenings this round stay hidden
-    const u = Engine.leveled(m ? Game.unitFor(m, owner, i, sq) : base, sq ? sq.level : 0);
+    // a squad on the board: its stats as its fight builds them (its tile's buffs, the map, tower skills), theirs as far as
+    // this screen may know it (Game.seenBy: what they did this round stays hidden)
+    const mv = m && sq && owner !== me && phase === 'deploy' ? Game.seenBy(m, me) : m;
+    const fsq = mv && sq && phase === 'deploy' ? mv.armies[owner].find(q => q.id === sq.id && q.unit === sq.unit) : null;
+    let u = Engine.leveled(fsq ? Game.fieldUnit(mv, owner, fsq) : m ? Game.unitFor(m, owner, i, sq) : base, sq ? sq.level : 0);
+    if (fsq && u.name === 'Sniper' && Game.towerSkill2On(mv, owner, 'sniper')) u = { ...u, hit: u.hit + Game.AIRSHIP.sniperHit }; // (as in bodiesFor: flat, after levels)
+    const near = fsq ? Game.auraNear(mv, owner, fsq) : null; // an ally's aura (Reforge) where the fight begins
     let lvl = '';
     if (sq) {
       const next = sq.level < Engine.MAX_LEVEL ? Math.round(Game.xpNeeded(base, sq.level)) : null;
@@ -4268,8 +4278,9 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (u.dodge > 0) tr.push(`Dodges ${u.dodge}% of hits`);
     if (u.windWalk) tr.push(`Dodges every ${u.windWalk.every === 1 ? '' : u.windWalk.every + 'th '}attack at it, from the first`);
     if (u.windUp > 0) tr.push(`Wind-up ${u.windUp} s`);
-    if (u.defense === 'armor') tr.push(`Armor ${u.defVal}`);
-    if (u.defense === 'ward') tr.push(`Ward ${u.defVal}`);
+    if (Engine.armorOf(u) > 0) tr.push(`Armor ${Math.round(Engine.armorOf(u) * 100) / 100}`); // its own and its skills'
+    if (Engine.wardOf(u) > 0) tr.push(`Ward ${Math.round(Engine.wardOf(u) * 100) / 100}`);
+    if (near) tr.push(`<b style="color:var(--gold)">Aura from ${esc(units[owner === me ? near.from : Game.shownUnit(m, me, owner, near.from)].name)}</b>: +${near.hit} hit, +${near.aps} attacks/s while within ${Math.round(near.radius * 10) / 10} m`);
     if (u.splash > 0) tr.push(`Splash ${u.splash} m`);
     const html = `
       ${(() => { const r = roleOf(i, owner === me ? me : null); return `<p class="roleline"><span class="roles">${roleIcons(r)}${rangeSvg(r.range)}</span><span>${r.text}</span></p>`; })()}
@@ -4284,7 +4295,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       ${sq && m && units[i].building && (side === me || side === undefined || sq.round < m.round || phase !== 'deploy') ? buildingBlock(side === undefined ? me : side, 'sq' + sq.id) : ''}
       <div class="stats num">
         <div><span>Bodies</span>${u.bodies}</div><div><span>Health</span>${Math.round(u.hp)}</div>
-        <div><span>${u.ram ? 'Ram' : 'Hit'}</span>${Math.round(u.hit)}</div>${u.ram ? '' : `<div><span>Attacks/s</span>${u.aps}</div>`}
+        <div><span>${u.ram ? 'Ram' : 'Hit'}</span>${Math.round(u.hit)}${near && near.hit && !u.ram ? `<b style="color:var(--gold)"> +${near.hit}</b>` : ''}</div>${u.ram ? '' : `<div><span>Attacks/s</span>${Math.round(u.aps * 100) / 100}${near && near.aps ? `<b style="color:var(--gold)"> +${near.aps}</b>` : ''}</div>`}
         ${u.ram ? '' : `<div><span>Range</span>${u.range} m</div>`}<div><span>Speed</span>${Math.round(u.speed * 100) / 100} m/s</div>
       </div>
       <div class="vs">
@@ -4608,9 +4619,10 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   function syncState() {
     const s = snapshot(m);
     if (phase === 'deploy') {
+      if (s.sold) { s.armies[0] = s.armies[0].concat(Game.soldNow(s, 0)); s.sold = [[], s.sold[1] || []]; } // a squad sold this round still stands
       s.armies[0] = s.armies[0].filter(q => q.round < m.round && !Game.hiddenFromFoe(m, q)).map(q => { // a squad moved this round shows on its old tile
         if (q.from && q.movedRound === m.round) { q.col = q.from.col; q.row = q.from.row; }
-        delete q.from; delete q.movedRound;
+        delete q.from; delete q.movedRound; delete q.soldRound;
         if (q.charmGiven === m.round) { delete q.charm; delete q.charmGiven; } // Matteo's first stack, given this round
         if (q.awaken === m.round) delete q.awaken; // an awakening bought this round
         return q;
@@ -4704,6 +4716,11 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       if (!c || c.in != null || !Game.isCarrier(m, c.unit) || Game.isCarrier(m, q.unit) || c.col !== q.col || c.row !== q.row || full.has(c.id)) return false;
       full.add(c.id); return true;
     });
+    // squads from earlier rounds they no longer have were sold: to the host they stand where they were until the fight,
+    // and a rider a sold carrier let out stays inside
+    const kept = new Set(m.armies[1].map(q => q.id));
+    for (const h of had.values()) if (h.round < m.round && !kept.has(h.id)) Game.noteSold(m, 1, h);
+    for (const q of m.armies[1]) { const h = had.get(q.id); if (h && q.in == null && (h.freed === m.round || (h.in != null && !kept.has(h.in)))) q.freed = m.round; }
     // the guest's Glut (the Obelisk): stacks come from the fights played here
     for (const q of m.armies[1]) { const h = had.get(q.id); if (h && h.glut > 0 && h.unit === q.unit) q.glut = h.glut; }
     // the guest's charisma (Matteo): stacks come from the fights played here; the guest only gives the first stack

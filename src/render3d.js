@@ -467,7 +467,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
       return [wx, wz];
     };
     // the opponent's squads from this round stay hidden until the fight; a squad they moved shows on its old tile
-    for (const sq of m.armies[foe]) if ((sq.round < m.round || !deploying) && !Game.hiddenFromFoe(m, sq)) {
+    for (const sq of deploying ? Game.shownArmy(m, foe) : m.armies[foe]) if ((sq.round < m.round || !deploying) && !Game.hiddenFromFoe(m, sq)) {
       const p = deploying ? Game.seenAt(m, sq) : sq;
       const look = Game.shownUnit(m, me, foe, sq.unit); // a disguised unit shows as what it pretends to be
       squad(deploying ? { ...sq, unit: look, col: p.col, row: p.row, level: Game.seenLevel(m, sq) } : { ...sq, unit: look }, foe, false); // a level-up bought this round stays hidden

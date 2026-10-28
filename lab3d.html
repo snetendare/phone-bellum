@@ -499,7 +499,7 @@ const Engine = (() => {
   // health a second (BLEED.pct[n] %: 4 stacks, 5 stacks; not structures). Bleed skips armor and ward, like poison. The stacks belong to the target, so
   // every source adds to the same ones. u.bleedLonger: its stacks last that many seconds more; u.bleedNoHeal: a body
   // bleeding from it can't heal or regenerate until the bleed runs out; u.bleedStun: a body it brings to BLEED.max
-  // stacks is stunned that many seconds.
+  // stacks is stunned that many seconds. Buildings (structures and u.building) never bleed, nor take poison.
   const BLEED = { dmg: 3, pulse: 0.5, secs: 2.5, max: 5, pct: { 4: 2, 5: 5 } };
   // Poisoned bodies heal POISON_HEAL % as much (slime units drink poison and heal fully)
   const POISON_HEAL = 50;
@@ -963,6 +963,19 @@ const Engine = (() => {
     return { squads: s, bodies: n, hp, dps, strength: hp * dps };
   }
 
+  // A body's attack as it stands right now (also what the fight card shows). Attacks a second: an ally's aura, Flow
+  // state stacks, kill stacks, Frenzy (up to its cap, never below the base rate) and an enemy Berserker's roar
+  function liveAps(b) {
+    const a = b.u.aps + (b.auraAps || 0) + (b.flow > 0 ? b.flow * b.u.flow.aps : 0) + (b.kills > 0 ? b.kills * b.u.killStack.aps : 0);
+    const roared = b.roarAtk > 0 ? 1 - b.roarAtk / 100 : 1;
+    if (!(b.u.frenzyPct > 0) || !b.frenzy) return a * roared;
+    return Math.max(a, Math.min(b.u.frenzyCap, a * (1 + b.frenzy * b.u.frenzyPct / 100))) * roared;
+  }
+  // its hit: damage spin-up and a charge on the unit's own hit, then an ally's aura on top
+  const liveHit = (b, charged) => b.u.hit * (charged ? b.u.charge : 1) * (b.u.spinHit > 0 ? Math.min(SPIN_CAP, 1 + b.u.spinHit / 100 * Math.max(0, b.firing)) : 1) + (b.auraHit || 0);
+  // a unit's armor and ward: its own and its skills' (bonusArmor, bonusWard; the lower ward counts)
+  const armorOf = (u) => (u.defense === 'armor' ? u.defVal : 0) + (u.bonusArmor || 0);
+  const wardOf = (u) => { const w = [u.defense === 'ward' ? u.defVal : 0, u.bonusWard || 0].filter(x => x > 0); return w.length ? Math.min(...w) : 0; };
   function damageAfterDefense(hit, target, g) {
     const u = target.u;
     const armor = (u.defense === 'armor' ? u.defVal : 0) + (u.bonusArmor || 0) + (u.bull && target.trampleLeft > 0 ? u.bull.armor : 0); // Bullhead: tougher while it charges
@@ -1378,9 +1391,11 @@ const Engine = (() => {
       if (poolHp(v) <= 1e-9 && finishing(owner, v)) return;
       if (poolHp(v) <= 1e-9) kill(owner, v);
     }
+    // buildings (towers, treasuries, walls, the factory...) neither bleed nor take poison
+    const isBuilt = (v) => !!(v.u.structure || v.u.building);
     // n stacks of bleed from owner on v (see BLEED). The stacks are v's own: every source adds to them
     function bleedOn(owner, v, n) {
-      if (!v.alive || v.turning || v.u.aloft || sheltered(v) || !(n > 0)) return;
+      if (!v.alive || v.turning || v.u.aloft || isBuilt(v) || sheltered(v) || !(n > 0)) return;
       const bl = v.bleed || (v.bleed = { n: 0, t: 0, pulse: BLEED.pulse, src: owner, noHeal: false });
       const before = bl.n;
       bl.n = Math.min(BLEED.max, bl.n + n); bl.src = owner;
@@ -1444,6 +1459,7 @@ const Engine = (() => {
       seen[tl.type] = true;
       if (tl.type === 'speed' || tl.type === 'haste') { b.u = { ...b.u, speed: b.u.speed * (1 + tl.speed / 100) }; b.fast = true; }
       if (tl.type === 'toxic') {
+        if (isBuilt(b)) return;
         (b.poison || (b.poison = [])).push({ src: null, dps: b.u.hp * tl.poisonPct / 100, t: tl.poisonDur });
         // slime units get it the other way round: the poison heals them (see the ongoing effects) and the slow speeds them up
         if (b.u.slime) { if (!(b.slowT > 0)) { b.slowMove = -tl.slowMove; b.slowAtk = -tl.slowAtk; b.slowT = tl.slowDur; } return; }
@@ -1530,7 +1546,7 @@ const Engine = (() => {
       }
       if (owner.u.bleedHit > 0) bleedOn(owner, v, owner.u.bleedHit); // Bloodrush: stacks of bleed with every hit
       if (owner.u.stunHit > 0 && !v.u.structure) v.stunT = Math.max(v.stunT, owner.u.stunHit);
-      if (owner.u.poisonPct > 0) {
+      if (owner.u.poisonPct > 0 && !isBuilt(v)) {
         // poison: a share of the hit, spread over its duration. Each attacker keeps one dose on the target;
         // its next hit refreshes that dose. Doses from different attackers add up.
         const dps = hit * owner.u.poisonPct / 100 / owner.u.poisonDur;
@@ -1769,12 +1785,7 @@ const Engine = (() => {
     }
 
     // attacks per second right now: Frenzy speeds it up with every hit landed, up to its cap (never below the base rate)
-    function apsOf(b) {
-      const a = b.u.aps + (b.auraAps || 0) + (b.flow > 0 ? b.flow * b.u.flow.aps : 0) + (b.kills > 0 ? b.kills * b.u.killStack.aps : 0); // an ally's aura, Flow state stacks, kill stacks
-      const roared = b.roarAtk > 0 ? 1 - b.roarAtk / 100 : 1; // an enemy Berserker's roar
-      if (!(b.u.frenzyPct > 0) || !b.frenzy) return a * roared;
-      return Math.max(a, Math.min(b.u.frenzyCap, a * (1 + b.frenzy * b.u.frenzyPct / 100))) * roared;
-    }
+    function apsOf(b) { return liveAps(b); } // (an ally's aura, Flow state and kill stacks, Frenzy, a roar: see liveAps)
 
     function fire(b, targets, canCharge) {
       const charged = canCharge && b.u.charge > 1 && b.moved >= CHARGE_RUN && !(t < (b.chargeAt || 0));
@@ -1795,7 +1806,7 @@ const Engine = (() => {
       }
       const opening = b.u.firstHit > 0 && !b.firstDone ? 1 + b.u.firstHit / 100 : 1; // Shadowborn: the first attack of the fight hits harder
       b.firstDone = true;
-      const hit = (b.u.hit * (charged ? b.u.charge : 1) * (b.u.spinHit > 0 ? Math.min(SPIN_CAP, 1 + b.u.spinHit / 100 * Math.max(0, b.firing)) : 1) + (b.auraHit || 0)) * opening; // an ally's aura adds to every hit
+      const hit = liveHit(b, charged) * opening; // an ally's aura adds to every hit
       // trample: a charged hit doesn't stop the unit; it runs on through its target and over every body in its path
       if (charged && b.u.trample > 0 && targets.length && !targets.flame) {
         const tgt = targets[0], dx = tgt.x - b.x, dy = tgt.y - b.y, d = hyp(dx, dy);
@@ -2890,7 +2901,7 @@ const Engine = (() => {
     return m;
   }
 
-  return { DASH_SPEED, LONE_R, WATCH_IDLE, BURN, FROST_ON, EAT_R, glutUnit, TOWER_DOWN, RULES, ruleOn, STEALTH_BACK, SKILL_SLOTS, SLOTS, SKILL_TYPES, skillParam, describeSkill, applySkills, innateUnit, fairBudget, battle, makeArmy, matrix, createBattle, buildSquad, rawStrength, squadsFor, withTraits, leveled, TRAIT_DEFAULTS, SPIN_CAP, CHARGE_RUN, TRAMPLE_RUN, BLAST_RADIUS, BLEED, POISON_HEAL, RAM_REACH, ROLL_START, ROLL_PAST, BUILD_GAP, BUILD_COOP, SITE_REACH, MINE_TRIGGER, REPAIR_SECS, LEVEL_BONUS, levelHpK, MAX_LEVEL, CHARM_MAX, CONVERT_HP, CONVERT_SQUAD };
+  return { DASH_SPEED, LONE_R, WATCH_IDLE, BURN, FROST_ON, EAT_R, glutUnit, TOWER_DOWN, RULES, ruleOn, STEALTH_BACK, SKILL_SLOTS, SLOTS, SKILL_TYPES, skillParam, describeSkill, applySkills, innateUnit, fairBudget, battle, makeArmy, matrix, createBattle, buildSquad, rawStrength, squadsFor, withTraits, leveled, liveAps, liveHit, armorOf, wardOf, TRAIT_DEFAULTS, SPIN_CAP, CHARGE_RUN, TRAMPLE_RUN, BLAST_RADIUS, BLEED, POISON_HEAL, RAM_REACH, ROLL_START, ROLL_PAST, BUILD_GAP, BUILD_COOP, SITE_REACH, MINE_TRIGGER, REPAIR_SECS, LEVEL_BONUS, levelHpK, MAX_LEVEL, CHARM_MAX, CONVERT_HP, CONVERT_SQUAD };
 })();
 if (typeof module !== 'undefined') module.exports = Engine;
 
@@ -3235,10 +3246,10 @@ const Game = (() => {
   // for free. m.mark[side] = { squad, round } (round: when it was placed; hidden from the opponent until that fight)
   const MARK = { cost: 50, hit: 15, bounty: 100 };
   const markOf = (m, side) => (m && m.mark && m.mark[side]) || null;
-  const markLost = (m, side) => { const k = markOf(m, side); return !!k && !m.armies[1 - side].some(q => q.id === k.squad); };
+  const markLost = (m, side) => { const k = markOf(m, side); return !!k && !shownArmy(m, 1 - side).some(q => q.id === k.squad); }; // (a squad sold this round counts from the next: its owner's sale stays hidden)
   const markOn = (m, side) => towerPicked(m, side) && !!towerType(m, side).mark && !!markOf(m, side) && !markLost(m, side);
   const markCost = (m, side) => markOf(m, side) ? 0 : MARK.cost; // paid once; placing it again after a sale is free
-  const markTarget = (m, side, sqId) => m.armies[1 - side].find(q => q.id === sqId && q.round < m.round && !isRider(q) && !(m.units[q.unit] || {}).building) || null;
+  const markTarget = (m, side, sqId) => shownArmy(m, 1 - side).find(q => q.id === sqId && q.round < m.round && !isRider(q) && !(m.units[q.unit] || {}).building) || null;
   const canMark = (m, side, sqId) => towerPicked(m, side) && !!towerType(m, side).mark && (!markOf(m, side) || markLost(m, side)) && m.gold[side] >= markCost(m, side) && (sqId == null || !!markTarget(m, side, sqId));
   function placeMark(m, side, sqId) {
     if (!canMark(m, side, sqId) || sqId == null) return false;
@@ -3698,7 +3709,7 @@ const Game = (() => {
   }
   // the viewer is removing this mushroom tile this round (it still stands until the fight)
   const removingShroom = (m, viewer, deploying, col, row) => !!m && deploying && (m.map && m.map.removed || []).some(x => x.col === col && x.row === row && x.side === viewer && x.round === m.round);
-  const enemyHolds = (m, side, col, row) => !!m && (m.armies[1 - side].some(s => { const p = seenAt(m, s); return !hiddenFromFoe(m, s) && p.col === col && p.row === row && s.round < m.round; }) ||
+  const enemyHolds = (m, side, col, row) => !!m && (shownArmy(m, 1 - side).some(s => { const p = seenAt(m, s); return !hiddenFromFoe(m, s) && p.col === col && p.row === row && s.round < m.round; }) ||
     (m.round > 1 && m.towers && m.towers[1 - side] && m.towers[1 - side].col === col && m.towers[1 - side].row === row));
   // the edge tiles of your zone that are the enemy's flank are reserved for them for the whole match
   const reserved = (side, col, row) => isFlank(1 - side, col, row);
@@ -3741,7 +3752,17 @@ const Game = (() => {
   const isRider = (sq) => !!sq && sq.in != null;
   // what the opponent can't see on the board: riders, and a squad that stepped out of a carrier this round (it is
   // still inside as far as they know)
-  const hiddenFromFoe = (m, s) => isRider(s) || !!(s.from && s.movedRound === m.round && s.from.in != null);
+  const hiddenFromFoe = (m, s) => isRider(s) || !!(s.from && s.movedRound === m.round && s.from.in != null) || (s.freed != null && s.freed === m.round);
+  // A squad sold this round still stands, as far as the other player knows, until the fight: m.sold[side] holds copies
+  // of the squads sold this round (soldRound), and a rider its sold carrier let out stays inside to them (freed: that round)
+  const soldNow = (m, side) => ((m && m.sold && m.sold[side]) || []).filter(q => q.soldRound === m.round);
+  function noteSold(m, side, sq) {
+    if (!m.sold) m.sold = [[], []];
+    m.sold[side] = soldNow(m, side).filter(q => q.id !== sq.id).concat([{ ...sq, soldRound: m.round }]);
+    for (const s of m.armies[side]) if (s.in === sq.id) s.freed = m.round;
+  }
+  // a side's squads as the other player may know them while deploying: its army and the squads it sold this round
+  const shownArmy = (m, side) => m.armies[side].concat(soldNow(m, side));
   const isCarrier = (m, ui) => !!(m && m.units[ui] && m.units[ui].carrier);
   const riderOf = (m, side, sq) => sq ? m.armies[side].find(s => s.in === sq.id) || null : null;
   const carrierOf = (m, side, sq) => isRider(sq) ? m.armies[side].find(s => s.id === sq.in) || null : null;
@@ -4314,6 +4335,7 @@ const Game = (() => {
     const i = m.armies[side].findIndex(s => s.id === sqId && s.round < m.round);
     if (i < 0) return 0;
     const [sq] = m.armies[side].splice(i, 1);
+    noteSold(m, side, sq); // the other player still sees it until the fight
     syncRiders(m, side); // a sold carrier's rider steps out onto the tile
     const v = sellValue(m, sq);
     m.gold[side] += v;
@@ -4449,11 +4471,46 @@ const Game = (() => {
     return true;
   }
 
+  // A squad's unit as its fight builds it, before its level (airship Snipers add AIRSHIP.sniperHit after it): skills,
+  // the buildings' effects, the map, a purple mushroom tile, Wilhelm's forward armor, Zoe's buff tile, Eagle eye, the
+  // map's range cut and tuning, a devtest building's aura. fx: buildingEffects(m, side), when the caller has it
+  function fieldUnit(m, side, sq, fx = buildingEffects(m, side)) {
+    const ch = charOf(m, side), forward = isFlank(side, sq.col, sq.row) || inNoMans(sq.row), mp = mapOf(m);
+    let u = withConstructFx(unitFor(m, side, sq.unit, sq), fx);
+    if (mp && mp.stealthDmg && u.stealth) u = { ...u, hit: u.hit * (1 + mp.stealthDmg / 100) }; // the map favours stealth units
+    if (mp && mp.boostHp && (mp.boostUnits || []).includes(m.units[sq.unit].name)) u = { ...u, hp: u.hp * (1 + mp.boostHp / 100) }; // ...or these units by name
+    if ((shroomAt(m, sq.col, sq.row) || {}).type === 'purple') u = { ...u, hit: u.hit * (1 + SHROOM.purpleDmg / 100), hp: u.hp * (1 + SHROOM.purpleHp / 100), aps: u.aps * (1 + SHROOM.purpleAps / 100) }; // a purple mushroom tile: half a Zoe buff
+    if (ch === 'wilhelm' && forward) u = { ...u, bonusArmor: (u.bonusArmor || 0) + CHAR.wilhelmArmor };
+    // Zoe: a squad that starts the fight on a buff tile keeps the bonus for the whole fight
+    if (onBuffTile(m, side, sq.col, sq.row)) { const zb = zoeBuff(m, side); u = { ...u, hit: u.hit * (1 + zb.dmg / 100), hp: u.hp * (1 + zb.hp / 100), aps: u.aps * (1 + zb.aps / 100) }; }
+    if (towerSkillOn(m, side, 'sniper') && u.name === 'Sniper') u = { ...u, range: u.range + TOWER_SKILL.eagleRange, aps: u.aps * (1 + TOWER_SKILL.eagleAps / 100) }; // Eagle eye
+    if (mp && mp.rangeCut && u.range > mp.rangeKeep) u = { ...u, range: Math.max(mp.rangeKeep, u.range * (1 - mp.rangeCut / 100)) }; // the map shortens reach (never below rangeKeep)
+    u = mapTuned(mp, u); // ...or tunes range and speed (Test Grid)
+    const aura = isDev(m) ? auraFor(m, side, sq.col, sq.row) : null; // devtest: a building's aura
+    return aura ? modUnit(u, aura) : u;
+  }
+  // The strongest aura (Reforge) a squad stands in where its fight begins: other squads of its side whose unit has one,
+  // within its radius from tile to tile (in the fight it counts body to body, so it holds while they stay close).
+  // { hit, aps, from: the unit giving the stronger hit, radius: its aura's } or null
+  function auraNear(m, side, sq) {
+    if (!sq || isRider(sq) || (m.units[sq.unit] || {}).building) return null;
+    const w = tileToWorld(sq.col, sq.row), fx = buildingEffects(m, side);
+    let best = null;
+    for (const s of m.armies[side]) {
+      if (s.id === sq.id || isRider(s) || (m.units[s.unit] || {}).building) continue;
+      const au = fieldUnit(m, side, s, fx).aura, v = tileToWorld(s.col, s.row);
+      if (!au || Math.hypot(v.x - w.x, v.y - w.y) > au.radius + 1e-9) continue;
+      if (!best) best = { hit: au.hit, aps: au.aps, from: s.unit, radius: au.radius };
+      else { if (au.hit > best.hit) { best.from = s.unit; best.radius = au.radius; } best.hit = Math.max(best.hit, au.hit); best.aps = Math.max(best.aps, au.aps); }
+    }
+    return best;
+  }
+
   function bodiesFor(m, side) {
     const out = [];
     let idx = 0;
-    // tower skills in force: Eagle eye (sniper tower), Home ground (bastion: a band across this side's zone)
-    const eagle = towerSkillOn(m, side, 'sniper'), airship = towerSkill2On(m, side, 'sniper');
+    // tower skills in force: Airship (sniper tower), Home ground (bastion: a band across this side's zone)
+    const airship = towerSkill2On(m, side, 'sniper');
     const home = towerSkillOn(m, side, 'bastion') ? (() => {
       const ys = zoneRows(side).map(r => tileToWorld(0, r).y);
       return { y0: Math.min(...ys) - TILE / 2, y1: Math.max(...ys) + TILE / 2, armor: TOWER_SKILL.homeArmor, hpPct: TOWER_SKILL.homeHp, on: false };
@@ -4461,23 +4518,10 @@ const Game = (() => {
     const fx = buildingEffects(m, side);
     for (const sq of m.armies[side]) {
       if (m.units[sq.unit].building) continue; // a building: see buildingBodies
-      const w = tileToWorld(sq.col, sq.row);
-      const ch = charOf(m, side), forward = isFlank(side, sq.col, sq.row) || inNoMans(sq.row);
-      let u = withConstructFx(unitFor(m, side, sq.unit, sq), fx);
-      const mp = mapOf(m);
-      if (mp && mp.stealthDmg && u.stealth) u = { ...u, hit: u.hit * (1 + mp.stealthDmg / 100) }; // the map favours stealth units
-      if (mp && mp.boostHp && (mp.boostUnits || []).includes(m.units[sq.unit].name)) u = { ...u, hp: u.hp * (1 + mp.boostHp / 100) }; // ...or these units by name
-      const purple = (shroomAt(m, sq.col, sq.row) || {}).type === 'purple'; // a purple mushroom tile: half a Zoe buff
-      if (purple) u = { ...u, hit: u.hit * (1 + SHROOM.purpleDmg / 100), hp: u.hp * (1 + SHROOM.purpleHp / 100), aps: u.aps * (1 + SHROOM.purpleAps / 100) };
-      if (ch === 'wilhelm' && forward) u = { ...u, bonusArmor: (u.bonusArmor || 0) + CHAR.wilhelmArmor };
-      // Zoe: a squad that starts the fight on a buff tile keeps the bonus for the whole fight
-      const zoe = onBuffTile(m, side, sq.col, sq.row);
-      if (zoe) { const zb = zoeBuff(m, side); u = { ...u, hit: u.hit * (1 + zb.dmg / 100), hp: u.hp * (1 + zb.hp / 100), aps: u.aps * (1 + zb.aps / 100) }; }
-      if (eagle && u.name === 'Sniper') u = { ...u, range: u.range + TOWER_SKILL.eagleRange, aps: u.aps * (1 + TOWER_SKILL.eagleAps / 100) };
-      if (mp && mp.rangeCut && u.range > mp.rangeKeep) u = { ...u, range: Math.max(mp.rangeKeep, u.range * (1 - mp.rangeCut / 100)) }; // the map shortens reach (never below rangeKeep)
-      u = mapTuned(mp, u); // ...or tunes range and speed (Test Grid)
-      const aura = isDev(m) ? auraFor(m, side, sq.col, sq.row) : null; // devtest: a building's aura
-      if (aura) u = modUnit(u, aura);
+      const w = tileToWorld(sq.col, sq.row), ch = charOf(m, side);
+      const u = fieldUnit(m, side, sq, fx);
+      const purple = (shroomAt(m, sq.col, sq.row) || {}).type === 'purple', zoe = onBuffTile(m, side, sq.col, sq.row); // (for their effects)
+      const aura = isDev(m) ? auraFor(m, side, sq.col, sq.row) : null;
       const b = E.buildSquad(u, side, w.x, w.y, sq.id, TILE, idx, sq.level);
       if (u.glut) for (const x of b) x.glutN = glutOf(sq); // Glut it has eaten (already in its stats): it eats on from there
       if (aura) for (const x of b) x.aura = true;
@@ -4746,9 +4790,9 @@ const Game = (() => {
   function seenBy(m, viewer) {
     const fo = 1 - viewer, v = { ...m }, now = m.round;
     const two = (a, x) => { const o = Array.isArray(a) ? a.slice() : [null, null]; o[fo] = x; return o; };
-    v.armies = two(m.armies, m.armies[fo].filter(s => s.round < now && !hiddenFromFoe(m, s)).map(s => {
+    v.armies = two(m.armies, shownArmy(m, fo).filter(s => s.round < now && !hiddenFromFoe(m, s)).map(s => {
       const p = seenAt(m, s), q = { ...s, col: p.col, row: p.row, level: seenLevel(m, s) };
-      delete q.from; delete q.movedRound;
+      delete q.from; delete q.movedRound; delete q.soldRound;
       if (!seenAwake(m, s)) delete q.awaken;
       if (q.charmGiven === now) { delete q.charm; delete q.charmGiven; }
       return q;
@@ -4971,7 +5015,8 @@ const Game = (() => {
     m.round++;
     m.extraDeploys = [0, 0];
     m.moved = [null, null];
-    for (const a of m.armies) for (const sq of a) { delete sq.from; delete sq.movedRound; }
+    for (const a of m.armies) for (const sq of a) { delete sq.from; delete sq.movedRound; delete sq.freed; }
+    m.sold = [[], []];
     rollBuffTiles(m, 0); rollBuffTiles(m, 1);
     const income = incomeFor(m.round), before = m.gold.slice();
     m.gold[0] += income; m.gold[1] += income;
@@ -5640,7 +5685,7 @@ const Game = (() => {
   }
 
   const api = {
-    MAX_ROUND_DMG, TIER_DMG, bankBusy, seenAt, charShown, towerTypeShown, altarShown, elfOwnShown, shroomShown, removingShroom, movedId, canMove, moveSquad, undoMove,
+    MAX_ROUND_DMG, TIER_DMG, bankBusy, seenAt, soldNow, noteSold, shownArmy, fieldUnit, auraNear, charShown, towerTypeShown, altarShown, elfOwnShown, shroomShown, removingShroom, movedId, canMove, moveSquad, undoMove,
     COLS, ROWS, TILE, ZONE, START_HP, START_GOLD, INCOME, incomeFor, LOSER_BONUS, LOSER_BONUS_ROUND, TOWER_FALL_HP, CREDIT_LINE, loanTerms, treasurySteal, SQUAD_COST, SETTINGS, XP_STEPS, xpNeeded, unitCostOf,
     levelCost, isReady, levelUp, undoLevel, levelAllPlan, levelAll, upgradeOffer, seenLevel, aiLevel, AI, CONFIG,
     deploysAllowed, deploysLeft, deployedThisRound, canBuyDeploy, buyDeploy, refundDeploy,
@@ -6625,8 +6670,8 @@ const Render2D = (cv, view) => {
       ctx.globalAlpha = 1;
     }
     // the opponent's squads from this round stay hidden until the fight
-    // a squad they moved this round still shows on its old tile
-    for (const sq of m.armies[foe()]) if ((sq.round < m.round || phase !== 'deploy') && !Game.hiddenFromFoe(m, sq)) {
+    // a squad they moved this round still shows on its old tile, and one they sold this round still stands
+    for (const sq of phase === 'deploy' ? Game.shownArmy(m, foe()) : m.armies[foe()]) if ((sq.round < m.round || phase !== 'deploy') && !Game.hiddenFromFoe(m, sq)) {
       const p = phase === 'deploy' ? Game.seenAt(m, sq) : sq;
       const look = Game.shownUnit(m, me, foe(), sq.unit); // a disguised unit shows as what it pretends to be
       drawSquad(phase === 'deploy' ? { ...sq, unit: look, col: p.col, row: p.row, level: Game.seenLevel(m, sq) } : { ...sq, unit: look }, foe(), false); // a level-up bought this round stays hidden
@@ -6657,7 +6702,7 @@ const Render2D = (cv, view) => {
     if (phase === 'deploy') drawBwalls();
     drawBuildings();
     // Overwatch: a squad standing in one of its side's buildings is drawn over the building (theirs as far as you can see it)
-    for (const side of [me, foe()]) for (const sq of m.armies[side]) {
+    for (const side of [me, foe()]) for (const sq of side !== me && phase === 'deploy' ? Game.shownArmy(m, side) : m.armies[side]) {
       if (Game.isRider(sq) || (side !== me && ((phase === 'deploy' && sq.round >= m.round) || Game.hiddenFromFoe(m, sq)))) continue;
       const p = side === me ? (drag && drag.moved && drag.id === sq.id ? drag.over : sq) : phase === 'deploy' ? Game.seenAt(m, sq) : sq;
       if (!Game.garrisonAt(m, side, p.col, p.row)) continue;
@@ -8363,7 +8408,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
       return [wx, wz];
     };
     // the opponent's squads from this round stay hidden until the fight; a squad they moved shows on its old tile
-    for (const sq of m.armies[foe]) if ((sq.round < m.round || !deploying) && !Game.hiddenFromFoe(m, sq)) {
+    for (const sq of deploying ? Game.shownArmy(m, foe) : m.armies[foe]) if ((sq.round < m.round || !deploying) && !Game.hiddenFromFoe(m, sq)) {
       const p = deploying ? Game.seenAt(m, sq) : sq;
       const look = Game.shownUnit(m, me, foe, sq.unit); // a disguised unit shows as what it pretends to be
       squad(deploying ? { ...sq, unit: look, col: p.col, row: p.row, level: Game.seenLevel(m, sq) } : { ...sq, unit: look }, foe, false); // a level-up bought this round stays hidden
