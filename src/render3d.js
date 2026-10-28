@@ -747,7 +747,8 @@ const Render3D = (THREE, el, view, opts = {}) => {
         beam(x1, 1.1, z1, x2, 0.9, z2, k * Math.max(e.charged ? 0.28 : 0.1, 0.1 + ((e.spin || 1) - 1) * 0.16), team, 0.85 * a);
         if (e.splash > 0) arc(x2, z2, e.splash, team, 0.55 * a, 1, 0.08);
       } else if (e.kind === 'frost') { // a frost beam: a pale core in a glow of the team colour
-        beam(x1, 1.4, z1, x2, 1.0, z2, k * 0.24, team, 0.35 * a); beam(x1, 1.4, z1, x2, 1.0, z2, k * 0.08, color(FROST_COL), a);
+        const ab = Art.beamAlpha(e); // held on its target: steady, with a shimmer
+        beam(x1, 1.4, z1, x2, 1.0, z2, k * 0.28, team, 0.35 * ab); beam(x1, 1.4, z1, x2, 1.0, z2, k * 0.09, color(FROST_COL), ab);
       } else if (e.kind === 'eat') { // eaten by the Obelisk: a violet wisp drawn into it
         const p = 1 - a; beam(x1, 0.8, z1, x1 + (x2 - x1) * p, 0.8 + 1.5 * p, z1 + (z2 - z1) * p, k * 0.12, color(GLUT_COL), 0.85 * a);
       } else if (e.kind === 'heal') { // a dashed green line

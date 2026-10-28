@@ -35,7 +35,7 @@ function fight() {
 }
 // as the game's absorb(): this tick's shots and deaths become effects
 function absorb() {
-  for (const s of bt.lastShots()) if (s[13] === 1) fx.push({ kind: 'frost', x1: s[0], y1: s[1], x2: s[2], y2: s[3], side: s[4], age: 0, life: 0.2 }); // a frost beam
+  for (const s of bt.lastShots()) if (s[13] === 1) Art.frostBeam(fx, s); // a frost beam, held on its target
   else if (s[13] === 2) fx.push({ kind: 'freeze', x: s[0], y: s[1], side: s[4], age: 0, life: 0.6 }); // frozen solid
   else if (s[13] === 3) fx.push({ kind: 'eat', x1: s[0], y1: s[1], x2: s[2], y2: s[3], side: s[4], age: 0, life: 0.6 }); // eaten by the Obelisk
   else if (s[12] === 1) fx.push({ kind: 'roar', x: s[0], y: s[1], r: s[5], side: s[4], age: 0, life: 0.8 });
@@ -163,6 +163,7 @@ function frame(ts) {
     acc += dt * speed;
     while (acc >= DT) { acc -= DT; if (!bt.step()) break; absorb(); }
     for (const e of fx) e.age += dt * speed;
+    Art.frostFollow(fx);
     fx = fx.filter(e => e.age < e.life);
     if (bt.isOver()) {
       result = bt.result(); phase = 'result'; fx = []; shop();

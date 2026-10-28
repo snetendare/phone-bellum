@@ -46,6 +46,8 @@ const Models3D = (THREE) => {
   // in the team colour round the lowest coil and violet spines (its Glut) down its back; the neck rears up and forward to
   // a wedge-shaped head with an open jaw, fangs and glowing yellow eyes. torus(): a coil lying flat
   const coil = (r, t, y, col, [x, z] = [0, 0]) => P(new THREE.TorusGeometry(r, t, 6, 14), col, [x, y, z], [Math.PI / 2, 0, 0]);
+  const OBELISK_K = 0.8; // the serpent drawn this much smaller than its health would make it
+  const small = (parts, k = OBELISK_K) => parts.map(p => (p.g.scale(k, k, k), p));
   const obeliskParts = () => [
     coil(1.2, 0.42, 0.42, 'tint'), coil(1.28, 0.07, 0.22, 'team'),
     coil(0.85, 0.38, 1.08, 'tint', [0, 0.3]),
@@ -232,11 +234,11 @@ const Models3D = (THREE) => {
       P(cyl(0.05, 0.05, 2.2, 5), WOOD, [0.55, 1.1, -0.15]),
       ...top()]])),
     // Obelisk: a giant serpent coiled on the ground, its head reared up (see obeliskParts)
-    obelisk: () => obeliskParts(),
+    obelisk: () => small(obeliskParts()),
     // ...awakened (Eye of the Obelisk): a hood spread behind its head and great glowing eyes, its deadly gaze
-    'obelisk:eye': () => [...obeliskParts(), 
+    'obelisk:eye': () => small([...obeliskParts(),
       ...[-1, 1].flatMap(sd => [P(box(0.08, 1.15, 0.75), 'tint', [sd * 0.5, 2.7, -0.3], [-0.45, 0, sd * 0.55]), P(box(0.04, 0.8, 0.4), GLUT, [sd * 0.53, 2.7, -0.42], [-0.45, 0, sd * 0.55]),
-        P(ball(0.22), GLUT, [sd * 0.43, 3.26, -1.45]), P(ball(0.11), '#FFF2A8', [sd * 0.45, 3.26, -1.6])])],
+        P(ball(0.22), GLUT, [sd * 0.43, 3.26, -1.45]), P(ball(0.11), '#FFF2A8', [sd * 0.45, 3.26, -1.6])])]),
     // ---------- the tier 4 units (NAMED) ----------
     // Ether Golem: a hunched heap of boulders in the unit's colour, a glowing core and eye slit, rune shards floating
     golem: () => [

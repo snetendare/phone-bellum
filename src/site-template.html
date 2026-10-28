@@ -469,7 +469,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
     'Assassin': 'Hidden killer. Strikes once, hard.',
     'Sun Priest': 'Beam that ramps up. Melts giants.',
     'Meteor Caller': 'Long-range meteors. Helpless up close.',
-    'War Mammoth': 'Charges through lines, trampling.',
+    'War Mammoth': 'Charges deep through lines to the backline, stomping all around it.',
     'Necromancer': 'Raises skeletons as a screen.',
     'Wisps': 'Slow, hard ranged bolts. Fragile.',
     'Crossbow Volley': 'Bolt bursts down one line.',
@@ -2326,6 +2326,10 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
       if (u.knockback > 0) t.push(`knockback ${u.knockback} m`);
       if (u.trample > 0) t.push(`tramples ${u.trample}%`);
       if (u.chargeStun > 0) t.push(`stunned ${u.chargeStun} s after each charge (can't move or attack)`);
+      if (u.chargeCd > 0) t.push(`charges at most once every ${u.chargeCd} s`);
+      if (u.trampleRun > 0) t.push(`runs on ${u.trampleRun} m past its target after a charge${u.trampleSpeed > 0 ? ` at ${u.trampleSpeed}x speed` : ''}`);
+      if (u.stomp > 0) t.push(`every attack hits all enemies within ${u.stomp} m of it`);
+      if (u.levelHp > 0) t.push(`each level adds +${u.levelHp}% health (not +100%)`);
       if (u.pctHit > 0) t.push(`every hit also deals ${u.pctHit}% of the target's max health, ignoring armor (not to towers)`);
       if (u.deathBlast > 0) t.push(`explodes on death for ${u.deathBlast}% of max health within ${Engine.BLAST_RADIUS} m`);
       if (u.windUp > 0) t.push(`wind-up ${u.windUp} s`);
@@ -2913,7 +2917,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   }
 
   function absorb() {
-    for (const s of bt.lastShots()) if (s[13] === 1) fx.push({ kind: 'frost', x1: s[0], y1: s[1], x2: s[2], y2: s[3], side: s[4], age: 0, life: 0.2 }); // a frost beam
+    for (const s of bt.lastShots()) if (s[13] === 1) Art.frostBeam(fx, s); // a frost beam, held on its target
     else if (s[13] === 2) fx.push({ kind: 'freeze', x: s[0], y: s[1], side: s[4], age: 0, life: 0.6 }); // frozen solid
     else if (s[13] === 3) fx.push({ kind: 'eat', x1: s[0], y1: s[1], x2: s[2], y2: s[3], side: s[4], age: 0, life: 0.6 }); // eaten by the Obelisk
     else if (s[12] === 1) fx.push({ kind: 'roar', x: s[0], y: s[1], r: s[5], side: s[4], age: 0, life: 0.8 });
@@ -2958,6 +2962,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       absorb();
     }
     for (const e of fx) e.age += dtReal * sp * boost;
+    Art.frostFollow(fx);
     fx = fx.filter(e => e.age < e.life);
     $('clock').textContent = `${bt.time().toFixed(1)} s${cam && cam.on ? ' · final seconds' : boost > 1 ? ' · speeding up' : ''}`;
     render();
@@ -4145,6 +4150,8 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (u.knockback > 0) tr.push(`Knockback ${u.knockback} m`);
     if (u.trample > 0) tr.push(`Tramples (${u.trample}% hit)`);
     if (u.chargeStun > 0) tr.push(`Stunned ${u.chargeStun} s after a charge`);
+    if (u.chargeCd > 0) tr.push(`Charge every ${u.chargeCd} s`);
+    if (u.stomp > 0) tr.push(`Stomps all within ${u.stomp} m`);
     if (u.pctHit > 0) tr.push(`Hits +${u.pctHit}% of target’s health, past armor`);
     if (u.deathBlast > 0) tr.push(`Death blast ${u.deathBlast}% health, ${u.blastAt > 0 ? u.blastAt : Engine.BLAST_RADIUS} m`);
     if (u.dodge > 0) tr.push(`Dodges ${u.dodge}% of hits`);

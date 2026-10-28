@@ -280,7 +280,7 @@
       "cost": 150,
       "params": {
         "every": 3,
-        "hit": 5
+        "hit": 15
       }
     },
     {
@@ -868,7 +868,9 @@
       "cost": 300,
       "params": {
         "range": 18,
-        "speed": 25
+        "speed": 25,
+        "poison": 50,
+        "duration": 4
       },
       "flat": true,
       "needs": "glutMax"
@@ -1652,7 +1654,7 @@
       "spinUp": 0,
       "pierce": 0,
       "projSpeed": 22,
-      "minRange": 12,
+      "minRange": 16,
       "charge": 1,
       "knockback": 0,
       "windUp": 2,
@@ -1678,7 +1680,7 @@
       "cost": 500,
       "bodies": 1,
       "hp": 400,
-      "hit": 114,
+      "hit": 105,
       "aps": 0.3,
       "range": 50,
       "speed": 2,
@@ -1704,7 +1706,7 @@
       "defVal": 6,
       "level": 0,
       "unlock": 150,
-      "splash": 3,
+      "splash": 0,
       "skillsOn": [
         false,
         false
@@ -1732,7 +1734,11 @@
         "armorHp"
       ],
       "trample": 50,
-      "chargeStun": 1
+      "chargeStun": 0,
+      "chargeCd": 10,
+      "trampleRun": 14,
+      "trampleSpeed": 1.5,
+      "stomp": 3.5
     },
     {
       "burst": 1,
@@ -2430,14 +2436,14 @@
         "speed": 0,
         "aps": 0
       },
-      "lifesteal": 50,
+      "lifesteal": 20,
       "trait": {
         "name": "Glut",
         "text": "Eats kills: +6% health, +6% hit each. Max 3 a round, 15 in all."
       },
       "trait2": {
         "name": "Devour",
-        "text": "Heals 50% of damage dealt."
+        "text": "Heals 20% of damage dealt."
       },
       "skills": [
         "gluttony",
@@ -2468,7 +2474,8 @@
           1,
           2
         ]
-      ]
+      ],
+      "levelHp": 75
     }
   ]
 }

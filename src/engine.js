@@ -1,6 +1,6 @@
 // ===== Battle engine (shared by headless tests and the page) =====
 const Engine = (() => {
-  const TRAIT_DEFAULTS = { burst: 1, pellets: 1, spinUp: 0, spinHit: 0, pierce: 0, projSpeed: 0, minRange: 0, charge: 1, knockback: 0, windUp: 0, flame: 0, trample: 0, chargeStun: 0, deathBlast: 0, pctHit: 0, ram: 0, noFlank: 0, carrier: 0, noPack: 0, roll: 0 };
+  const TRAIT_DEFAULTS = { burst: 1, pellets: 1, spinUp: 0, spinHit: 0, pierce: 0, projSpeed: 0, minRange: 0, charge: 1, knockback: 0, windUp: 0, flame: 0, trample: 0, chargeStun: 0, chargeCd: 0, trampleRun: 0, trampleSpeed: 0, stomp: 0, levelHp: 0, deathBlast: 0, pctHit: 0, ram: 0, noFlank: 0, carrier: 0, noPack: 0, roll: 0 };
   const BURST_GAP = 0.15;      // seconds between shots in a burst
   const SHOTGUN_COS = Math.sqrt(3) / 2; // pellets spread 30 degrees to each side of the target (cos 30)
   // Only + - * / and sqrt from here on: those give identical results in every browser,
@@ -18,6 +18,10 @@ const Engine = (() => {
   const CHARGE_RUN = 5;        // metres a unit must run before its next attack counts as a charge
   const TRAMPLE_RUN = 8;       // after a charged hit, a trampler keeps running this far past its target
   const TRAMPLE_WIDTH = 1.5;   // bodies within this distance of a trampler's path get run over
+  // chargeCd: seconds after a charge before its next attack can be a charge (0: whenever it has run CHARGE_RUN m again).
+  // trampleRun: how far a trampler runs on past its target (0: TRAMPLE_RUN); trampleSpeed: its speed during that run, x its
+  // own (0: 1x). stomp: radius (m) round itself that every attack hits, every enemy in it for the full hit (the War Mammoth).
+  // levelHp: % of starting health each level adds (0: LEVEL_BONUS, +100%); hit still grows by LEVEL_BONUS.
   // chargeStun: after a charged hit (and the trample run that follows it) the unit is stunned this many seconds:
   // it can't move or attack
   const STEALTH_BACK = 1.5;    // a stealth unit hides again after this many seconds without attacking
@@ -201,13 +205,16 @@ const Engine = (() => {
 
   const withTraits = (u) => ({ ...TRAIT_DEFAULTS, defense: 'none', defVal: 0, level: 0, ...u });
 
+  // health multiplier at level L (u.levelHp: % of starting health per level, else LEVEL_BONUS)
+  const levelHpK = (u, L) => 1 + (u && u.levelHp > 0 ? u.levelHp / 100 : LEVEL_BONUS) * L;
+
   // Unit stats at a given level (defaults to the unit's own level field)
   function leveled(unit, level) {
     const u = withTraits(unit);
     const L = Math.max(0, Math.min(MAX_LEVEL, Math.round(level == null ? u.level : level)));
     if (!L) return { ...u, level: 0 };
     const k = 1 + LEVEL_BONUS * L;
-    return { ...u, level: L, hp: u.hp * k, hit: u.hit * k, ...(u.spear ? { spear: { ...u.spear, hit: u.spear.hit * k } } : {}), ...(u.missiles ? { missiles: { ...u.missiles, hit: u.missiles.hit * k } } : {}) };
+    return { ...u, level: L, hp: u.hp * levelHpK(u, L), hit: u.hit * k, ...(u.spear ? { spear: { ...u.spear, hit: u.spear.hit * k } } : {}), ...(u.missiles ? { missiles: { ...u.missiles, hit: u.missiles.hit * k } } : {}) };
   }
 
   // a unit with u.glut at n stacks of Glut (from its stats at none): more health, hit, move and attack speed
@@ -290,7 +297,7 @@ const Engine = (() => {
     glut:    { label: 'Glut', params: [['max', 'Most stacks', 12, 1], ['cap', 'Most stacks eaten per round', 2, 1], ['hp', 'Health per stack (+%)', 5, 1], ['hit', 'Hit per stack (+%)', 5, 1]] },
     glutCap: { label: 'Bigger appetite', params: [['add', 'More stacks eaten per round (+)', 1, 1]] },
     glutSpeed: { label: 'Glut speed', params: [['speed', 'Move speed per stack (+m/s)', 0.05, 0.01], ['aps', 'Attack speed per stack (+%)', 1, 0.5]] },
-    ranged:  { label: 'Ranged attack', params: [['range', 'Range (becomes, m)', 18, 1], ['speed', 'Projectile speed (m/s)', 25, 1]] },
+    ranged:  { label: 'Ranged attack', params: [['range', 'Range (becomes, m)', 18, 1], ['speed', 'Projectile speed (m/s)', 25, 1], ['poison', 'Poison (% of hit, in total; 0 = none)', 50, 10], ['duration', 'Poison lasts (s)', 4, 0.5]] },
   };
   const skillParam = (d, k) => {
     const v = d.params && d.params[k];
@@ -394,7 +401,7 @@ const Engine = (() => {
       case 'glut': return `Eats kills: +${n('hp')}% health, +${n('hit')}% hit each (max ${n('max')}).`;
       case 'glutCap': return `Eats +${n('add')} a round.`;
       case 'glutSpeed': return `Glut also gives +${n('speed')} m/s, +${n('aps')}% attack speed.`;
-      case 'ranged': return `Ranged: ${n('range')} m.`;
+      case 'ranged': return `Ranged: ${n('range')} m.${+P('poison') > 0 ? ` Hits poison: ${n('poison')}% over ${n('duration')} s.` : ''}`;
     }
     return '';
   }
@@ -523,7 +530,9 @@ const Engine = (() => {
         case 'glut': u.glut = { speed: 0, aps: 0, ...(u.glut || {}), max: Math.max(1, Math.round(P('max'))), cap: Math.max(1, Math.round(P('cap'))), hp: P('hp'), hit: P('hit') }; break;
         case 'glutCap': if (u.glut) u.glut = { ...u.glut, cap: u.glut.cap + Math.max(0, Math.round(P('add'))) }; break;
         case 'glutSpeed': if (u.glut) u.glut = { ...u.glut, speed: (u.glut.speed || 0) + P('speed'), aps: (u.glut.aps || 0) + P('aps') }; break;
-        case 'ranged': u.range = Math.max(0.5, P('range')); u.projSpeed = Math.max(2, P('speed')); u.flame = 0; u.slam = false; u.eye = true; break; // eye: drawn awakened (the Obelisk's)
+        case 'ranged': u.range = Math.max(0.5, P('range')); u.projSpeed = Math.max(2, P('speed')); u.flame = 0; u.slam = false; u.eye = true;
+          if (P('poison') > 0) { u.poisonPct = (u.poisonPct || 0) + P('poison'); u.poisonDur = Math.max(u.poisonDur || 0, Math.max(0.5, P('duration') || 4)); }
+          break; // eye: drawn awakened (the Obelisk's)
         case 'double': u.hit = u.hit * (1 + P('hit') / 100); u.double = Math.max(2, Math.round(P('every'))); break;
         case 'bleedDeep': u.bleedLonger = (u.bleedLonger || 0) + Math.max(0, P('secs')); u.bleedNoHeal = true; break;
         case 'bleedStun': u.bleedStun = Math.max(u.bleedStun || 0, Math.max(0, P('secs'))); break;
@@ -1351,6 +1360,13 @@ const Engine = (() => {
     // one shot, or a spread of shotgun pellets each at a different body in the cone
     function aim(b, primary, valid) {
       if (b.u.flame > 0) return flameTargets(b, primary);
+      if (b.u.stomp > 0) {
+        // stomp: every enemy body within stomp m of it (the target too), each hit once where it stands
+        const out = [primary];
+        for (const f of sides[1 - b.side]) if (f !== primary && f.alive && !f.u.aloft && !sheltered(f) && gap(f, b) <= b.u.stomp + 0.01) out.push(f);
+        out.stomp = true;
+        return out;
+      }
       const n = Math.max(1, Math.round(b.u.pellets));
       if (n === 1 && b.u.beams > 1) {
         // split beam: the target plus the next nearest enemies in reach, each hit once (Multibeam: each extra beam
@@ -1399,8 +1415,9 @@ const Engine = (() => {
     }
 
     function fire(b, targets, canCharge) {
-      const charged = canCharge && b.u.charge > 1 && b.moved >= CHARGE_RUN;
+      const charged = canCharge && b.u.charge > 1 && b.moved >= CHARGE_RUN && !(t < (b.chargeAt || 0));
       b.moved = 0;
+      if (charged && b.u.chargeCd > 0) b.chargeAt = t + b.u.chargeCd;
       // attacking gives a stealth unit away (it hides again after STEALTH_BACK s without attacking); an airship stays out of
       // reach; Silent blade's first attack doesn't. During the tick's attacks the enemy sees it from the next tick (healsLand)
       if (b.hidden && !b.u.aloft && !b.quiet) { if (healLater) hitsLater.push(() => { b.hidden = false; }); else b.hidden = false; }
@@ -1420,7 +1437,7 @@ const Engine = (() => {
       // trample: a charged hit doesn't stop the unit; it runs on through its target and over every body in its path
       if (charged && b.u.trample > 0 && targets.length && !targets.flame) {
         const tgt = targets[0], dx = tgt.x - b.x, dy = tgt.y - b.y, d = hyp(dx, dy);
-        if (d > 0) { b.trampleDir = [dx / d, dy / d]; b.trampleLeft = d + TRAMPLE_RUN; b.trampled = [tgt]; }
+        if (d > 0) { b.trampleDir = [dx / d, dy / d]; b.trampleLeft = d + (b.u.trampleRun > 0 ? b.u.trampleRun : TRAMPLE_RUN); b.trampled = [tgt]; }
       }
       // stunned after a charge (a trampler only once its run is over, see the movement loop)
       if (charged && b.u.chargeStun > 0 && !(b.trampleLeft > 0)) b.stunT = b.u.chargeStun;
@@ -1430,14 +1447,14 @@ const Engine = (() => {
         if (wl && targets.flame) { if (walled.has(wl)) continue; walled.add(wl); }
         const dx = tgt.x - b.x, dy = tgt.y - b.y, d = hyp(dx, dy) || 1;
         const dirX = dx / d, dirY = dy / d;
-        if (targets.flame) {
-          hurt(b, tgt, hit, b.x, b.y); // flames land at once, no splash or pierce
+        if (targets.flame || targets.stomp) {
+          hurt(b, tgt, hit, b.x, b.y); // flames and stomps land at once, no splash or pierce
         } else if (b.u.projSpeed > 0) {
           projectiles.push({ owner: b, x: b.x, y: b.y, fx: b.x, fy: b.y, tx: tgt.x, ty: tgt.y, dirX, dirY, left: d, hit });
         } else {
           impact(b, tgt.x, tgt.y, tgt, hit, dirX, dirY, b.x, b.y);
         }
-        if (opts.record && !targets.flame) shots.push([b.x, b.y, tgt.x, tgt.y, b.side, b.u.splash, charged ? 1 : 0, 0, 0, b.u.spinUp > 0 ? b.spin : 1, b.u.chain ? 1 : 0, 0, 0, b.u.frost && !(b.u.projSpeed > 0) ? 1 : 0]); // [13] 1: a frost beam
+        if (opts.record && !targets.flame) shots.push([b.x, b.y, tgt.x, tgt.y, b.side, b.u.splash, charged ? 1 : 0, 0, 0, b.u.spinUp > 0 ? b.spin : 1, b.u.chain ? 1 : 0, 0, 0, b.u.frost && !(b.u.projSpeed > 0) ? 1 : 0, b, tgt]); // [13] 1: a frost beam; [14], [15]: its shooter and target (a held beam is drawn between them)
       }
       // chain lightning: from the target on to the nearest enemy not hit yet, up to chain.jumps times
       if (b.u.chain && targets.length && !targets.flame && !(b.u.projSpeed > 0)) {
@@ -1823,7 +1840,7 @@ const Engine = (() => {
           b.intent = was && was.alive ? was : null;
           // running through after a charge: straight on, hitting each body it runs over once
           // a Bullhead charge runs at twice its speed, hits for bull.hit and knocks each body it hits back along its path
-          const mv = Math.min(b.trampleLeft, spd(b) * (b.charging ? 2 : 1) * (b.slowT > 0 ? 1 - b.slowMove / 100 : 1) * (cripple[b.side] > 0 ? 1 - towerDown.move / 100 : 1) * dt);
+          const mv = Math.min(b.trampleLeft, spd(b) * (b.charging ? 2 : b.u.trampleSpeed > 0 ? b.u.trampleSpeed : 1) * (b.slowT > 0 ? 1 - b.slowMove / 100 : 1) * (cripple[b.side] > 0 ? 1 - towerDown.move / 100 : 1) * dt);
           const [ux, uy] = b.trampleDir;
           b.x += ux * mv; b.y += uy * mv; b.hx = ux; b.hy = uy;
           if (g.bounds) { b.x = Math.max(g.bounds.x0, Math.min(g.bounds.x1, b.x)); b.y = Math.max(g.bounds.y0, Math.min(g.bounds.y1, b.y)); }
@@ -2511,6 +2528,6 @@ const Engine = (() => {
     return m;
   }
 
-  return { DASH_SPEED, LONE_R, WATCH_IDLE, BURN, FROST_ON, EAT_R, glutUnit, TOWER_DOWN, RULES, ruleOn, STEALTH_BACK, SKILL_SLOTS, SLOTS, SKILL_TYPES, skillParam, describeSkill, applySkills, innateUnit, fairBudget, battle, makeArmy, matrix, createBattle, buildSquad, rawStrength, squadsFor, withTraits, leveled, TRAIT_DEFAULTS, SPIN_CAP, CHARGE_RUN, TRAMPLE_RUN, BLAST_RADIUS, BLEED, POISON_HEAL, RAM_REACH, ROLL_START, ROLL_PAST, BUILD_GAP, BUILD_COOP, SITE_REACH, MINE_TRIGGER, REPAIR_SECS, LEVEL_BONUS, MAX_LEVEL, CHARM_MAX, CONVERT_HP, CONVERT_SQUAD };
+  return { DASH_SPEED, LONE_R, WATCH_IDLE, BURN, FROST_ON, EAT_R, glutUnit, TOWER_DOWN, RULES, ruleOn, STEALTH_BACK, SKILL_SLOTS, SLOTS, SKILL_TYPES, skillParam, describeSkill, applySkills, innateUnit, fairBudget, battle, makeArmy, matrix, createBattle, buildSquad, rawStrength, squadsFor, withTraits, leveled, TRAIT_DEFAULTS, SPIN_CAP, CHARGE_RUN, TRAMPLE_RUN, BLAST_RADIUS, BLEED, POISON_HEAL, RAM_REACH, ROLL_START, ROLL_PAST, BUILD_GAP, BUILD_COOP, SITE_REACH, MINE_TRIGGER, REPAIR_SECS, LEVEL_BONUS, levelHpK, MAX_LEVEL, CHARM_MAX, CONVERT_HP, CONVERT_SQUAD };
 })();
 if (typeof module !== 'undefined') module.exports = Engine;

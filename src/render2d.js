@@ -1057,8 +1057,9 @@ const Render2D = (cv, view) => {
         ctx.beginPath(); ctx.moveTo(PX(e.x1), PY(e.y1)); ctx.lineTo(PX(e.x2), PY(e.y2)); ctx.stroke(); ctx.setLineDash([]);
         if (e.splash > 0) { ctx.globalAlpha = 0.5 * a; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(PX(e.x2), PY(e.y2), e.splash * S, 0, Math.PI * 2); ctx.stroke(); } // the elves' splash heal
       }
-      if (e.kind === 'frost') { // a frost beam: a cold glow in the team colour round a pale core
-        for (const [col, lw, al] of [[teamCol(e.side), 4, 0.3], [FROST_COL, 2, 0.85], ['#FFFFFF', 0.8, 0.9]]) { ctx.strokeStyle = col; ctx.lineWidth = lw; ctx.globalAlpha = al * a; ctx.beginPath(); ctx.moveTo(PX(e.x1), PY(e.y1)); ctx.lineTo(PX(e.x2), PY(e.y2)); ctx.stroke(); }
+      if (e.kind === 'frost') { // a frost beam, held on its target: a cold glow in the team colour round a pale core
+        const ab = Art.beamAlpha(e);
+        for (const [col, lw, al] of [[teamCol(e.side), 5, 0.3], [FROST_COL, 2.4, 0.85], ['#FFFFFF', 1, 0.9]]) { ctx.strokeStyle = col; ctx.lineWidth = lw; ctx.globalAlpha = al * ab; ctx.beginPath(); ctx.moveTo(PX(e.x1), PY(e.y1)); ctx.lineTo(PX(e.x2), PY(e.y2)); ctx.stroke(); }
       }
       if (e.kind === 'freeze') { // frozen solid: shards of ice burst out
         ctx.strokeStyle = '#E8FAFF'; ctx.globalAlpha = a; ctx.lineWidth = 1.5;

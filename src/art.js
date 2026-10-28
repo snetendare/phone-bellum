@@ -121,5 +121,23 @@ const Art = (() => {
     if (crest) arms(ctx, crest, x + Math.min(w / 2, s * 0.28), y + s * 0.18, Math.max(8, s * 0.38));
     ctx.globalAlpha = 1;
   }
-  return { css, teamCol, ELF_COL, SHROOM_COL, CHARM_COL, BLEED_COL, POOL_COL, FROST_COL, GLUT_COL, ARMS, arms, armsFlag, armsImg, keep };
+  // Frost Wizard beams are held, not shot: one beam per shooter, kept on its target between hits (refreshed by each
+  // hit) and following both bodies; a new target ends the old beam. fx: the effects list; s: a shot record ([13] 1)
+  function frostBeam(fx, s) {
+    const src = s[14], tgt = s[15], hold = 1 / Math.max(0.5, src && src.u ? src.u.aps : 3) + 0.2;
+    let e = null;
+    for (const o of fx) if (o.kind === 'frost' && o.held && o.src === src) { if (o.tgt === tgt) e = o; else o.life = Math.min(o.life, o.age + 0.06); }
+    if (e) { e.life = e.age + hold; return; }
+    fx.push({ kind: 'frost', held: !!src, src, tgt, x1: s[0], y1: s[1], x2: s[2], y2: s[3], side: s[4], age: 0, life: src ? hold : 0.2 });
+  }
+  // each frame: held beams follow their shooter and target, and fade at once when either falls
+  function frostFollow(fx) {
+    for (const e of fx) if (e.held) {
+      if (!e.src.alive || !e.tgt.alive) { e.life = Math.min(e.life, e.age + 0.08); continue; }
+      e.x1 = e.src.x; e.y1 = e.src.y; e.x2 = e.tgt.x; e.y2 = e.tgt.y;
+    }
+  }
+  // a held beam's strength: steady with a cold shimmer, fading out over its last 0.1 s
+  const beamAlpha = (e) => e.held ? Math.min(1, (e.life - e.age) / 0.1) * (0.85 + 0.15 * Math.sin(e.age * 31)) : 1 - e.age / e.life;
+  return { frostBeam, frostFollow, beamAlpha, css, teamCol, ELF_COL, SHROOM_COL, CHARM_COL, BLEED_COL, POOL_COL, FROST_COL, GLUT_COL, ARMS, arms, armsFlag, armsImg, keep };
 })();

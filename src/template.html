@@ -401,6 +401,11 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
     ['charge', 'Charge (× damage)', 0.5, 'Next hit after running 5 m. 1 = off.'],
     ['knockback', 'Knockback (m)', 0.5, 'How far a big hit pushes a small body.'],
     ['trample', 'Trample (% of hit)', 10, 'After a charged hit the unit keeps running 8 m through its target, hitting each body it runs over for this share of its hit. 0 = off.'],
+    ['chargeCd', 'Charge cooldown (s)', 1, 'After a charge, the next attack can only be a charge again after this long. 0 = whenever it has run 5 m.'],
+    ['trampleRun', 'Trample run (m)', 1, 'How far it runs on past its target after a charged hit. 0 = 8 m.'],
+    ['trampleSpeed', 'Trample run speed (×)', 0.25, 'Its speed during the run-through, times its own. 0 = 1×.'],
+    ['stomp', 'Stomp radius (m)', 0.5, 'Every attack hits all enemies within this many metres of the unit itself, each for the full hit. 0 = off.'],
+    ['levelHp', 'Health per level (%)', 5, 'Health each level adds, in % of starting health. 0 = the usual +100%.'],
     ['chargeStun', 'Stun after charge (s)', 0.5, 'After a charged hit (and its trample run) the unit stands stunned this long: it can’t move or attack. 0 = off.'],
     ['deathBlast', 'Death blast (% of max health)', 5, 'When a body dies it explodes, dealing this share of its max health to every enemy within 4 m. Grows with level. 0 = off.'],
     ['pctHit', 'Health cut (% of target max health)', 5, 'Every hit also deals this share of the target’s max health (leveled targets have more), on top of the hit. Not against towers. Armor doesn’t stop this part (it still stops the hit); a ward caps the whole hit. 0 = off.'],
@@ -686,6 +691,8 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
       if (u.knockback > 0) tr.push(`knockback ${fmt(u.knockback, 1)} m`);
       if (u.trample > 0) tr.push(`trample ${fmt(u.trample, 0)}%`);
       if (u.chargeStun > 0) tr.push(`stunned ${fmt(u.chargeStun, 1)} s after a charge`);
+      if (u.chargeCd > 0) tr.push(`charge every ${fmt(u.chargeCd, 1)} s`);
+      if (u.stomp > 0) tr.push(`stomp ${fmt(u.stomp, 1)} m`);
       if (u.deathBlast > 0) tr.push(`death blast ${fmt(u.deathBlast, 0)}%`);
       if (u.pctHit > 0) tr.push(`health cut ${fmt(u.pctHit, 0)}%`);
       if (u.windUp > 0) tr.push(`wind-up ${fmt(u.windUp, 1)} s`);
