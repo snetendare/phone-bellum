@@ -3668,7 +3668,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       let b = null, loaded = false;
       try {
         const THREE = await import(THREE_URL);
-        if (typeof Render3D !== 'function') for (const f of ['camera3d', 'models3d', 'render3d']) await load(`src/${f}.js?v=${V3D}`); // V3D: a new name each build, so a browser never runs an old copy
+        if (typeof Render3D !== 'function') for (const f of ['camera3d', 'models3d', 'scenery3d', 'render3d']) await load(`src/${f}.js?v=${V3D}`); // V3D: a new name each build, so a browser never runs an old copy
         loaded = true;
         if (!want3d) return; // switched back to 2D while loading
         el.className = 'board3d';

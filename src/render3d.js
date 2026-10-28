@@ -63,7 +63,8 @@ const Render3D = (THREE, el, view, opts = {}) => {
   floorCv.style.cssText = 'position:fixed;left:-10000px;top:0;width:720px';
   document.body.appendChild(floorCv);
   let floorView = null, floorKey = null, floorAge = 0, floorDims = '';
-  const floor2d = Render2D(floorCv, () => floorView);
+  // on maps without a painted ground of their own, the floor is the scenery's meadow, with darker grid lines
+  const floor2d = Render2D(floorCv, () => floorView, typeof Scenery3D === 'function' ? { ground: Scenery3D.meadow, grid: 'rgba(28, 38, 22, 0.2)', zoneA: 0.1 } : {});
   const groundTex = new THREE.CanvasTexture(floorCv);
   groundTex.colorSpace = THREE.SRGBColorSpace;
   groundTex.anisotropy = renderer.capabilities.getMaxAnisotropy();
@@ -76,6 +77,17 @@ const Render3D = (THREE, el, view, opts = {}) => {
   const around = new THREE.Mesh(new THREE.PlaneGeometry(600, 600), new THREE.MeshLambertMaterial({ color: '#141b1d' }));
   around.rotation.x = -Math.PI / 2; around.position.y = -0.05; around.receiveShadow = true;
   scene.add(around);
+  // the land around the board and small plants on it (src/scenery3d.js; missing in builds without it)
+  const scenery = typeof Scenery3D === 'function' ? Scenery3D(THREE, scene, { onReady: () => { biomeKey = null; if (opts.onInput) opts.onInput(); } }) : null;
+  let biomeKey = null;
+  function useScenery(v) {
+    if (!scenery) return;
+    scenery.update(v, groundY, BW, BD, T);
+    const bi = scenery.biome(v);
+    if (bi.sky === biomeKey) return;
+    biomeKey = bi.sky;
+    scene.background.set(bi.sky); scene.fog.color.set(bi.sky); around.material.color.set(bi.land);
+  }
   // ---------- ground height (a map's terrain: Game.groundHeight): the floor rises and falls with it, and everything
   // standing or drawn on it (models, rings, markers, shots) goes up and down with it. Heights are sampled HK times a
   // tile once per map and side, and read between the samples. Wall tiles stand as stone blocks (or lines of stone along
@@ -902,7 +914,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
     if (camDown.lengthSq() < 1e-6) camDown.set(0, 0, 1); camDown.normalize();
     const z = cam.zoom();
     viewMode = z < 0.5 ? 'strategic' : z < 1.5 ? 'tilted' : z < 2.5 ? 'angled' : 'ground'; uiOff = viewMode === 'ground';
-    paintFloor(v, dt); useHeights(v);
+    paintFloor(v, dt); useHeights(v); useScenery(v);
     used.clear(); ns = 0;
     placeBodies(v, dt);
     drawFx(v);
@@ -937,6 +949,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
     const [ratio, shadows] = QUALITY[q] || QUALITY.high;
     renderer.setPixelRatio(Math.min(ratio, window.devicePixelRatio || 1));
     sun.castShadow = shadows;
+    if (scenery) scenery.shadows(shadows);
     sizeTo();
   }
   // for checks: what the last frame drew of each body (its unit's name, kind, shape and colour, side, look, coat of
@@ -945,9 +958,10 @@ const Render3D = (THREE, el, view, opts = {}) => {
     side: s.side, look: s.look, crest: s.crest || null, edge: s.edge || null, structure: !!s.u.structure, building: s.u.building || null, spire: !!s.u.spire, aloft: !!s.u.aloft, marked: !!s.marked }));
   function dispose() {
     cam.dispose();
+    if (scenery) scenery.dispose();
     renderer.dispose();
     renderer.forceContextLoss();
   }
   return { size: sizeTo, draw, tileAt, thumb: (match) => floor2d.thumb(match), camera: cam, info: () => renderer.info.render,
-    still: () => !cam.busy(), quality, pixelRatio: () => renderer.getPixelRatio(), dispose, drawn, screenAt, pickAt };
+    still: () => !cam.busy(), quality, pixelRatio: () => renderer.getPixelRatio(), dispose, drawn, screenAt, pickAt, scenery };
 };

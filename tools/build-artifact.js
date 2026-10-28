@@ -11,7 +11,9 @@ art = art.replace('<script src="peerjs.min.js"></script>', '<script src="https:/
 if (art.includes('id="lab-link"') || !art.includes('jsdelivr')) throw new Error('artifact build failed');
 // The 3D board (the Board setting): its code inlined (about 75 KB; it only defines functions, so the 2D game opens
 // as before), three.js imported from jsDelivr only when 3D starts.
-const code3d = ['camera3d', 'models3d', 'render3d'].map(f => fs.readFileSync(`src/${f}.js`, 'utf8')).join('\n');
+const code3d = ['camera3d', 'models3d', 'scenery3d', 'render3d'].map(f => fs.readFileSync(`src/${f}.js`, 'utf8')).join('\n')
+  // the scenery's models (models/scenery.bin, about 1.8 MB) inlined, since an artifact can't fetch files next to it
+  + '\nwindow.PB_SCENERY = "' + fs.readFileSync('models/scenery.bin').toString('base64') + '";';
 const with3d = (page, threeUrl) => {
   const out = page.replace('</style>', () => '</style>\n<script>\n' + code3d + '\n</script>')
     .replace("const THREE_URL = './vendor/three.module.min.js';", () => `const THREE_URL = '${threeUrl}';`);

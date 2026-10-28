@@ -14,7 +14,9 @@
 // floor(plain): only the board itself (map, zones, tiles), no squads or towers: the 3D renderer lays it on the ground;
 // plain leaves out the zones, grid and tile markers (for the 3D ground-level view).
 // A 3D renderer can take its place by offering the same calls.
-const Render2D = (cv, view) => {
+// opts (the 3D board's floor): ground(ctx, W, H, tilePx) paints the land of a map that has no painted ground of its own
+// and returns true; grid and zoneA: the grid lines' colour and how strongly the zones are tinted on it.
+const Render2D = (cv, view, opts = {}) => {
   let ctx = cv.getContext('2d'); // swapped for a moment while drawing map thumbnails (thumb)
   let m = null, me = 0, phase = 'start', units = [], mode = 'ai', bt = null, battlePre = null, fx = [], battleCam = null;
   let selected = null, moving = null, drag = null, hoverTile = null, rangeOf = null, editable = false, placingUnit = null, placingElf = false, placingTower = false, placingWall = false, dev = null, placingBuilding = null;
@@ -409,12 +411,14 @@ const Render2D = (cv, view) => {
     const Z = Game.ZONE, mine = (Game.ROWS - Z) * t;
     const v = phase === 'battle' && battlePre ? battlePre : m; // during a fight: the board as it was when the fight began, not the next round's
     const mp = Game.mapOf(v);
-    if (mp && BACKGROUNDS[mp.id]) ctx.drawImage(mapBackground(mp.id), 0, 0, W, H);
-    else { ctx.fillStyle = css('--board'); ctx.fillRect(0, 0, W, H); }
+    const own = mp && BACKGROUNDS[mp.id];
+    if (own) ctx.drawImage(mapBackground(mp.id), 0, 0, W, H);
+    else if (!(opts.ground && opts.ground(ctx, W, H, t))) { ctx.fillStyle = css('--board'); ctx.fillRect(0, 0, W, H); }
+    const lit = !own && !!opts.ground; // the 3D board's meadow: darker grid lines, stronger zone tints
     if (mp && mp.terrain) ctx.drawImage(terrainLayer(v), 0, 0, W, H);
     if (mp && mp.objective) drawObjective(v);
     if (!plain) {
-      ctx.globalAlpha = 0.08;
+      ctx.globalAlpha = lit ? opts.zoneA : 0.08;
       ctx.fillStyle = css('--foe'); ctx.fillRect(0, 0, W, t * Z);
       ctx.fillStyle = css('--you'); ctx.fillRect(0, mine, W, t * Z);
       if (v) for (const side of [0, 1]) { // flank tiles inside the other zone: reserved from the start, usable from round 3
@@ -444,7 +448,7 @@ const Render2D = (cv, view) => {
       }
       ctx.globalAlpha = 1;
     }
-    ctx.strokeStyle = 'rgba(200, 230, 225, 0.06)'; ctx.lineWidth = 1;
+    ctx.strokeStyle = lit ? opts.grid : 'rgba(200, 230, 225, 0.06)'; ctx.lineWidth = 1;
     for (let i = 1; i < Game.COLS; i++) { ctx.beginPath(); ctx.moveTo(i * t, 0); ctx.lineTo(i * t, H); ctx.stroke(); }
     for (let i = 1; i < Game.ROWS; i++) { ctx.beginPath(); ctx.moveTo(0, i * t); ctx.lineTo(W, i * t); ctx.stroke(); }
     ctx.setLineDash([5, 6]); ctx.lineWidth = 1.2;

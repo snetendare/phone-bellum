@@ -38,16 +38,16 @@ const game = src('site-template.html').replace('/*BASECSS*/', () => src('game.cs
   .replace('/*GAME*/', () => src('game.js'))
   .replace('/*ART*/', () => src('art.js')).replace('/*RENDER2D*/', () => src('render2d.js')).replace('/*DATA*/', () => src('demo-units.json'))
   .replace('/*FACTIONS*/', () => src('faction-units.json'))
-  .replace('/*V3D*/', () => require('crypto').createHash('sha1').update(['camera3d.js', 'models3d.js', 'render3d.js', 'game.js', 'engine.js'].map(src).join('')).digest('hex').slice(0, 10));
+  .replace('/*V3D*/', () => require('crypto').createHash('sha1').update(['camera3d.js', 'models3d.js', 'scenery3d.js', 'render3d.js', 'game.js', 'engine.js'].map(src).join('')).digest('hex').slice(0, 10));
 game.split('<script>').slice(1).map(s => s.split('</script>')[0]).forEach(s => new Function(s));
 // the 3D board's code is loaded on its own when 3D starts: make sure it parses too
-for (const f of ['camera3d.js', 'models3d.js', 'render3d.js']) new Function(src(f));
+for (const f of ['camera3d.js', 'models3d.js', 'scenery3d.js', 'render3d.js']) new Function(src(f));
 fs.writeFileSync('index.html', game);
 // 3D test page
 const lab3d = src('lab3d-template.html').replace('/*BASECSS*/', () => src('game.css'))
   .replace('/*SHAPES*/', () => shapes).replace('/*ENGINE*/', () => eng).replace('/*GAME*/', () => src('game.js'))
   .replace('/*ART*/', () => src('art.js')).replace('/*RENDER2D*/', () => src('render2d.js')).replace('/*CAMERA3D*/', () => src('camera3d.js'))
-  .replace('/*MODELS3D*/', () => src('models3d.js')).replace('/*RENDER3D*/', () => src('render3d.js'))
+  .replace('/*MODELS3D*/', () => src('models3d.js') + '\n' + src('scenery3d.js')).replace('/*RENDER3D*/', () => src('render3d.js'))
   .replace('/*DATA*/', () => src('demo-units.json')).replace('/*LAB3D*/', () => src('lab3d.js'));
 fs.writeFileSync('lab3d.html', lab3d);
 console.log('built index.html, lab.html and lab3d.html');
