@@ -67,7 +67,8 @@ const Render3D = (THREE, el, view, opts = {}) => {
   const groundTex = new THREE.CanvasTexture(floorCv);
   groundTex.colorSpace = THREE.SRGBColorSpace;
   groundTex.anisotropy = renderer.capabilities.getMaxAnisotropy();
-  const ground = new THREE.Mesh(new THREE.PlaneGeometry(BW, BD), new THREE.MeshLambertMaterial({ map: groundTex }));
+  const HK = 8; // ground height samples a tile (see the ground height below)
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(BW, BD, Game.COLS * HK, Game.ROWS * HK), new THREE.MeshLambertMaterial({ map: groundTex }));
   ground.rotation.x = -Math.PI / 2;
   ground.receiveShadow = true;
   scene.add(ground);
@@ -75,6 +76,53 @@ const Render3D = (THREE, el, view, opts = {}) => {
   const around = new THREE.Mesh(new THREE.PlaneGeometry(600, 600), new THREE.MeshLambertMaterial({ color: '#141b1d' }));
   around.rotation.x = -Math.PI / 2; around.position.y = -0.05; around.receiveShadow = true;
   scene.add(around);
+  // ---------- ground height (a map's terrain: Game.groundHeight): the floor rises and falls with it, and everything
+  // standing or drawn on it (models, rings, markers, shots) goes up and down with it. Heights are sampled HK times a
+  // tile once per map and side, and read between the samples. Wall tiles stand as stone blocks (or lines of stone along
+  // their form). ----------
+  const hCols = Game.COLS * HK + 1, hRows = Game.ROWS * HK + 1;
+  let hKey = '', hGrid = null, hF = 1, stones = [];
+  const WALL_H = 3.2; // how tall a wall stands (m)
+  const stoneMat = new THREE.MeshStandardMaterial({ color: '#4A5A63', roughness: 0.9, metalness: 0.02, flatShading: true });
+  function useHeights(v) {
+    const src = v.battlePre || v.m, mp = src && Game.mapOf(src), key = mp && mp.terrain ? src.map.id + ':' + v.me : '';
+    if (key === hKey) return;
+    hKey = key; hF = v.me === 1 ? -1 : 1; stones = [];
+    const pos = ground.geometry.attributes.position;
+    hGrid = key ? new Float32Array(hCols * hRows) : null;
+    for (let j = 0; j < hRows; j++) for (let i = 0; i < hCols; i++) {
+      const wx = -BW / 2 + i * T / HK, wz = -BD / 2 + j * T / HK, h = hGrid ? Game.groundHeight(src, wx * hF, -wz * hF) : 0;
+      if (hGrid) hGrid[j * hCols + i] = h;
+      pos.setZ(j * hCols + i, h); // the plane lies in x, y before it is turned flat: its z is up
+    }
+    pos.needsUpdate = true; ground.geometry.computeVertexNormals(); ground.geometry.computeBoundingSphere();
+    around.position.y = Math.min(0, ...(hGrid || [0])) - 0.05; // the land round the board stays under the lowest ground
+    if (!key) return;
+    for (let row = 0; row < Game.ROWS; row++) for (let col = 0; col < Game.COLS; col++) {
+      const tl = Game.terrainTile(src, col, row);
+      if (tl.ch !== '#') continue;
+      const c = hF === 1 ? col : Game.COLS - 1 - col, r = hF === 1 ? row : Game.ROWS - 1 - row, x0 = c * T - BW / 2, z0 = r * T - BD / 2, y0 = tl.h * Game.TERRAIN.step;
+      const path = Game.SHAPE_PATH[tl.shape];
+      if (!path) { stones.push([x0 + T / 2, y0, z0 + T / 2, T, T, 0]); continue; }
+      const wide = '▔▕▁▏'.includes(tl.shape) ? 0.2 : 0.32, at = ([u, w]) => [x0 + (hF === 1 ? u : 1 - u) * T, z0 + (hF === 1 ? w : 1 - w) * T];
+      for (let k = 1; k < path.length; k++) { // a block along each piece of the line, a little longer so the corners meet
+        const [ax, az] = at(path[k - 1]), [bx, bz] = at(path[k]), L = Math.hypot(bx - ax, bz - az);
+        stones.push([(ax + bx) / 2, y0, (az + bz) / 2, L + T * wide, T * wide, Math.atan2(-(bz - az), bx - ax)]);
+      }
+    }
+  }
+  // the ground's height at a world point
+  function groundY(wx, wz) {
+    if (!hGrid) return 0;
+    const gx = Math.max(0, Math.min(hCols - 1.001, (wx + BW / 2) / T * HK)), gz = Math.max(0, Math.min(hRows - 1.001, (wz + BD / 2) / T * HK));
+    const i = Math.floor(gx), j = Math.floor(gz), u = gx - i, w = gz - j, k = j * hCols + i;
+    return (hGrid[k] * (1 - u) + hGrid[k + 1] * u) * (1 - w) + (hGrid[k + hCols] * (1 - u) + hGrid[k + hCols + 1] * u) * w;
+  }
+  function drawStones() {
+    const g = group('stones', beamGeo, stoneMat, stones.length);
+    stones.forEach(([x, y, z, len, wide, ang], i) => { tmpP.set(x, y + WALL_H / 2, z); tmpQ.setFromAxisAngle(up, ang); tmpS.set(len, WALL_H, wide); g.setMatrixAt(i, tmpM.compose(tmpP, tmpQ, tmpS)); });
+    finish(g, stones.length);
+  }
   const ids = new WeakMap(); let nextId = 1;
   const idOf = (o) => o ? (ids.get(o) || (ids.set(o, nextId), nextId++)) : 0;
   function paintFloor(v, dt) {
@@ -199,7 +247,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
   function spr(mode, x, y, z, w, h, c, a, p0 = 0, p1 = 0, p2 = 0, p3 = 0) {
     if (ns >= SPR_CAP || a <= 0.01 || uiOff) return;
     const P = sprAttr.aPos.array, S = sprAttr.aSize.array, C = sprAttr.aCol.array, Q = sprAttr.aP.array, i3 = ns * 3, i2 = ns * 2, i4 = ns * 4;
-    P[i3] = x; P[i3 + 1] = y; P[i3 + 2] = z; S[i2] = w; S[i2 + 1] = h;
+    P[i3] = x; P[i3 + 1] = y + groundY(x, z); P[i3 + 2] = z; S[i2] = w; S[i2 + 1] = h; // heights are above the ground there
     C[i4] = c.r; C[i4 + 1] = c.g; C[i4 + 2] = c.b; C[i4 + 3] = a;
     Q[i4] = p0; Q[i4 + 1] = p1; Q[i4 + 2] = p2; Q[i4 + 3] = p3;
     sprAttr.aMode.array[ns] = mode;
@@ -265,7 +313,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
   const beamMat = new THREE.MeshBasicMaterial({ blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, toneMapped: false });
   const beamGeo = new THREE.BoxGeometry(1, 1, 1);
   const beams = [];
-  const beam = (x1, y1, z1, x2, y2, z2, w, c, a) => { if (a > 0.01) beams.push([x1, y1, z1, x2, y2, z2, w, c.r * a, c.g * a, c.b * a]); };
+  const beam = (x1, y1, z1, x2, y2, z2, w, c, a) => { if (a > 0.01) beams.push([x1, y1 + groundY(x1, z1), z1, x2, y2 + groundY(x2, z2), z2, w, c.r * a, c.g * a, c.b * a]); }; // heights above the ground
   function drawBeams() {
     const g = group('beams', beamGeo, beamMat, beams.length);
     beams.forEach(([x1, y1, z1, x2, y2, z2, w, r, gg, b], i) => {
@@ -295,12 +343,13 @@ const Render3D = (THREE, el, view, opts = {}) => {
     hits.forEach((n, k) => {
       if (!(n > 0)) return;
       const h = 2.6 * n / Game.ICE.wallHits, x = (wx + dirs[k][0] * T * 0.5) * f, z = -(wy + dirs[k][1] * T * 0.5) * f;
+      if (!(h > 0)) return;
       walls.push([x, h, z, dirs[k][0] !== 0]);
     });
   }
   function drawWalls() {
     const g = group('walls', beamGeo, wallMat, walls.length);
-    walls.forEach(([x, h, z, across], i) => { tmpP.set(x, h / 2, z); tmpQ.identity(); tmpS.set(across ? T * 0.12 : T * 0.8, h, across ? T * 0.8 : T * 0.12); g.setMatrixAt(i, tmpM.compose(tmpP, tmpQ, tmpS)); });
+    walls.forEach(([x, h, z, across], i) => { tmpP.set(x, h / 2 + groundY(x, z), z); tmpQ.identity(); tmpS.set(across ? T * 0.12 : T * 0.8, h, across ? T * 0.8 : T * 0.12); g.setMatrixAt(i, tmpM.compose(tmpP, tmpQ, tmpS)); });
     finish(g, walls.length);
     walls.length = 0;
   }
@@ -651,7 +700,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
         const bob = s.moving && !s.u.smooth && !rollAt ? Math.abs(Math.sin(clock * 9 + s.phase)) * 0.12 * r * s.moving : 0;
         const [wx, wz] = world(f, s.x, s.y);
         tmpQ.setFromAxisAngle(up, fixed ? (s.side === me ? Math.PI : 0) + ((s.u.barrierY || 0) > (s.u.barrier || 0) ? Math.PI / 2 : 0) : Math.atan2(-hx * f, hy * f)); // a model's front is its -z side; a tower's door faces its own side; a wall along y turns a quarter
-        tmpP.set(wx, lift + bob, wz); tmpS.setScalar(sc);
+        tmpP.set(wx, lift + bob + groundY(wx, wz), wz); tmpS.setScalar(sc);
         if (rollAt && s.b) { // turn the ball around its middle by how far it has rolled
           tmpQ.multiply(tmpQ2.setFromAxisAngle(xAxis, -(s.b.moved || 0) / (rollAt * sc)));
           const c = rollAt * sc; tmpD.set(0, -c, 0).applyQuaternion(tmpQ); tmpP.x += tmpD.x; tmpP.y += c + tmpD.y; tmpP.z += tmpD.z;
@@ -679,7 +728,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
           else smoke(wx, h, wz, 0.35 * r, s.phase || 0);
         }
         if (s.tag) { const l = labels.get(s.tag) || { u: s.u, pts: [] }; l.pts.push([wx, wz, r]); labels.set(s.tag, l); }
-        if (s.tile) models_.push([wx, wz, r, h, s.tile.col, s.tile.row]);
+        if (s.tile) models_.push([wx, wz, r, h + groundY(wx, wz), s.tile.col, s.tile.row]);
       });
       for (const [, g] of gs) finish(g, list.length);
     }
@@ -692,7 +741,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
       icon('tag|' + Shapes.tag(u), cx + camDown.x * d, 0.3, cz + camDown.z * d, tagS, white, 0.95);
     }
     const rg = group('rings', ringGeo, flatMat, rings.length);
-    rings.forEach(([x, z, r, side], i) => { tmpP.set(x, 0, z); tmpS.set(r, 1, r); tmpQ.identity(); rg.setMatrixAt(i, tmpM.compose(tmpP, tmpQ, tmpS)); rg.setColorAt(i, teamColor(side, me)); });
+    rings.forEach(([x, z, r, side], i) => { tmpP.set(x, groundY(x, z), z); tmpS.set(r, 1, r); tmpQ.identity(); rg.setMatrixAt(i, tmpM.compose(tmpP, tmpQ, tmpS)); rg.setColorAt(i, teamColor(side, me)); });
     finish(rg, rings.length);
     if (!battle) return;
     // projectiles in flight: thrown spears, and team-coloured shot for the rest
@@ -702,7 +751,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
     const sg = group('projectiles', shotGeo, flatMat, rest.length);
     const LEAF = color('#7BE05A'), FLAME = color('#FF9A3D'); // a Leaf Wizard's leaves, a Leafblade missile's flame
     rest.forEach((p, i) => {
-      tmpP.set(p.x * f, p.missile ? 2.2 : 1.6, -p.y * f); tmpS.setScalar(fxWide() * (p.missile ? 2 : 1.4)); tmpQ.identity(); sg.setMatrixAt(i, tmpM.compose(tmpP, tmpQ, tmpS));
+      tmpP.set(p.x * f, (p.missile ? 2.2 : 1.6) + groundY(p.x * f, -p.y * f), -p.y * f); tmpS.setScalar(fxWide() * (p.missile ? 2 : 1.4)); tmpQ.identity(); sg.setMatrixAt(i, tmpM.compose(tmpP, tmpQ, tmpS));
       sg.setColorAt(i, p.missile ? FLAME : p.owner.u.name === 'Leaf Wizard' ? tmpC.copy(LEAF).lerp(teamColor(p.owner.side, me), 0.25) : tmpC.copy(teamColor(p.owner.side, me)).lerp(white, 0.45));
       if (p.missile) beam(p.x * f, 2.2, -p.y * f, (p.x - p.dirX * 2.5) * f, 2.0, -(p.y - p.dirY * 2.5) * f, 0.25 * fxWide(), FLAME, 0.8); // its trail
     });
@@ -710,7 +759,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
     const sp = models.parts('spear'), spT = group('spear:tint', sp.tint, tintMat, spears.length), spF = group('spear:fixed', sp.fixed, fixedMat, spears.length);
     spears.forEach((p, i) => {
       tmpD.set(p.dirX * f, 0, -p.dirY * f).normalize(); tmpQ.setFromUnitVectors(tmpS.set(0, 0, -1), tmpD);
-      tmpP.set(p.x * f, 1.3, -p.y * f); tmpS.setScalar(1); tmpM.compose(tmpP, tmpQ, tmpS);
+      tmpP.set(p.x * f, 1.3 + groundY(p.x * f, -p.y * f), -p.y * f); tmpS.setScalar(1); tmpM.compose(tmpP, tmpQ, tmpS);
       spT.setMatrixAt(i, tmpM); spT.setColorAt(i, tmpC.set(p.owner.u.color || '#cccccc'));
       spF.setMatrixAt(i, tmpM); spF.setColorAt(i, white);
     });
@@ -767,7 +816,8 @@ const Render3D = (THREE, el, view, opts = {}) => {
         const ang = Math.atan2(z2 - z1, x2 - x1), half = (e.half || 30) * Math.PI / 180, rr = Math.hypot(x2 - x1, z2 - z1), k = 0.4 + 0.6 * a;
         for (let sgm = 0; sgm < FAN_SEG; sgm++) {
           const a0 = ang - half + 2 * half * sgm / FAN_SEG, a1 = ang - half + 2 * half * (sgm + 1) / FAN_SEG, o = (nf * FAN_SEG + sgm) * 9;
-          fanPos.set([x1, 0.3, z1, x1 + Math.cos(a0) * rr, 0.3, z1 + Math.sin(a0) * rr, x1 + Math.cos(a1) * rr, 0.3, z1 + Math.sin(a1) * rr], o);
+          const fy = 0.3 + groundY(x1, z1);
+          fanPos.set([x1, fy, z1, x1 + Math.cos(a0) * rr, fy, z1 + Math.sin(a0) * rr, x1 + Math.cos(a1) * rr, fy, z1 + Math.sin(a1) * rr], o);
           fanCol.set(e.slam ? [0.42 * k, 0.33 * k, 0.2 * k, 0.12 * k, 0.09 * k, 0.05 * k, 0.12 * k, 0.09 * k, 0.05 * k] : e.spin ? [0.3 * k, 0.55 * k, 0.15 * k, 0.05 * k, 0.2 * k, 0.04 * k, 0.05 * k, 0.2 * k, 0.04 * k] : [0.55 * k, 0.32 * k, 0.08 * k, 0.12 * k, 0.03 * k, 0, 0.12 * k, 0.03 * k, 0], o); // a ground slam is dust, spinning blades are leaves, not fire
         }
         nf++;
@@ -807,9 +857,9 @@ const Render3D = (THREE, el, view, opts = {}) => {
   let lastMe = 0;
   const cam = Camera3D(THREE, camera, renderer.domElement, {
     width: BW, depth: BD,
-    onTap: (p, cx, cy) => { if (opts.onTap) opts.onTap(pick(p, cx, cy)); },
+    onTap: (p, cx, cy) => { if (opts.onTap) opts.onTap(pick(groundHit(cx, cy) || p, cx, cy)); },
     // a press on a squad never moves the camera: one the page doesn't drag is held still, as on the 2D board
-    onPress: (p, cx, cy) => { const t = pick(p, cx, cy); return !!(opts.onPress && opts.onPress(t)) || !!(t && squadTiles.has(t.col + ',' + t.row)); },
+    onPress: (p, cx, cy) => { const t = pick(groundHit(cx, cy) || p, cx, cy); return !!(opts.onPress && opts.onPress(t)) || !!(t && squadTiles.has(t.col + ',' + t.row)); },
     onDrag: (p) => { if (opts.onDrag) opts.onDrag(tileOfGround(p, lastMe)); },
     onDrop: (p) => { if (opts.onDrop) opts.onDrop(tileOfGround(p, lastMe), !!p); },
     onHover: (p) => { if (opts.onHover) opts.onHover(tileOfGround(p, lastMe)); },
@@ -839,12 +889,12 @@ const Render3D = (THREE, el, view, opts = {}) => {
     if (camDown.lengthSq() < 1e-6) camDown.set(0, 0, 1); camDown.normalize();
     const z = cam.zoom();
     viewMode = z < 0.5 ? 'strategic' : z < 1.5 ? 'tilted' : z < 2.5 ? 'angled' : 'ground'; uiOff = viewMode === 'ground';
-    paintFloor(v, dt);
+    paintFloor(v, dt); useHeights(v);
     used.clear(); ns = 0;
     placeBodies(v, dt);
     drawFx(v);
     if (v.hoverTile && cam.handsOn() && !(v.selected !== null || v.moving != null)) { const s = screenTile(v.me, v.hoverTile.col, v.hoverTile.row); tileSq(s.col, s.row, color(css('--you') || '#5CC6DF'), 0.35, 1, 0, 0.03); }
-    drawBeams(); drawWalls();
+    drawBeams(); drawWalls(); drawStones();
     for (const g of Object.values(groups)) if (!used.has(g)) g.count = 0;
     sprGeo.instanceCount = ns;
     for (const a of Object.values(sprAttr)) { a.clearUpdateRanges(); a.addUpdateRange(0, ns * a.itemSize); a.needsUpdate = true; }
@@ -853,14 +903,20 @@ const Render3D = (THREE, el, view, opts = {}) => {
     scene.fog.near = 400 - 310 * near; scene.fog.far = 600 - 380 * near;
     renderer.render(scene, camera);
   }
-  const tileAt = (clientX, clientY) => tileOfGround(cam.groundAt(clientX, clientY), view().me);
+  // where a touch meets the ground, raised or lowered (a couple of steps toward the ground's height there)
+  function groundHit(clientX, clientY) {
+    let p = cam.groundAt(clientX, clientY);
+    for (let k = 0; k < 3 && p && hGrid; k++) p = cam.groundAt(clientX, clientY, groundY(p.x, p.z)) || p;
+    return p;
+  }
+  const tileAt = (clientX, clientY) => tileOfGround(groundHit(clientX, clientY), view().me);
   // the tile a touch there picks (a squad's model in front of the ground wins, see pick()), for checks
-  const pickAt = (clientX, clientY) => pick(cam.groundAt(clientX, clientY), clientX, clientY);
+  const pickAt = (clientX, clientY) => pick(groundHit(clientX, clientY), clientX, clientY);
   // where the middle of a tile (model column / row), h metres above the ground, is on the screen: [clientX, clientY]
   const scrV = new THREE.Vector3();
   function screenAt(col, row, h = 0) {
     const f = view().me === 1 ? -1 : 1, w = Game.tileToWorld(col, row), r = renderer.domElement.getBoundingClientRect();
-    scrV.set(w.x * f, h, -w.y * f).project(camera);
+    scrV.set(w.x * f, h + groundY(w.x * f, -w.y * f), -w.y * f).project(camera);
     return [r.left + (scrV.x + 1) / 2 * r.width, r.top + (1 - scrV.y) / 2 * r.height];
   }
   const QUALITY = { high: [2, true], medium: [1.5, true], low: [1, false] };

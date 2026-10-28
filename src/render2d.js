@@ -213,6 +213,87 @@ const Render2D = (cv, view) => {
     for (let k = 0; k < 120; k++) { c.globalAlpha = 0.08 + rr() * 0.14; c.beginPath(); c.arc(rr() * W, rr() * H, 0.6 + rr() * 0.9, 0, Math.PI * 2); c.fill(); }
   }
   const BACKGROUNDS = { forest: [1234567, paintForest], cavern: [7654321, paintCavern], ice: [4242421, paintIce] };
+  // ---------- terrain: a map's ground height, water, walls, shallow water and bushes (Game.TERRAIN) ----------
+  // Painted once per map, board size and side onto a canvas of its own, then copied onto the board every frame.
+  // Height is light and shade: higher ground lighter, lower darker, slopes lit from the top left, as Game.groundHeight
+  // has it (ramps where raised ground meets walkable ground). A tile with a form (line, corner, diagonal, edge wall)
+  // is drawn as that line.
+  const TERRAIN_LOOK = { '~': { fill: '#1C5873', line: '#4FA9C9' }, s: { fill: '#2B7A93', line: '#7CC3D8' }, '#': { fill: '#2C3A44', line: '#55707F' }, b: { fill: '#24502A', line: '#4C8A4F' } };
+  let terBg = null;
+  function terrainLayer(v) {
+    const key = v.map.id + ':' + W + 'x' + H + ':' + me;
+    if (terBg && terBg.key === key) return terBg.cv;
+    const dpr = Math.min(2, window.devicePixelRatio || 1), t = tilePx(), C = Game.COLS, R = Game.ROWS, T = Game.TILE, step = Game.TERRAIN.step;
+    const oc = document.createElement('canvas'); oc.width = Math.round(W * dpr); oc.height = Math.round(H * dpr);
+    const c = oc.getContext('2d'); c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    // a model point (in tiles from the board's top left) on this screen, and its height
+    const sx = (X) => (me === 1 ? C - X : X) * t, sy = (Y) => (me === 1 ? R - Y : Y) * t;
+    const hAt = (X, Y) => Game.groundHeight(v, (X - C / 2) * T, (R / 2 - Y) * T) / step;
+    // ground height: n samples a tile, each lighter or darker by its level and its slope, drawn as a small picture
+    // stretched over the board (so it blends smoothly)
+    const n = 4, d = 1 / n, hc = document.createElement('canvas'); hc.width = C * n; hc.height = R * n;
+    const hg = hc.getContext('2d'), img = hg.createImageData(C * n, R * n);
+    for (let j = 0; j < R * n; j++) for (let i = 0; i < C * n; i++) {
+      const X = (i + 0.5) * d, Y = (j + 0.5) * d, h = hAt(X, Y);
+      const lit = (hAt(X - d, Y - d) - hAt(X + d, Y + d)) * (me === 1 ? -1 : 1); // the slope, facing the light (top left on screen)
+      const k = Math.max(-0.4, Math.min(0.4, (h > 0 ? 0.075 * h : 0.1 * h) + lit * 0.45)); // lighter or darker
+      const q = ((me === 1 ? R * n - 1 - j : j) * C * n + (me === 1 ? C * n - 1 - i : i)) * 4;
+      if (k > 0) { img.data[q] = 242; img.data[q + 1] = 230; img.data[q + 2] = 196; } // (black otherwise)
+      img.data[q + 3] = Math.round(Math.abs(k) * 255);
+    }
+    hg.putImageData(img, 0, 0);
+    c.imageSmoothingEnabled = true; c.drawImage(hc, 0, 0, W, H);
+    // a faint rim along the edges of raised and lowered ground
+    c.globalAlpha = 0.35; c.lineWidth = 1;
+    for (let row = 0; row < R; row++) for (let col = 0; col < C; col++) {
+      const h = Game.terrainTile(v, col, row).h;
+      if (!h) continue;
+      for (const [dc, dr, ax, ay, bx, by] of [[0, -1, 0, 0, 1, 0], [1, 0, 1, 0, 1, 1], [0, 1, 0, 1, 1, 1], [-1, 0, 0, 0, 0, 1]]) {
+        const o = Game.terrainTile(v, col + dc, row + dr);
+        if (col + dc < 0 || col + dc >= C || row + dr < 0 || row + dr >= R || o.h === h || o.ch === '~' || o.ch === '#') continue;
+        c.strokeStyle = h > o.h ? '#F7EBCB' : '#000000';
+        c.beginPath(); c.moveTo(sx(col + ax), sy(row + ay)); c.lineTo(sx(col + bx), sy(row + by)); c.stroke();
+      }
+    }
+    // water, walls, shallow water and bushes
+    let sd = 99; const rr = () => { sd = (sd * 1103515245 + 12345) % 2147483648; return sd / 2147483648; };
+    for (let row = 0; row < R; row++) for (let col = 0; col < C; col++) {
+      const tl = Game.terrainTile(v, col, row), look = TERRAIN_LOOK[tl.ch];
+      if (!look) continue;
+      const x = Math.min(sx(col), sx(col + 1)), y = Math.min(sy(row), sy(row + 1)), path = Game.SHAPE_PATH[tl.shape];
+      if (path) { // a form: a thick line through the tile (turned round with the board for side 1)
+        const pts = path.map(([u, w]) => [sx(col + u), sy(row + w)]), wide = '▔▕▁▏'.includes(tl.shape) ? 0.2 : 0.34;
+        c.lineCap = 'round'; c.lineJoin = 'round';
+        c.beginPath(); pts.forEach(([px, py], k) => k ? c.lineTo(px, py) : c.moveTo(px, py));
+        c.globalAlpha = 0.95; c.strokeStyle = look.fill; c.lineWidth = t * wide; c.stroke();
+        c.globalAlpha = 0.6; c.strokeStyle = look.line; c.lineWidth = Math.max(1, t * 0.04); c.stroke();
+        continue;
+      }
+      const same = (dc, dr) => { const o = Game.terrainTile(v, col + dc, row + dr); return col + dc < 0 || col + dc >= C || row + dr < 0 || row + dr >= R || (o.ch === tl.ch && o.shape === '.'); };
+      c.globalAlpha = tl.ch === 'b' ? 0.85 : 0.95; c.fillStyle = look.fill; c.fillRect(x, y, t, t);
+      if (tl.ch === '~' || tl.ch === 's') { // ripples
+        c.strokeStyle = '#BFE6F2'; c.lineWidth = 1;
+        for (let k = 0; k < 3; k++) {
+          const px = x + t * (0.15 + rr() * 0.6), py = y + t * (0.2 + rr() * 0.65), w = t * (0.12 + rr() * 0.15);
+          c.globalAlpha = 0.22; c.beginPath(); c.moveTo(px, py); c.quadraticCurveTo(px + w / 2, py - t * 0.05, px + w, py); c.stroke();
+        }
+      }
+      if (tl.ch === '#') { c.globalAlpha = 0.5; c.fillStyle = '#6D8796'; c.fillRect(x + t * 0.08, y + t * 0.08, t * 0.84, t * 0.18); } // a lit top
+      if (tl.ch === 'b') for (let k = 0; k < 5; k++) { // leafy clumps
+        c.globalAlpha = 0.55; c.fillStyle = k % 2 ? '#3A7A3E' : '#2F6533';
+        c.beginPath(); c.arc(x + t * (0.2 + rr() * 0.6), y + t * (0.2 + rr() * 0.6), t * (0.14 + rr() * 0.08), 0, Math.PI * 2); c.fill();
+      }
+      // its shore or edge: a light line where it meets other ground
+      c.globalAlpha = 0.7; c.strokeStyle = look.line; c.lineWidth = Math.max(1, t * 0.05);
+      for (const [dc, dr, ax, ay, bx, by] of [[0, -1, 0, 0, 1, 0], [1, 0, 1, 0, 1, 1], [0, 1, 0, 1, 1, 1], [-1, 0, 0, 0, 0, 1]]) {
+        if (same(dc, dr)) continue;
+        c.beginPath(); c.moveTo(sx(col + ax), sy(row + ay)); c.lineTo(sx(col + bx), sy(row + by)); c.stroke();
+      }
+    }
+    c.globalAlpha = 1;
+    terBg = { key, cv: oc };
+    return oc;
+  }
   const ICE_COL = '#BFE3F5';
   // the storm band (a faint frost) and this round's hail tiles (animated during the fight)
   function drawStorm(v) {
@@ -305,6 +386,7 @@ const Render2D = (cv, view) => {
     const mp = Game.mapOf(v);
     if (mp && BACKGROUNDS[mp.id]) ctx.drawImage(mapBackground(mp.id), 0, 0, W, H);
     else { ctx.fillStyle = css('--board'); ctx.fillRect(0, 0, W, H); }
+    if (mp && mp.terrain) ctx.drawImage(terrainLayer(v), 0, 0, W, H);
     if (!plain) {
       ctx.globalAlpha = 0.08;
       ctx.fillStyle = css('--foe'); ctx.fillRect(0, 0, W, t * Z);
@@ -595,9 +677,9 @@ const Render2D = (cv, view) => {
     const tw = 96, th = tw * Game.ROWS / Game.COLS, dpr = 2;
     const oc = document.createElement('canvas'); oc.width = tw * dpr; oc.height = th * dpr;
     const g = oc.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0);
-    const keep = { ctx, W, H, S, m, me, phase, mapBg };
+    const keep = { ctx, W, H, S, m, me, phase, mapBg, terBg };
     try {
-      ctx = g; W = tw; H = th; S = W / (Game.COLS * Game.TILE); me = 0; phase = 'start'; mapBg = null;
+      ctx = g; W = tw; H = th; S = W / (Game.COLS * Game.TILE); me = 0; phase = 'start'; mapBg = null; terBg = null;
       m = match;
       drawBoard();
       const t = tilePx();
@@ -609,7 +691,7 @@ const Render2D = (cv, view) => {
         g.fillText('?', tw / 2, th / 2);
       }
       return oc.toDataURL();
-    } finally { ({ ctx, W, H, S, m, me, phase, mapBg } = keep); }
+    } finally { ({ ctx, W, H, S, m, me, phase, mapBg, terBg } = keep); }
   }
   function drawTowerTile(side) {
     const tw = m.towers[side], t = tilePx();

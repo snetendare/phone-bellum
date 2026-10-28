@@ -181,7 +181,7 @@ const Game = (() => {
   const bwallShown = (m, viewer, deploying, side, w) => side === viewer || !deploying || w.round < m.round;
   const ownHalf = (side, row) => side === 0 ? row >= ROWS / 2 && row < ROWS : row >= 0 && row < ROWS / 2;
   function bwallSpotOk(m, side, col, row, edge) {
-    if (!isEdge(edge) || col < 0 || col >= COLS || !ownHalf(side, row) || reserved(side, col, row)) return false;
+    if (!isEdge(edge) || col < 0 || col >= COLS || !ownHalf(side, row) || reserved(side, col, row) || terrainBlocks(m, col, row)) return false;
     const [dc, dr] = EDGES[edge];
     if (col + dc < 0 || col + dc >= COLS || row + dr < 0 || row + dr >= ROWS) return false; // not on the board's outer edge
     if (bwallOn(m, side, col, row, edge) || bwallOn(m, 1 - side, col, row, edge)) return false;
@@ -480,6 +480,20 @@ const Game = (() => {
   // rules of every fight. Elf tower: a neutral tower standing on the centre line of no man's land, the same
   // distance from both zones, in a random column that stays for the whole match. It can't be attacked. It sides
   // with whoever has bribed the elves the most times (see the bribe-off below); with nobody ahead, it shoots both sides in turn.
+  // Maps made in the map editor (its JSON, format 'nml-map'): tiles ('.' open, '#' wall, '~' water, 's' shallow water,
+  // 'b' bush; 'O' objectives and 'p' 'y' 'g' mushrooms aren't played yet), shape (the form of a wall, water, shallow
+  // water or bush tile: '.' a full tile, else a corner, line, diagonal or edge wall, see SHAPE_PATH), height ('L' -2,
+  // 'l' -1, '.' 0, 'h' +1, 'H' +2), flank and buildings (the game's own spots for now). See terrainOf for what each does.
+  const EDITOR_MAPS = {
+    bridge: { format: 'nml-map', version: 1, name: 'Bridge map', base: 'testgrid', cols: 14, rows: 18, zone: 7, symmetry: 'point',
+      tiles: ['..............', '..............', '..............', '..............', '..............', '..............', '.....~..~.....', '.....~..~.....', '.....~..~.....',
+        '.....~..~.....', '.....~..~.....', '.....~..~.....', '..............', '..............', '..............', '..............', '..............', '..............'],
+      shape: Array(18).fill('..............'),
+      height: ['..............', '..............', '..............', '..............', '..............', '......hh......', '......HH......', '......HH......', '......HH......',
+        '......HH......', '......HH......', '......HH......', '......hh......', '..............', '..............', '..............', '..............', '..............'],
+      flank: Array(18).fill('F............F'),
+      buildings: [{ kind: 'tower', side: 0, col: 10, row: 16 }, { kind: 'tower', side: 1, col: 3, row: 1 }, { kind: 'treasury', side: 0, col: 4, row: 15 }, { kind: 'treasury', side: 1, col: 9, row: 2 }] },
+  };
   const MAPS = [
     { id: 'standard', name: 'Standard', short: 'No special rules.', text: 'No special rules.', plain: true }, // only when picked, never random
     { id: 'forest', name: 'Forest Clearing', short: 'Bribe the elf tower to fight for you.', text: 'Bribe the elf tower to fight for you. Healing ×1.5.', boostHp: 15, boostUnits: ['Ent', 'Earth Wizard'], healMul: 1.5, elfTower: true },
@@ -490,7 +504,87 @@ const Game = (() => {
       iceShort: 'Hail from round 2. An ice altar rises on even rounds.', iceText: 'Every fight from round 2: a hailstorm drops 10 hail tiles in the storm band (no man’s land at first); units standing in hail take 20 damage per second. Even rounds: the altar of ice rises in the middle of the board. Tap it to buy ice walls for your tower, push the storm band toward your opponent, or summon a Snowgre.', ice: true },
     { id: 'testgrid', name: 'Test Grid', short: 'A bigger board: each zone is 14 by 7 tiles.', text: 'Bigger board. A treasury pays 50 gold per fight it survives.', plain: true, grid: { cols: 14, rows: 18, zone: 7 }, pointMirror: true, treasury: true,
       rangeAdd: 2, rangeAddMin: 5, slowSteps: [[3, 0.2], [5, 0.2]], tuneKeep: ['Shiv', 'Water Mage'] }, // only when picked, never random
+    // the Test Grid's board and rules, with two rivers and a raised bridge between them across no man's land
+    { id: 'bridge', name: 'Bridge', short: 'A raised bridge between two rivers. High ground shoots further and harder.', text: 'Two rivers nobody can wade across, a raised bridge between them. From higher ground: +1 m range and +2% damage per level above the target. A treasury pays 50 gold per fight it survives.', plain: true,
+      grid: { cols: 14, rows: 18, zone: 7 }, pointMirror: true, treasury: true, terrain: EDITOR_MAPS.bridge,
+      rangeAdd: 2, rangeAddMin: 5, slowSteps: [[3, 0.2], [5, 0.2]], tuneKeep: ['Shiv', 'Water Mage'] }, // only when picked, never random
   ];
+  // ---------- terrain: walls, water, bushes and ground height (a map's `terrain`, from the map editor) ----------
+  // A wall ('#') stops walking, shots and sight; water ('~') stops walking only; shallow water ('s') slows whoever wades
+  // in it by TERRAIN.wade %; a bush ('b') hides who stands in it (see the engine's inSight). A tile with a form (a
+  // line, corner, diagonal or edge wall) only has that much of it: the engine's grid has TERRAIN.sub x TERRAIN.sub
+  // cells a tile, and the cells the form runs through take it. Bodies walk round what stops them (Engine: steer).
+  // Ground height is a level per tile (-2 .. 2): the engine gives higher ground more range and damage (Engine.HEIGHT),
+  // and the boards draw it TERRAIN.step m up per level, sloping smoothly between walkable tiles.
+  const TERRAIN = { sub: 3, wade: 30, step: 1.5, sink: 0.6 };
+  const CHH = { L: -2, l: -1, '.': 0, h: 1, H: 2 };
+  // the line through a tile's form, in tile units (0 to 1, y down), as in the map editor
+  const SHAPE_PATH = { '─': [[0, .5], [1, .5]], '│': [[.5, 0], [.5, 1]], '└': [[.5, 0], [.5, .5], [1, .5]], '┌': [[1, .5], [.5, .5], [.5, 1]],
+    '┐': [[.5, 1], [.5, .5], [0, .5]], '┘': [[0, .5], [.5, .5], [.5, 0]], '╱': [[0, 1], [1, 0]], '╲': [[0, 0], [1, 1]],
+    '▔': [[0, .11], [1, .11]], '▕': [[.89, 0], [.89, 1]], '▁': [[0, .89], [1, .89]], '▏': [[.11, 0], [.11, 1]] };
+  const EDGE_FORMS = '▔▕▁▏'; // an edge wall stands on one side of its tile: the tile can still be stood on
+  const terrainMap = (m) => { const mp = mapOf(m); return mp && mp.terrain ? mp.terrain : null; };
+  // what is on a tile: { ch, shape, h } (open, flat ground off the map's terrain)
+  function terrainTile(m, col, row) {
+    const t = terrainMap(m);
+    if (!t || col < 0 || row < 0 || col >= COLS || row >= ROWS) return { ch: '.', shape: '.', h: 0 };
+    return { ch: t.tiles[row][col], shape: (t.shape && t.shape[row][col]) || '.', h: CHH[t.height[row][col]] || 0 };
+  }
+  // nothing can be placed on a wall or water tile (an edge wall leaves its tile free)
+  const terrainBlocks = (m, col, row) => { const t = terrainTile(m, col, row); return (t.ch === '#' || t.ch === '~') && !EDGE_FORMS.includes(t.shape); };
+  // the engine's terrain grid for a map (opts.terrain), made once per map: see Engine's terrain
+  function terrainOf(m) {
+    const mp = mapOf(m), t = mp && mp.terrain;
+    if (!t) return null;
+    if (mp.grid3 && mp.grid3.cols === COLS * TERRAIN.sub) return mp.grid3;
+    const k = TERRAIN.sub, cols = COLS * k, rows = ROWS * k;
+    const out = { cols, rows, cell: TILE / k, x0: -COLS * TILE / 2, y1: ROWS * TILE / 2, block: new Uint8Array(cols * rows), sight: new Uint8Array(cols * rows), level: new Int8Array(cols * rows) };
+    // whether the middle of cell (i, j) of a tile lies on its form (within 0.2 of a tile of the line)
+    const onForm = (sh, i, j) => {
+      const pts = SHAPE_PATH[sh], x = (i + 0.5) / k, y = (j + 0.5) / k;
+      for (let n = 1; n < pts.length; n++) {
+        const [ax, ay] = pts[n - 1], [bx, by] = pts[n], dx = bx - ax, dy = by - ay, L = dx * dx + dy * dy;
+        const u = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / L)), ex = ax + dx * u - x, ey = ay + dy * u - y;
+        if (ex * ex + ey * ey <= 0.04 + 1e-9) return true;
+      }
+      return false;
+    };
+    for (let row = 0; row < ROWS; row++) for (let col = 0; col < COLS; col++) {
+      const { ch, shape, h } = terrainTile(m, col, row);
+      for (let j = 0; j < k; j++) for (let i = 0; i < k; i++) {
+        const idx = (row * k + j) * cols + col * k + i, on = shape === '.' || !SHAPE_PATH[shape] || onForm(shape, i, j);
+        out.level[idx] = h;
+        if (!on) continue;
+        if (ch === '#' || ch === '~') out.block[idx] = 1;
+        if (ch === '#' || ch === 'b') out.sight[idx] = 1;
+      }
+    }
+    mp.grid3 = out;
+    return out;
+  }
+  // How high the ground is drawn at a board point (metres; for the boards, not the rules): a tile's level times
+  // TERRAIN.step, sloping smoothly across walkable tiles (between the middles of neighbouring tiles), so a raised tile
+  // meets the open ground round it in a ramp. Walls and water keep their own level (water TERRAIN.sink lower), and a
+  // point on the edge between them and walkable ground belongs to the ground: the bank drops on the water's side.
+  function groundHeight(m, x, y) {
+    const t = terrainMap(m);
+    if (!t) return 0;
+    const fc = x / TILE + (COLS - 1) / 2, fr = (ROWS - 1) / 2 - y / TILE; // in tiles, tile middles on whole numbers
+    const open = (tl) => tl.ch !== '#' && tl.ch !== '~';
+    // the tiles the point is in (two or four on an edge or corner)
+    const cs = [...new Set([Math.round(fc - 1e-6), Math.round(fc + 1e-6)])], rs = [...new Set([Math.round(fr - 1e-6), Math.round(fr + 1e-6)])];
+    let own = null;
+    for (const c of cs) for (const r of rs) { const tl = terrainTile(m, Math.max(0, Math.min(COLS - 1, c)), Math.max(0, Math.min(ROWS - 1, r))); if (!own || (open(tl) && !open(own))) own = tl; }
+    if (!open(own)) return own.h * TERRAIN.step - (own.ch === '~' ? TERRAIN.sink : 0);
+    const c0 = Math.floor(fc), r0 = Math.floor(fr), u = fc - c0, v = fr - r0;
+    let sum = 0, wsum = 0;
+    for (const [dc, dr, w] of [[0, 0, (1 - u) * (1 - v)], [1, 0, u * (1 - v)], [0, 1, (1 - u) * v], [1, 1, u * v]]) {
+      const c = Math.max(0, Math.min(COLS - 1, c0 + dc)), r = Math.max(0, Math.min(ROWS - 1, r0 + dr)), tl = terrainTile(m, c, r);
+      if (!open(tl) || w <= 0) continue;
+      sum += tl.h * w; wsum += w;
+    }
+    return (wsum > 0 ? sum / wsum : own.h) * TERRAIN.step;
+  }
   // ---------- Frozen Peak: hailstorm and the altar of ice ----------
   // The storm band is 4 rows deep: no man's land to start with. Each push moves it ICE.push rows toward the other
   // player, for the rest of the match (side 0 pushes toward row 0, side 1 toward the last row); it never leaves the board.
@@ -646,7 +740,7 @@ const Game = (() => {
   // what it costs a player: what they paid if they bought it this round, else what it costs them now
   const elfOwnCost = (m, side) => { const e = elfOwnOf(m, side); return (e && e.round === m.round ? isMapFree(m, side, { kind: 'elf' }) : mapFreeLeft(m, side)) ? blix(ELF_OWN.cost) : ELF_OWN.cost; };
   const canBuyElfOwn = (m, side) => elfOwnOffered(m, side) && !elfOwnOf(m, side) && m.gold[side] >= elfOwnCost(m, side);
-  const elfOwnSpotOk = (m, side, col, row) => col >= 0 && col < COLS && inZone(side, row) && !reserved(side, col, row) && !occupied(m, side, col, row);
+  const elfOwnSpotOk = (m, side, col, row) => col >= 0 && col < COLS && inZone(side, row) && !reserved(side, col, row) && !occupied(m, side, col, row) && !terrainBlocks(m, col, row);
   function buyElfOwn(m, side, col, row) {
     if (!canBuyElfOwn(m, side) || !elfOwnSpotOk(m, side, col, row)) return false;
     if (!m.elfOwn) m.elfOwn = [null, null];
@@ -822,7 +916,7 @@ const Game = (() => {
   const canPlaceAt = (m, side, col, row, ui, moving) => blockOf(m, ui, col, row).every(([c, r]) => canPlaceTile(m, side, c, r, ui, moving));
   // no squad, tower or building on any tile the unit would take
   const spotFree = (m, side, col, row, ui) => blockOf(m, ui, col, row).every(([c, r]) => !occupied(m, side, c, r) || garrisonFree(m, side, c, r, ui));
-  const canPlaceTile = (m, side, col, row, ui, moving) => col >= 0 && col < COLS && row >= 0 && row < ROWS && !reserved(side, col, row) && !(ui != null && isOff(m, ui, side)) &&
+  const canPlaceTile = (m, side, col, row, ui, moving) => col >= 0 && col < COLS && row >= 0 && row < ROWS && !reserved(side, col, row) && !terrainBlocks(m, col, row) && !(ui != null && isOff(m, ui, side)) &&
     !(ui != null && m && m.units[ui] && m.units[ui].noFlank && isFlank(side, col, row)) &&
     (inZone(side, row) || (flankOpen(m) && isFlank(side, col, row)) || (inNoMans(row) && hasSkillType(m, side, ui, 'forward', moving ? 0 : 1)) || garrisonFree(m, side, col, row, ui)) && !enemyHolds(m, side, col, row);
   // ---------- Overwatch (the Sniper's Master skill) ----------
@@ -1253,7 +1347,7 @@ const Game = (() => {
   const buildingAt = (m, side, col, row) => buildingsOf(m, side).find(b => b.col === col && b.row === row) || null;
   // what a screen may show of a player's building: an opponent's new one only from the fight on
   const buildingShown = (v, viewer, deploying, side, b) => side === viewer || !deploying || b.round < v.round;
-  const buildingSpotOk = (m, side, col, row) => col >= 0 && col < COLS && inZone(side, row) && !reserved(side, col, row) && !occupied(m, side, col, row);
+  const buildingSpotOk = (m, side, col, row) => col >= 0 && col < COLS && inZone(side, row) && !reserved(side, col, row) && !occupied(m, side, col, row) && !terrainBlocks(m, col, row);
   const canBuyBuilding = (m, side, ui, k) => isBuildingSkill(m, ui, k) && !!buildingInfo(buildingIdOf(m, ui, k)) && !buildingOf(m, side, buildingIdOf(m, ui, k)) && canBuySkill(m, side, ui, k);
   // buy unit ui's building skill k and put the building on (col, row)
   function buyBuilding(m, side, ui, k, col, row) {
@@ -1779,7 +1873,7 @@ const Game = (() => {
     const taken = (col, row) => [0, 1].some(sd => occupied(m, sd, col, row)) || snowgres(m, 0).concat(snowgres(m, 1)).some(g => g.col === col && g.row === row);
     const spots = [];
     for (let row = 0; row < ROWS; row++) for (let col = 0; col < COLS; col++) {
-      if (reserved(side, col, row) || taken(col, row)) continue;
+      if (reserved(side, col, row) || taken(col, row) || terrainBlocks(m, col, row)) continue;
       if (inZone(side, row) || inNoMans(row) || (flankOpen(m) && isFlank(side, col, row))) spots.push({ col, row });
     }
     const r = rng(m.seed + m.round * 7307 + side * 2903 + 41), out = [];
@@ -1796,7 +1890,7 @@ const Game = (() => {
     if (charOf(m, side) !== 'zoe') return;
     const r = rng(m.seed + m.round * 6151 + side * 3571 + 99);
     const spots = [];
-    for (const row of zoneRows(side)) for (let col = 0; col < COLS; col++) if (!reserved(side, col, row) && !towerAt(m, side, col, row) && !treasuryAt(m, side, col, row) && !shroomAt(m, col, row)) spots.push({ col, row });
+    for (const row of zoneRows(side)) for (let col = 0; col < COLS; col++) if (!reserved(side, col, row) && !towerAt(m, side, col, row) && !treasuryAt(m, side, col, row) && !shroomAt(m, col, row) && !terrainBlocks(m, col, row)) spots.push({ col, row });
     for (let k = 0; k < CHAR.zoeTiles && spots.length; k++) m.buff[side].push(spots.splice(Math.floor(r() * spots.length), 1)[0]);
   }
   const onBuffTile = (m, side, col, row) => charOf(m, side) === 'zoe' && !!(m.buff && m.buff[side] || []).some(t => t.col === col && t.row === row);
@@ -1834,12 +1928,19 @@ const Game = (() => {
         : { type: 'toxic', poisonPct: SHROOM.poisonPct, poisonDur: SHROOM.poisonDur, slowMove: SHROOM.slowMove, slowAtk: SHROOM.slowAtk, slowDur: SHROOM.slowDur, x0: w.x - T2, x1: w.x + T2, y0: w.y - T2, y1: w.y + T2 });
     }
     for (const h of hailTiles(m)) { const w = tileToWorld(h.col, h.row); tiles.push({ type: 'hail', dps: ICE.hailDps, x0: w.x - T2, x1: w.x + T2, y0: w.y - T2, y1: w.y + T2 }); }
+    // shallow water slows whoever wades in it
+    if (terrainMap(m)) for (let row = 0; row < ROWS; row++) for (let col = 0; col < COLS; col++) {
+      const tl = terrainTile(m, col, row);
+      if (tl.ch !== 's' || (tl.shape !== '.' && SHAPE_PATH[tl.shape])) continue; // a form of shallow water is too thin to wade in
+      const w = tileToWorld(col, row);
+      tiles.push({ type: 'wade', slow: TERRAIN.wade, x0: w.x - T2, x1: w.x + T2, y0: w.y - T2, y1: w.y + T2 });
+    }
     const fx = isDev(m) ? castEffects(m) : { tiles: [], strikes: [] }; // devtest spells
     tiles.push(...fx.tiles);
     if (AWARENESS) g = { ...g, aware2: true, ...(isDev(m) && DEV.awareLane != null ? { awareLane: DEV.awareLane } : {}) };
     const neutrals = elf ? [{ u: elfUnit(m), x: elf.x, y: elf.y, friends: [bribeLeader(m) === 0, bribeLeader(m) === 1] }] : [];
     for (const side of [0, 1]) { const e = elfOwnOf(m, side); if (e) { const w = tileToWorld(e.col, e.row); neutrals.push({ u: elfUnit(m), x: w.x, y: w.y, friends: [side === 0, side === 1], side }); } }
-    return { g, opts: { tiles, strikes: fx.strikes, neutrals, charm: [charmMap(m, 0), charmMap(m, 1)] } };
+    return { g, opts: { tiles, strikes: fx.strikes, neutrals, charm: [charmMap(m, 0), charmMap(m, 1)], terrain: terrainOf(m) } };
   }
 
   // ---------- intent: whom a squad goes for ----------
@@ -2758,7 +2859,7 @@ const Game = (() => {
     TOWER, TOWER_TYPES, OUTPOST, TOWER_PICK_ROUND, towerType, towerChoices, needsTowerPick, setTowerType, settleTowerPicks, TOWER_SKILL, towerSkillOf, towerSkillVisible, towerPicked, canBuyTowerSkill, buyTowerSkill, undoTowerSkill, towerSkillCost, towerSkill2Of, towerSkill2Visible, towerSkill2Cost, canBuyTowerSkill2, buyTowerSkill2, undoTowerSkill2, towerSkill2On, AIRSHIP, MOAT, BWALL, BWALL_SQ, EDGES, bwallsOf, bwallOn, edgeOf, bwallWorld, bwallsLeft, bwallShown, bwallSpotOk, placeBwall, unplaceBwall, ensureBwalls, bwallUnit, INVEST, MAGE_GENERALS, mageGenPrice, MAGE, mageGenInfo, mageGenOf, mageTpOf, isExtraGen, mageGenCost, canBuyMageGen, buyMageGen, undoMageGen, mageTowerUnit, generalUnit, LOAN, loanNow, investNow, bankBusy, investNow, bankBusy, canTakeLoan, takeLoan, undoLoan, towerRounds, troundInfo, troundOn, troundCost, canBuyTround, buyTround, undoTround, SLIME_UNITS, slimeTowerUnit, slimeSkillDefs, TOWER_MID, towerColOk, towerAt, needsTower, placeTower, ensureTower,
     FLANK, flankRows, flankOpen, isFlank, reserved, canPlaceAt, isOff, enemyHolds, inNoMans, hasSkillType, garrisonAt, garrisonFree, inBuilding, WATCH_SQ, watchUnit, freeMover,
     STANDARD_PACK, ICE, ALTAR, GOLEM, isIce, hailRound, altarRound, stormShift, stormRows, hailTiles, altarCost, altarRefund, altarCount, pushRoom, altarBought, addAltar, buyAltar, undoAltar, snowgres, snowgreUnit,
-    MAPS, ELF_TOWER, SHROOM, SHROOM_SPLIT, shroomAt, shroomTileAt, shroomRemoval, SHROOM_REMOVE, shroomCost, removeShroom, undoRemoveShroom, mapOf, elfSpot, rollMap, BRIBE_COST, bribeList, bribeGold, bribeCount, bribeNow, bribeCost, bribeRefund, ELF_POWER, elfPowered, elfUnit, ELF_OWN, elfOwnCost, elfOwnOf, elfOwnAt, elfOwnUnlocked, elfOwnOffered, canBuyElfOwn, elfOwnSpotOk, buyElfOwn, undoElfOwn, bribeLeader, canBribe, bribe, undoBribe,
+    MAPS, EDITOR_MAPS, TERRAIN, SHAPE_PATH, terrainTile, terrainBlocks, terrainOf, groundHeight, ELF_TOWER, SHROOM, SHROOM_SPLIT, shroomAt, shroomTileAt, shroomRemoval, SHROOM_REMOVE, shroomCost, removeShroom, undoRemoveShroom, mapOf, elfSpot, rollMap, BRIBE_COST, bribeList, bribeGold, bribeCount, bribeNow, bribeCost, bribeRefund, ELF_POWER, elfPowered, elfUnit, ELF_OWN, elfOwnCost, elfOwnOf, elfOwnAt, elfOwnUnlocked, elfOwnOffered, canBuyElfOwn, elfOwnSpotOk, buyElfOwn, undoElfOwn, bribeLeader, canBribe, bribe, undoBribe,
     CHARACTERS, CHAR, charOf, charInfo, enzoSkill, enzoActive, charmOf, isGentleman, canGiveCharm, giveCharm, undoCharm, ensureCharm, felixGold, isTier1, rollBuffTiles, onBuffTile, zoeBuff, yotImps, yotLevel, TOWER_SPOT, towerSpot,
     TREASURY, TREASURY_SQ, treasuryOn, treasuryUp, treasurySpot, treasuryAt, treasuryUnit, deployCost, FORTIFY, fortifyOf, canFortify, fortify, bwallsFighting, VAULT, vaultOn, MARK, markOf, markLost, markOn, markCost, markTarget, canMark, placeMark, markShown,
     FACTION_MODE, FACTIONS: () => FACTIONS, setFactions, factionInfo, factionsOf, factionTowers, towerTypeById, ownsUnit, withFactionTrait, factionSet,

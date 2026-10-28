@@ -556,6 +556,14 @@ const Engine = (() => {
   // it only looks within its sight, and new attack targets skip enemies its side is already about to kill
   const AWARE = { step: 2, full: 12, stick: 3, leash: 1.5, melee: 5, lane: 0.5 }; // metres added per melee body on the target already, when its slots are full; kept-target bonus; how far past sight it chases its target; melee reach; extra cost per metre sideways (a squad keeps to its own lane)
 
+  // terrain (a map's walls and water, opts.terrain): look: metres ahead a walking body checks for something in its way;
+  // ahead: cells of the way round it looks along for the furthest point it can walk straight to; every: seconds it keeps
+  // that point; clear: half the width of the line it needs; body: how close it comes to a blocked cell; keep: paths kept,
+  // keepLos: lines of sight kept
+  const NAV = { look: 9, ahead: 14, every: 0.25, clear: 0.6, body: 0.5, keep: 600, keepLos: 300000 };
+  const SIGHT_NEAR = 3;        // metres from which a body in a bush is seen anyway
+  const HEIGHT = { range: 1, dmg: 2 }; // per level of higher ground over the target: +1 m range, +2 % damage
+
   const LEVEL_BONUS = 1;       // each upgrade adds +100% of starting health and hit (2x, then 3x)
   const MAX_LEVEL = 2;         // two upgrades on top of the base unit
 
@@ -1246,6 +1254,171 @@ const Engine = (() => {
       }
       return best;
     }
+    // Terrain (opts.terrain, a map's walls, water, bushes and ground height; Game's terrainOf builds it): a grid of cells
+    // `cell` metres wide, cols x rows of them from (x0, y1) at the top left of the board (row 0 at the top), with per
+    // cell: block (nobody walks there: walls, water), sight (sight stops there: walls; bushes too, see inSight) and level
+    // (ground height, -2 .. 2). Bodies flying (aloft) ignore all of it. ter.cache keeps what is worked out from the
+    // terrain alone (paths, lines of sight) across fights.
+    const ter = opts.terrain || null;
+    const TC = ter ? ter.cell : 1, NAV_INF = 1e9;
+    const terBlock = !!(ter && ter.block.some(v => v)), terSight = !!(ter && ter.sight.some(v => v)), terHeight = !!(ter && ter.level.some(v => v));
+    const terCache = ter ? (ter.cache || (ter.cache = { flows: new Map(), los: new Map() })) : null;
+    // the cell a board point is in (-1 off the grid)
+    const cellOf = (x, y) => { const c = Math.floor((x - ter.x0) / TC), r = Math.floor((ter.y1 - y) / TC); return c < 0 || r < 0 || c >= ter.cols || r >= ter.rows ? -1 : r * ter.cols + c; };
+    const cellX = (i) => ter.x0 + (i % ter.cols + 0.5) * TC, cellY = (i) => ter.y1 - (Math.floor(i / ter.cols) + 0.5) * TC;
+    const blocked = (i) => i >= 0 && ter.block[i] === 1;
+    // Height: a body on higher ground than its target gets HEIGHT.range m more range and HEIGHT.dmg % more damage per
+    // level of difference (from +2 down to -2: 4 levels, 4x). Lower ground costs nothing.
+    const heightRange = g.heightRange == null ? HEIGHT.range : g.heightRange, heightDmg = g.heightDmg == null ? HEIGHT.dmg : g.heightDmg;
+    const levelOf = (b) => { const i = cellOf(b.x, b.y); return i < 0 ? 0 : ter.level[i]; };
+    const above = (b, f) => terHeight && !b.u.aloft && !f.u.aloft ? Math.max(0, levelOf(b) - levelOf(f)) : 0;
+    const upRange = (b, f) => f ? above(b, f) * heightRange : 0;
+    // whether a body could walk the straight line from (ax, ay) to (bx, by): its middle and both its sides (NAV.clear m
+    // out) stay off blocked cells. Off the board counts as open (the board's edge stops bodies anyway).
+    function clearWalk(ax, ay, bx, by) {
+      const dx = bx - ax, dy = by - ay, d = hyp(dx, dy);
+      if (d < 1e-9) return !blocked(cellOf(ax, ay));
+      const n = Math.ceil(d / (TC * 0.25)), sx = -dy / d * NAV.clear, sy = dx / d * NAV.clear;
+      for (let k = 0; k <= n; k++) {
+        const x = ax + dx * k / n, y = ay + dy * k / n;
+        if (blocked(cellOf(x, y)) || blocked(cellOf(x + sx, y + sy)) || blocked(cellOf(x - sx, y - sy))) return false;
+      }
+      return true;
+    }
+    // the walkable cell nearest a point (its own if it is walkable), or -1
+    function walkCell(x, y) {
+      let i = cellOf(Math.max(ter.x0 + 1e-6, Math.min(ter.x0 + ter.cols * TC - 1e-6, x)), Math.max(ter.y1 - ter.rows * TC + 1e-6, Math.min(ter.y1 - 1e-6, y)));
+      if (i < 0 || !blocked(i)) return i;
+      const c0 = i % ter.cols, r0 = Math.floor(i / ter.cols);
+      for (let ring = 1; ring < Math.max(ter.cols, ter.rows); ring++) {
+        let best = -1, bd = Infinity;
+        for (let r = r0 - ring; r <= r0 + ring; r++) for (let c = c0 - ring; c <= c0 + ring; c++) {
+          if (r < 0 || c < 0 || r >= ter.rows || c >= ter.cols || (Math.abs(r - r0) !== ring && Math.abs(c - c0) !== ring)) continue;
+          const j = r * ter.cols + c;
+          if (blocked(j)) continue;
+          const d = hyp(cellX(j) - x, cellY(j) - y);
+          if (d < bd) { bd = d; best = j; }
+        }
+        if (best >= 0) return best;
+      }
+      return -1;
+    }
+    // the eight steps from a cell: [dc, dr, cost]. A diagonal step needs both cells beside it open (no cutting corners).
+    const STEPS = [[0, -1, 10], [1, 0, 10], [0, 1, 10], [-1, 0, 10], [1, -1, 14], [1, 1, 14], [-1, 1, 14], [-1, -1, 14]];
+    function stepTo(i, s) {
+      const c = i % ter.cols + s[0], r = Math.floor(i / ter.cols) + s[1];
+      if (c < 0 || r < 0 || c >= ter.cols || r >= ter.rows) return -1;
+      const j = r * ter.cols + c;
+      if (blocked(j)) return -1;
+      if (s[0] && s[1] && (blocked(i + s[0]) || blocked(i + s[1] * ter.cols))) return -1;
+      return j;
+    }
+    // how far every cell is from a goal cell on foot (Dijkstra; whole numbers, so the same on every device), kept per goal
+    function flowTo(goal) {
+      let f = terCache.flows.get(goal);
+      if (f) return f;
+      if (terCache.flows.size >= NAV.keep) terCache.flows.clear();
+      f = new Int32Array(ter.cols * ter.rows).fill(NAV_INF);
+      f[goal] = 0;
+      const heap = [[0, goal]];
+      const push = (e) => { heap.push(e); let k = heap.length - 1; while (k > 0) { const p = (k - 1) >> 1; if (heap[p][0] < e[0] || (heap[p][0] === e[0] && heap[p][1] <= e[1])) break; heap[k] = heap[p]; k = p; } heap[k] = e; };
+      const pop = () => {
+        const top = heap[0], last = heap.pop();
+        if (heap.length) {
+          let k = 0;
+          for (;;) {
+            const l = 2 * k + 1, r = l + 1;
+            let m = k, mv = last;
+            if (l < heap.length && (heap[l][0] < mv[0] || (heap[l][0] === mv[0] && heap[l][1] < mv[1]))) { m = l; mv = heap[l]; }
+            if (r < heap.length && (heap[r][0] < mv[0] || (heap[r][0] === mv[0] && heap[r][1] < mv[1]))) { m = r; mv = heap[r]; }
+            if (m === k) break;
+            heap[k] = heap[m]; k = m;
+          }
+          heap[k] = last;
+        }
+        return top;
+      };
+      while (heap.length) {
+        const [d, i] = pop();
+        if (d > f[i]) continue;
+        for (const s of STEPS) { const j = stepTo(i, s); if (j >= 0 && d + s[2] < f[j]) { f[j] = d + s[2]; push([f[j], j]); } }
+      }
+      terCache.flows.set(goal, f);
+      return f;
+    }
+    // Which way a body walking toward (gx, gy) goes, given the way it wants to go (wx, wy): straight on while nothing
+    // blocks it for NAV.look m (or up to the goal), else along the shortest way round, aiming at the furthest point of
+    // it that it can walk to in a straight line. Its heading swings round smoothly (TURN), so it curves to the nearest
+    // opening instead of walking into the wall. The way is worked out again every NAV.every s, or when the goal moves on.
+    function steer(b, gx, gy, wx, wy) {
+      if (!terBlock || b.u.aloft) return [wx, wy];
+      const look = Math.min(NAV.look, hyp(gx - b.x, gy - b.y));
+      if (clearWalk(b.x, b.y, b.x + wx * look, b.y + wy * look)) { b.nav = null; return [wx, wy]; }
+      const goal = walkCell(gx, gy), start = cellOf(b.x, b.y);
+      if (goal < 0 || start < 0) return [wx, wy];
+      let p = b.nav && b.nav.goal === goal && t - b.nav.t < NAV.every - 1e-9 ? b.nav : null;
+      if (!p) {
+        const f = flowTo(goal);
+        let i = blocked(start) ? walkCell(b.x, b.y) : start;
+        if (i < 0 || f[i] >= NAV_INF) return [wx, wy]; // no way there on foot: straight at it
+        let px = cellX(i), py = cellY(i), any = false;
+        for (let k = 0; k < NAV.ahead && i !== goal; k++) {
+          let next = -1;
+          for (const s of STEPS) { const j = stepTo(i, s); if (j >= 0 && f[j] < f[next < 0 ? i : next]) next = j; }
+          if (next < 0) break;
+          i = next;
+          const x = i === goal ? gx : cellX(i), y = i === goal ? gy : cellY(i);
+          if (clearWalk(b.x, b.y, x, y)) { px = x; py = y; any = true; } else if (any) break;
+        }
+        p = b.nav = { goal, t, x: px, y: py };
+      }
+      const dx = p.x - b.x, dy = p.y - b.y, d = hyp(dx, dy);
+      return d > 1e-6 ? [dx / d, dy / d] : [wx, wy];
+    }
+    // a body standing in a blocked cell (pushed there, or walked round a corner) is put back out at the nearest open edge
+    function keepOut(b) {
+      const i = cellOf(b.x, b.y);
+      if (i < 0) return;
+      const c0 = i % ter.cols, r0 = Math.floor(i / ter.cols);
+      for (let pass = 0; pass < 2; pass++) for (let r = r0 - 1; r <= r0 + 1; r++) for (let c = c0 - 1; c <= c0 + 1; c++) {
+        if (r < 0 || c < 0 || r >= ter.rows || c >= ter.cols || !blocked(r * ter.cols + c)) continue;
+        const lx = ter.x0 + c * TC, hx = lx + TC, hy = ter.y1 - r * TC, ly = hy - TC;
+        const nx = Math.max(lx, Math.min(hx, b.x)), ny = Math.max(ly, Math.min(hy, b.y)), dx = b.x - nx, dy = b.y - ny, d = hyp(dx, dy);
+        if (d >= NAV.body) continue;
+        if (d > 1e-9) { b.x = nx + dx / d * NAV.body; b.y = ny + dy / d * NAV.body; continue; }
+        // inside the cell: out through the nearest side that leads to an open cell
+        const outs = [[b.x - lx, -1, 0], [hx - b.x, 1, 0], [hy - b.y, 0, -1], [b.y - ly, 0, 1]].filter(([, dc, dr]) => !blocked(cellOf(b.x + dc * TC, b.y - dr * TC)));
+        const o = (outs.length ? outs : [[b.x - lx, -1, 0]]).reduce((a, q) => q[0] < a[0] ? q : a);
+        b.x += o[1] * (o[0] + NAV.body); b.y -= o[2] * (o[0] + NAV.body);
+      }
+    }
+    // Line of sight between two cells (kept): walls (cells that block sight and walking) between them hide one from the
+    // other. A bush (blocks sight, walkable) hides who stands in it: it is seen from SIGHT_NEAR m, or by a body in a bush
+    // itself within a tile; bushes further than a tile from the one looking stop sight through them as well.
+    function losCells(a, z) {
+      if (a === z) return true;
+      const key = a * ter.cols * ter.rows + z;
+      let v = terCache.los.get(key);
+      if (v != null) return v;
+      const ax = cellX(a), ay = cellY(a), zx = cellX(z), zy = cellY(z), d = hyp(zx - ax, zy - ay);
+      v = true;
+      const n = Math.ceil(d / (TC * 0.25));
+      for (let k = 1; k < n && v; k++) {
+        const x = ax + (zx - ax) * k / n, y = ay + (zy - ay) * k / n, i = cellOf(x, y);
+        if (i < 0 || i === a || i === z || !ter.sight[i]) continue;
+        if (blocked(i) || hyp(x - ax, y - ay) > TC * 3 + 1e-9) v = false;
+      }
+      if (v && ter.sight[z] && !blocked(z) && d > SIGHT_NEAR + 1e-9 && !(ter.sight[a] && d <= TC * 3 + 1e-9)) v = false;
+      if (terCache.los.size >= NAV.keepLos) terCache.los.clear();
+      terCache.los.set(key, v);
+      return v;
+    }
+    // whether b can see f: always without walls or bushes, and for anything flying or sitting in a building
+    const inSight = (b, f) => {
+      if (!terSight || b.u.aloft || f.u.aloft || b.inside || f.u.structure) return true;
+      const a = cellOf(b.x, b.y), z = cellOf(f.x, f.y);
+      return a < 0 || z < 0 || losCells(a, z);
+    };
     // current range: shortsight can shrink it for a while, but never below 1 m (or the unit's own range if shorter)
     // Flow state stacks add to it
     const R = (b) => { const r = b.flow > 0 ? b.u.range + b.flow * b.u.flow.range : b.u.range; return b.shrinkT > 0 ? Math.max(Math.min(r, 1), r - b.shrinkM) : r; };
@@ -1339,7 +1512,7 @@ const Engine = (() => {
     function watchIdle(b) {
       const aware = Math.max(R(b) + sight, minSight);
       let sees = false;
-      for (const f of sides[1 - b.side]) if (pickable(b, f) && !f.u.aloft && gap(f, b) <= aware) { sees = true; break; }
+      for (const f of sides[1 - b.side]) if (pickable(b, f) && !f.u.aloft && gap(f, b) <= aware && inSight(b, f)) { sees = true; break; }
       b.watchT = sees ? 0 : (b.watchT || 0) + dt;
       if (b.watchT < WATCH_IDLE - 1e-9) return false;
       const host = b.inside;
@@ -1437,6 +1610,12 @@ const Engine = (() => {
         if (b.side === tl.side || b.u.unstoppable) return;
         if (!(b.slowT > 0)) { b.slowMove = 0; b.slowAtk = 0; }
         b.slowMove = Math.max(b.slowMove, tl.slow); b.slowT = Math.max(b.slowT, 0.25); // wears off a moment after it walks out
+        return;
+      }
+      if (tl.type === 'wade') { // shallow water: everyone in it walks tl.slow % slower
+        if (b.u.unstoppable) return;
+        if (!(b.slowT > 0)) { b.slowMove = 0; b.slowAtk = 0; }
+        b.slowMove = Math.max(b.slowMove, tl.slow); b.slowT = Math.max(b.slowT, 0.25);
         return;
       }
       if (tl.type === 'haste' && b.side !== tl.side) return; // only the caster's units speed up
@@ -1682,7 +1861,7 @@ const Engine = (() => {
       for (const f of sides[1 - b.side]) {
         if (!pickable(b, f)) continue;
         const d = gap(f, b);
-        if (d <= reachOf(b) + 0.01 && d >= b.u.minRange) valid.push([b.u.healthiest ? (f.u.structure ? 1e9 : 0) - poolHp(f) : d, f]); // healthiest: most health first, units before structures
+        if (d <= reachOf(b) + upRange(b, f) + 0.01 && d >= b.u.minRange && inSight(b, f)) valid.push([b.u.healthiest ? (f.u.structure ? 1e9 : 0) - poolHp(f) : d, f]); // healthiest: most health first, units before structures
       }
       valid.sort((p, q) => b.u.backline ? q[0] - p[0] : p[0] - q[0]);
       return valid.map(v => v[1]);
@@ -1707,7 +1886,7 @@ const Engine = (() => {
       const aware = Math.max(rg + sight, minSight), melee = rg <= AWARE.melee;
       let best = null, bc = Infinity;
       for (const f of sides[1 - b.side]) {
-        if (!pickable(b, f)) continue;
+        if (!pickable(b, f) || !inSight(b, f)) continue;
         const d = gap(f, b), mine = f === b.goal;
         if (d > aware * (mine ? AWARE.leash : 1)) continue;
         const lane = g.awareLane == null ? AWARE.lane : g.awareLane;
@@ -1810,12 +1989,13 @@ const Engine = (() => {
         if (wl && targets.flame) { if (walled.has(wl)) continue; walled.add(wl); }
         const dx = tgt.x - b.x, dy = tgt.y - b.y, d = hyp(dx, dy) || 1;
         const dirX = dx / d, dirY = dy / d;
+        const hk = tgt.u ? hit * (1 + above(b, tgt) * heightDmg / 100) : hit; // from higher ground (see HEIGHT)
         if (targets.flame || targets.stomp) {
-          hurt(b, tgt, hit, b.x, b.y); // flames and stomps land at once, no splash or pierce
+          hurt(b, tgt, hk, b.x, b.y); // flames and stomps land at once, no splash or pierce
         } else if (b.u.projSpeed > 0) {
-          projectiles.push({ owner: b, x: b.x, y: b.y, fx: b.x, fy: b.y, tx: tgt.x, ty: tgt.y, dirX, dirY, left: d, hit });
+          projectiles.push({ owner: b, x: b.x, y: b.y, fx: b.x, fy: b.y, tx: tgt.x, ty: tgt.y, dirX, dirY, left: d, hit: hk });
         } else {
-          impact(b, tgt.x, tgt.y, tgt, hit, dirX, dirY, b.x, b.y);
+          impact(b, tgt.x, tgt.y, tgt, hk, dirX, dirY, b.x, b.y);
         }
         if (opts.record && !targets.flame) shots.push([b.x, b.y, tgt.x, tgt.y, b.side, b.u.splash, charged ? 1 : 0, 0, 0, b.u.spinUp > 0 ? b.spin : 1, b.u.chain ? 1 : 0, 0, 0, b.u.frost && !(b.u.projSpeed > 0) ? 1 : 0, b, tgt]); // [13] 1: a frost beam; [14], [15]: its shooter and target (a held beam is drawn between them)
       }
@@ -1897,7 +2077,7 @@ const Engine = (() => {
       b.intent = tgt;
       if (td > RAM_REACH) {
         const mv = Math.min(td - RAM_REACH * 0.5, spd(b) * (b.slowT > 0 ? 1 - b.slowMove / 100 : 1) * (cripple[b.side] > 0 ? 1 - towerDown.move / 100 : 1) * dt);
-        b.hx = (tgt.x - b.x) / td; b.hy = (tgt.y - b.y) / td;
+        [b.hx, b.hy] = steer(b, tgt.x, tgt.y, (tgt.x - b.x) / td, (tgt.y - b.y) / td);
         b.x += b.hx * mv; b.y += b.hy * mv; b.moved += mv;
         if (dist(tgt, b) > RAM_REACH) return;
       }
@@ -1918,13 +2098,15 @@ const Engine = (() => {
       const top = b.u.speed, start = Math.min(ROLL_START, top);
       if (b.rollV == null) b.rollV = start;
       if (!(b.rollPast > 0)) {
-        let near = null, nd = Infinity;
-        for (const f of foes) { if (!pickable(b, f)) continue; const d = dist(f, b); if (d < nd) { nd = d; near = f; } }
+        let near = null, nd = Infinity, hid = null, hd = Infinity; // the nearest it sees, else the nearest it doesn't (walls)
+        for (const f of foes) { if (!pickable(b, f)) continue; const d = dist(f, b); if (!inSight(b, f)) { if (d < hd) { hd = d; hid = f; } } else if (d < nd) { nd = d; near = f; } }
+        const blind = !near && !!hid;
+        if (blind) { near = hid; nd = hd; }
         if (!near) return;
         b.near = near;
         const [mx, my] = b.march || [0, b.side === 0 ? 1 : -1];
         if (!b.engaged) {
-          let spotted = nd <= Math.max(R(b) + sight, minSight);
+          let spotted = !blind && nd <= Math.max(R(b) + sight, minSight);
           if (!spotted) { // nothing left ahead to march toward: go for the nearest
             spotted = true;
             for (const f of foes) if (pickable(b, f) && (f.x - b.x) * mx + (f.y - b.y) * my > 0) { spotted = false; break; }
@@ -1936,6 +2118,7 @@ const Engine = (() => {
         b.intent = tgt;
         let wx = mx, wy = my;
         if (tgt) { const d = dist(tgt, b) || 1; wx = (tgt.x - b.x) / d; wy = (tgt.y - b.y) / d; }
+        if (terBlock) [wx, wy] = steer(b, tgt ? tgt.x : b.x + wx * 400, tgt ? tgt.y : b.y + wy * 400, wx, wy); // round walls and water
         // standing still it can set off any way; rolling, it swings round like a walking body
         if (b.hx === undefined || b.rollV <= start) { b.hx = wx; b.hy = wy; }
         else {
@@ -1979,7 +2162,7 @@ const Engine = (() => {
       const dx = sx / n - b.x, dy = sy / n - b.y, d = hyp(dx, dy), keep = 2.5;
       if (d <= keep) return;
       const mv = Math.min(d - keep, spd(b) * moveMul(b) * dt);
-      b.hx = dx / d; b.hy = dy / d;
+      [b.hx, b.hy] = steer(b, sx / n, sy / n, dx / d, dy / d);
       b.x += b.hx * mv; b.y += b.hy * mv; b.moved += mv;
     }
 
@@ -2016,7 +2199,7 @@ const Engine = (() => {
       b.siteAt = d <= SITE_REACH;
       if (b.siteAt) return true;
       const mv = Math.min(d - SITE_REACH * 0.8, spd(b) * moveMul(b) * dt);
-      b.hx = (s.x - b.x) / d; b.hy = (s.y - b.y) / d;
+      [b.hx, b.hy] = steer(b, s.x, s.y, (s.x - b.x) / d, (s.y - b.y) / d);
       b.x += b.hx * mv; b.y += b.hy * mv; b.moved += mv;
       return true;
     }
@@ -2038,7 +2221,7 @@ const Engine = (() => {
       const dx = x - b.x, dy = y - b.y, d = hyp(dx, dy);
       if (d <= stop + 1e-6) return true;
       const mv = Math.min(d - stop, spd(b) * moveMul(b) * dt);
-      b.hx = dx / d; b.hy = dy / d;
+      [b.hx, b.hy] = steer(b, x, y, dx / d, dy / d);
       b.x += b.hx * mv; b.y += b.hy * mv; b.moved += mv;
       return d - mv <= stop + 1e-6;
     }
@@ -2240,12 +2423,16 @@ const Engine = (() => {
           if (sd - mv <= 0.05 || b.spreadT <= 0) { b.spreadTo = null; b.spreadT = null; }
           continue;
         }
-        let near = null, nd = Infinity;
+        // the nearest enemy it can see; with none in sight (walls in the way), the nearest it can't (unseen): it walks
+        // on round to it but doesn't stop, engage or build for it until it sees it
+        let near = null, nd = Infinity, hid = null, hd = Infinity;
         for (const f of foes) {
           if (!pickable(b, f)) continue;
           const d = gap(f, b);
-          if (d < nd) { nd = d; near = f; }
+          if (!inSight(b, f)) { if (d < hd) { hd = d; hid = f; } } else if (d < nd) { nd = d; near = f; }
         }
+        const unseen = !near && !!hid;
+        if (unseen) { near = hid; nd = hd; }
         b.near = near;
         if (b.u.flee > 0 && near && nd < b.u.flee) { // keeping away from the enemy
           const mv = spd(b) * moveMul(b) * dt;
@@ -2258,7 +2445,7 @@ const Engine = (() => {
         // a builder that hasn't built yet stops to build once an enemy is within its constructs' range (see the builders below)
         if (b.u.build && !b.built) {
           if (b.buildT > 0) continue;
-          if (near && nd <= b.u.build.range - 1) {
+          if (near && !unseen && nd <= b.u.build.range - 1) {
             b.buildT = b.buildFull = Math.max(dt, b.u.build.time || 0);
             b.buildDir = nd > 1e-6 ? [(near.x - b.x) / nd, (near.y - b.y) / nd] : [0, b.side === 0 ? 1 : -1];
             continue;
@@ -2270,23 +2457,27 @@ const Engine = (() => {
         if (b.guide && b.guide.length) {
           const p = b.guide[0], gx = p.x - b.x, gy = p.y - b.y, gd = hyp(gx, gy);
           if (gd < 1.5) { b.guide.shift(); if (!b.guide.length) b.guide = null; continue; }
-          if (near && nd <= reachOf(b)) continue; // something in reach: stand and fight it
+          if (near && !unseen && nd <= reachOf(b) + upRange(b, near)) continue; // something in reach: stand and fight it
           const step = spd(b) * (b.slowT > 0 ? 1 - b.slowMove / 100 : 1) * (cripple[b.side] > 0 ? 1 - towerDown.move / 100 : 1) * dt;
-          if (b.hx === undefined) { b.hx = gx / gd; b.hy = gy / gd; }
+          const [ux, uy] = steer(b, p.x, p.y, gx / gd, gy / gd);
+          if (b.hx === undefined) { b.hx = ux; b.hy = uy; }
           const k = Math.min(1, TURN * dt);
-          let hx = b.hx + (gx / gd - b.hx) * k, hy = b.hy + (gy / gd - b.hy) * k, hl = hyp(hx, hy);
-          if (hl < 1e-6) { hx = gx / gd; hy = gy / gd; hl = 1; }
+          let hx = b.hx + (ux - b.hx) * k, hy = b.hy + (uy - b.hy) * k, hl = hyp(hx, hy);
+          if (hl < 1e-6) { hx = ux; hy = uy; hl = 1; }
           b.hx = hx / hl; b.hy = hy / hl;
           const mv = Math.min(step, gd);
           b.x += b.hx * mv; b.y += b.hy * mv; b.moved += mv;
           if (b.u.windUp > 0 && mv > 0) { b.setUp = false; if (b.windTarget) { b.windTarget = null; stats[b.side].windLost++; } }
           continue;
         }
-        if (g.aware2 && b.engaged && near) { const gl = goalOf(b, rg); if (gl) { near = gl; nd = gap(gl, b); } }
-        if (b.avenge) { if (b.avenge.alive && !b.avenge.hidden) { near = b.avenge; nd = gap(near, b); } else b.avenge = null; } // a guard going for its attacker
+        let blind = unseen; // walking to an enemy it can't see
+        if (g.aware2 && b.engaged && near) { const gl = goalOf(b, rg); if (gl) { near = gl; nd = gap(gl, b); blind = false; } }
+        if (b.avenge) { if (b.avenge.alive && !b.avenge.hidden) { near = b.avenge; nd = gap(near, b); blind = !inSight(b, near); } else b.avenge = null; } // a guard going for its attacker
+        // higher ground reaches further (see HEIGHT); an enemy out of sight is never in reach
+        const rgN = blind ? -1 : rg + upRange(b, near);
         // its movement target: whom it goes for once engaged (or a guard's attacker), or whom it stands at in reach
-        if (near && (b.engaged || b.avenge || nd <= (g.stopPct > 0 && g.stopPct < 1 && b.engaged ? stopAt(rg) : rg))) b.intent = near;
-        if (near && nd > (g.stopPct > 0 && g.stopPct < 1 && b.engaged ? stopAt(rg) : rg)) {
+        if (near && (b.engaged || b.avenge || nd <= (g.stopPct > 0 && g.stopPct < 1 && b.engaged ? stopAt(rgN) : rgN))) b.intent = near;
+        if (near && nd > (g.stopPct > 0 && g.stopPct < 1 && b.engaged ? stopAt(rgN) : rgN)) {
           b.dashing = b.u.dash > 0 && b.engaged && nd <= b.u.dash; // dash: the last metres to its target in a flash
           const step = (b.dashing ? Math.max(DASH_SPEED, spd(b)) : spd(b)) * (b.slowT > 0 ? 1 - b.slowMove / 100 : 1) * (cripple[b.side] > 0 ? 1 - towerDown.move / 100 : 1) * dt;
           let mv;
@@ -2299,7 +2490,7 @@ const Engine = (() => {
           const fwd = b.side === 0 ? 1 : -1, [mx, my] = b.march || [0, fwd];
           const aware = Math.max(rg + sight, minSight);
           if (!b.engaged) {
-            let spotted = nd <= aware;
+            let spotted = !blind && nd <= aware;
             if (!spotted) { // nothing left ahead to march toward: go for the nearest
               spotted = true;
               for (const f of foes) if (pickable(b, f) && (f.x - b.x) * mx + (f.y - b.y) * my > 0) { spotted = false; break; }
@@ -2310,11 +2501,16 @@ const Engine = (() => {
           let wx = mx, wy = my;
           const nr = dist(near, b) || 1; // the direction to it (nd is to its edge for a wall)
           if (b.engaged) { wx = (near.x - b.x) / nr; wy = (near.y - b.y) / nr; }
-          else if (drift > 0 && nd < aware + drift && (near.x - b.x) * mx + (near.y - b.y) * my > 0) {
+          else if (drift > 0 && !blind && nd < aware + drift && (near.x - b.x) * mx + (near.y - b.y) * my > 0) {
             // within DRIFT of its sight: lean toward the nearest enemy ahead, harder the closer it gets, so it
             // curves in on a diagonal instead of marching level with the enemy and then turning sharply
             const w = (aware + drift - nd) / drift;
             wx = mx * (1 - w) + (near.x - b.x) / nr * w; wy = my * (1 - w) + (near.y - b.y) / nr * w;
+          }
+          // walls and water in the way: round them, toward its enemy, or toward the far end of the board while it marches
+          if (terBlock && !b.u.aloft) {
+            const far = b.engaged ? 0 : 400, gx = b.engaged ? near.x : b.x + wx * far, gy = b.engaged ? near.y : b.y + wy * far;
+            [wx, wy] = steer(b, gx, gy, wx, wy);
           }
           // turn smoothly instead of snapping: the heading swings toward the wanted direction
           if (b.hx === undefined) { b.hx = mx; b.hy = my; }
@@ -2323,7 +2519,7 @@ const Engine = (() => {
           if (hl < 1e-6) { hx = wx; hy = wy; hl = 1; }
           b.hx = hx / hl; b.hy = hy / hl;
           // walk a little inside max range, so being nudged by allies doesn't leave the unit just out of reach
-          mv = b.engaged ? Math.min(step, nd - stopAt(rg)) : step;
+          mv = b.engaged && !blind ? Math.min(step, nd - stopAt(rgN)) : step;
           b.x += b.hx * mv;
           b.y += b.hy * mv;
           b.moved += mv;
@@ -2440,6 +2636,8 @@ const Engine = (() => {
           else f.y = w.y + (dy < 0 ? -hy : hy);
         }
       }
+      // walls and water: a body that ended up in one (pushed by allies, knocked back, cutting a corner) steps back out
+      if (terBlock) for (const b of all) if (b.alive && !b.u.aloft && !b.u.structure && !b.u.anchored && !sheltered(b) && !b.boarded) keepOut(b);
       for (const s of strikes) {
         if (s.done || t + 1e-9 < s.t) continue;
         s.done = true;
@@ -2573,6 +2771,7 @@ const Engine = (() => {
               const [ox, oy] = SPAWN_SPOTS[(b.kids.length + k) % SPAWN_SPOTS.length], fwd = b.side === 0 ? 1 : -1;
               const kid = newBody(b.u.spawn.unit, b.side, b.x + ox * g.spacing * 0.7, b.y + oy * fwd * g.spacing * 0.7, spawnNo[b.side]++, -1);
               b.kids.push(kid); all.push(kid); sides[b.side].push(kid);
+              if (terBlock && !kid.u.aloft) keepOut(kid); // not dropped in the water
               stats[b.side].totalHp += kid.u.hp;
             }
           }
@@ -2810,7 +3009,7 @@ const Engine = (() => {
         pendingKids.push(pt.hf);
       }
       // bodies spawned by deaths this tick join the fight
-      for (const kid of pendingKids) { all.push(kid); sides[kid.side].push(kid); if (counts(kid)) stats[kid.side].totalHp += kid.u.hp; }
+      for (const kid of pendingKids) { all.push(kid); sides[kid.side].push(kid); if (counts(kid)) stats[kid.side].totalHp += kid.u.hp; if (terBlock && !kid.u.aloft) keepOut(kid); } // not in the water
       pendingKids.length = 0;
       // a linked squad shares its health: whatever healed one of its bodies is shared by all
       for (const grp of groups) {
@@ -2895,7 +3094,7 @@ const Engine = (() => {
     return m;
   }
 
-  return { POISON_SLOW, DASH_SPEED, LONE_R, WATCH_IDLE, BURN, FROST_ON, EAT_R, glutUnit, TOWER_DOWN, RULES, ruleOn, STEALTH_BACK, SKILL_SLOTS, SLOTS, SKILL_TYPES, skillParam, describeSkill, applySkills, innateUnit, fairBudget, battle, makeArmy, matrix, createBattle, buildSquad, rawStrength, squadsFor, withTraits, leveled, TRAIT_DEFAULTS, SPIN_CAP, CHARGE_RUN, TRAMPLE_RUN, BLAST_RADIUS, BLEED, POISON_HEAL, RAM_REACH, ROLL_START, ROLL_PAST, BUILD_GAP, BUILD_COOP, SITE_REACH, MINE_TRIGGER, REPAIR_SECS, LEVEL_BONUS, levelHpK, MAX_LEVEL, CHARM_MAX, CONVERT_HP, CONVERT_SQUAD };
+  return { NAV, HEIGHT, SIGHT_NEAR, POISON_SLOW, DASH_SPEED, LONE_R, WATCH_IDLE, BURN, FROST_ON, EAT_R, glutUnit, TOWER_DOWN, RULES, ruleOn, STEALTH_BACK, SKILL_SLOTS, SLOTS, SKILL_TYPES, skillParam, describeSkill, applySkills, innateUnit, fairBudget, battle, makeArmy, matrix, createBattle, buildSquad, rawStrength, squadsFor, withTraits, leveled, TRAIT_DEFAULTS, SPIN_CAP, CHARGE_RUN, TRAMPLE_RUN, BLAST_RADIUS, BLEED, POISON_HEAL, RAM_REACH, ROLL_START, ROLL_PAST, BUILD_GAP, BUILD_COOP, SITE_REACH, MINE_TRIGGER, REPAIR_SECS, LEVEL_BONUS, levelHpK, MAX_LEVEL, CHARM_MAX, CONVERT_HP, CONVERT_SQUAD };
 })();
 if (typeof module !== 'undefined') module.exports = Engine;
 
@@ -3084,7 +3283,7 @@ const Game = (() => {
   const bwallShown = (m, viewer, deploying, side, w) => side === viewer || !deploying || w.round < m.round;
   const ownHalf = (side, row) => side === 0 ? row >= ROWS / 2 && row < ROWS : row >= 0 && row < ROWS / 2;
   function bwallSpotOk(m, side, col, row, edge) {
-    if (!isEdge(edge) || col < 0 || col >= COLS || !ownHalf(side, row) || reserved(side, col, row)) return false;
+    if (!isEdge(edge) || col < 0 || col >= COLS || !ownHalf(side, row) || reserved(side, col, row) || terrainBlocks(m, col, row)) return false;
     const [dc, dr] = EDGES[edge];
     if (col + dc < 0 || col + dc >= COLS || row + dr < 0 || row + dr >= ROWS) return false; // not on the board's outer edge
     if (bwallOn(m, side, col, row, edge) || bwallOn(m, 1 - side, col, row, edge)) return false;
@@ -3383,6 +3582,20 @@ const Game = (() => {
   // rules of every fight. Elf tower: a neutral tower standing on the centre line of no man's land, the same
   // distance from both zones, in a random column that stays for the whole match. It can't be attacked. It sides
   // with whoever has bribed the elves the most times (see the bribe-off below); with nobody ahead, it shoots both sides in turn.
+  // Maps made in the map editor (its JSON, format 'nml-map'): tiles ('.' open, '#' wall, '~' water, 's' shallow water,
+  // 'b' bush; 'O' objectives and 'p' 'y' 'g' mushrooms aren't played yet), shape (the form of a wall, water, shallow
+  // water or bush tile: '.' a full tile, else a corner, line, diagonal or edge wall, see SHAPE_PATH), height ('L' -2,
+  // 'l' -1, '.' 0, 'h' +1, 'H' +2), flank and buildings (the game's own spots for now). See terrainOf for what each does.
+  const EDITOR_MAPS = {
+    bridge: { format: 'nml-map', version: 1, name: 'Bridge map', base: 'testgrid', cols: 14, rows: 18, zone: 7, symmetry: 'point',
+      tiles: ['..............', '..............', '..............', '..............', '..............', '..............', '.....~..~.....', '.....~..~.....', '.....~..~.....',
+        '.....~..~.....', '.....~..~.....', '.....~..~.....', '..............', '..............', '..............', '..............', '..............', '..............'],
+      shape: Array(18).fill('..............'),
+      height: ['..............', '..............', '..............', '..............', '..............', '......hh......', '......HH......', '......HH......', '......HH......',
+        '......HH......', '......HH......', '......HH......', '......hh......', '..............', '..............', '..............', '..............', '..............'],
+      flank: Array(18).fill('F............F'),
+      buildings: [{ kind: 'tower', side: 0, col: 10, row: 16 }, { kind: 'tower', side: 1, col: 3, row: 1 }, { kind: 'treasury', side: 0, col: 4, row: 15 }, { kind: 'treasury', side: 1, col: 9, row: 2 }] },
+  };
   const MAPS = [
     { id: 'standard', name: 'Standard', short: 'No special rules.', text: 'No special rules.', plain: true }, // only when picked, never random
     { id: 'forest', name: 'Forest Clearing', short: 'Bribe the elf tower to fight for you.', text: 'Bribe the elf tower to fight for you. Healing ×1.5.', boostHp: 15, boostUnits: ['Ent', 'Earth Wizard'], healMul: 1.5, elfTower: true },
@@ -3393,7 +3606,87 @@ const Game = (() => {
       iceShort: 'Hail from round 2. An ice altar rises on even rounds.', iceText: 'Every fight from round 2: a hailstorm drops 10 hail tiles in the storm band (no man’s land at first); units standing in hail take 20 damage per second. Even rounds: the altar of ice rises in the middle of the board. Tap it to buy ice walls for your tower, push the storm band toward your opponent, or summon a Snowgre.', ice: true },
     { id: 'testgrid', name: 'Test Grid', short: 'A bigger board: each zone is 14 by 7 tiles.', text: 'Bigger board. A treasury pays 50 gold per fight it survives.', plain: true, grid: { cols: 14, rows: 18, zone: 7 }, pointMirror: true, treasury: true,
       rangeAdd: 2, rangeAddMin: 5, slowSteps: [[3, 0.2], [5, 0.2]], tuneKeep: ['Shiv', 'Water Mage'] }, // only when picked, never random
+    // the Test Grid's board and rules, with two rivers and a raised bridge between them across no man's land
+    { id: 'bridge', name: 'Bridge', short: 'A raised bridge between two rivers. High ground shoots further and harder.', text: 'Two rivers nobody can wade across, a raised bridge between them. From higher ground: +1 m range and +2% damage per level above the target. A treasury pays 50 gold per fight it survives.', plain: true,
+      grid: { cols: 14, rows: 18, zone: 7 }, pointMirror: true, treasury: true, terrain: EDITOR_MAPS.bridge,
+      rangeAdd: 2, rangeAddMin: 5, slowSteps: [[3, 0.2], [5, 0.2]], tuneKeep: ['Shiv', 'Water Mage'] }, // only when picked, never random
   ];
+  // ---------- terrain: walls, water, bushes and ground height (a map's `terrain`, from the map editor) ----------
+  // A wall ('#') stops walking, shots and sight; water ('~') stops walking only; shallow water ('s') slows whoever wades
+  // in it by TERRAIN.wade %; a bush ('b') hides who stands in it (see the engine's inSight). A tile with a form (a
+  // line, corner, diagonal or edge wall) only has that much of it: the engine's grid has TERRAIN.sub x TERRAIN.sub
+  // cells a tile, and the cells the form runs through take it. Bodies walk round what stops them (Engine: steer).
+  // Ground height is a level per tile (-2 .. 2): the engine gives higher ground more range and damage (Engine.HEIGHT),
+  // and the boards draw it TERRAIN.step m up per level, sloping smoothly between walkable tiles.
+  const TERRAIN = { sub: 3, wade: 30, step: 1.5, sink: 0.6 };
+  const CHH = { L: -2, l: -1, '.': 0, h: 1, H: 2 };
+  // the line through a tile's form, in tile units (0 to 1, y down), as in the map editor
+  const SHAPE_PATH = { '─': [[0, .5], [1, .5]], '│': [[.5, 0], [.5, 1]], '└': [[.5, 0], [.5, .5], [1, .5]], '┌': [[1, .5], [.5, .5], [.5, 1]],
+    '┐': [[.5, 1], [.5, .5], [0, .5]], '┘': [[0, .5], [.5, .5], [.5, 0]], '╱': [[0, 1], [1, 0]], '╲': [[0, 0], [1, 1]],
+    '▔': [[0, .11], [1, .11]], '▕': [[.89, 0], [.89, 1]], '▁': [[0, .89], [1, .89]], '▏': [[.11, 0], [.11, 1]] };
+  const EDGE_FORMS = '▔▕▁▏'; // an edge wall stands on one side of its tile: the tile can still be stood on
+  const terrainMap = (m) => { const mp = mapOf(m); return mp && mp.terrain ? mp.terrain : null; };
+  // what is on a tile: { ch, shape, h } (open, flat ground off the map's terrain)
+  function terrainTile(m, col, row) {
+    const t = terrainMap(m);
+    if (!t || col < 0 || row < 0 || col >= COLS || row >= ROWS) return { ch: '.', shape: '.', h: 0 };
+    return { ch: t.tiles[row][col], shape: (t.shape && t.shape[row][col]) || '.', h: CHH[t.height[row][col]] || 0 };
+  }
+  // nothing can be placed on a wall or water tile (an edge wall leaves its tile free)
+  const terrainBlocks = (m, col, row) => { const t = terrainTile(m, col, row); return (t.ch === '#' || t.ch === '~') && !EDGE_FORMS.includes(t.shape); };
+  // the engine's terrain grid for a map (opts.terrain), made once per map: see Engine's terrain
+  function terrainOf(m) {
+    const mp = mapOf(m), t = mp && mp.terrain;
+    if (!t) return null;
+    if (mp.grid3 && mp.grid3.cols === COLS * TERRAIN.sub) return mp.grid3;
+    const k = TERRAIN.sub, cols = COLS * k, rows = ROWS * k;
+    const out = { cols, rows, cell: TILE / k, x0: -COLS * TILE / 2, y1: ROWS * TILE / 2, block: new Uint8Array(cols * rows), sight: new Uint8Array(cols * rows), level: new Int8Array(cols * rows) };
+    // whether the middle of cell (i, j) of a tile lies on its form (within 0.2 of a tile of the line)
+    const onForm = (sh, i, j) => {
+      const pts = SHAPE_PATH[sh], x = (i + 0.5) / k, y = (j + 0.5) / k;
+      for (let n = 1; n < pts.length; n++) {
+        const [ax, ay] = pts[n - 1], [bx, by] = pts[n], dx = bx - ax, dy = by - ay, L = dx * dx + dy * dy;
+        const u = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / L)), ex = ax + dx * u - x, ey = ay + dy * u - y;
+        if (ex * ex + ey * ey <= 0.04 + 1e-9) return true;
+      }
+      return false;
+    };
+    for (let row = 0; row < ROWS; row++) for (let col = 0; col < COLS; col++) {
+      const { ch, shape, h } = terrainTile(m, col, row);
+      for (let j = 0; j < k; j++) for (let i = 0; i < k; i++) {
+        const idx = (row * k + j) * cols + col * k + i, on = shape === '.' || !SHAPE_PATH[shape] || onForm(shape, i, j);
+        out.level[idx] = h;
+        if (!on) continue;
+        if (ch === '#' || ch === '~') out.block[idx] = 1;
+        if (ch === '#' || ch === 'b') out.sight[idx] = 1;
+      }
+    }
+    mp.grid3 = out;
+    return out;
+  }
+  // How high the ground is drawn at a board point (metres; for the boards, not the rules): a tile's level times
+  // TERRAIN.step, sloping smoothly across walkable tiles (between the middles of neighbouring tiles), so a raised tile
+  // meets the open ground round it in a ramp. Walls and water keep their own level (water TERRAIN.sink lower), and a
+  // point on the edge between them and walkable ground belongs to the ground: the bank drops on the water's side.
+  function groundHeight(m, x, y) {
+    const t = terrainMap(m);
+    if (!t) return 0;
+    const fc = x / TILE + (COLS - 1) / 2, fr = (ROWS - 1) / 2 - y / TILE; // in tiles, tile middles on whole numbers
+    const open = (tl) => tl.ch !== '#' && tl.ch !== '~';
+    // the tiles the point is in (two or four on an edge or corner)
+    const cs = [...new Set([Math.round(fc - 1e-6), Math.round(fc + 1e-6)])], rs = [...new Set([Math.round(fr - 1e-6), Math.round(fr + 1e-6)])];
+    let own = null;
+    for (const c of cs) for (const r of rs) { const tl = terrainTile(m, Math.max(0, Math.min(COLS - 1, c)), Math.max(0, Math.min(ROWS - 1, r))); if (!own || (open(tl) && !open(own))) own = tl; }
+    if (!open(own)) return own.h * TERRAIN.step - (own.ch === '~' ? TERRAIN.sink : 0);
+    const c0 = Math.floor(fc), r0 = Math.floor(fr), u = fc - c0, v = fr - r0;
+    let sum = 0, wsum = 0;
+    for (const [dc, dr, w] of [[0, 0, (1 - u) * (1 - v)], [1, 0, u * (1 - v)], [0, 1, (1 - u) * v], [1, 1, u * v]]) {
+      const c = Math.max(0, Math.min(COLS - 1, c0 + dc)), r = Math.max(0, Math.min(ROWS - 1, r0 + dr)), tl = terrainTile(m, c, r);
+      if (!open(tl) || w <= 0) continue;
+      sum += tl.h * w; wsum += w;
+    }
+    return (wsum > 0 ? sum / wsum : own.h) * TERRAIN.step;
+  }
   // ---------- Frozen Peak: hailstorm and the altar of ice ----------
   // The storm band is 4 rows deep: no man's land to start with. Each push moves it ICE.push rows toward the other
   // player, for the rest of the match (side 0 pushes toward row 0, side 1 toward the last row); it never leaves the board.
@@ -3549,7 +3842,7 @@ const Game = (() => {
   // what it costs a player: what they paid if they bought it this round, else what it costs them now
   const elfOwnCost = (m, side) => { const e = elfOwnOf(m, side); return (e && e.round === m.round ? isMapFree(m, side, { kind: 'elf' }) : mapFreeLeft(m, side)) ? blix(ELF_OWN.cost) : ELF_OWN.cost; };
   const canBuyElfOwn = (m, side) => elfOwnOffered(m, side) && !elfOwnOf(m, side) && m.gold[side] >= elfOwnCost(m, side);
-  const elfOwnSpotOk = (m, side, col, row) => col >= 0 && col < COLS && inZone(side, row) && !reserved(side, col, row) && !occupied(m, side, col, row);
+  const elfOwnSpotOk = (m, side, col, row) => col >= 0 && col < COLS && inZone(side, row) && !reserved(side, col, row) && !occupied(m, side, col, row) && !terrainBlocks(m, col, row);
   function buyElfOwn(m, side, col, row) {
     if (!canBuyElfOwn(m, side) || !elfOwnSpotOk(m, side, col, row)) return false;
     if (!m.elfOwn) m.elfOwn = [null, null];
@@ -3725,7 +4018,7 @@ const Game = (() => {
   const canPlaceAt = (m, side, col, row, ui, moving) => blockOf(m, ui, col, row).every(([c, r]) => canPlaceTile(m, side, c, r, ui, moving));
   // no squad, tower or building on any tile the unit would take
   const spotFree = (m, side, col, row, ui) => blockOf(m, ui, col, row).every(([c, r]) => !occupied(m, side, c, r) || garrisonFree(m, side, c, r, ui));
-  const canPlaceTile = (m, side, col, row, ui, moving) => col >= 0 && col < COLS && row >= 0 && row < ROWS && !reserved(side, col, row) && !(ui != null && isOff(m, ui, side)) &&
+  const canPlaceTile = (m, side, col, row, ui, moving) => col >= 0 && col < COLS && row >= 0 && row < ROWS && !reserved(side, col, row) && !terrainBlocks(m, col, row) && !(ui != null && isOff(m, ui, side)) &&
     !(ui != null && m && m.units[ui] && m.units[ui].noFlank && isFlank(side, col, row)) &&
     (inZone(side, row) || (flankOpen(m) && isFlank(side, col, row)) || (inNoMans(row) && hasSkillType(m, side, ui, 'forward', moving ? 0 : 1)) || garrisonFree(m, side, col, row, ui)) && !enemyHolds(m, side, col, row);
   // ---------- Overwatch (the Sniper's Master skill) ----------
@@ -4156,7 +4449,7 @@ const Game = (() => {
   const buildingAt = (m, side, col, row) => buildingsOf(m, side).find(b => b.col === col && b.row === row) || null;
   // what a screen may show of a player's building: an opponent's new one only from the fight on
   const buildingShown = (v, viewer, deploying, side, b) => side === viewer || !deploying || b.round < v.round;
-  const buildingSpotOk = (m, side, col, row) => col >= 0 && col < COLS && inZone(side, row) && !reserved(side, col, row) && !occupied(m, side, col, row);
+  const buildingSpotOk = (m, side, col, row) => col >= 0 && col < COLS && inZone(side, row) && !reserved(side, col, row) && !occupied(m, side, col, row) && !terrainBlocks(m, col, row);
   const canBuyBuilding = (m, side, ui, k) => isBuildingSkill(m, ui, k) && !!buildingInfo(buildingIdOf(m, ui, k)) && !buildingOf(m, side, buildingIdOf(m, ui, k)) && canBuySkill(m, side, ui, k);
   // buy unit ui's building skill k and put the building on (col, row)
   function buyBuilding(m, side, ui, k, col, row) {
@@ -4682,7 +4975,7 @@ const Game = (() => {
     const taken = (col, row) => [0, 1].some(sd => occupied(m, sd, col, row)) || snowgres(m, 0).concat(snowgres(m, 1)).some(g => g.col === col && g.row === row);
     const spots = [];
     for (let row = 0; row < ROWS; row++) for (let col = 0; col < COLS; col++) {
-      if (reserved(side, col, row) || taken(col, row)) continue;
+      if (reserved(side, col, row) || taken(col, row) || terrainBlocks(m, col, row)) continue;
       if (inZone(side, row) || inNoMans(row) || (flankOpen(m) && isFlank(side, col, row))) spots.push({ col, row });
     }
     const r = rng(m.seed + m.round * 7307 + side * 2903 + 41), out = [];
@@ -4699,7 +4992,7 @@ const Game = (() => {
     if (charOf(m, side) !== 'zoe') return;
     const r = rng(m.seed + m.round * 6151 + side * 3571 + 99);
     const spots = [];
-    for (const row of zoneRows(side)) for (let col = 0; col < COLS; col++) if (!reserved(side, col, row) && !towerAt(m, side, col, row) && !treasuryAt(m, side, col, row) && !shroomAt(m, col, row)) spots.push({ col, row });
+    for (const row of zoneRows(side)) for (let col = 0; col < COLS; col++) if (!reserved(side, col, row) && !towerAt(m, side, col, row) && !treasuryAt(m, side, col, row) && !shroomAt(m, col, row) && !terrainBlocks(m, col, row)) spots.push({ col, row });
     for (let k = 0; k < CHAR.zoeTiles && spots.length; k++) m.buff[side].push(spots.splice(Math.floor(r() * spots.length), 1)[0]);
   }
   const onBuffTile = (m, side, col, row) => charOf(m, side) === 'zoe' && !!(m.buff && m.buff[side] || []).some(t => t.col === col && t.row === row);
@@ -4737,12 +5030,19 @@ const Game = (() => {
         : { type: 'toxic', poisonPct: SHROOM.poisonPct, poisonDur: SHROOM.poisonDur, slowMove: SHROOM.slowMove, slowAtk: SHROOM.slowAtk, slowDur: SHROOM.slowDur, x0: w.x - T2, x1: w.x + T2, y0: w.y - T2, y1: w.y + T2 });
     }
     for (const h of hailTiles(m)) { const w = tileToWorld(h.col, h.row); tiles.push({ type: 'hail', dps: ICE.hailDps, x0: w.x - T2, x1: w.x + T2, y0: w.y - T2, y1: w.y + T2 }); }
+    // shallow water slows whoever wades in it
+    if (terrainMap(m)) for (let row = 0; row < ROWS; row++) for (let col = 0; col < COLS; col++) {
+      const tl = terrainTile(m, col, row);
+      if (tl.ch !== 's' || (tl.shape !== '.' && SHAPE_PATH[tl.shape])) continue; // a form of shallow water is too thin to wade in
+      const w = tileToWorld(col, row);
+      tiles.push({ type: 'wade', slow: TERRAIN.wade, x0: w.x - T2, x1: w.x + T2, y0: w.y - T2, y1: w.y + T2 });
+    }
     const fx = isDev(m) ? castEffects(m) : { tiles: [], strikes: [] }; // devtest spells
     tiles.push(...fx.tiles);
     if (AWARENESS) g = { ...g, aware2: true, ...(isDev(m) && DEV.awareLane != null ? { awareLane: DEV.awareLane } : {}) };
     const neutrals = elf ? [{ u: elfUnit(m), x: elf.x, y: elf.y, friends: [bribeLeader(m) === 0, bribeLeader(m) === 1] }] : [];
     for (const side of [0, 1]) { const e = elfOwnOf(m, side); if (e) { const w = tileToWorld(e.col, e.row); neutrals.push({ u: elfUnit(m), x: w.x, y: w.y, friends: [side === 0, side === 1], side }); } }
-    return { g, opts: { tiles, strikes: fx.strikes, neutrals, charm: [charmMap(m, 0), charmMap(m, 1)] } };
+    return { g, opts: { tiles, strikes: fx.strikes, neutrals, charm: [charmMap(m, 0), charmMap(m, 1)], terrain: terrainOf(m) } };
   }
 
   // ---------- intent: whom a squad goes for ----------
@@ -5661,7 +5961,7 @@ const Game = (() => {
     TOWER, TOWER_TYPES, OUTPOST, TOWER_PICK_ROUND, towerType, towerChoices, needsTowerPick, setTowerType, settleTowerPicks, TOWER_SKILL, towerSkillOf, towerSkillVisible, towerPicked, canBuyTowerSkill, buyTowerSkill, undoTowerSkill, towerSkillCost, towerSkill2Of, towerSkill2Visible, towerSkill2Cost, canBuyTowerSkill2, buyTowerSkill2, undoTowerSkill2, towerSkill2On, AIRSHIP, MOAT, BWALL, BWALL_SQ, EDGES, bwallsOf, bwallOn, edgeOf, bwallWorld, bwallsLeft, bwallShown, bwallSpotOk, placeBwall, unplaceBwall, ensureBwalls, bwallUnit, INVEST, MAGE_GENERALS, mageGenPrice, MAGE, mageGenInfo, mageGenOf, mageTpOf, isExtraGen, mageGenCost, canBuyMageGen, buyMageGen, undoMageGen, mageTowerUnit, generalUnit, LOAN, loanNow, investNow, bankBusy, investNow, bankBusy, canTakeLoan, takeLoan, undoLoan, towerRounds, troundInfo, troundOn, troundCost, canBuyTround, buyTround, undoTround, SLIME_UNITS, slimeTowerUnit, slimeSkillDefs, TOWER_MID, towerColOk, towerAt, needsTower, placeTower, ensureTower,
     FLANK, flankRows, flankOpen, isFlank, reserved, canPlaceAt, isOff, enemyHolds, inNoMans, hasSkillType, garrisonAt, garrisonFree, inBuilding, WATCH_SQ, watchUnit, freeMover,
     STANDARD_PACK, ICE, ALTAR, GOLEM, isIce, hailRound, altarRound, stormShift, stormRows, hailTiles, altarCost, altarRefund, altarCount, pushRoom, altarBought, addAltar, buyAltar, undoAltar, snowgres, snowgreUnit,
-    MAPS, ELF_TOWER, SHROOM, SHROOM_SPLIT, shroomAt, shroomTileAt, shroomRemoval, SHROOM_REMOVE, shroomCost, removeShroom, undoRemoveShroom, mapOf, elfSpot, rollMap, BRIBE_COST, bribeList, bribeGold, bribeCount, bribeNow, bribeCost, bribeRefund, ELF_POWER, elfPowered, elfUnit, ELF_OWN, elfOwnCost, elfOwnOf, elfOwnAt, elfOwnUnlocked, elfOwnOffered, canBuyElfOwn, elfOwnSpotOk, buyElfOwn, undoElfOwn, bribeLeader, canBribe, bribe, undoBribe,
+    MAPS, EDITOR_MAPS, TERRAIN, SHAPE_PATH, terrainTile, terrainBlocks, terrainOf, groundHeight, ELF_TOWER, SHROOM, SHROOM_SPLIT, shroomAt, shroomTileAt, shroomRemoval, SHROOM_REMOVE, shroomCost, removeShroom, undoRemoveShroom, mapOf, elfSpot, rollMap, BRIBE_COST, bribeList, bribeGold, bribeCount, bribeNow, bribeCost, bribeRefund, ELF_POWER, elfPowered, elfUnit, ELF_OWN, elfOwnCost, elfOwnOf, elfOwnAt, elfOwnUnlocked, elfOwnOffered, canBuyElfOwn, elfOwnSpotOk, buyElfOwn, undoElfOwn, bribeLeader, canBribe, bribe, undoBribe,
     CHARACTERS, CHAR, charOf, charInfo, enzoSkill, enzoActive, charmOf, isGentleman, canGiveCharm, giveCharm, undoCharm, ensureCharm, felixGold, isTier1, rollBuffTiles, onBuffTile, zoeBuff, yotImps, yotLevel, TOWER_SPOT, towerSpot,
     TREASURY, TREASURY_SQ, treasuryOn, treasuryUp, treasurySpot, treasuryAt, treasuryUnit, deployCost, FORTIFY, fortifyOf, canFortify, fortify, bwallsFighting, VAULT, vaultOn, MARK, markOf, markLost, markOn, markCost, markTarget, canMark, placeMark, markShown,
     FACTION_MODE, FACTIONS: () => FACTIONS, setFactions, factionInfo, factionsOf, factionTowers, towerTypeById, ownsUnit, withFactionTrait, factionSet,
@@ -6044,6 +6344,87 @@ const Render2D = (cv, view) => {
     for (let k = 0; k < 120; k++) { c.globalAlpha = 0.08 + rr() * 0.14; c.beginPath(); c.arc(rr() * W, rr() * H, 0.6 + rr() * 0.9, 0, Math.PI * 2); c.fill(); }
   }
   const BACKGROUNDS = { forest: [1234567, paintForest], cavern: [7654321, paintCavern], ice: [4242421, paintIce] };
+  // ---------- terrain: a map's ground height, water, walls, shallow water and bushes (Game.TERRAIN) ----------
+  // Painted once per map, board size and side onto a canvas of its own, then copied onto the board every frame.
+  // Height is light and shade: higher ground lighter, lower darker, slopes lit from the top left, as Game.groundHeight
+  // has it (ramps where raised ground meets walkable ground). A tile with a form (line, corner, diagonal, edge wall)
+  // is drawn as that line.
+  const TERRAIN_LOOK = { '~': { fill: '#1C5873', line: '#4FA9C9' }, s: { fill: '#2B7A93', line: '#7CC3D8' }, '#': { fill: '#2C3A44', line: '#55707F' }, b: { fill: '#24502A', line: '#4C8A4F' } };
+  let terBg = null;
+  function terrainLayer(v) {
+    const key = v.map.id + ':' + W + 'x' + H + ':' + me;
+    if (terBg && terBg.key === key) return terBg.cv;
+    const dpr = Math.min(2, window.devicePixelRatio || 1), t = tilePx(), C = Game.COLS, R = Game.ROWS, T = Game.TILE, step = Game.TERRAIN.step;
+    const oc = document.createElement('canvas'); oc.width = Math.round(W * dpr); oc.height = Math.round(H * dpr);
+    const c = oc.getContext('2d'); c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    // a model point (in tiles from the board's top left) on this screen, and its height
+    const sx = (X) => (me === 1 ? C - X : X) * t, sy = (Y) => (me === 1 ? R - Y : Y) * t;
+    const hAt = (X, Y) => Game.groundHeight(v, (X - C / 2) * T, (R / 2 - Y) * T) / step;
+    // ground height: n samples a tile, each lighter or darker by its level and its slope, drawn as a small picture
+    // stretched over the board (so it blends smoothly)
+    const n = 4, d = 1 / n, hc = document.createElement('canvas'); hc.width = C * n; hc.height = R * n;
+    const hg = hc.getContext('2d'), img = hg.createImageData(C * n, R * n);
+    for (let j = 0; j < R * n; j++) for (let i = 0; i < C * n; i++) {
+      const X = (i + 0.5) * d, Y = (j + 0.5) * d, h = hAt(X, Y);
+      const lit = (hAt(X - d, Y - d) - hAt(X + d, Y + d)) * (me === 1 ? -1 : 1); // the slope, facing the light (top left on screen)
+      const k = Math.max(-0.4, Math.min(0.4, (h > 0 ? 0.075 * h : 0.1 * h) + lit * 0.45)); // lighter or darker
+      const q = ((me === 1 ? R * n - 1 - j : j) * C * n + (me === 1 ? C * n - 1 - i : i)) * 4;
+      if (k > 0) { img.data[q] = 242; img.data[q + 1] = 230; img.data[q + 2] = 196; } // (black otherwise)
+      img.data[q + 3] = Math.round(Math.abs(k) * 255);
+    }
+    hg.putImageData(img, 0, 0);
+    c.imageSmoothingEnabled = true; c.drawImage(hc, 0, 0, W, H);
+    // a faint rim along the edges of raised and lowered ground
+    c.globalAlpha = 0.35; c.lineWidth = 1;
+    for (let row = 0; row < R; row++) for (let col = 0; col < C; col++) {
+      const h = Game.terrainTile(v, col, row).h;
+      if (!h) continue;
+      for (const [dc, dr, ax, ay, bx, by] of [[0, -1, 0, 0, 1, 0], [1, 0, 1, 0, 1, 1], [0, 1, 0, 1, 1, 1], [-1, 0, 0, 0, 0, 1]]) {
+        const o = Game.terrainTile(v, col + dc, row + dr);
+        if (col + dc < 0 || col + dc >= C || row + dr < 0 || row + dr >= R || o.h === h || o.ch === '~' || o.ch === '#') continue;
+        c.strokeStyle = h > o.h ? '#F7EBCB' : '#000000';
+        c.beginPath(); c.moveTo(sx(col + ax), sy(row + ay)); c.lineTo(sx(col + bx), sy(row + by)); c.stroke();
+      }
+    }
+    // water, walls, shallow water and bushes
+    let sd = 99; const rr = () => { sd = (sd * 1103515245 + 12345) % 2147483648; return sd / 2147483648; };
+    for (let row = 0; row < R; row++) for (let col = 0; col < C; col++) {
+      const tl = Game.terrainTile(v, col, row), look = TERRAIN_LOOK[tl.ch];
+      if (!look) continue;
+      const x = Math.min(sx(col), sx(col + 1)), y = Math.min(sy(row), sy(row + 1)), path = Game.SHAPE_PATH[tl.shape];
+      if (path) { // a form: a thick line through the tile (turned round with the board for side 1)
+        const pts = path.map(([u, w]) => [sx(col + u), sy(row + w)]), wide = '▔▕▁▏'.includes(tl.shape) ? 0.2 : 0.34;
+        c.lineCap = 'round'; c.lineJoin = 'round';
+        c.beginPath(); pts.forEach(([px, py], k) => k ? c.lineTo(px, py) : c.moveTo(px, py));
+        c.globalAlpha = 0.95; c.strokeStyle = look.fill; c.lineWidth = t * wide; c.stroke();
+        c.globalAlpha = 0.6; c.strokeStyle = look.line; c.lineWidth = Math.max(1, t * 0.04); c.stroke();
+        continue;
+      }
+      const same = (dc, dr) => { const o = Game.terrainTile(v, col + dc, row + dr); return col + dc < 0 || col + dc >= C || row + dr < 0 || row + dr >= R || (o.ch === tl.ch && o.shape === '.'); };
+      c.globalAlpha = tl.ch === 'b' ? 0.85 : 0.95; c.fillStyle = look.fill; c.fillRect(x, y, t, t);
+      if (tl.ch === '~' || tl.ch === 's') { // ripples
+        c.strokeStyle = '#BFE6F2'; c.lineWidth = 1;
+        for (let k = 0; k < 3; k++) {
+          const px = x + t * (0.15 + rr() * 0.6), py = y + t * (0.2 + rr() * 0.65), w = t * (0.12 + rr() * 0.15);
+          c.globalAlpha = 0.22; c.beginPath(); c.moveTo(px, py); c.quadraticCurveTo(px + w / 2, py - t * 0.05, px + w, py); c.stroke();
+        }
+      }
+      if (tl.ch === '#') { c.globalAlpha = 0.5; c.fillStyle = '#6D8796'; c.fillRect(x + t * 0.08, y + t * 0.08, t * 0.84, t * 0.18); } // a lit top
+      if (tl.ch === 'b') for (let k = 0; k < 5; k++) { // leafy clumps
+        c.globalAlpha = 0.55; c.fillStyle = k % 2 ? '#3A7A3E' : '#2F6533';
+        c.beginPath(); c.arc(x + t * (0.2 + rr() * 0.6), y + t * (0.2 + rr() * 0.6), t * (0.14 + rr() * 0.08), 0, Math.PI * 2); c.fill();
+      }
+      // its shore or edge: a light line where it meets other ground
+      c.globalAlpha = 0.7; c.strokeStyle = look.line; c.lineWidth = Math.max(1, t * 0.05);
+      for (const [dc, dr, ax, ay, bx, by] of [[0, -1, 0, 0, 1, 0], [1, 0, 1, 0, 1, 1], [0, 1, 0, 1, 1, 1], [-1, 0, 0, 0, 0, 1]]) {
+        if (same(dc, dr)) continue;
+        c.beginPath(); c.moveTo(sx(col + ax), sy(row + ay)); c.lineTo(sx(col + bx), sy(row + by)); c.stroke();
+      }
+    }
+    c.globalAlpha = 1;
+    terBg = { key, cv: oc };
+    return oc;
+  }
   const ICE_COL = '#BFE3F5';
   // the storm band (a faint frost) and this round's hail tiles (animated during the fight)
   function drawStorm(v) {
@@ -6136,6 +6517,7 @@ const Render2D = (cv, view) => {
     const mp = Game.mapOf(v);
     if (mp && BACKGROUNDS[mp.id]) ctx.drawImage(mapBackground(mp.id), 0, 0, W, H);
     else { ctx.fillStyle = css('--board'); ctx.fillRect(0, 0, W, H); }
+    if (mp && mp.terrain) ctx.drawImage(terrainLayer(v), 0, 0, W, H);
     if (!plain) {
       ctx.globalAlpha = 0.08;
       ctx.fillStyle = css('--foe'); ctx.fillRect(0, 0, W, t * Z);
@@ -6426,9 +6808,9 @@ const Render2D = (cv, view) => {
     const tw = 96, th = tw * Game.ROWS / Game.COLS, dpr = 2;
     const oc = document.createElement('canvas'); oc.width = tw * dpr; oc.height = th * dpr;
     const g = oc.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0);
-    const keep = { ctx, W, H, S, m, me, phase, mapBg };
+    const keep = { ctx, W, H, S, m, me, phase, mapBg, terBg };
     try {
-      ctx = g; W = tw; H = th; S = W / (Game.COLS * Game.TILE); me = 0; phase = 'start'; mapBg = null;
+      ctx = g; W = tw; H = th; S = W / (Game.COLS * Game.TILE); me = 0; phase = 'start'; mapBg = null; terBg = null;
       m = match;
       drawBoard();
       const t = tilePx();
@@ -6440,7 +6822,7 @@ const Render2D = (cv, view) => {
         g.fillText('?', tw / 2, th / 2);
       }
       return oc.toDataURL();
-    } finally { ({ ctx, W, H, S, m, me, phase, mapBg } = keep); }
+    } finally { ({ ctx, W, H, S, m, me, phase, mapBg, terBg } = keep); }
   }
   function drawTowerTile(side) {
     const tw = m.towers[side], t = tilePx();
@@ -7975,7 +8357,8 @@ const Render3D = (THREE, el, view, opts = {}) => {
   const groundTex = new THREE.CanvasTexture(floorCv);
   groundTex.colorSpace = THREE.SRGBColorSpace;
   groundTex.anisotropy = renderer.capabilities.getMaxAnisotropy();
-  const ground = new THREE.Mesh(new THREE.PlaneGeometry(BW, BD), new THREE.MeshLambertMaterial({ map: groundTex }));
+  const HK = 8; // ground height samples a tile (see the ground height below)
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(BW, BD, Game.COLS * HK, Game.ROWS * HK), new THREE.MeshLambertMaterial({ map: groundTex }));
   ground.rotation.x = -Math.PI / 2;
   ground.receiveShadow = true;
   scene.add(ground);
@@ -7983,6 +8366,53 @@ const Render3D = (THREE, el, view, opts = {}) => {
   const around = new THREE.Mesh(new THREE.PlaneGeometry(600, 600), new THREE.MeshLambertMaterial({ color: '#141b1d' }));
   around.rotation.x = -Math.PI / 2; around.position.y = -0.05; around.receiveShadow = true;
   scene.add(around);
+  // ---------- ground height (a map's terrain: Game.groundHeight): the floor rises and falls with it, and everything
+  // standing or drawn on it (models, rings, markers, shots) goes up and down with it. Heights are sampled HK times a
+  // tile once per map and side, and read between the samples. Wall tiles stand as stone blocks (or lines of stone along
+  // their form). ----------
+  const hCols = Game.COLS * HK + 1, hRows = Game.ROWS * HK + 1;
+  let hKey = '', hGrid = null, hF = 1, stones = [];
+  const WALL_H = 3.2; // how tall a wall stands (m)
+  const stoneMat = new THREE.MeshStandardMaterial({ color: '#4A5A63', roughness: 0.9, metalness: 0.02, flatShading: true });
+  function useHeights(v) {
+    const src = v.battlePre || v.m, mp = src && Game.mapOf(src), key = mp && mp.terrain ? src.map.id + ':' + v.me : '';
+    if (key === hKey) return;
+    hKey = key; hF = v.me === 1 ? -1 : 1; stones = [];
+    const pos = ground.geometry.attributes.position;
+    hGrid = key ? new Float32Array(hCols * hRows) : null;
+    for (let j = 0; j < hRows; j++) for (let i = 0; i < hCols; i++) {
+      const wx = -BW / 2 + i * T / HK, wz = -BD / 2 + j * T / HK, h = hGrid ? Game.groundHeight(src, wx * hF, -wz * hF) : 0;
+      if (hGrid) hGrid[j * hCols + i] = h;
+      pos.setZ(j * hCols + i, h); // the plane lies in x, y before it is turned flat: its z is up
+    }
+    pos.needsUpdate = true; ground.geometry.computeVertexNormals(); ground.geometry.computeBoundingSphere();
+    around.position.y = Math.min(0, ...(hGrid || [0])) - 0.05; // the land round the board stays under the lowest ground
+    if (!key) return;
+    for (let row = 0; row < Game.ROWS; row++) for (let col = 0; col < Game.COLS; col++) {
+      const tl = Game.terrainTile(src, col, row);
+      if (tl.ch !== '#') continue;
+      const c = hF === 1 ? col : Game.COLS - 1 - col, r = hF === 1 ? row : Game.ROWS - 1 - row, x0 = c * T - BW / 2, z0 = r * T - BD / 2, y0 = tl.h * Game.TERRAIN.step;
+      const path = Game.SHAPE_PATH[tl.shape];
+      if (!path) { stones.push([x0 + T / 2, y0, z0 + T / 2, T, T, 0]); continue; }
+      const wide = '▔▕▁▏'.includes(tl.shape) ? 0.2 : 0.32, at = ([u, w]) => [x0 + (hF === 1 ? u : 1 - u) * T, z0 + (hF === 1 ? w : 1 - w) * T];
+      for (let k = 1; k < path.length; k++) { // a block along each piece of the line, a little longer so the corners meet
+        const [ax, az] = at(path[k - 1]), [bx, bz] = at(path[k]), L = Math.hypot(bx - ax, bz - az);
+        stones.push([(ax + bx) / 2, y0, (az + bz) / 2, L + T * wide, T * wide, Math.atan2(-(bz - az), bx - ax)]);
+      }
+    }
+  }
+  // the ground's height at a world point
+  function groundY(wx, wz) {
+    if (!hGrid) return 0;
+    const gx = Math.max(0, Math.min(hCols - 1.001, (wx + BW / 2) / T * HK)), gz = Math.max(0, Math.min(hRows - 1.001, (wz + BD / 2) / T * HK));
+    const i = Math.floor(gx), j = Math.floor(gz), u = gx - i, w = gz - j, k = j * hCols + i;
+    return (hGrid[k] * (1 - u) + hGrid[k + 1] * u) * (1 - w) + (hGrid[k + hCols] * (1 - u) + hGrid[k + hCols + 1] * u) * w;
+  }
+  function drawStones() {
+    const g = group('stones', beamGeo, stoneMat, stones.length);
+    stones.forEach(([x, y, z, len, wide, ang], i) => { tmpP.set(x, y + WALL_H / 2, z); tmpQ.setFromAxisAngle(up, ang); tmpS.set(len, WALL_H, wide); g.setMatrixAt(i, tmpM.compose(tmpP, tmpQ, tmpS)); });
+    finish(g, stones.length);
+  }
   const ids = new WeakMap(); let nextId = 1;
   const idOf = (o) => o ? (ids.get(o) || (ids.set(o, nextId), nextId++)) : 0;
   function paintFloor(v, dt) {
@@ -8107,7 +8537,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
   function spr(mode, x, y, z, w, h, c, a, p0 = 0, p1 = 0, p2 = 0, p3 = 0) {
     if (ns >= SPR_CAP || a <= 0.01 || uiOff) return;
     const P = sprAttr.aPos.array, S = sprAttr.aSize.array, C = sprAttr.aCol.array, Q = sprAttr.aP.array, i3 = ns * 3, i2 = ns * 2, i4 = ns * 4;
-    P[i3] = x; P[i3 + 1] = y; P[i3 + 2] = z; S[i2] = w; S[i2 + 1] = h;
+    P[i3] = x; P[i3 + 1] = y + groundY(x, z); P[i3 + 2] = z; S[i2] = w; S[i2 + 1] = h; // heights are above the ground there
     C[i4] = c.r; C[i4 + 1] = c.g; C[i4 + 2] = c.b; C[i4 + 3] = a;
     Q[i4] = p0; Q[i4 + 1] = p1; Q[i4 + 2] = p2; Q[i4 + 3] = p3;
     sprAttr.aMode.array[ns] = mode;
@@ -8173,7 +8603,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
   const beamMat = new THREE.MeshBasicMaterial({ blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, toneMapped: false });
   const beamGeo = new THREE.BoxGeometry(1, 1, 1);
   const beams = [];
-  const beam = (x1, y1, z1, x2, y2, z2, w, c, a) => { if (a > 0.01) beams.push([x1, y1, z1, x2, y2, z2, w, c.r * a, c.g * a, c.b * a]); };
+  const beam = (x1, y1, z1, x2, y2, z2, w, c, a) => { if (a > 0.01) beams.push([x1, y1 + groundY(x1, z1), z1, x2, y2 + groundY(x2, z2), z2, w, c.r * a, c.g * a, c.b * a]); }; // heights above the ground
   function drawBeams() {
     const g = group('beams', beamGeo, beamMat, beams.length);
     beams.forEach(([x1, y1, z1, x2, y2, z2, w, r, gg, b], i) => {
@@ -8203,12 +8633,13 @@ const Render3D = (THREE, el, view, opts = {}) => {
     hits.forEach((n, k) => {
       if (!(n > 0)) return;
       const h = 2.6 * n / Game.ICE.wallHits, x = (wx + dirs[k][0] * T * 0.5) * f, z = -(wy + dirs[k][1] * T * 0.5) * f;
+      if (!(h > 0)) return;
       walls.push([x, h, z, dirs[k][0] !== 0]);
     });
   }
   function drawWalls() {
     const g = group('walls', beamGeo, wallMat, walls.length);
-    walls.forEach(([x, h, z, across], i) => { tmpP.set(x, h / 2, z); tmpQ.identity(); tmpS.set(across ? T * 0.12 : T * 0.8, h, across ? T * 0.8 : T * 0.12); g.setMatrixAt(i, tmpM.compose(tmpP, tmpQ, tmpS)); });
+    walls.forEach(([x, h, z, across], i) => { tmpP.set(x, h / 2 + groundY(x, z), z); tmpQ.identity(); tmpS.set(across ? T * 0.12 : T * 0.8, h, across ? T * 0.8 : T * 0.12); g.setMatrixAt(i, tmpM.compose(tmpP, tmpQ, tmpS)); });
     finish(g, walls.length);
     walls.length = 0;
   }
@@ -8559,7 +8990,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
         const bob = s.moving && !s.u.smooth && !rollAt ? Math.abs(Math.sin(clock * 9 + s.phase)) * 0.12 * r * s.moving : 0;
         const [wx, wz] = world(f, s.x, s.y);
         tmpQ.setFromAxisAngle(up, fixed ? (s.side === me ? Math.PI : 0) + ((s.u.barrierY || 0) > (s.u.barrier || 0) ? Math.PI / 2 : 0) : Math.atan2(-hx * f, hy * f)); // a model's front is its -z side; a tower's door faces its own side; a wall along y turns a quarter
-        tmpP.set(wx, lift + bob, wz); tmpS.setScalar(sc);
+        tmpP.set(wx, lift + bob + groundY(wx, wz), wz); tmpS.setScalar(sc);
         if (rollAt && s.b) { // turn the ball around its middle by how far it has rolled
           tmpQ.multiply(tmpQ2.setFromAxisAngle(xAxis, -(s.b.moved || 0) / (rollAt * sc)));
           const c = rollAt * sc; tmpD.set(0, -c, 0).applyQuaternion(tmpQ); tmpP.x += tmpD.x; tmpP.y += c + tmpD.y; tmpP.z += tmpD.z;
@@ -8587,7 +9018,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
           else smoke(wx, h, wz, 0.35 * r, s.phase || 0);
         }
         if (s.tag) { const l = labels.get(s.tag) || { u: s.u, pts: [] }; l.pts.push([wx, wz, r]); labels.set(s.tag, l); }
-        if (s.tile) models_.push([wx, wz, r, h, s.tile.col, s.tile.row]);
+        if (s.tile) models_.push([wx, wz, r, h + groundY(wx, wz), s.tile.col, s.tile.row]);
       });
       for (const [, g] of gs) finish(g, list.length);
     }
@@ -8600,7 +9031,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
       icon('tag|' + Shapes.tag(u), cx + camDown.x * d, 0.3, cz + camDown.z * d, tagS, white, 0.95);
     }
     const rg = group('rings', ringGeo, flatMat, rings.length);
-    rings.forEach(([x, z, r, side], i) => { tmpP.set(x, 0, z); tmpS.set(r, 1, r); tmpQ.identity(); rg.setMatrixAt(i, tmpM.compose(tmpP, tmpQ, tmpS)); rg.setColorAt(i, teamColor(side, me)); });
+    rings.forEach(([x, z, r, side], i) => { tmpP.set(x, groundY(x, z), z); tmpS.set(r, 1, r); tmpQ.identity(); rg.setMatrixAt(i, tmpM.compose(tmpP, tmpQ, tmpS)); rg.setColorAt(i, teamColor(side, me)); });
     finish(rg, rings.length);
     if (!battle) return;
     // projectiles in flight: thrown spears, and team-coloured shot for the rest
@@ -8610,7 +9041,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
     const sg = group('projectiles', shotGeo, flatMat, rest.length);
     const LEAF = color('#7BE05A'), FLAME = color('#FF9A3D'); // a Leaf Wizard's leaves, a Leafblade missile's flame
     rest.forEach((p, i) => {
-      tmpP.set(p.x * f, p.missile ? 2.2 : 1.6, -p.y * f); tmpS.setScalar(fxWide() * (p.missile ? 2 : 1.4)); tmpQ.identity(); sg.setMatrixAt(i, tmpM.compose(tmpP, tmpQ, tmpS));
+      tmpP.set(p.x * f, (p.missile ? 2.2 : 1.6) + groundY(p.x * f, -p.y * f), -p.y * f); tmpS.setScalar(fxWide() * (p.missile ? 2 : 1.4)); tmpQ.identity(); sg.setMatrixAt(i, tmpM.compose(tmpP, tmpQ, tmpS));
       sg.setColorAt(i, p.missile ? FLAME : p.owner.u.name === 'Leaf Wizard' ? tmpC.copy(LEAF).lerp(teamColor(p.owner.side, me), 0.25) : tmpC.copy(teamColor(p.owner.side, me)).lerp(white, 0.45));
       if (p.missile) beam(p.x * f, 2.2, -p.y * f, (p.x - p.dirX * 2.5) * f, 2.0, -(p.y - p.dirY * 2.5) * f, 0.25 * fxWide(), FLAME, 0.8); // its trail
     });
@@ -8618,7 +9049,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
     const sp = models.parts('spear'), spT = group('spear:tint', sp.tint, tintMat, spears.length), spF = group('spear:fixed', sp.fixed, fixedMat, spears.length);
     spears.forEach((p, i) => {
       tmpD.set(p.dirX * f, 0, -p.dirY * f).normalize(); tmpQ.setFromUnitVectors(tmpS.set(0, 0, -1), tmpD);
-      tmpP.set(p.x * f, 1.3, -p.y * f); tmpS.setScalar(1); tmpM.compose(tmpP, tmpQ, tmpS);
+      tmpP.set(p.x * f, 1.3 + groundY(p.x * f, -p.y * f), -p.y * f); tmpS.setScalar(1); tmpM.compose(tmpP, tmpQ, tmpS);
       spT.setMatrixAt(i, tmpM); spT.setColorAt(i, tmpC.set(p.owner.u.color || '#cccccc'));
       spF.setMatrixAt(i, tmpM); spF.setColorAt(i, white);
     });
@@ -8675,7 +9106,8 @@ const Render3D = (THREE, el, view, opts = {}) => {
         const ang = Math.atan2(z2 - z1, x2 - x1), half = (e.half || 30) * Math.PI / 180, rr = Math.hypot(x2 - x1, z2 - z1), k = 0.4 + 0.6 * a;
         for (let sgm = 0; sgm < FAN_SEG; sgm++) {
           const a0 = ang - half + 2 * half * sgm / FAN_SEG, a1 = ang - half + 2 * half * (sgm + 1) / FAN_SEG, o = (nf * FAN_SEG + sgm) * 9;
-          fanPos.set([x1, 0.3, z1, x1 + Math.cos(a0) * rr, 0.3, z1 + Math.sin(a0) * rr, x1 + Math.cos(a1) * rr, 0.3, z1 + Math.sin(a1) * rr], o);
+          const fy = 0.3 + groundY(x1, z1);
+          fanPos.set([x1, fy, z1, x1 + Math.cos(a0) * rr, fy, z1 + Math.sin(a0) * rr, x1 + Math.cos(a1) * rr, fy, z1 + Math.sin(a1) * rr], o);
           fanCol.set(e.slam ? [0.42 * k, 0.33 * k, 0.2 * k, 0.12 * k, 0.09 * k, 0.05 * k, 0.12 * k, 0.09 * k, 0.05 * k] : e.spin ? [0.3 * k, 0.55 * k, 0.15 * k, 0.05 * k, 0.2 * k, 0.04 * k, 0.05 * k, 0.2 * k, 0.04 * k] : [0.55 * k, 0.32 * k, 0.08 * k, 0.12 * k, 0.03 * k, 0, 0.12 * k, 0.03 * k, 0], o); // a ground slam is dust, spinning blades are leaves, not fire
         }
         nf++;
@@ -8715,9 +9147,9 @@ const Render3D = (THREE, el, view, opts = {}) => {
   let lastMe = 0;
   const cam = Camera3D(THREE, camera, renderer.domElement, {
     width: BW, depth: BD,
-    onTap: (p, cx, cy) => { if (opts.onTap) opts.onTap(pick(p, cx, cy)); },
+    onTap: (p, cx, cy) => { if (opts.onTap) opts.onTap(pick(groundHit(cx, cy) || p, cx, cy)); },
     // a press on a squad never moves the camera: one the page doesn't drag is held still, as on the 2D board
-    onPress: (p, cx, cy) => { const t = pick(p, cx, cy); return !!(opts.onPress && opts.onPress(t)) || !!(t && squadTiles.has(t.col + ',' + t.row)); },
+    onPress: (p, cx, cy) => { const t = pick(groundHit(cx, cy) || p, cx, cy); return !!(opts.onPress && opts.onPress(t)) || !!(t && squadTiles.has(t.col + ',' + t.row)); },
     onDrag: (p) => { if (opts.onDrag) opts.onDrag(tileOfGround(p, lastMe)); },
     onDrop: (p) => { if (opts.onDrop) opts.onDrop(tileOfGround(p, lastMe), !!p); },
     onHover: (p) => { if (opts.onHover) opts.onHover(tileOfGround(p, lastMe)); },
@@ -8747,12 +9179,12 @@ const Render3D = (THREE, el, view, opts = {}) => {
     if (camDown.lengthSq() < 1e-6) camDown.set(0, 0, 1); camDown.normalize();
     const z = cam.zoom();
     viewMode = z < 0.5 ? 'strategic' : z < 1.5 ? 'tilted' : z < 2.5 ? 'angled' : 'ground'; uiOff = viewMode === 'ground';
-    paintFloor(v, dt);
+    paintFloor(v, dt); useHeights(v);
     used.clear(); ns = 0;
     placeBodies(v, dt);
     drawFx(v);
     if (v.hoverTile && cam.handsOn() && !(v.selected !== null || v.moving != null)) { const s = screenTile(v.me, v.hoverTile.col, v.hoverTile.row); tileSq(s.col, s.row, color(css('--you') || '#5CC6DF'), 0.35, 1, 0, 0.03); }
-    drawBeams(); drawWalls();
+    drawBeams(); drawWalls(); drawStones();
     for (const g of Object.values(groups)) if (!used.has(g)) g.count = 0;
     sprGeo.instanceCount = ns;
     for (const a of Object.values(sprAttr)) { a.clearUpdateRanges(); a.addUpdateRange(0, ns * a.itemSize); a.needsUpdate = true; }
@@ -8761,14 +9193,20 @@ const Render3D = (THREE, el, view, opts = {}) => {
     scene.fog.near = 400 - 310 * near; scene.fog.far = 600 - 380 * near;
     renderer.render(scene, camera);
   }
-  const tileAt = (clientX, clientY) => tileOfGround(cam.groundAt(clientX, clientY), view().me);
+  // where a touch meets the ground, raised or lowered (a couple of steps toward the ground's height there)
+  function groundHit(clientX, clientY) {
+    let p = cam.groundAt(clientX, clientY);
+    for (let k = 0; k < 3 && p && hGrid; k++) p = cam.groundAt(clientX, clientY, groundY(p.x, p.z)) || p;
+    return p;
+  }
+  const tileAt = (clientX, clientY) => tileOfGround(groundHit(clientX, clientY), view().me);
   // the tile a touch there picks (a squad's model in front of the ground wins, see pick()), for checks
-  const pickAt = (clientX, clientY) => pick(cam.groundAt(clientX, clientY), clientX, clientY);
+  const pickAt = (clientX, clientY) => pick(groundHit(clientX, clientY), clientX, clientY);
   // where the middle of a tile (model column / row), h metres above the ground, is on the screen: [clientX, clientY]
   const scrV = new THREE.Vector3();
   function screenAt(col, row, h = 0) {
     const f = view().me === 1 ? -1 : 1, w = Game.tileToWorld(col, row), r = renderer.domElement.getBoundingClientRect();
-    scrV.set(w.x * f, h, -w.y * f).project(camera);
+    scrV.set(w.x * f, h + groundY(w.x * f, -w.y * f), -w.y * f).project(camera);
     return [r.left + (scrV.x + 1) / 2 * r.width, r.top + (1 - scrV.y) / 2 * r.height];
   }
   const QUALITY = { high: [2, true], medium: [1.5, true], low: [1, false] };
