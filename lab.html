@@ -1496,7 +1496,8 @@ const Engine = (() => {
     const ter = opts.terrain || null;
     const TC = ter ? ter.cell : 1, NAV_INF = 1e9;
     const terBlock = !!(ter && ter.block.some(v => v)), terSight = !!(ter && ter.sight.some(v => v)), terHeight = !!(ter && ter.level.some(v => v));
-    const terCache = ter ? (ter.cache || (ter.cache = { flows: new Map(), los: new Map() })) : null;
+    const terCache = ter ? (ter.cache || (ter.cache = { flows: new Map(), blocks: new Map(), los: new Map() })) : null;
+    if (terCache && !terCache.blocks) terCache.blocks = new Map();
     // the cell a board point is in (-1 off the grid)
     const cellOf = (x, y) => { const c = Math.floor((x - ter.x0) / TC), r = Math.floor((ter.y1 - y) / TC); return c < 0 || r < 0 || c >= ter.cols || r >= ter.rows ? -1 : r * ter.cols + c; };
     const cellX = (i) => ter.x0 + (i % ter.cols + 0.5) * TC, cellY = (i) => ter.y1 - (Math.floor(i / ter.cols) + 0.5) * TC;
@@ -1549,10 +1550,11 @@ const Engine = (() => {
       return j;
     }
     // how far every cell is from a goal cell on foot (Dijkstra; whole numbers, so the same on every device), kept per goal
-    function flowTo(goal) {
-      let f = terCache.flows.get(goal);
+    // (store: where it is kept, terCache.flows by default; walkGap keeps its own, one per block of cells)
+    function flowTo(goal, store = terCache.flows) {
+      let f = store.get(goal);
       if (f) return f;
-      if (terCache.flows.size >= NAV.keep) terCache.flows.clear();
+      if (store.size >= NAV.keep) store.clear();
       f = new Int32Array(ter.cols * ter.rows).fill(NAV_INF);
       f[goal] = 0;
       const heap = [[0, goal]];
@@ -1578,7 +1580,7 @@ const Engine = (() => {
         if (d > f[i]) continue;
         for (const s of STEPS) { const j = stepTo(i, s); if (j >= 0 && d + s[2] < f[j]) { f[j] = d + s[2]; push([f[j], j]); } }
       }
-      terCache.flows.set(goal, f);
+      store.set(goal, f);
       return f;
     }
     // Which way a body walking toward (gx, gy) goes, given the way it wants to go (wx, wy): straight on while nothing
@@ -1609,6 +1611,29 @@ const Engine = (() => {
       }
       const dx = p.x - b.x, dy = p.y - b.y, d = hyp(dx, dy);
       return d > 1e-6 ? [dx / d, dy / d] : [wx, wy];
+    }
+    // how far b has to go to fight f: the gap between them, or, when walls or water stand between them on foot and f is
+    // out of b's reach (rg: its range), the length of the way round (so a body on a bridge doesn't pick an enemy just
+    // across the river, a long walk back, over one further on at the end of the bridge). The way round counts only when it is
+    // clearly longer than the gap (the grid's steps run a little long on open ground), so open ground is as before.
+    function walkGap(b, f, rg) {
+      const d = gap(f, b);
+      if (!terBlock || b.u.aloft || f.u.aloft) return d;
+      // the paths are the same both ways, so it walks from f to the middle of b's block of 3 x 3 cells: one flow per
+      // block (kept), at most a cell and a half off, which the margin below covers. Both ends are kept for the tick.
+      if (b.wgTick !== tick) {
+        b.wgTick = tick; b.wgFlow = null;
+        const i = cellOf(b.x, b.y);
+        if (i >= 0) {
+          const c = Math.min(ter.cols - 1, Math.floor(i % ter.cols / 3) * 3 + 1), r = Math.min(ter.rows - 1, Math.floor(i / ter.cols / 3) * 3 + 1);
+          const from = walkCell(cellX(r * ter.cols + c), cellY(r * ter.cols + c));
+          if (from >= 0) b.wgFlow = flowTo(from, terCache.blocks);
+        }
+      }
+      if (f.wcTick !== tick) { f.wcTick = tick; f.wc = walkCell(f.x, f.y); }
+      if (!b.wgFlow || f.wc < 0) return d;
+      const w = b.wgFlow[f.wc] * TC / 10;
+      return w < NAV_INF * TC / 10 && w > d * 1.1 + 4 * TC && d > reachTo(rg, b, f) ? w : d;
     }
     // a body standing in a blocked cell (pushed there, or walked round a corner) is put back out at the nearest open edge
     function keepOut(b) {
@@ -2147,7 +2172,7 @@ const Engine = (() => {
         const d = gap(f, b), mine = f === b.goal;
         if (d > aware * (mine ? AWARE.leash : 1)) continue;
         const lane = g.awareLane == null ? AWARE.lane : g.awareLane;
-        let c = d - (mine ? AWARE.stick : 0) + lane * Math.abs(f.x - b.x);
+        let c = walkGap(b, f, rg) - (mine ? AWARE.stick : 0) + lane * Math.abs(f.x - b.x); // the way round walls and water
         if (melee) { const n = (f.claimsM || 0) - (mine ? 1 : 0); c += n >= slotsOf(f) ? AWARE.full : n * AWARE.step; }
         else c += ((f.claimsR || 0) - (mine ? 1 : 0)) * 0.5;
         if (c < bc) { bc = c; best = f; }
@@ -2669,6 +2694,11 @@ const Engine = (() => {
         if (b.u.ram) { ram(b, foes); continue; }
         if (b.u.roll > 0) { roll(b, foes); continue; }
         if (b.follow) { escortMove(b); continue; }
+        if (b.u.drop && !b.dropped) { // a drop not yet made (the airship): it flies straight on into the enemy's territory first
+          const dy = b.u.drop.y - b.y, mv = Math.min(Math.abs(dy), spd(b) * moveMul(b) * dt);
+          b.hx = 0; b.hy = Math.sign(dy) || b.u.drop.dir; b.y += b.hy * mv; b.moved += mv;
+          continue;
+        }
         if (b.spreadTo) { // Spread: run out to its own spot first
           const sx = b.spreadTo.x - b.x, sy = b.spreadTo.y - b.y, sd = hyp(sx, sy);
           const mv = Math.min(sd, spd(b) * (b.slowT > 0 ? 1 - b.slowMove / 100 : 1) * dt);
@@ -2682,12 +2712,15 @@ const Engine = (() => {
         }
         // the nearest enemy it can see; with none in sight (walls in the way), the nearest it can't (unseen): it walks
         // on round to it but doesn't stop, engage or build for it until it sees it
+        // (with walls or water about: the nearest on foot, see walkGap)
         let near = null, nd = Infinity, hid = null, hd = Infinity;
+        const rb = terBlock ? R(b) : 0;
         for (const f of foes) {
           if (!pickable(b, f)) continue;
-          const d = gap(f, b);
+          const d = terBlock ? walkGap(b, f, rb) : gap(f, b);
           if (!inSight(b, f)) { if (d < hd) { hd = d; hid = f; } } else if (d < nd) { nd = d; near = f; }
         }
+        if (terBlock) { if (near) nd = gap(near, b); if (hid) hd = gap(hid, b); } // its reach is measured straight
         const unseen = !near && !!hid;
         if (unseen) { near = hid; nd = hd; }
         b.near = near;
@@ -3032,6 +3065,19 @@ const Engine = (() => {
               if (terBlock && !kid.u.aloft) keepOut(kid); // not dropped in the water
               stats[b.side].totalHp += kid.u.hp;
             }
+          }
+        }
+        // a drop (the sniper tower's airship): count bodies of drop.unit, once a fight, the moment it crosses the line
+        // y = drop.y going the way of drop.dir (+1: up, -1: down) into the enemy's territory
+        if (b.u.drop && !b.dropped && (b.y - b.u.drop.y) * b.u.drop.dir >= 0) {
+          b.dropped = true;
+          const fwd = b.side === 0 ? 1 : -1;
+          for (let k = 0; k < b.u.drop.count; k++) {
+            const [ox, oy] = SPAWN_SPOTS[k % SPAWN_SPOTS.length];
+            const kid = newBody(b.u.drop.unit, b.side, b.x + ox * g.spacing * 0.7, b.y + oy * fwd * g.spacing * 0.7, spawnNo[b.side]++, -1);
+            all.push(kid); sides[b.side].push(kid);
+            if (terBlock && !kid.u.aloft) keepOut(kid); // not dropped in the water
+            stats[b.side].totalHp += kid.u.hp;
           }
         }
       }

@@ -1,5 +1,5 @@
 // Headless check of the 2026-10-28 tower changes: Keep (Muster, Brute guards 400), Sniper tower (Mark Bounty, airship
-// 400 shooting like a level 3 Sniper), Bastion (Fortify, Vault), and Overwatch seeing stealthed units.
+// 400 shooting like a level 1 Sniper, dropping 2 paratroopers once as it enters enemy territory), Bastion (Fortify, Vault), and Overwatch seeing stealthed units.
 // Run from the repo root: node tools/tests/towers-1028.js
 const assert = require('assert');
 const Game = require('../../src/game.js');
@@ -23,13 +23,33 @@ assert.strictEqual(Game.deployCost(m, 0), 0); assert.strictEqual(Game.deployCost
 m.towers[1].type = 'sniper'; assert.strictEqual(Game.deployCost(m, 1), Game.CONFIG.extraDeployCost);
 const g0 = m.gold[0]; assert.ok(Game.buyDeploy(m, 0)); assert.strictEqual(m.gold[0], g0, 'free with Muster');
 
-// Sniper tower: airship 400, shooting like a level 3 Sniper
+// Sniper tower: airship 400, shooting like a level 1 Sniper, dropping 2 paratroopers once, into the enemy's zone
 assert.strictEqual(T.find(t => t.id === 'sniper').skill2.cost, 400);
 m = mk('sniper');
 Game.buyTowerSkill2(m, 0);
 let b = Game.bodiesFor(m, 0).find(x => x.squad === -4);
 const sn = units[ui('Sniper')];
-assert.ok(b && Math.abs(b.u.hit - sn.hit * 3) < 1e-9 && b.u.aps === sn.aps && b.u.range === sn.range, 'airship: a level 3 Sniper\'s attack');
+assert.ok(b && Math.abs(b.u.hit - sn.hit) < 1e-9 && b.u.aps === sn.aps && b.u.range === sn.range, 'airship: a level 1 Sniper\'s attack');
+assert.ok(!b.u.spawn && b.u.drop && b.u.drop.count === 2, 'airship: one drop of 2, no spawning');
+for (const side of [0, 1]) {
+  const ma = mk('sniper'); ma.towers[1].type = 'sniper'; Game.buyTowerSkill2(ma, side);
+  sq(ma, 1 - side, 'Brute', 5, side === 0 ? 2 : 13, 1); // a target deep in the enemy's zone
+  sq(ma, side, 'Brute', 5, side === 0 ? 13 : 2, 1);
+  const sa = Game.startBattle(ma), drops = [];
+  let air = null, kids = 0;
+  for (let k = 0; k < 3000 && sa.step(); k++) {
+    const bs = sa.bodies;
+    air = air || bs.find(x => x.squad === -4 && x.side === side);
+    const n = bs.filter(x => x.side === side && x.u.name === 'Paratrooper').length;
+    if (n > kids) { drops.push({ n: n - kids, y: air.y }); kids = n; }
+  }
+  {
+    assert.strictEqual(drops.length, 1, 'side ' + side + ': one drop a fight');
+    assert.strictEqual(drops[0].n, 2, 'side ' + side + ': 2 paratroopers');
+    const edge = b.u.drop.y; // side 0's edge; side 1's mirrors it
+    assert.ok(side === 0 ? drops[0].y >= edge : drops[0].y <= -edge, 'side ' + side + ': dropped inside enemy territory');
+  }
+}
 
 // Mark Bounty: 50 once, only an enemy squad from an earlier round, can't be moved, free again once the squad is sold
 m = mk('sniper');
@@ -73,6 +93,18 @@ m = mk('sniper'); sq(m, 1, 'Brute', 5, 3, 1); const sim2 = Game.startBattle(m); 
 const r2 = sim2.result(); r2.markKill = [true, false]; const gb = m.gold.slice();
 const sum2 = Game.resolve(m, r2);
 assert.deepStrictEqual(sum2.markBounty, [Game.MARK.bounty, 0]);
+assert.ok(Game.markLost(m, 0) || !Game.markOf(m, 0), 'a mark that paid out is spent');
+// a mark resets once its squad is wiped out by anyone, and can then go on another squad for free
+m = mk('sniper'); const mA = sq(m, 1, 'Goblin Swarm', 5, 3, 1), mB = sq(m, 1, 'Wisps', 6, 3, 1);
+assert.ok(Game.placeMark(m, 0, mA.id) && Game.markOn(m, 0));
+const r3 = { ...r2, markKill: [false, false], squads: { ...r2.squads, ['1:' + mA.id]: { side: 1, squad: mA.id, total: 5, alive: 0, xp: 0, dealt: 0 } } };
+const g3 = m.gold[0]; const sum3 = Game.resolve(m, r3);
+assert.deepStrictEqual(sum3.markBounty, [0, 0], 'no bounty when a Sniper didn\'t finish it');
+assert.ok(!Game.markOn(m, 0) && Game.markLost(m, 0) && Game.markCost(m, 0) === 0, 'the mark reset');
+m.round++; assert.ok(Game.placeMark(m, 0, mB.id) && Game.markOn(m, 0) && Game.markOf(m, 0).squad === mB.id, 'placed again for free');
+// a marked squad that survives keeps the mark
+const r4 = { ...r2, markKill: [false, false], squads: { ...r2.squads, ['1:' + mB.id]: { side: 1, squad: mB.id, total: 5, alive: 2, xp: 0, dealt: 0 } } };
+Game.resolve(m, r4); assert.ok(Game.markOn(m, 0) && Game.markOf(m, 0).squad === mB.id, 'still marked');
 
 // Bastion: Fortify, 50 a round, one wall for this fight, gone next round, taken back for a refund
 m = mk('bastion');

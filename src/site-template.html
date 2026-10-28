@@ -3883,7 +3883,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     return why || !editable() ? `<button class="btn small" disabled>${why || `Awaken · ${cost} gold`}</button>` : `<button class="btn small primary" data-act="awaken">Awaken · ${cost} gold</button>`;
   }
 
-  // Mark Bounty: check before the mark goes on (it stays for the match)
+  // Mark Bounty: check before the mark goes on (it stays until its squad is wiped out)
   function askMark(sq) {
     const name = units[sq.unit].name, cost = Game.markCost(m, me);
     $('sheet').innerHTML = `<div class="bar"><h3 id="sheet-h">Mark their ${esc(name)}?</h3><button class="btn small" id="close">Close</button></div>

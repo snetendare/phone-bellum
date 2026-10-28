@@ -45,8 +45,8 @@ const Game = (() => {
       muster: { name: 'Muster', text: 'Your extra deployment each round is free.' } }, // see deployCost
     { id: 'sniper', name: 'Sniper tower', text: 'Slow, huge range, double damage.', unit: { ...TOWER, name: 'Sniper Tower', kind: 'sniper', hp: 500, hit: 60, aps: 0.4, range: 32, color: '#B9C7D6' },
       skill: { name: 'Eagle eye', text: 'Tower and Snipers: +3 m range, +10% attack speed.' },
-      skill2: { name: 'Deploy airship', cost: 400, text: 'An untouchable airship shoots like a level 3 Sniper and drops paratroopers each fight. Snipers and tower: +30 hit.' },
-      mark: { name: 'Mark Bounty', cost: 50, text: 'Mark one enemy squad for the rest of the match. Your Snipers deal it +15% damage and see it through stealth; +100 gold each fight a Sniper takes its last body. The mark can’t be moved; if they sell the squad, place it again for free.' } }, // see MARK
+      skill2: { name: 'Deploy airship', cost: 400, text: 'An untouchable airship shoots like a level 1 Sniper and drops 2 paratroopers each fight as it flies into enemy territory. Snipers and tower: +30 hit.' },
+      mark: { name: 'Mark Bounty', cost: 50, text: 'Mark one enemy squad until it is wiped out. Your Snipers deal it +15% damage and see it through stealth; +100 gold if a Sniper takes its last body. The mark can’t be moved; once the squad is wiped out or sold, place it again for free.' } }, // see MARK
     { id: 'bastion', name: 'Bastion', text: `Tough. Burns all enemies within ${MOAT.range} m.`,
       unit: { ...TOWER, name: 'Bastion', kind: 'bastion', hp: 1000, hit: MOAT.hit, aps: MOAT.aps, range: MOAT.range, moat: { ...MOAT }, idle: true, color: '#B79C8A' }, // idle: the moat is its only attack
       skill: { name: 'Home ground', text: 'Bastion blocks 2 hits a fight. Units in your zone: +2 armor, +10% health.' },
@@ -221,8 +221,9 @@ const Game = (() => {
     return E.withTraits({ name: 'Wall', cost: 0, bodies: 1, hp: BWALL.hp, hit: 0, aps: 1, range: 0, speed: 0, splash: 0, shape: 'square', color: '#9C8F7A', structure: true, lesser: true, idle: true, kind: 'wall',
       barrier: across ? BWALL.thick / 2 : TILE / 2, barrierY: across ? TILE / 2 : BWALL.thick / 2, defense: 'armor', defVal: BWALL.armor, level: 0 }); };
   // Deploy airship (sniper tower): squad id -4, can't be hit (Engine: aloft), stops hover m short of its target;
-  // drops one paratrooper every `every` s, up to `max` alive; +sniperHit damage per hit for the tower, the airship and Snipers
-  const AIRSHIP = { speed: 3, hover: 14, every: 5, max: 6, sniperHit: 30, level: 2 }; // level: it shoots like a Sniper at this level (2 = level 3)
+  // drops `drop` paratroopers once a fight, as it flies into the enemy's deployment zone; +sniperHit damage per hit for
+  // the tower, the airship and Snipers
+  const AIRSHIP = { speed: 3, hover: 14, drop: 2, sniperHit: 30, level: 0 }; // level: it shoots like a Sniper at this level (0 = level 1)
   const INVEST = { gold: 800 }; // Major investment (bank): paid back at the start of the next round
   // Mage tower: each round its owner may call one mage general, who swaps the tower's attack for that round's fight
   // only, and/or the teleport general (extra: called on top of another general, or alone).
@@ -331,13 +332,14 @@ const Game = (() => {
     m.gold[side] -= L.gold;
     return true;
   }
-  // Mark Bounty (sniper tower): MARK.cost gold, once a match, marks one enemy squad from an earlier round for the rest
-  // of the match: Snipers deal it +MARK.hit % and see it through stealth, and a fight where a Sniper takes its last body
-  // pays MARK.bounty gold. The mark can't be moved; if its squad leaves the enemy's army (sold), it can be placed again
-  // for free. m.mark[side] = { squad, round } (round: when it was placed; hidden from the opponent until that fight)
+  // Mark Bounty (sniper tower): MARK.cost gold, once a match, marks one enemy squad from an earlier round until
+  // it is wiped out: Snipers deal it +MARK.hit % and see it through stealth, and a fight where a Sniper takes its last body
+  // pays MARK.bounty gold. The mark can't be moved; once its squad is wiped out in a fight (by anyone) or leaves the
+  // enemy's army (sold), it can be placed again for free. m.mark[side] = { squad, round, done } (round: when it was
+  // placed; hidden from the opponent until that fight; done: its squad was wiped out, see resolve)
   const MARK = { cost: 50, hit: 15, bounty: 100 };
   const markOf = (m, side) => (m && m.mark && m.mark[side]) || null;
-  const markLost = (m, side) => { const k = markOf(m, side); return !!k && !m.armies[1 - side].some(q => q.id === k.squad); };
+  const markLost = (m, side) => { const k = markOf(m, side); return !!k && (!!k.done || !m.armies[1 - side].some(q => q.id === k.squad)); };
   const markOn = (m, side) => towerPicked(m, side) && !!towerType(m, side).mark && !!markOf(m, side) && !markLost(m, side);
   const markCost = (m, side) => markOf(m, side) ? 0 : MARK.cost; // paid once; placing it again after a sale is free
   const markTarget = (m, side, sqId) => m.armies[1 - side].find(q => q.id === sqId && q.round < m.round && !isRider(q) && !(m.units[q.unit] || {}).building) || null;
@@ -1785,9 +1787,12 @@ const Game = (() => {
         const { skills, skillDefs, skillsOn, skillsInnate, skillMods, ...plain } = (m.units || []).find(x => x && x.name === 'Wisps') || GUARD;
         const para = E.withTraits({ ...plain, name: 'Paratrooper', level: 0, bodies: 1, shape: 'diamond', color: '#E2D3A6' });
         const sn = (m.units || []).find(x => x && x.name === 'Sniper'), sl = sn ? E.leveled(E.withTraits({ ...sn, level: 0 }), AIRSHIP.level) : null;
-        const shot = sl ? { hit: sl.hit, aps: sl.aps, range: sl.range, splash: 0, projSpeed: sl.projSpeed || 0, spinUp: 0, spinHit: 0 } : {}; // a level 3 Sniper's attack
-        const au = E.withTraits({ ...tu, ...shot, name: 'Airship', kind: 'airship', structure: false, aloft: true, hp: 1, speed: AIRSHIP.speed, hover: AIRSHIP.hover,
-          spawn: { unit: para, count: 1, every: AIRSHIP.every, max: AIRSHIP.max, waves: 0 } });
+        const shot = sl ? { hit: sl.hit, aps: sl.aps, range: sl.range, splash: 0, projSpeed: sl.projSpeed || 0, spinUp: 0, spinHit: 0 } : {}; // a level 1 Sniper's attack
+        // the edge of the enemy's zone: side 0 flies up (toward row 0) past the edge of row ZONE - 1, side 1 down past row ROWS - ZONE
+        const edge = tileToWorld(0, side === 0 ? ZONE - 1 : ROWS - ZONE).y + (side === 0 ? -1 : 1) * TILE / 2;
+        const { spawn, ...tower } = tu;
+        const au = E.withTraits({ ...tower, ...shot, name: 'Airship', kind: 'airship', structure: false, aloft: true, hp: 1, speed: AIRSHIP.speed, hover: AIRSHIP.hover,
+          drop: { unit: para, count: AIRSHIP.drop, y: edge, dir: side === 0 ? 1 : -1 } });
         const aw = tileToWorld(t.col, side === 0 ? ROWS - ZONE - 1 : ZONE); // it takes off from the front row of its side's half of no man's land
         const ab = E.buildSquad(au, side, aw.x, aw.y, -4, TILE, idx);
         idx += ab.length; out.push(...ab);
@@ -2241,6 +2246,11 @@ const Game = (() => {
     // Mark Bounty: a Sniper took the marked squad's last body
     summary.markBounty = [0, 1].map(sd => res.markKill && res.markKill[sd] ? MARK.bounty : 0);
     for (const sd of [0, 1]) m.gold[sd] += summary.markBounty[sd];
+    // ...and a mark whose squad was wiped out this fight is spent: it can be placed again (free) on another squad
+    for (const sd of [0, 1]) if (markOn(m, sd)) {
+      const k = markOf(m, sd), q = res.squads && res.squads[(1 - sd) + ':' + k.squad];
+      if ((res.markKill && res.markKill[sd]) || (q && q.total > 0 && q.alive === 0)) m.mark[sd] = { ...k, done: true };
+    }
     if (m.bwalls) m.bwalls = m.bwalls.map(a => (a || []).filter(w => !w.temp)); // Fortify walls stood for one fight
     // Major investment (bank) bought in the round just fought pays out now
     summary.invest = [0, 1].map(sd => m.towerSkill2 && m.towerSkill2[sd] === m.round - 1 && towerType(m, sd).id === 'bank' ? INVEST.gold : 0);
