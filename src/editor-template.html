@@ -202,10 +202,9 @@ const TOOLS = [
   { id: '#', key: '1' }, { id: '~', key: '2' }, { id: 's', key: '3' }, { id: 'b', key: '4' }, { id: 'O', key: '5' },
   { id: 'raise', key: '6', name: 'Raise ground', sub: 'Up to +2', col: '#F2C318' },
   { id: 'lower', key: '7', name: 'Lower ground', sub: 'Down to −2', col: '#E5483F' },
-  { id: 'flank-add', key: '8', name: 'Add flank', sub: 'Make it a flank tile', col: '#3C6E74' },
-  { id: 'flank-del', key: '9', name: 'Remove flank', sub: 'Tile stays as it is', col: '#1C3236' },
+  { id: 'flank', key: '8', name: 'Flank tiles', sub: 'Add or remove', col: '#3C6E74' },
   { id: 'p', key: 'p' }, { id: 'y', key: 'y' }, { id: 'g', key: 'g' },
-  { id: 'normal', key: 'n', name: 'Normal tile', sub: 'Open, flat, no flank', col: '#13201F' },
+  { id: 'erase', key: 'e', name: 'Erase', sub: 'Tile and ground', col: '#13201F' },
 ];
 TOOLS.forEach(t => { if (FEATURE[t.id]) Object.assign(t, FEATURE[t.id]); });
 
@@ -259,7 +258,7 @@ function undo() { if (!undoStack.length) return; redoStack.push(snap()); map = J
 function redo() { if (!redoStack.length) return; undoStack.push(snap()); map = JSON.parse(redoStack.pop()); dirty = true; refresh(); }
 
 // ---------- painting ----------
-// stroke: the tiles already touched (ground goes up or down once per tile a stroke)
+// stroke: the tiles already touched (ground goes up or down once per tile a stroke) and the flank tool's mode
 let stroke = null;
 function paint(c, r) {
   for (const p of withMirror(c, r)) {
@@ -273,10 +272,10 @@ function paintOne(c, r) {
   if (tool === 'raise' || tool === 'lower') {
     const h = Math.max(-2, Math.min(2, hAt(c, r) + (tool === 'raise' ? 1 : -1)));
     setAt(map.height, c, r, HCH[h]);
-  } else if (tool === 'flank-add' || tool === 'flank-del') {
-    setAt(map.flank, c, r, tool === 'flank-add' ? 'F' : '.');
-  } else if (tool === 'normal') { // back to a plain tile: open, flat and no flank
-    setAt(map.tiles, c, r, '.'); setAt(map.height, c, r, '.'); setAt(map.flank, c, r, '.');
+  } else if (tool === 'flank') {
+    setAt(map.flank, c, r, stroke.flank ? 'F' : '.');
+  } else if (tool === 'erase') {
+    setAt(map.tiles, c, r, '.'); setAt(map.height, c, r, '.');
   } else if (FEATURE[tool]) {
     if ((tool === '#' || tool === '~') && buildingAt(c, r)) { say('Walls can’t go under a building. Move it first.'); return; }
     setAt(map.tiles, c, r, tool);
@@ -508,7 +507,7 @@ cv.addEventListener('pointerdown', (e) => {
   cv.setPointerCapture(e.pointerId);
   const b = buildingAt(p.col, p.row);
   if (b) { drag = { b, from: p, at: p, moved: false }; draw(); return; }
-  stroke = { before: snap(), done: new Set() };
+  stroke = { before: snap(), done: new Set(), flank: !flankAt(p.col, p.row) };
   paint(p.col, p.row); draw();
 });
 cv.addEventListener('pointermove', (e) => {
