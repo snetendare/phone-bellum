@@ -56,5 +56,6 @@ const st = Game.treasurySteal(g3[1]); // a share of what side 1 left unspent, to
 assert.strictEqual(m3.gold[0], base(0) + T.gold + st);
 assert.strictEqual(m3.gold[1], base(1) - st);
 // the raid: 25% of unspent gold, to the nearest 50, 50 to 200
-assert.deepStrictEqual([0, 150, 300, 500, 700, 2000].map(Game.treasurySteal), [50, 50, 100, 150, 200, 200]);
+assert.deepStrictEqual([0, 150, 300, 500, 700, 2000].map(x => Game.treasurySteal(x)), [50, 50, 100, 150, 200, 200]);
+assert.deepStrictEqual([0, 300, 400, 600, 2000].map(x => Game.treasurySteal(x, true)), [50, 50, 50, 100, 100], "a Vault halves the raid");
 console.log('treasury ok');

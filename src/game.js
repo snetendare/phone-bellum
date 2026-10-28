@@ -41,14 +41,18 @@ const Game = (() => {
   const TOWER_TYPES = [
     { id: 'keep', name: 'Keep', text: 'Steady light shots, short range.', unit: { ...TOWER, hp: 700 },
       skill: { name: 'Guards', text: '4 Wisp guards defend the keep for 5 s each fight, then attack.' },
-      skill2: { name: 'Brute guards', cost: 500, needs: true, text: 'Guards are Brutes, with your Brute skills. Needs Guards.' } },
+      skill2: { name: 'Brute guards', cost: 400, needs: true, text: 'Guards are Brutes, with your Brute skills. Needs Guards.' },
+      muster: { name: 'Muster', text: 'Your extra deployment each round is free.' } }, // see deployCost
     { id: 'sniper', name: 'Sniper tower', text: 'Slow, huge range, double damage.', unit: { ...TOWER, name: 'Sniper Tower', kind: 'sniper', hp: 500, hit: 60, aps: 0.4, range: 32, color: '#B9C7D6' },
       skill: { name: 'Eagle eye', text: 'Tower and Snipers: +3 m range, +10% attack speed.' },
-      skill2: { name: 'Deploy airship', cost: 500, text: 'An untouchable airship shoots and drops paratroopers each fight. Snipers, tower and airship: +30 hit.' } },
+      skill2: { name: 'Deploy airship', cost: 400, text: 'An untouchable airship shoots like a level 3 Sniper and drops paratroopers each fight. Snipers and tower: +30 hit.' },
+      mark: { name: 'Mark Bounty', cost: 50, text: 'Mark one enemy squad for the rest of the match. Your Snipers deal it +15% damage and see it through stealth; +100 gold each fight a Sniper takes its last body. The mark can’t be moved; if they sell the squad, place it again for free.' } }, // see MARK
     { id: 'bastion', name: 'Bastion', text: `Tough. Burns all enemies within ${MOAT.range} m.`,
       unit: { ...TOWER, name: 'Bastion', kind: 'bastion', hp: 1000, hit: MOAT.hit, aps: MOAT.aps, range: MOAT.range, moat: { ...MOAT }, idle: true, color: '#B79C8A' }, // idle: the moat is its only attack
       skill: { name: 'Home ground', text: 'Bastion blocks 2 hits a fight. Units in your zone: +2 armor, +10% health.' },
-      skill2: { name: 'Defensive walls', cost: 250, text: 'Place 3 walls on your side that block enemies. Bastion +4 armor.' } },
+      skill2: { name: 'Defensive walls', cost: 250, text: 'Place 3 walls on your side that block enemies. Bastion +4 armor.' },
+      fortify: { name: 'Fortify', cost: 50, text: 'Once a round: one extra wall on your side for this round’s fight only.' }, // see FORTIFY
+      vault: { name: 'Vault', text: 'Your treasury has +6 armor, and a raid on it steals half as much.' } }, // see VAULT
     { id: 'mage', name: 'Mage tower', text: 'A beam that ramps up on one target. Melts giants.', unit: { ...TOWER, name: 'Mage Tower', kind: 'mage', hp: 600, hit: 14, aps: 1.5, range: 12, spinUp: 50, spinHit: 50, color: '#A493DE' },
       generals: true }, // no once-per-match skill: a mage general can be called every round instead (MAGE_GENERALS)
     { id: 'bank', name: 'Bank tower', text: 'Sturdy, medium range. Credit line: your loans are 200 (pay back 300).', unit: { ...TOWER, name: 'Bank Tower', kind: 'bank', hp: 700, hit: 45, aps: 0.6, range: 18, color: '#D9B95B' },
@@ -132,7 +136,7 @@ const Game = (() => {
   function undoTowerSkill2(m, side) {
     if (!(m.towerSkill2 && m.towerSkill2[side] === m.round)) return false;
     const cost = towerSkill2Cost(m, side), wasFree = isMapFree(m, side, { kind: 'tskill2' });
-    if (m.bwalls && m.bwalls[side]) m.bwalls[side] = m.bwalls[side].filter(w => w.round !== m.round); // the walls it gave go with it
+    if (m.bwalls && m.bwalls[side]) m.bwalls[side] = m.bwalls[side].filter(w => w.temp || w.round !== m.round); // the walls it gave go with it
     m.towerSkill2[side] = 0;
     m.gold[side] += cost;
     if (wasFree) passMapFree(m, side);
@@ -157,7 +161,22 @@ const Game = (() => {
   const bwallsOf = (m, side) => (m && m.bwalls && m.bwalls[side]) || [];
   // the wall a player has on that edge (null: none)
   const bwallOn = (m, side, col, row, edge) => { const k = edgeKey(col, row, edge); return bwallsOf(m, side).find(w => edgeKey(w.col, w.row, edgeOf(side, w)) === k) || null; };
-  const bwallsLeft = (m, side) => towerSkill2On(m, side, 'bastion') ? Math.max(0, BWALL.count - bwallsOf(m, side).length) : 0;
+  const bwallsLeft = (m, side) => towerSkill2On(m, side, 'bastion') ? Math.max(0, BWALL.count - bwallsOf(m, side).filter(w => !w.temp).length) : 0;
+  // Fortify (bastion, every round): FORTIFY.cost gold for one more wall, placed like the others, that stands in this
+  // round's fight only ({ ..., temp: true }; dropped when the next round starts). A wall placed now can be taken back.
+  const FORTIFY = { cost: 50 };
+  const fortifyOf = (m, side) => bwallsOf(m, side).find(w => w.temp && w.round === m.round) || null;
+  const canFortify = (m, side) => towerPicked(m, side) && !!towerType(m, side).fortify && !fortifyOf(m, side) && m.gold[side] >= FORTIFY.cost;
+  function fortify(m, side, col, row, edge, paid = true) {
+    edge = isEdge(edge) ? edge : frontEdge(side);
+    if (!(towerPicked(m, side) && towerType(m, side).fortify) || fortifyOf(m, side) || (paid && m.gold[side] < FORTIFY.cost) || !bwallSpotOk(m, side, col, row, edge)) return false;
+    if (!m.bwalls) m.bwalls = [[], []];
+    m.bwalls[side].push({ col, row, edge, round: m.round, temp: true });
+    if (paid) m.gold[side] -= FORTIFY.cost;
+    return true;
+  }
+  // the walls that stand in this round's fight
+  const bwallsFighting = (m, side) => bwallsOf(m, side).filter(w => w.temp ? w.round === m.round : towerSkill2On(m, side, 'bastion'));
   // what a viewer may see of a player's walls: their own, and the opponent's from earlier rounds while deploying
   const bwallShown = (m, viewer, deploying, side, w) => side === viewer || !deploying || w.round < m.round;
   const ownHalf = (side, row) => side === 0 ? row >= ROWS / 2 && row < ROWS : row >= 0 && row < ROWS / 2;
@@ -180,6 +199,7 @@ const Game = (() => {
     const w = isEdge(edge) ? bwallOn(m, side, col, row, edge) : null;
     if (!w || w.round !== m.round) return false;
     m.bwalls[side].splice(m.bwalls[side].indexOf(w), 1);
+    if (w.temp) m.gold[side] += FORTIFY.cost; // a Fortify wall: its gold back
     return true;
   }
   // walls not placed by the fight go up by themselves: in a line along the front edges of the tiles two rows in front
@@ -202,7 +222,7 @@ const Game = (() => {
       barrier: across ? BWALL.thick / 2 : TILE / 2, barrierY: across ? TILE / 2 : BWALL.thick / 2, defense: 'armor', defVal: BWALL.armor, level: 0 }); };
   // Deploy airship (sniper tower): squad id -4, can't be hit (Engine: aloft), stops hover m short of its target;
   // drops one paratrooper every `every` s, up to `max` alive; +sniperHit damage per hit for the tower, the airship and Snipers
-  const AIRSHIP = { speed: 3, hover: 14, every: 5, max: 6, sniperHit: 30 };
+  const AIRSHIP = { speed: 3, hover: 14, every: 5, max: 6, sniperHit: 30, level: 2 }; // level: it shoots like a Sniper at this level (2 = level 3)
   const INVEST = { gold: 800 }; // Major investment (bank): paid back at the start of the next round
   // Mage tower: each round its owner may call one mage general, who swaps the tower's attack for that round's fight
   // only, and/or the teleport general (extra: called on top of another general, or alone).
@@ -311,6 +331,26 @@ const Game = (() => {
     m.gold[side] -= L.gold;
     return true;
   }
+  // Mark Bounty (sniper tower): MARK.cost gold, once a match, marks one enemy squad from an earlier round for the rest
+  // of the match: Snipers deal it +MARK.hit % and see it through stealth, and a fight where a Sniper takes its last body
+  // pays MARK.bounty gold. The mark can't be moved; if its squad leaves the enemy's army (sold), it can be placed again
+  // for free. m.mark[side] = { squad, round } (round: when it was placed; hidden from the opponent until that fight)
+  const MARK = { cost: 50, hit: 15, bounty: 100 };
+  const markOf = (m, side) => (m && m.mark && m.mark[side]) || null;
+  const markLost = (m, side) => { const k = markOf(m, side); return !!k && !m.armies[1 - side].some(q => q.id === k.squad); };
+  const markOn = (m, side) => towerPicked(m, side) && !!towerType(m, side).mark && !!markOf(m, side) && !markLost(m, side);
+  const markCost = (m, side) => markOf(m, side) ? 0 : MARK.cost; // paid once; placing it again after a sale is free
+  const markTarget = (m, side, sqId) => m.armies[1 - side].find(q => q.id === sqId && q.round < m.round && !isRider(q) && !(m.units[q.unit] || {}).building) || null;
+  const canMark = (m, side, sqId) => towerPicked(m, side) && !!towerType(m, side).mark && (!markOf(m, side) || markLost(m, side)) && m.gold[side] >= markCost(m, side) && (sqId == null || !!markTarget(m, side, sqId));
+  function placeMark(m, side, sqId) {
+    if (!canMark(m, side, sqId) || sqId == null) return false;
+    m.gold[side] -= markCost(m, side);
+    if (!m.mark) m.mark = [null, null];
+    m.mark[side] = { squad: sqId, round: m.round };
+    return true;
+  }
+  // whether the marked squad is sqId, as a viewer may know it (the opponent learns of a mark at its first fight)
+  const markShown = (m, viewer, deploying, side) => { const k = markOf(m, side); return !!k && (side === viewer || !deploying || k.round < m.round); };
   // Tower skills bought every round (a faction tower's `rounds`, the Mecha Tower's bots): each works in that round's
   // fight only and can be bought again the next round. m.tround[side] = { [id]: round bought }; hidden from the
   // opponent until the fight. See bodiesFor for what each does.
@@ -705,7 +745,9 @@ const Game = (() => {
   const TREASURY = { round: 1, hp: 400, gold: 50, steal: 50, stealPct: 25, stealMax: 200 }; // see treasurySteal
   // Treasury raid: the owner's gold left unspent at the fight, times stealPct %, to the nearest 50; at least `steal`,
   // at most `stealMax`, never more than the owner has
-  const treasurySteal = (banked) => Math.min(TREASURY.stealMax, Math.max(TREASURY.steal, Math.round(Math.max(0, banked) * TREASURY.stealPct / 100 / 50) * 50));
+  // (vault: the owner has a Vault, so the share and the most are VAULT.steal % of the usual)
+  const treasurySteal = (banked, vault) => { const k = vault ? VAULT.steal / 100 : 1;
+    return Math.min(TREASURY.stealMax * k, Math.max(TREASURY.steal, Math.round(Math.max(0, banked) * TREASURY.stealPct * k / 100 / 50) * 50)); };
   const TREASURY_SQ = -150; // its squad id in fights
   const treasuryOn = (m) => { const mp = mapOf(m); return !!(mp && mp.treasury); };
   const treasuryUp = (m) => treasuryOn(m) && m.round >= TREASURY.round;
@@ -715,7 +757,11 @@ const Game = (() => {
     return { col: col + (col < (COLS - 1) / 2 ? 1 : -1), row: t.row + (side === 0 ? -1 : 1) };
   };
   const treasuryAt = (m, side, col, row) => { const t = treasurySpot(m, side); return !!t && t.col === col && t.row === row; };
-  const treasuryUnit = () => E.withTraits({ name: 'Treasury', cost: 0, bodies: 1, hp: TREASURY.hp, hit: 0, aps: 1, range: 0, speed: 0, splash: 0, shape: 'square', color: '#D9B95B', structure: true, lesser: true, kind: 'treasury', level: 0 });
+  // Vault (the Bastion's trait): its owner's treasury gets VAULT.armor, and a raid on it takes VAULT.steal % of the usual
+  const VAULT = { armor: 6, steal: 50 };
+  const vaultOn = (m, side) => towerPicked(m, side) && !!towerType(m, side).vault;
+  const treasuryUnit = (m, side) => { const u = treasuryUnit0(); return m && vaultOn(m, side) ? { ...u, defense: 'armor', defVal: VAULT.armor } : u; };
+  const treasuryUnit0 = () => E.withTraits({ name: 'Treasury', cost: 0, bodies: 1, hp: TREASURY.hp, hit: 0, aps: 1, range: 0, speed: 0, splash: 0, shape: 'square', color: '#D9B95B', structure: true, lesser: true, kind: 'treasury', level: 0 });
   // where the elf tower stands (world coordinates), or null: on its column, on the line between the two middle rows
   const elfSpot = (m) => { const mp = mapOf(m); return mp && mp.elfTower && m.map.elfCol != null ? { x: tileToWorld(m.map.elfCol, 0).x, y: 0, col: m.map.elfCol } : null; };
   const towerColOk = (col) => col >= 0 && col < COLS && (col < TOWER_MID[0] || col > TOWER_MID[1]);
@@ -1376,10 +1422,12 @@ const Game = (() => {
     return v;
   }
 
-  const canBuyDeploy = (m, side) => CONFIG.deployCap && m.extraDeploys[side] < CONFIG.maxExtraDeploys && m.gold[side] >= CONFIG.extraDeployCost;
+  // Muster (the Keep's trait): its owner's extra deployment is free
+  const deployCost = (m, side) => towerPicked(m, side) && towerType(m, side).muster ? 0 : CONFIG.extraDeployCost;
+  const canBuyDeploy = (m, side) => CONFIG.deployCap && m.extraDeploys[side] < CONFIG.maxExtraDeploys && m.gold[side] >= deployCost(m, side);
   function buyDeploy(m, side) {
     if (!canBuyDeploy(m, side)) return false;
-    m.gold[side] -= CONFIG.extraDeployCost;
+    m.gold[side] -= deployCost(m, side);
     m.extraDeploys[side]++;
     return true;
   }
@@ -1388,7 +1436,7 @@ const Game = (() => {
   function refundDeploy(m, side) {
     if (m.extraDeploys[side] <= 0 || deploysLeft(m, side) <= 0) return false;
     m.extraDeploys[side]--;
-    m.gold[side] += CONFIG.extraDeployCost;
+    m.gold[side] += deployCost(m, side);
     return true;
   }
 
@@ -1538,6 +1586,8 @@ const Game = (() => {
       const dis = isDev(m) && m.units[sq.unit].disguise ? m.units.find(x => x.name === m.units[sq.unit].disguise) : null; // devtest: a disguise, until its first attack
       if (dis) { const mask = { name: dis.name, shape: dis.shape, color: dis.color, bodies: dis.bodies, range: dis.range }; for (const x of b) x.mask = mask; }
       if (isDev(m) && sq.guide && sq.guide.length && !isRider(sq)) for (const x of b) x.guide = sq.guide.map(p => tileToWorld(p.col, p.row)); // devtest: the squad's arrow
+      if (u.name === 'Sniper' && markOn(m, side)) for (const x of b) x.sniperMark = MARK.hit; // Mark Bounty: these Snipers hunt the mark
+      if (markOn(m, 1 - side) && markOf(m, 1 - side).squad === sq.id) for (const x of b) x.marked = true;
       if (airship && u.name === 'Sniper') { const su = { ...b[0].u, hit: b[0].u.hit + AIRSHIP.sniperHit }; for (const x of b) x.u = su; } // flat, after levels
       if (home) for (const x of b) x.band = { ...home };
       if (zoe) for (const x of b) x.zoe = true; // for the rising-stars effect
@@ -1602,7 +1652,9 @@ const Game = (() => {
       if (airship) {
         const { skills, skillDefs, skillsOn, skillsInnate, skillMods, ...plain } = (m.units || []).find(x => x && x.name === 'Wisps') || GUARD;
         const para = E.withTraits({ ...plain, name: 'Paratrooper', level: 0, bodies: 1, shape: 'diamond', color: '#E2D3A6' });
-        const au = E.withTraits({ ...tu, name: 'Airship', kind: 'airship', structure: false, aloft: true, hp: 1, speed: AIRSHIP.speed, hover: AIRSHIP.hover,
+        const sn = (m.units || []).find(x => x && x.name === 'Sniper'), sl = sn ? E.leveled(E.withTraits({ ...sn, level: 0 }), AIRSHIP.level) : null;
+        const shot = sl ? { hit: sl.hit, aps: sl.aps, range: sl.range, splash: 0, projSpeed: sl.projSpeed || 0, spinUp: 0, spinHit: 0 } : {}; // a level 3 Sniper's attack
+        const au = E.withTraits({ ...tu, ...shot, name: 'Airship', kind: 'airship', structure: false, aloft: true, hp: 1, speed: AIRSHIP.speed, hover: AIRSHIP.hover,
           spawn: { unit: para, count: 1, every: AIRSHIP.every, max: AIRSHIP.max, waves: 0 } });
         const aw = tileToWorld(t.col, side === 0 ? ROWS - ZONE - 1 : ZONE); // it takes off from the front row of its side's half of no man's land
         const ab = E.buildSquad(au, side, aw.x, aw.y, -4, TILE, idx);
@@ -1624,11 +1676,12 @@ const Game = (() => {
       });
     }
     if (treasuryUp(m)) {
-      const ts = treasurySpot(m, side), w = tileToWorld(ts.col, ts.row), tb = E.buildSquad(treasuryUnit(), side, w.x, w.y, TREASURY_SQ, TILE, idx);
+      const ts = treasurySpot(m, side), w = tileToWorld(ts.col, ts.row), tb = E.buildSquad(treasuryUnit(m, side), side, w.x, w.y, TREASURY_SQ, TILE, idx);
       idx += tb.length; out.push(...tb);
     }
     // Defensive walls (bastion's second skill)
-    if (towerSkill2On(m, side, 'bastion')) bwallsOf(m, side).forEach((bw, k) => {
+    bwallsOf(m, side).forEach((bw, k) => {
+      if (!bwallsFighting(m, side).includes(bw)) return;
       const w = bwallWorld(side, bw), wb = E.buildSquad(bwallUnit(edgeOf(side, bw)), side, w.x, w.y, BWALL_SQ - k, TILE, idx);
       idx += wb.length; out.push(...wb);
     });
@@ -2038,10 +2091,14 @@ const Game = (() => {
     summary.treasury = [0, 1].map(sd => ({ gold: treasuryFell[sd] === false ? TREASURY.gold : 0, lost: 0 }));
     for (const sd of [0, 1]) m.gold[sd] += summary.treasury[sd].gold;
     for (const sd of [0, 1]) if (treasuryFell[sd]) {
-      const take = Math.min(treasurySteal(before[sd]), m.gold[sd]);
+      const take = Math.min(treasurySteal(before[sd], vaultOn(m, sd)), m.gold[sd]);
       m.gold[sd] -= take; m.gold[1 - sd] += take;
       summary.treasury[sd].lost = take; summary.treasury[1 - sd].stole = take;
     }
+    // Mark Bounty: a Sniper took the marked squad's last body
+    summary.markBounty = [0, 1].map(sd => res.markKill && res.markKill[sd] ? MARK.bounty : 0);
+    for (const sd of [0, 1]) m.gold[sd] += summary.markBounty[sd];
+    if (m.bwalls) m.bwalls = m.bwalls.map(a => (a || []).filter(w => !w.temp)); // Fortify walls stood for one fight
     // Major investment (bank) bought in the round just fought pays out now
     summary.invest = [0, 1].map(sd => m.towerSkill2 && m.towerSkill2[sd] === m.round - 1 && towerType(m, sd).id === 'bank' ? INVEST.gold : 0);
     for (const sd of [0, 1]) m.gold[sd] += summary.invest[sd];
@@ -2533,6 +2590,14 @@ const Game = (() => {
     if (canBuyTowerSkill(m, side) && rng(m.seed + m.round * 331 + side * 17)() < 0.5) buyTowerSkill(m, side); // own stream, as above
     if (canBuyTowerSkill2(m, side) && m.gold[side] - towerSkill2Cost(m, side) >= SQUAD_COST && rng(m.seed + m.round * 347 + side * 19)() < 0.35) buyTowerSkill2(m, side);
     if (canTakeLoan(m, side) && loanTerms(m, side) === CREDIT_LINE && m.gold[side] < SQUAD_COST * 3 && rng(m.seed + m.round * 613 + side * 37)() < 0.4) takeLoan(m, side); // short on gold: sometimes a loan
+    if (canMark(m, side) && m.gold[side] - markCost(m, side) >= SQUAD_COST) { // Mark Bounty: their priciest squad
+      const t = m.armies[1 - side].filter(q => markTarget(m, side, q.id)).sort((a, b) => (b.cost || 0) - (a.cost || 0) || a.id - b.id)[0];
+      if (t) placeMark(m, side, t.id);
+    }
+    if (canFortify(m, side) && m.gold[side] - FORTIFY.cost >= SQUAD_COST && rng(m.seed + m.round * 631 + side * 43)() < 0.5) { // Fortify: in front of the tower or treasury
+      const t = (treasuryUp(m) && rng(m.seed + m.round * 641 + side)() < 0.5 && treasurySpot(m, side)) || (m.towers && m.towers[side]);
+      if (t) for (const [dc, dr] of [[0, side === 0 ? -1 : 1], [-1, 0], [1, 0], [0, 0]]) if (fortify(m, side, t.col + dc, t.row + dr, frontEdge(side))) break;
+    }
     for (const x of towerRounds(m, side)) { // the Mecha Tower's bots: some rounds, if they leave gold for a squad
       if (canBuyTround(m, side, x.id) && m.gold[side] - troundCost(m, side, x.id) >= SQUAD_COST && rng(m.seed + m.round * 619 + side * 41 + x.id.length)() < 0.45) buyTround(m, side, x.id);
     }
@@ -2615,7 +2680,7 @@ const Game = (() => {
     while (m.gold[side] - reserve >= minCost && guard++ < 60) {
       if (deploysLeft(m, side) <= 0) {
         // out of deployments: buy one more only if a squad is still affordable after it
-        if (m.extraDeploys[side] >= AI.maxExtraDeploys || m.gold[side] - reserve < minCost + CONFIG.extraDeployCost) break;
+        if (m.extraDeploys[side] >= AI.maxExtraDeploys || m.gold[side] - reserve < minCost + deployCost(m, side)) break;
         if (!buyDeploy(m, side)) break;
       }
       const budget = m.gold[side] - reserve;
@@ -2694,7 +2759,7 @@ const Game = (() => {
     STANDARD_PACK, ICE, ALTAR, GOLEM, isIce, hailRound, altarRound, stormShift, stormRows, hailTiles, altarCost, altarRefund, altarCount, pushRoom, altarBought, addAltar, buyAltar, undoAltar, snowgres, snowgreUnit,
     MAPS, ELF_TOWER, SHROOM, SHROOM_SPLIT, shroomAt, shroomTileAt, shroomRemoval, SHROOM_REMOVE, shroomCost, removeShroom, undoRemoveShroom, mapOf, elfSpot, rollMap, BRIBE_COST, bribeList, bribeGold, bribeCount, bribeNow, bribeCost, bribeRefund, ELF_POWER, elfPowered, elfUnit, ELF_OWN, elfOwnCost, elfOwnOf, elfOwnAt, elfOwnUnlocked, elfOwnOffered, canBuyElfOwn, elfOwnSpotOk, buyElfOwn, undoElfOwn, bribeLeader, canBribe, bribe, undoBribe,
     CHARACTERS, CHAR, charOf, charInfo, enzoSkill, enzoActive, charmOf, isGentleman, canGiveCharm, giveCharm, undoCharm, ensureCharm, felixGold, isTier1, rollBuffTiles, onBuffTile, zoeBuff, yotImps, yotLevel, TOWER_SPOT, towerSpot,
-    TREASURY, TREASURY_SQ, treasuryOn, treasuryUp, treasurySpot, treasuryAt, treasuryUnit,
+    TREASURY, TREASURY_SQ, treasuryOn, treasuryUp, treasurySpot, treasuryAt, treasuryUnit, deployCost, FORTIFY, fortifyOf, canFortify, fortify, bwallsFighting, VAULT, vaultOn, MARK, markOf, markLost, markOn, markCost, markTarget, canMark, placeMark, markShown,
     FACTION_MODE, FACTIONS: () => FACTIONS, setFactions, factionInfo, factionsOf, factionTowers, towerTypeById, ownsUnit, withFactionTrait, factionSet,
     createDraft, draftTurn, draftOpen, draftAct, draftDone, draftPossible, aiDraftChoice,
     zoneRows, inZone, tileToWorld, squadRange, squadReach, towerReach, fightTowerUnit, createMatch, place, unplace, bodiesFor, startBattle, battleSetup, seenBy, intentPreview, INTENT, AWARENESS, resolve, aiDeploy, occupied,
