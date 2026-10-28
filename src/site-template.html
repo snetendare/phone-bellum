@@ -2017,7 +2017,10 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
       const extra = (t) => [t.skill && [t.skill.name, t.skill.text, `skill · ${Game.TOWER_SKILL.cost} gold`], t.skill2 && [t.skill2.name, t.skill2.text, `skill · ${t.skill2.cost} gold${t.skill2.needs ? ` · needs ${t.skill.name}` : ''}`],
         t.mark && [t.mark.name, t.mark.text, `${t.mark.cost} gold`], t.fortify && [t.fortify.name, t.fortify.text, `every round · ${t.fortify.cost} gold`],
         t.creditLine && [t.creditLine.name, t.creditLine.text, 'always on'], t.muster && [t.muster.name, t.muster.text, 'always on'], t.vault && [t.vault.name, t.vault.text, 'always on'], t.passive && [t.passive.name, t.passive.text, 'always on'],
-        ...(t.generals ? Game.MAGE_GENERALS.map(gn => [gn.name, gn.text, `every round · ${gn.cost} gold`]) : [])].filter(Boolean);
+        ...(t.generals ? Game.MAGE_GENERALS.map(gn => [gn.name, gn.text, `every round · ${gn.cost} gold`, gn.cost]) : []),
+        ...(t.rounds || []).map(x => [x.name, x.text || '', `every round · ${+x.cost || 0} gold`, +x.cost || 0])].filter(Boolean)
+        .map(x => x.length > 3 ? x : [...x, /always on/.test(x[2]) ? 0 : +((x[2].match(/(\d+) gold/) || [])[1] || 0)])
+        .sort((a, b) => a[3] - b[3]); // cheapest first, as on the tower sheet
       body = back('') + `<p class="hint" style="margin:0">Everyone starts with an Outpost and picks a tower in round ${Game.TOWER_PICK_ROUND}. A fallen tower cripples its army for ${Engine.TOWER_DOWN.secs} s and costs ${Game.TOWER_FALL_HP} health. Anyone may take a loan once a round: +${Game.LOAN.gold} now, ${Game.LOAN.payback} less next round.</p>`
         + Game.TOWER_TYPES.map(t => `<div style="display:grid;gap:6px;border-top:1px solid var(--line);padding-top:8px"><h4 style="margin:0;font-family:var(--font-display);font-size:16px">${esc(t.name)}</h4>
           <p class="role" style="margin:0">${esc(t.text)}</p>${towerStats(t.unit)}${extra(t).map(([n, x, tag]) => row(n, esc(x), tag)).join('')}</div>`).join('');
@@ -3881,11 +3884,24 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (side === me && phase === 'deploy') act = w ? `<button class="btn small" id="tfort-undo" ${editable() ? '' : 'disabled'}>Undo · +${Game.FORTIFY.cost}</button>` : `<button class="btn small${editable() && Game.canFortify(m, me) ? ' primary' : ''}" id="tfort" ${editable() && Game.canFortify(m, me) ? '' : 'disabled'}>Place · ${Game.FORTIFY.cost} gold</button>`;
     return abilityRow(tt.fortify.name, act, esc(tt.fortify.text));
   }
+  // the tower's abilities on its sheet, cheapest at the top: free ones (traits, the loan), then by list price
+  // (a group of every-round buys by its cheapest). Same price: the order below.
+  const towerCosts = (tt) => ({
+    passive: 0, loan: 0, mark: tt.mark ? tt.mark.cost : 0, fortify: tt.fortify ? tt.fortify.cost : 0,
+    skill: Game.TOWER_SKILL.cost, skill2: tt.skill2 ? tt.skill2.cost : 0,
+    generals: Math.min(...Game.MAGE_GENERALS.map(g => g.cost)), rounds: Math.min(Infinity, ...(tt.rounds || []).map(x => +x.cost || 0)),
+  });
+  function towerAbilities(side, tt) {
+    const c = towerCosts(tt);
+    return [[c.passive, passiveBlock(side, tt)], [c.loan, loanBlock(side, tt)], [c.mark, markBlock(side, tt)], [c.fortify, fortifyBlock(side, tt)],
+      [c.skill, towerSkillBlock(side, tt)], [c.skill2, towerSkill2Block(side, tt)], [c.generals, mageGenBlock(side, tt)], [c.rounds, troundBlock(side, tt)]]
+      .filter(([, h]) => h).sort((a, b) => a[0] - b[0]).map(([, h]) => h).join('');
+  }
   function openTowerSheet(side) {
     const D = Engine.TOWER_DOWN, shown = towerTypeVisible(side), tt = Game.towerType(m, side), T = tt.unit;
     $('sheet').innerHTML = `
       <div class="bar"><h3 id="sheet-h">${side === me ? 'Your tower' : `${esc(foeName())}'s tower`}${shown ? ` · ${esc(tt.name)}` : ''}</h3><button class="btn small" id="close">Close</button></div>
-      ${shown && Game.towerPicked(m, side) ? towerSkillBlock(side, tt) + towerSkill2Block(side, tt) + markBlock(side, tt) + fortifyBlock(side, tt) + mageGenBlock(side, tt) + loanBlock(side, tt) + troundBlock(side, tt) + passiveBlock(side, tt) : ''}
+      ${shown && Game.towerPicked(m, side) ? towerAbilities(side, tt) : ''}
       <p style="margin:0">${(() => { const id = Game.charOf(m, side); return !charVisible(side) ? 'Character: hidden until the first fight.' : id ? `Character: ${charLine(id)}` : 'Character: not picked yet.'; })()}</p>
       <p class="role" style="margin:0">${shown ? (tt.id === 'outpost' ? `A small watchtower. You pick your real tower in round ${Game.TOWER_PICK_ROUND}.` : esc(tt.text)) : `Its type stays hidden until the round ${Game.TOWER_PICK_ROUND} fight.`}</p>
       <p style="margin:0"><span style="color:var(--foe)">If it falls:</span> that army is crippled for ${D.secs} s. ${MORE('fall-more')}</p>
@@ -4008,7 +4024,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   function troundBlock(side, tt) {
     if (!(tt.rounds || []).length) return '';
     const chip = (txt, col) => `<span class="chip" style="color:${col};border:1px solid currentColor;border-radius:99px;padding:1px 8px;font-size:12px">${txt}</span>`;
-    const rows = tt.rounds.map(x => {
+    const rows = tt.rounds.slice().sort((a, b) => Game.troundCost(m, side, a.id) - Game.troundCost(m, side, b.id)).map(x => {
       const on = Game.troundOn(m, side, x.id), cost = Game.troundCost(m, side, x.id);
       let act;
       if (side !== me) act = on && phase !== 'deploy' ? chip('Sent out', 'var(--foe)') : '';
@@ -4049,8 +4065,9 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       else if (phase === 'deploy') { const ok = editable() && Game.canBuyMageGen(m, me, g.id); act = `<button class="btn small${ok ? (g.extra ? ' primary' : ' either') : ''}" data-mgen="${g.id}" ${ok ? '' : 'disabled'}>${g.extra ? 'Add' : cur ? 'Swap' : 'Call'} · ${g.cost} gold</button>`; }
       else act = `<span class="hint">${g.cost} gold</span>`;
       const u = Game.generalUnit(m, tt.unit, g.extra ? cur : g.id);
-      return { extra: !!g.extra, html: upRow({ name: g.name, act, text: esc(g.text), more: `${g.extra ? `With it: ${cur ? `the ${esc(Game.mageGenInfo(cur).name)}’s attack. ` : ''}` : ''}${stats(u)}` }) };
+      return { extra: !!g.extra, cost: g.cost, html: upRow({ name: g.name, act, text: esc(g.text), more: `${g.extra ? `With it: ${cur ? `the ${esc(Game.mageGenInfo(cur).name)}’s attack. ` : ''}` : ''}${stats(u)}` }) };
     });
+    rows.sort((a, b) => a.cost - b.cost); // cheapest first (stable: same price keeps its order)
     const swaps = rows.filter(r => !r.extra).map(r => r.html), adds = rows.filter(r => r.extra).map(r => r.html);
     return `<div style="display:grid;gap:6px"><h4 style="margin:0;font-size:12px;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted)">Mage generals · ${side === me ? 'one per round, plus teleport if you like, for this round’s fight' : phase === 'deploy' ? 'hidden until the fight' : 'this fight'}${HOLD_HINT}</h4>${swaps.length > 1 ? orGroup(swaps, 'One a round · calling another swaps it') : swaps.join('')}${adds.join('')}</div>`;
   }
