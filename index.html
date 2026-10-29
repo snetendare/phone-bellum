@@ -8163,6 +8163,7 @@ const Render2D = (cv, view, opts = {}) => {
     reveal: { title: 'Reveal', file: 'audio/reveal.mp3' },
     salig: { title: 'Salig', file: 'audio/salig.mp3', artist: 'Emil Helleday' },
     bulgaria: { title: 'Bulgaria', file: 'audio/bulgaria.mp3' },
+    berlin: { title: 'Berlin', file: 'audio/berlin.mp3' },
     icyOne: { title: 'Icy one', file: 'audio/icy-one.mp3' },
     sirski: { title: 'SIRSKI', file: 'audio/sirski.mp3' },
     knarkkungn: { title: 'Knarkkungn', file: 'audio/knarkkungn.mp3' },
@@ -8177,8 +8178,9 @@ const Render2D = (cv, view, opts = {}) => {
   const MUSIC_COMBOS = {
     cavern: { deploy: ['sirski'] },                         // Mushroom Cavern
     icy: { deploy: ['icyOne'], battle: ['knarkkungn'] },    // Icy Peak
+    autumn: { deploy: ['berlin'] },                         // Autumn
   };
-  const LOOK_MUSIC = { frost: 'cavern', autumn: 'cavern', cavern: 'cavern', snow: 'icy' }; // frost = Darkwoods
+  const LOOK_MUSIC = { frost: 'cavern', autumn: 'autumn', cavern: 'cavern', snow: 'icy' }; // frost = Darkwoods
   // the menu playlist: every song that isn't deployment or battle music (a new song shows up in it by itself)
   const phaseSongs = new Set([...PLAYLISTS.deploy, ...PLAYLISTS.battle, ...Object.values(MUSIC_COMBOS).flatMap(o => Object.values(o).flat())]);
   PLAYLISTS.menu = Object.keys(SONGS).filter(id => !phaseSongs.has(id));
