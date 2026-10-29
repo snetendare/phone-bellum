@@ -12,7 +12,7 @@
 // blended by the angle the camera sees it from, with a soft round shadow on the ground under it.
 // Calls: update(v, groundY, BW, BD, T): lay out the scenery for this view's map and side (cheap when nothing changed);
 // biome(v) -> the look for this map { sky, land } (colours); shadows(on); dispose().
-// The floor itself (the meadow under the zones) is painted by meadow() below, through the 2D renderer's ground hook.
+// The floor itself (meadow or sand under the zones) is painted by Scenery3D.floor below, through the 2D renderer's ground hook.
 const Scenery3D = (THREE, scene, opts = {}) => {
   // ---------- looks per map: the colour of the sky and the land around the board, what grows there ----------
   // trees: which tree models; tint: a colour every model is multiplied by (1 = as painted); grow: how much of the
@@ -22,7 +22,11 @@ const Scenery3D = (THREE, scene, opts = {}) => {
     forest: { sky: '#1D2B22', land: '#16271B', tint: [0.55, 0.68, 0.58], trees: ['CommonTree_1', 'CommonTree_2', 'CommonTree_4', 'Pine_1', 'Pine_2', 'Pine_3', 'TwistedTree_1'], grow: 1.25, dress: 0 },
     ice: { sky: '#26323A', land: '#1C2830', tint: [0.62, 0.72, 0.82], low: 'rocks', trees: ['Pine_1', 'Pine_2', 'Pine_3', 'Pine_5', 'DeadTree_1', 'DeadTree_3'], grow: 0.8, dress: 0 },
     cavern: { sky: '#120E17', land: '#17121D', tint: [0.42, 0.36, 0.5], low: 'rocks', trees: [], grow: 0.7, dress: 0 },
+    // desert sand, palms and sun-bleached rocks; an oasis off the board (ponds), purely for looks
+    desert: { sky: '#CBBE9F', land: '#A99063', tint: [1.04, 1, 0.94], low: 'desert', trees: ['PalmTree_1', 'PalmTree_2', 'PalmTree_3', 'PalmTree_4', 'DeadTree_1'], grow: 0.5, dress: 0.7, ponds: true,
+      tints: [[/^Grass_Wispy|^Grass_Common_Short/, [1.3, 1.08, 0.55]], [/^Plant_7/, [1.15, 1, 0.62]], [/^DeadTree/, [1.15, 1.02, 0.85]]] },
   };
+  BIOMES.oasis = BIOMES.desert; // Test - oasis
   BIOMES.testgrid = BIOMES.ice; // the Test Grid has Frozen Peak's look (its floor too: Render3D's floorAs)
   const biomeOf = (id) => BIOMES[id] || BIOMES.meadow;
   const biome = (v) => { const src = v && (v.battlePre || v.m), mp = src && Game.mapOf(src); return biomeOf(mp && mp.id); };
@@ -156,16 +160,16 @@ const Scenery3D = (THREE, scene, opts = {}) => {
     blobMat = new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(sc), color: '#1A2414', transparent: true, opacity: 0.45, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 });
     blobGeo = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
   }
-  // the impostors and their shadows for one layout: list of [name, x, y, z, s, shade, flip]
-  function impostors(list, tint) {
+  // the impostors and their shadows for one layout: list of [name, x, y, z, s, colour [r, g, b], flip]
+  function impostors(list) {
     const n = list.length; if (!n || !impMat) return;
     const geo = impGeo.clone(); geo.instanceCount = n;
     const P = new Float32Array(n * 3), Z = new Float32Array(n), M = new Float32Array(n), C = new Float32Array(n * 3), F = new Float32Array(n);
     const blobs = new THREE.InstancedMesh(blobGeo, blobMat, n);
-    list.forEach(([name, x, y, z, s, sh, flip], i) => {
+    list.forEach(([name, x, y, z, s, col, flip], i) => {
       const md = lib[name], im = impIndex[name];
       P.set([x, y + md.h * s / 2, z], i * 3); Z[i] = im.S * s; M[i] = im.i; F[i] = flip;
-      C.set([tint[0] * sh, tint[1] * sh, tint[2] * sh], i * 3);
+      C.set(col, i * 3);
       const b = Math.max(1.5, md.r * s * 1.6);
       blobs.setMatrixAt(i, tmpM.compose(tmpP.set(x + b * 0.15, y + 0.02, z + b * 0.1), tmpQ.identity(), tmpS.set(b, 1, b)));
     });
@@ -180,13 +184,23 @@ const Scenery3D = (THREE, scene, opts = {}) => {
   // ---------- layout ----------
   let key = null, castShadows = true;
   const tmpM = new THREE.Matrix4(), tmpP = new THREE.Vector3(), tmpQ = new THREE.Quaternion(), tmpS = new THREE.Vector3(), upY = new THREE.Vector3(0, 1, 0), tmpC = new THREE.Color();
-  function clear() { for (const m of meshes) { scene.remove(m); if (m.isInstancedMesh) m.dispose(); else m.geometry.dispose(); } meshes.length = 0; }
+  function clear() { for (const m of meshes) { scene.remove(m); if (m.isInstancedMesh) m.dispose(); else if (m.name !== 'pond') m.geometry.dispose(); } meshes.length = 0; }
   // what goes where. Each pick is [model, weight]; scale is [lo, hi].
   const LOW = [['Bush_Common_Flowers', 1.2], ['Fern_1', 2.5], ['Rock_Medium_1', 0.6], ['Rock_Medium_2', 0.6], ['Rock_Medium_3', 0.6], ['Plant_1_Big', 1.5], ['Grass_Wispy_Short', 1], ['Grass_Common_Tall', 3]];
   const TUFT = [['Grass_Common_Short', 7], ['Grass_Wispy_Short', 1], ['Grass_Common_Tall', 2], ['Clover_1', 2], ['Flower_3_Group', 1], ['Pebble_Round_1', 1], ['Pebble_Round_2', 1], ['Mushroom_Common', 0.5]];
   const DRESS = [['Grass_Common_Short', 7], ['Grass_Wispy_Short', 1], ['Clover_1', 1], ['Flower_3_Group', 1], ['Pebble_Round_1', 1.5], ['Pebble_Round_2', 1.5], ['Pebble_Square_2', 1]];
   const PEBBLES = [['Pebble_Round_1', 1], ['Pebble_Round_2', 1], ['Pebble_Square_2', 1], ['Mushroom_Common', 0.3]];
   const ROCKS = [['Rock_Medium_1', 1], ['Rock_Medium_2', 1], ['Rock_Medium_3', 1], ['Pebble_Square_2', 0.5]];
+  // the desert's lists (low things, tufts, the board's dressing, boulders)
+  const DESERT = {
+    low: [['DesertRock_1', 1], ['DesertRock_2', 1], ['DesertRock_3', 1], ['Grass_Wispy_Short', 3], ['PalmTree_5', 1]],
+    tuft: [['Grass_Wispy_Short', 3], ['Grass_Common_Short', 2], ['Pebble_Round_1', 1], ['Pebble_Round_2', 1], ['Pebble_Square_2', 1]],
+    dress: [['Pebble_Round_1', 2], ['Pebble_Round_2', 2], ['Pebble_Square_2', 2], ['Grass_Wispy_Short', 1.5]],
+    rocks: [['DesertRock_1', 1], ['DesertRock_2', 1], ['DesertRock_3', 1]],
+  };
+  // the oasis's water (off the board): water, a shallow rim and wet sand round it
+  const pondMats = [new THREE.MeshLambertMaterial({ color: '#8C7650' }), new THREE.MeshLambertMaterial({ color: '#86AE9E' }), new THREE.MeshStandardMaterial({ color: '#4E8C8E', roughness: 0.2, metalness: 0 })];
+  const pondGeo = new THREE.CircleGeometry(1, 48).rotateX(-Math.PI / 2);
   function update(v, groundY, BW, BD, T) {
     if (!lib || !v || !v.m) return;
     const src = v.battlePre || v.m, mp = Game.mapOf(src), id = (mp && mp.id) || 'standard';
@@ -201,8 +215,17 @@ const Scenery3D = (THREE, scene, opts = {}) => {
     const hw = BW / 2, hd = BD / 2;
     // model (+ '~' when far out: no shadow, an impostor if it has one; bushes from 6 m) -> [[x, y, z, ang, s, shade]]
     const placed = new Map();
-    const put = (name, x, z, s, y = 0) => { if (!lib[name]) return; const d = outside(x, z), k = name + (d > 16 || (d > 6 && /^Bush/.test(name)) ? '~' : ''); (placed.get(k) || placed.set(k, []).get(k)).push([x, y, z, rr() * Math.PI * 2, s, 0.85 + rr() * 0.3]); };
-    const low = () => bi.low === 'rocks' ? pickOf(ROCKS) : pickOf(LOW), tuft = () => bi.low === 'rocks' ? pickOf(PEBBLES) : pickOf(TUFT);
+    // ponds (the desert's oasis): nothing else grows in the water
+    const ponds = bi.ponds ? [{ x: hw * 0.2, z: -hd - 25, rx: 24, rz: 12 }, { x: -hw - 17, z: -hd * 0.25, rx: 9, rz: 16 }] : [];
+    const inPond = (x, z, k = 1.12) => ponds.some((p) => ((x - p.x) / p.rx) ** 2 + ((z - p.z) / p.rz) ** 2 < k * k);
+    const tintFor = (name) => { const t = (bi.tints || []).find(([re]) => re.test(name)); return t ? t[1] : [1, 1, 1]; };
+    const put = (name, x, z, s, y = 0, wet = false) => {
+      if (!lib[name] || (!wet && inPond(x, z))) return;
+      const d = outside(x, z), k = name + (d > 16 || (d > 6 && /^Bush/.test(name)) ? '~' : ''), sh = 0.85 + rr() * 0.3, t = tintFor(name);
+      (placed.get(k) || placed.set(k, []).get(k)).push([x, y, z, rr() * Math.PI * 2, s, [bi.tint[0] * t[0] * sh, bi.tint[1] * t[1] * sh, bi.tint[2] * t[2] * sh]]);
+    };
+    const L = bi.low === 'desert' ? DESERT : bi.low === 'rocks' ? { low: ROCKS, tuft: PEBBLES, rocks: ROCKS, dress: DRESS } : { low: LOW, tuft: TUFT, rocks: ROCKS, dress: DRESS };
+    const low = () => pickOf(L.low), tuft = () => pickOf(L.tuft);
     const outside = (x, z) => Math.max(Math.abs(x) - hw, Math.abs(z) - hd, 0) > 0 ? Math.hypot(Math.max(0, Math.abs(x) - hw), Math.max(0, Math.abs(z) - hd)) : 0;
     // 1. the edge: a frame of bushes, rocks and tall grass hugging the board, so its edge doesn't end in a hard line
     for (let s = 0; s < 2 * (BW + BD); s += 2.6) {
@@ -223,7 +246,7 @@ const Scenery3D = (THREE, scene, opts = {}) => {
       if (behindMe) { if (d < 22 && rr() < 0.35 * bi.grow) put(low(), x, z, 0.9 + rr() * 0.8); continue; }
       const p = Math.min(1, (d - 3) / 10) * (nearBoard ? 0.55 : 0.85) * bi.grow;
       if (rr() > p) { if (d < 16 && rr() < 0.6) put(low(), x, z, 0.9 + rr() * 0.9); continue; }
-      if (!bi.trees.length || rr() < 0.12) { put(pickOf(ROCKS), x, z, 1.6 + rr() * 2.2); continue; } // a boulder now and then
+      if (!bi.trees.length || rr() < 0.12) { put(pickOf(L.rocks), x, z, 1.6 + rr() * 2.2); continue; } // a boulder now and then
       let tree = bi.trees[Math.floor(rr() * bi.trees.length)];
       if (nearBoard && /^Twisted/.test(tree)) tree = bi.trees[0]; // the big twisted trees (9000 triangles) only stand far out, as impostors
       put(tree, x, z, 1.6 + rr() * 0.9);
@@ -243,27 +266,35 @@ const Scenery3D = (THREE, scene, opts = {}) => {
         const col = hF === 1 ? c : Game.COLS - 1 - c, row = hF === 1 ? r : Game.ROWS - 1 - r;
         const tl = mp && mp.terrain ? Game.terrainTile(src, col, row) : null;
         if (tl && '#~s'.includes(tl.ch)) continue;
-        put(pickOf(DRESS), x, z, 0.55 + rr() * 0.45, groundY(x, z));
+        put(pickOf(L.dress), x, z, 0.55 + rr() * 0.45, groundY(x, z));
       }
+    }
+    // 5. the oasis: water with a shallow rim and wet sand, reeds at the edge, palms round it
+    for (const p of ponds) {
+      [1.14, 1.04, 1].forEach((k, i) => { const m = new THREE.Mesh(pondGeo, pondMats[i]); m.scale.set(p.rx * k, 1, p.rz * k); m.position.set(p.x, 0.02 + i * 0.015, p.z); m.raycast = () => {}; m.name = 'pond'; scene.add(m); meshes.push(m); });
+      const per = 2 * Math.PI * Math.sqrt((p.rx * p.rx + p.rz * p.rz) / 2);
+      for (let s = 0; s < per; s += 1.4) { const a = s / per * Math.PI * 2 + rr() * 0.1, k = 0.96 + rr() * 0.12; put(rr() < 0.75 ? 'Grass_Common_Tall' : 'Grass_Wispy_Short', p.x + Math.cos(a) * p.rx * k, p.z + Math.sin(a) * p.rz * k, 1.2 + rr() * 0.9, 0, true); }
+      for (let s = 0; s < per; s += 5.5) { const a = s / per * Math.PI * 2 + rr() * 0.3, k = 1.2 + rr() * 0.45; put(bi.trees[Math.floor(rr() * 4)], p.x + Math.cos(a) * p.rx * k, p.z + Math.sin(a) * p.rz * k, 1.5 + rr() * 0.9, 0, true); }
+      for (let n = 0; n < 6; n++) { const a = rr() * Math.PI * 2, k = 1.15 + rr() * 0.3; put(pickOf(L.rocks), p.x + Math.cos(a) * p.rx * k, p.z + Math.sin(a) * p.rz * k, 0.8 + rr() * 1.4, 0, true); }
     }
     // far trees and bushes: impostors
     const far = [];
     for (const [k, list] of [...placed]) {
       const name = k.replace('~', '');
       if (!k.endsWith('~') || !impIndex || !impIndex[name]) continue;
-      for (const [x, y, z, ang, s, sh] of list) far.push([name, x, y, z, s, sh, ang < Math.PI ? 1 : -1]);
+      for (const [x, y, z, ang, s, col] of list) far.push([name, x, y, z, s, col, ang < Math.PI ? 1 : -1]);
       placed.delete(k);
     }
-    impostors(far, bi.tint);
+    impostors(far);
     // the rest: one mesh per model part, holding every placement of that model
     for (const [k, list] of placed) {
       const md = lib[k.replace('~', '')], tall = md.h > 3 && !k.endsWith('~');
       for (const part of md.parts) {
         const im = new THREE.InstancedMesh(part.geo, part.mat, list.length);
-        list.forEach(([x, y, z, ang, s, sh], i) => {
-          tmpP.set(x, y, z); tmpQ.setFromAxisAngle(upY, ang); tmpS.set(s, s * (0.9 + (sh - 0.85) * 0.6), s);
+        list.forEach(([x, y, z, ang, s, col], i) => {
+          tmpP.set(x, y, z); tmpQ.setFromAxisAngle(upY, ang); tmpS.set(s, s * (0.95 + (ang % 1) * 0.15), s);
           im.setMatrixAt(i, tmpM.compose(tmpP, tmpQ, tmpS));
-          im.setColorAt(i, tmpC.setRGB(bi.tint[0] * sh, bi.tint[1] * sh, bi.tint[2] * sh));
+          im.setColorAt(i, tmpC.setRGB(col[0], col[1], col[2]));
         });
         im.instanceMatrix.needsUpdate = true; if (im.instanceColor) im.instanceColor.needsUpdate = true;
         im.castShadow = castShadows && tall; im.receiveShadow = false;
@@ -273,39 +304,56 @@ const Scenery3D = (THREE, scene, opts = {}) => {
     }
   }
   function shadows(on) { if (on !== castShadows) { castShadows = on; key = ''; } }
-  function dispose() { clear(); if (atlas) { atlas.dispose(); impMat.dispose(); impGeo.dispose(); blobMat.map.dispose(); blobMat.dispose(); blobGeo.dispose(); } for (const m of mats) { if (m.map) m.map.dispose(); m.dispose(); } if (lib) for (const md of Object.values(lib)) for (const p of md.parts) p.geo.dispose(); }
+  function dispose() { clear(); pondGeo.dispose(); for (const m of pondMats) m.dispose(); if (atlas) { atlas.dispose(); impMat.dispose(); impGeo.dispose(); blobMat.map.dispose(); blobMat.dispose(); blobGeo.dispose(); } for (const m of mats) { if (m.map) m.map.dispose(); m.dispose(); } if (lib) for (const md of Object.values(lib)) for (const p of md.parts) p.geo.dispose(); }
   return { _lib: () => lib, _meshes: () => meshes, update, biome, shadows, dispose, ready, count: () => meshes.reduce((s, m) => s + m.count, 0) };
 };
 
-// The meadow floor under the zones, for maps that have no painted ground of their own (the 3D board only): dusty
-// greens with darker and lighter patches, and trampled earth across no man's land. Cached per size.
-Scenery3D.meadow = (() => {
-  let cache = null;
-  return (ctx, W, H, t) => {
+// The painted floors for maps that have no ground of their own (the 3D board only), cached per look and size:
+// meadow (dusty greens, trampled earth across no man's land, grass strokes) and sand (warm sand, wind ripples and
+// darker drifts across no man's land). Scenery3D.floor(ctx, W, H, t, mapId) paints the one for that map.
+Scenery3D.FLOORS = {
+  meadow: { base: '#5F714C', patch: ['#6A7D53', '#556944', '#718156', '#506343'], mid: ['#776C51', '#6B6248', '#7F7359'], strokes: ['#76895C', '#485B3C'], ripples: false },
+  sand: { base: '#B39A6C', patch: ['#BDA478', '#A88F62', '#C2AA7E', '#A38A5F'], mid: ['#9E8457', '#A78D60', '#94794E'], strokes: ['#C9B288', '#8F7650'], ripples: true },
+};
+Scenery3D.floorOf = (mapId) => mapId === 'oasis' ? 'sand' : 'meadow';
+Scenery3D.floor = (() => {
+  const cache = {};
+  return (ctx, W, H, t, mapId) => {
+    const look = Scenery3D.floorOf(mapId), L = Scenery3D.FLOORS[look];
     const key = W + 'x' + H + ':' + Game.ROWS + ':' + Game.ZONE;
-    if (!cache || cache.key !== key) {
+    if (!cache[look] || cache[look].key !== key) {
       const oc = document.createElement('canvas'), dpr = Math.min(2, window.devicePixelRatio || 1);
       oc.width = Math.round(W * dpr); oc.height = Math.round(H * dpr);
       const c = oc.getContext('2d'); c.scale(dpr, dpr);
       let sd = 99991; const rr = () => { sd = (sd * 16807) % 2147483647; return (sd - 1) / 2147483646; };
-      c.fillStyle = '#5F714C'; c.fillRect(0, 0, W, H);
+      c.fillStyle = L.base; c.fillRect(0, 0, W, H);
       const blob = (x, y, rx, ry, col, a) => { const g = c.createRadialGradient(x, y, 0, x, y, Math.max(rx, ry)); g.addColorStop(0, col); g.addColorStop(1, col + '00');
         c.globalAlpha = a; c.fillStyle = g; c.beginPath(); c.ellipse(x, y, rx, ry, rr() * 3, 0, Math.PI * 2); c.fill(); };
-      for (let k = 0; k < 70; k++) blob(rr() * W, rr() * H, t * (0.8 + rr() * 2.2), t * (0.6 + rr() * 1.6), ['#6A7D53', '#556944', '#718156', '#506343'][k % 4], 0.55);
-      // no man's land: trampled, earthy
+      for (let k = 0; k < 70; k++) blob(rr() * W, rr() * H, t * (0.8 + rr() * 2.2), t * (0.6 + rr() * 1.6), L.patch[k % 4], 0.55);
+      // no man's land: trampled earth, or darker drifts of sand
       const y0 = Game.ZONE * t, y1 = (Game.ROWS - Game.ZONE) * t;
-      for (let k = 0; k < 55; k++) blob(rr() * W, y0 + rr() * (y1 - y0), t * (0.6 + rr() * 1.5), t * (0.4 + rr() * 0.8), ['#776C51', '#6B6248', '#7F7359'][k % 3], 0.5);
-      // painted grass strokes
+      for (let k = 0; k < 55; k++) blob(rr() * W, y0 + rr() * (y1 - y0), t * (0.6 + rr() * 1.5), t * (0.4 + rr() * 0.8), L.mid[k % 3], 0.5);
       c.lineCap = 'round';
-      for (let k = 0; k < W * H / (t * t) * 14; k++) {
-        const x = rr() * W, y = rr() * H, l = t * (0.06 + rr() * 0.1);
-        c.globalAlpha = 0.25 + rr() * 0.25; c.strokeStyle = rr() < 0.5 ? '#76895C' : '#485B3C'; c.lineWidth = 0.8 + rr() * 0.8;
-        c.beginPath(); c.moveTo(x, y); c.lineTo(x + (rr() - 0.5) * l * 0.6, y - l); c.stroke();
+      if (L.ripples) { // wind ripples: long soft wavy lines, light over dark
+        for (let k = 0; k < H / t * 9; k++) {
+          const y = rr() * H, x0 = rr() * W - t * 2, len = t * (1.5 + rr() * 3), amp = t * 0.06, ph = rr() * 6;
+          for (const [col, dy, a] of [[L.strokes[1], t * 0.035, 0.22], [L.strokes[0], 0, 0.3]]) {
+            c.globalAlpha = a; c.strokeStyle = col; c.lineWidth = 1 + rr() * 0.6; c.beginPath();
+            for (let s = 0; s <= 1.0001; s += 0.1) { const x = x0 + s * len, yy = y + dy + Math.sin(ph + s * 5) * amp; s ? c.lineTo(x, yy) : c.moveTo(x, yy); }
+            c.stroke();
+          }
+        }
+      } else { // painted grass strokes
+        for (let k = 0; k < W * H / (t * t) * 14; k++) {
+          const x = rr() * W, y = rr() * H, l = t * (0.06 + rr() * 0.1);
+          c.globalAlpha = 0.25 + rr() * 0.25; c.strokeStyle = rr() < 0.5 ? L.strokes[0] : L.strokes[1]; c.lineWidth = 0.8 + rr() * 0.8;
+          c.beginPath(); c.moveTo(x, y); c.lineTo(x + (rr() - 0.5) * l * 0.6, y - l); c.stroke();
+        }
       }
       c.globalAlpha = 1;
-      cache = { key, cv: oc };
+      cache[look] = { key, cv: oc };
     }
-    ctx.drawImage(cache.cv, 0, 0, W, H);
+    ctx.drawImage(cache[look].cv, 0, 0, W, H);
     return true;
   };
 })();

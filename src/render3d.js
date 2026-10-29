@@ -63,8 +63,8 @@ const Render3D = (THREE, el, view, opts = {}) => {
   floorCv.style.cssText = 'position:fixed;left:-10000px;top:0;width:720px';
   document.body.appendChild(floorCv);
   let floorView = null, floorKey = null, floorAge = 0, floorDims = '';
-  // on maps without a painted ground of their own, the floor is the scenery's meadow, with darker grid lines
-  const floor2d = Render2D(floorCv, () => floorView, typeof Scenery3D === 'function' ? { ground: Scenery3D.meadow, grid: 'rgba(20, 28, 16, 0.22)', zoneA: 0.1, floorAs: { testgrid: 'ice' } } : {});
+  // on maps without a painted ground of their own, the floor is the scenery's meadow or sand, with darker grid lines
+  const floor2d = Render2D(floorCv, () => floorView, typeof Scenery3D === 'function' ? { ground: Scenery3D.floor, grid: 'rgba(20, 28, 16, 0.22)', zoneA: 0.1, floorAs: { testgrid: 'ice' } } : {});
   const groundTex = new THREE.CanvasTexture(floorCv);
   groundTex.colorSpace = THREE.SRGBColorSpace;
   groundTex.anisotropy = renderer.capabilities.getMaxAnisotropy();
