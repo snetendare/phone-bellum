@@ -914,7 +914,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
     if (camDown.lengthSq() < 1e-6) camDown.set(0, 0, 1); camDown.normalize();
     const z = cam.zoom();
     viewMode = z < 0.5 ? 'strategic' : z < 1.5 ? 'tilted' : z < 2.5 ? 'angled' : 'ground'; uiOff = viewMode === 'ground';
-    paintFloor(v, dt); useHeights(v); useScenery(v);
+    paintFloor(v, dt); useHeights(v); useScenery(v); if (scenery) scenery.tick(dt, renderer.getPixelRatio());
     used.clear(); ns = 0;
     placeBodies(v, dt);
     drawFx(v);

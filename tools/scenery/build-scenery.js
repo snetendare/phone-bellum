@@ -1,7 +1,7 @@
 // Builds models/scenery.bin, the 3D board's scenery (trees, bushes, rocks, grass, flowers), from the
 // Quaternius "Stylized Nature MegaKit" (CC0) glTF files, plus the palm trees of Quaternius' "Ultimate Stylized Nature"
-// (CC0; its OBJ files with PalmTree_Leaves.png and PalmTree_Trunk.jpg, in one folder).
-//   node tools/scenery/build-scenery.js <path to the MegaKit's glTF folder> <palm folder>
+// (CC0; its OBJ files with their textures from its glTF folder: palms in one folder, maples and birches in another).
+//   node tools/scenery/build-scenery.js <MegaKit glTF folder> <palm folder> <autumn folder>
 // Needs (in tools/scenery): npm i @gltf-transform/core @gltf-transform/functions meshoptimizer sharp
 //
 // The file is one binary: 'PBSC', a u32 header length, the header (JSON), then the data, each piece 4-byte aligned.
@@ -17,7 +17,8 @@ const sharp = require('sharp');
 
 const SRC = process.argv[2];
 if (!SRC) { console.error('usage: node build-scenery.js <MegaKit glTF folder>'); process.exit(1); }
-const PALMS = process.argv[3];
+const OBJS = [[process.argv[3], [1, 2, 3, 4, 5].map((k) => 'PalmTree_' + k)],
+  [process.argv[4], ['MapleTree_1', 'MapleTree_2', 'MapleTree_4', 'MapleTree_5', 'BirchTree_1', 'BirchTree_4', 'BirchTree_5']]];
 const OUT = path.join(__dirname, '..', '..', 'models', 'scenery.bin');
 // models made from another one with a different texture: name -> [model, texture name, texture file (from the MegaKit)]
 const RETEX = {
@@ -26,7 +27,8 @@ const RETEX = {
   DesertRock_3: ['Rock_Medium_3', 'Rocks_Desert', '../Textures/Rocks_Desert_Diffuse.png'],
 };
 // OBJ material -> [texture file, alpha-masked]
-const OBJ_TEX = { PalmTree_Leaves: ['PalmTree_Leaves.png', true], PalmTree_Trunk: ['PalmTree_Trunk.jpg', false] };
+const OBJ_TEX = { PalmTree_Leaves: ['PalmTree_Leaves.png', true], PalmTree_Trunk: ['PalmTree_Trunk.jpg', false],
+  MapleTree_Leaves: ['MapleTree_Leaves.png', true], MapleTree_Bark: ['MapleTree_Bark.jpg', false], BirchTree_Leaves: ['BirchTree_Leaves.png', true], BirchTree_Bark: ['BirchTree_Bark.jpg', false] };
 // a small OBJ reader: groups by material, uv v flipped to glTF's (top-down) convention
 function readObj(file) {
   const V = [], T = [], N = [], groups = new Map(); let g = null;
@@ -56,7 +58,7 @@ const PICK = {
   Pebble_Round_1: 1, Pebble_Round_2: 1, Pebble_Square_2: 1,
 };
 // texture -> longest side in pixels
-const TEX_SIZE = { Bark_NormalTree: 256, Bark_TwistedTree: 256, Bark_DeadTree: 256, Rocks_Diffuse: 512, Rocks_Desert: 512, Leaves: 512, Flowers: 256, Mushrooms: 256, PalmTree_Leaves: 512 };
+const TEX_SIZE = { Bark_NormalTree: 256, Bark_TwistedTree: 256, Bark_DeadTree: 256, Rocks_Diffuse: 512, Rocks_Desert: 512, Leaves: 512, Flowers: 256, Mushrooms: 256, PalmTree_Leaves: 512, MapleTree_Leaves: 512, BirchTree_Leaves: 512 };
 
 (async () => {
   await MeshoptSimplifier.ready;
@@ -121,11 +123,11 @@ const TEX_SIZE = { Bark_NormalTree: 256, Bark_TwistedTree: 256, Bark_DeadTree: 2
     addTex(tname, false, fs.readFileSync(path.join(SRC, file)));
     emit(name, new Map([...groupsOf[from].values()].map((g) => [tname, g])));
   }
-  // palms (OBJ)
-  if (PALMS) for (let k = 1; k <= 5; k++) {
-    const byTex = readObj(path.join(PALMS, `PalmTree_${k}.obj`));
-    for (const m of byTex.keys()) addTex(m, OBJ_TEX[m][1], fs.readFileSync(path.join(PALMS, OBJ_TEX[m][0])));
-    emit('PalmTree_' + k, byTex);
+  // palms, maples and birches (OBJ)
+  for (const [dir, names] of OBJS) if (dir) for (const name of names) {
+    const byTex = readObj(path.join(dir, name + '.obj'));
+    for (const m of byTex.keys()) addTex(m, OBJ_TEX[m][1], fs.readFileSync(path.join(dir, OBJ_TEX[m][0])));
+    emit(name, byTex);
   }
   for (let i = 0; i < tex.length; i++) {
     const t = tex[i], size = TEX_SIZE[t.name] || 256;

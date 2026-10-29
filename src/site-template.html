@@ -858,7 +858,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
   }
   let mapPick = '';         // the map the host picked for the next match ('' = random)
   let pickFor = '', pickSel = null, pickPeek = false, pickHtml = ''; // the choose-one-of-3 cards over the board (syncPick)
-  const MAP_SHORT = { standard: 'Standard', forest: 'Forest', cavern: 'Cavern', ice: 'Peak', testgrid: 'Test', oasis: 'Test - oasis', bridge: 'Bridge', rush: 'Rush' };
+  const MAP_SHORT = { standard: 'Standard', autumn: 'Autumn', forest: 'Forest', cavern: 'Cavern', ice: 'Peak', testgrid: 'Test', oasis: 'Test - oasis', bridge: 'Bridge', rush: 'Rush' };
   const mapSeg = () => `<div class="bar">
         <span class="hint">Map</span>
         <div class="maps" role="group" aria-label="Map">
@@ -3668,7 +3668,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       let b = null, loaded = false;
       try {
         const THREE = await import(THREE_URL);
-        if (typeof Render3D !== 'function') for (const f of ['camera3d', 'models3d', 'scenery3d', 'render3d']) await load(`src/${f}.js?v=${V3D}`); // V3D: a new name each build, so a browser never runs an old copy
+        if (typeof Render3D !== 'function') for (const f of ['camera3d', 'kaykit3d', 'models3d', 'scenery3d', 'render3d']) await load(`src/${f}.js?v=${V3D}`); // V3D: a new name each build, so a browser never runs an old copy
         loaded = true;
         if (!want3d) return; // switched back to 2D while loading
         el.className = 'board3d';
