@@ -149,7 +149,8 @@ body { display: flex; flex-direction: column; }
 <div class="hud bottom">
   <div id="shop" hidden><div class="line"><span id="hint"></span><span id="gold"></span></div><div id="cards"></div></div>
   <div class="row">
-  <select id="map" aria-label="Map"><option value="standard">Standard</option><option value="autumn">Autumn Forest</option><option value="forest">Forest Clearing</option><option value="cavern">Mushroom Cavern</option><option value="ice">Frozen Peak</option><option value="testgrid">Test Grid</option><option value="oasis">Test - oasis</option></select>
+  <select id="map" aria-label="Map"><option value="standard">Standard</option><option value="forest">Forest Clearing</option><option value="cavern">Mushroom Cavern</option><option value="ice">Frozen Peak</option><option value="testgrid">Test Grid</option></select>
+  <select id="skin" aria-label="Look"><option value="">Own look</option><option value="meadow">Meadow</option><option value="autumn">Autumn</option><option value="snow">Snow</option><option value="frost">Frost</option><option value="desert">Desert</option></select>
   <select id="who" aria-label="Who deploys blue"><option value="you">Blue: you</option><option value="ai">Blue: AI</option></select>
   <button class="btn" id="auto">Auto</button>
   <button class="btn primary" id="fight">Fight</button>
@@ -3641,18 +3642,14 @@ const Game = (() => {
       ...(ed.base === 'testgrid' ? { rangeAdd: 2, rangeAddMin: 5, slowSteps: [[3, 0.2], [5, 0.2]], tuneKeep: ['Shiv', 'Water Mage'] } : {}), ...extra };
   }
   const MAPS = [
-    { id: 'standard', name: 'Standard', short: 'No special rules.', text: 'No special rules.', plain: true }, // only when picked, never random
-    { id: 'autumn', name: 'Autumn Forest', short: 'No special rules. A forest in autumn.', text: 'No special rules.', plain: true }, // the Standard board in autumn colours (the 3D board's looks); only when picked
+    { id: 'standard', name: 'Standard', short: 'No special rules.', text: 'No special rules.', plain: true, skins: true }, // only when picked, never random
     { id: 'forest', name: 'Forest Clearing', short: 'Bribe the elf tower to fight for you.', text: 'Bribe the elf tower to fight for you. Healing ×1.5.', boostHp: 15, boostUnits: ['Ent', 'Earth Wizard'], healMul: 1.5, elfTower: true },
     { id: 'cavern', name: 'Mushroom Cavern', short: 'Shorter range. Mushroom tiles buff, speed up or poison.', text: '−25% range. Purple tiles buff, yellow speed up, green poison.', stealthDmg: 20, rangeCut: 25, rangeKeep: 5, shrooms: true, pointMirror: true },
     // Frozen Peak's hailstorm and altar are switched off for now (iceOff): the map is its snowy floor and music with no
     // special rules. To bring them back, take iceOff out and use iceShort / iceText as short / text again.
     { id: 'ice', name: 'Frozen Peak', short: 'A snowy mountain top. No special rules for now.', text: 'No special rules.', iceOff: true,
       iceShort: 'Hail from round 2. An ice altar rises on even rounds.', iceText: 'Every fight from round 2: a hailstorm drops 10 hail tiles in the storm band (no man’s land at first); units standing in hail take 20 damage per second. Even rounds: the altar of ice rises in the middle of the board. Tap it to buy ice walls for your tower, push the storm band toward your opponent, or summon a Snowgre.', ice: true },
-    { id: 'testgrid', name: 'Test Grid', short: 'A bigger board: each zone is 14 by 7 tiles.', text: 'Bigger board. A treasury pays 50 gold per fight it survives.', plain: true, grid: { cols: 14, rows: 18, zone: 7 }, pointMirror: true, treasury: true,
-      rangeAdd: 2, rangeAddMin: 5, slowSteps: [[3, 0.2], [5, 0.2]], tuneKeep: ['Shiv', 'Water Mage'] }, // only when picked, never random
-    // the Test Grid's board and rules on desert sand, an oasis off the board (the 3D board's looks only)
-    { id: 'oasis', name: 'Test - oasis', short: 'The Test Grid in the desert, by an oasis.', text: 'Bigger board. A treasury pays 50 gold per fight it survives.', plain: true, grid: { cols: 14, rows: 18, zone: 7 }, pointMirror: true, treasury: true,
+    { id: 'testgrid', name: 'Test Grid', short: 'A bigger board: each zone is 14 by 7 tiles.', text: 'Bigger board. A treasury pays 50 gold per fight it survives.', plain: true, skins: true, grid: { cols: 14, rows: 18, zone: 7 }, pointMirror: true, treasury: true,
       rangeAdd: 2, rangeAddMin: 5, slowSteps: [[3, 0.2], [5, 0.2]], tuneKeep: ['Shiv', 'Water Mage'] }, // only when picked, never random
     // the Test Grid's board and rules, with two rivers and a raised bridge between them across no man's land
     editorMap('bridge', EDITOR_MAPS.bridge, { name: 'Bridge', short: 'Hold the raised bridge between two rivers for 50 gold. High ground shoots further and harder.', text: 'Two rivers nobody can wade across, a raised bridge between them. Hold the bridge with more units than your opponent for 5 seconds in a row to win it: +50 gold. From higher ground: +1 m range and +2% damage per level above the target, as much less shooting uphill. A treasury pays 50 gold per fight it survives.',
@@ -3660,6 +3657,9 @@ const Game = (() => {
     // deeper zones (8 rows) and only 2 rows of no man's land: the armies meet almost at once
     editorMap('rush', EDITOR_MAPS.rush, { short: 'Deep zones, only 2 rows of no man’s land: the armies meet at once.', text: 'Each zone is 14 by 8 tiles, with only 2 rows of no man’s land between them, so the armies meet almost at once. The towers stand one column further in, and the back corners are flank tiles too. A treasury pays 50 gold per fight it survives.' }), // only when picked, never random
   ];
+  // Looks (skins) for the 3D board: a map with skins (the Standard and the Test Grid) can be played in any of them; the
+  // others have their own look. Only how the board looks: the rules stay the map's. The match keeps the host's pick (m.skin).
+  const SKINS = [{ id: 'meadow', name: 'Meadow' }, { id: 'autumn', name: 'Autumn' }, { id: 'snow', name: 'Snow' }, { id: 'frost', name: 'Frost' }, { id: 'desert', name: 'Desert' }];
   // ---------- terrain: walls, water, bushes and ground height (a map's `terrain`, from the map editor) ----------
   // A wall ('#') stops walking, shots and sight; water ('~') stops walking only; shallow water ('s') slows whoever wades
   // in it by TERRAIN.wade %; a bush ('b') hides who stands in it (see the engine's inSight). A tile with a form (a
@@ -4254,6 +4254,7 @@ const Game = (() => {
       packages: [dealPackages(units, r, offChars, packOff(0)), dealPackages(units, r, offChars, packOff(1))], // each player's 3 starting package options, each with a different random character
       pack: [null, null], // which one each player picked
       map: rollMap(seed >>> 0, mapId, lastMapId), // { id, elfCol }: the map this match is fought on (mapId picks it; otherwise random)
+      skin: null, // the 3D board's look for a map with skins (SKINS; null = the map's own)
       bribe: [[], []], // the round of each bribe each player paid the elves (see the bribe-off)
       elfOwn: [null, null], // each player's own elf tower: { col, row, round bought }
       towerSkill: [0, 0], // round each player bought their tower's skill in (0 = not bought)
@@ -4267,6 +4268,7 @@ const Game = (() => {
       offTowers: !factions && opts && Array.isArray(opts.offTowers) ? opts.offTowers.filter(id => TOWER_TYPES.some(x => x.id === id)) : [], // tower types left out (Standard pack)
     };
     m.towers = [towerSpot(m, 0), towerSpot(m, 1)];
+    { const mp = MAPS.find(x => x.id === m.map.id), sk = opts && opts.skin; if (mp && mp.skins && SKINS.some(x => x.id === sk)) m.skin = sk; }
     return m;
   }
 
@@ -6032,7 +6034,7 @@ const Game = (() => {
     TOWER, TOWER_TYPES, OUTPOST, TOWER_PICK_ROUND, towerType, towerChoices, needsTowerPick, setTowerType, settleTowerPicks, TOWER_SKILL, towerSkillOf, towerSkillVisible, towerPicked, canBuyTowerSkill, buyTowerSkill, undoTowerSkill, towerSkillCost, towerSkill2Of, towerSkill2Visible, towerSkill2Cost, canBuyTowerSkill2, buyTowerSkill2, undoTowerSkill2, towerSkill2On, AIRSHIP, MOAT, BWALL, BWALL_SQ, EDGES, bwallsOf, bwallOn, edgeOf, bwallWorld, bwallsLeft, bwallShown, bwallSpotOk, placeBwall, unplaceBwall, ensureBwalls, bwallUnit, INVEST, MAGE_GENERALS, mageGenPrice, MAGE, mageGenInfo, mageGenOf, mageTpOf, isExtraGen, mageGenCost, canBuyMageGen, buyMageGen, undoMageGen, mageTowerUnit, generalUnit, LOAN, loanNow, investNow, bankBusy, investNow, bankBusy, canTakeLoan, takeLoan, undoLoan, towerRounds, troundInfo, troundOn, troundCost, canBuyTround, buyTround, undoTround, SLIME_UNITS, slimeTowerUnit, slimeSkillDefs, TOWER_MID, towerColOk, towerAt, needsTower, placeTower, ensureTower,
     FLANK, flankRows, flankOpen, isFlank, flankTiles, reserved, canPlaceAt, isOff, enemyHolds, inNoMans, hasSkillType, garrisonAt, garrisonFree, inBuilding, WATCH_SQ, watchUnit, freeMover,
     STANDARD_PACK, ICE, ALTAR, GOLEM, isIce, hailRound, altarRound, stormShift, stormRows, hailTiles, altarCost, altarRefund, altarCount, pushRoom, altarBought, addAltar, buyAltar, undoAltar, snowgres, snowgreUnit,
-    MAPS, EDITOR_MAPS, TERRAIN, objectiveOf, objectiveTiles, SHAPE_PATH, terrainTile, terrainBlocks, terrainOf, groundHeight, ELF_TOWER, SHROOM, SHROOM_SPLIT, shroomAt, shroomTileAt, shroomRemoval, SHROOM_REMOVE, shroomCost, removeShroom, undoRemoveShroom, mapOf, elfSpot, rollMap, BRIBE_COST, bribeList, bribeGold, bribeCount, bribeNow, bribeCost, bribeRefund, ELF_POWER, elfPowered, elfUnit, ELF_OWN, elfOwnCost, elfOwnOf, elfOwnAt, elfOwnUnlocked, elfOwnOffered, canBuyElfOwn, elfOwnSpotOk, buyElfOwn, undoElfOwn, bribeLeader, canBribe, bribe, undoBribe,
+    MAPS, SKINS, EDITOR_MAPS, TERRAIN, objectiveOf, objectiveTiles, SHAPE_PATH, terrainTile, terrainBlocks, terrainOf, groundHeight, ELF_TOWER, SHROOM, SHROOM_SPLIT, shroomAt, shroomTileAt, shroomRemoval, SHROOM_REMOVE, shroomCost, removeShroom, undoRemoveShroom, mapOf, elfSpot, rollMap, BRIBE_COST, bribeList, bribeGold, bribeCount, bribeNow, bribeCost, bribeRefund, ELF_POWER, elfPowered, elfUnit, ELF_OWN, elfOwnCost, elfOwnOf, elfOwnAt, elfOwnUnlocked, elfOwnOffered, canBuyElfOwn, elfOwnSpotOk, buyElfOwn, undoElfOwn, bribeLeader, canBribe, bribe, undoBribe,
     CHARACTERS, CHAR, charOf, charInfo, enzoSkill, enzoActive, charmOf, isGentleman, canGiveCharm, giveCharm, undoCharm, ensureCharm, felixGold, isTier1, rollBuffTiles, onBuffTile, zoeBuff, yotImps, yotLevel, TOWER_SPOT, towerSpot,
     TREASURY, TREASURY_SQ, treasuryOn, treasuryUp, treasurySpot, treasuryAt, treasuryUnit, deployCost, FORTIFY, fortifyOf, canFortify, fortify, bwallsFighting, VAULT, vaultOn, MARK, markOf, markLost, markOn, markCost, markTarget, canMark, placeMark, markShown,
     FACTION_MODE, FACTIONS: () => FACTIONS, setFactions, factionInfo, factionsOf, factionTowers, towerTypeById, ownsUnit, withFactionTrait, factionSet,
@@ -6216,9 +6218,9 @@ const Art = (() => {
 // floor(plain): only the board itself (map, zones, tiles), no squads or towers: the 3D renderer lays it on the ground;
 // plain leaves out the zones, grid and tile markers (for the 3D ground-level view).
 // A 3D renderer can take its place by offering the same calls.
-// opts (the 3D board's floor): ground(ctx, W, H, tilePx, mapId) paints the land of a map that has no painted ground of its own
-// and returns true; grid and zoneA: the grid lines' colour and how strongly the zones are tinted on it; floorAs: map id ->
-// the map whose painted ground it gets.
+// opts (the 3D board's floor): look(match) -> { bg, floor }: the map ground to paint (bg: a map's painted ground, by id) or
+// the floor for ground(ctx, W, H, tilePx, floor), which paints it and returns true; grid and zoneA: the grid lines'
+// colour and how strongly the zones are tinted on a painted floor.
 const Render2D = (cv, view, opts = {}) => {
   let ctx = cv.getContext('2d'); // swapped for a moment while drawing map thumbnails (thumb)
   let m = null, me = 0, phase = 'start', units = [], mode = 'ai', bt = null, battlePre = null, fx = [], battleCam = null;
@@ -6614,9 +6616,9 @@ const Render2D = (cv, view, opts = {}) => {
     const Z = Game.ZONE, mine = (Game.ROWS - Z) * t;
     const v = phase === 'battle' && battlePre ? battlePre : m; // during a fight: the board as it was when the fight began, not the next round's
     const mp = Game.mapOf(v);
-    const bgId = mp && ((opts.floorAs && opts.floorAs[mp.id]) || mp.id), own = bgId && BACKGROUNDS[bgId];
+    const lk = opts.look ? opts.look(v) : null, bgId = lk ? lk.bg : mp && mp.id, own = bgId && BACKGROUNDS[bgId];
     if (own) ctx.drawImage(mapBackground(bgId), 0, 0, W, H);
-    else if (!(opts.ground && opts.ground(ctx, W, H, t, mp && mp.id))) { ctx.fillStyle = css('--board'); ctx.fillRect(0, 0, W, H); }
+    else if (!(opts.ground && lk && lk.floor && opts.ground(ctx, W, H, t, lk.floor))) { ctx.fillStyle = css('--board'); ctx.fillRect(0, 0, W, H); }
     const lit = !own && !!opts.ground; // the 3D board's meadow: darker grid lines, stronger zone tints
     if (mp && mp.terrain) ctx.drawImage(terrainLayer(v), 0, 0, W, H);
     if (mp && mp.objective) drawObjective(v);
@@ -8245,9 +8247,9 @@ const Models3D = (THREE) => {
   // the tower types (Game.TOWER_TYPES and the outpost): the walls take the type's colour, as on the 2D board
   const crown = (r, y, n = 8) => [...Array(n)].map((_, k) => P(box(r * 0.3, 0.55, 0.45), 'tint', [Math.sin((k + 0.5) * Math.PI * 2 / n) * r, y, Math.cos((k + 0.5) * Math.PI * 2 / n) * r], [0, (k + 0.5) * Math.PI * 2 / n, 0]));
   const door = (z, w = 0.9, h = 1.2) => P(box(w, h, 0.2), DARK, [0, h / 2, z]);
-  // a small lit torch on a wall bracket (KayKit), on the wall facing -z at x, y, z
-  const torch = (x, y, z) => kk('torch_mounted') ? [...KK('torch_mounted', [x, y, z], [0, Math.PI, 0], [1.3, 1.3, 1.3]),
-    P(cone(0.16, 0.5, 6), FIRE, [x, y + 1.08, z - 0.62]), P(cone(0.09, 0.32, 5), EMBER, [x, y + 1.02, z - 0.64])] : [];
+  // a small lit torch on a wall bracket (KayKit), on the building's right side (its wall facing +x) at x, y
+  const torch = (x, y) => kk('torch_mounted') ? [...KK('torch_mounted', [x, y, 0], [0, Math.PI / 2, 0], [1.3, 1.3, 1.3]),
+    P(cone(0.16, 0.5, 6), FIRE, [x + 0.62, y + 1.08, 0]), P(cone(0.09, 0.32, 5), EMBER, [x + 0.64, y + 1.02, 0])] : [];
   const flagOn = (y) => [P(cyl(0.05, 0.05, 1.6, 4), WOOD, [0, y + 0.8, 0]), P(box(0.05, 0.5, 0.9), 'team', [0, y + 1.3, 0.45])];
   const mechaTower = (y0 = 0) => lifted([
     P(cyl(2.2, 2.5, 3.2, 10), 'tint', [0, 1.6, 0]),
@@ -8260,14 +8262,14 @@ const Models3D = (THREE) => {
     door(-2.3, 0.9, 1.3)], y0);
   const TOWERS = {
     keep: () => [P(cyl(1.9, 2.3, 4.6, 8), 'tint', [0, 2.3, 0]), P(cyl(2.3, 2.1, 0.6, 8), 'tint', [0, 4.9, 0]), ...crown(2.05, 5.5),
-      P(cone(1.7, 2.2, 8), 'team', [0, 6.3, 0]), ...flagOn(7.1), door(-2.05), ...torch(0.95, 1.75, -2.08)],
+      P(cone(1.7, 2.2, 8), 'team', [0, 6.3, 0]), ...flagOn(7.1), door(-2.05), ...torch(2.1, 1.75)],
     outpost: () => [...[[-1, -1], [1, -1], [-1, 1], [1, 1]].map(([x, z]) => P(box(0.3, 3.4, 0.3), WOOD, [x * 1.1, 1.7, z * 1.1])),
       P(box(2.8, 1.1, 2.8), 'tint', [0, 3.6, 0]), P(cone(2.2, 1.4, 4), 'team', [0, 4.85, 0], [0, Math.PI / 4, 0]), ...flagOn(5.3)],
     sniper: () => [P(cyl(1.1, 1.5, 7.5, 6), 'tint', [0, 3.75, 0]), P(cyl(1.15, 1.15, 0.6, 6), '#F2C94C', [0, 6.2, 0]),
       P(box(0.3, 1.0, 0.2), 'team', [0, 4.6, -1.25]), P(cyl(1.5, 1.2, 0.6, 6), 'tint', [0, 7.8, 0]), ...crown(1.35, 8.35, 6), ...flagOn(8.3), door(-1.4, 0.7, 1.1)],
     bastion: () => [P(cyl(2.9, 3.2, 3.2, 8), 'tint', [0, 1.6, 0]), P(cyl(3.2, 3.0, 0.5, 8), 'tint', [0, 3.45, 0]), ...crown(3.0, 3.95, 10),
       P(box(1.6, 1.9, 0.25), 'team', [0, 1.7, -3.05]), P(box(0.25, 1.2, 0.3), 'tint', [0, 1.75, -3.15]), P(box(1.0, 0.25, 0.3), 'tint', [0, 2.0, -3.15]), ...flagOn(3.7),
-      ...torch(1.35, 1.8, -3.08)],
+      ...torch(2.98, 1.8)],
     mage: () => [P(cyl(1.6, 1.9, 4.2, 7), 'tint', [0, 2.1, 0]), P(cone(2.0, 4.0, 7), 'team', [0, 6.2, 0]), P(ball(0.45), '#F2C94C', [0, 6.6, -1.0]),
       P(cyl(0.12, 0.12, 0.8, 4), WOOD, [0, 8.6, 0]), door(-1.75, 0.8, 1.4)],
     bank: () => [P(box(4.2, 3.6, 3.6), 'tint', [0, 1.8, 0]), ...[-1.6, -0.55, 0.55, 1.6].map(x => P(box(0.6, 0.55, 0.45), 'tint', [x, 3.85, -1.6])),
@@ -8289,17 +8291,18 @@ const Models3D = (THREE) => {
   // wall raised by a spell (a row of sharpened stakes). Placeholders until the buildings get their own models.
   BUILD.lesser = () => [P(box(3.0, 2.0, 2.6), 'tint', [0, 1.0, 0]), P(cone(2.4, 1.6, 4), 'team', [0, 2.8, 0], [0, Math.PI / 4, 0]),
     P(box(0.7, 1.1, 0.15), DARK, [0, 0.55, -1.32]), P(cyl(0.25, 0.25, 1.2, 6), STONE, [0.9, 3.0, 0.5]), ...flagOn(3.4)];
-  // the treasury (Test Grid): KayKit's chest full of gold on a low stone step, stacks of coins round it and a banner in
-  // the team colour on a pole behind it (the older vault below when the build has no KayKit models)
-  BUILD.treasury = () => kk('chest_gold') ? [P(box(3.4, 0.3, 2.8), STONE, [0, 0.15, 0.1]),
-    ...KK('chest_gold', [0, 0.3, 0], [0, Math.PI, 0], [1.6, 1.6, 1.6]), ...chestLid(),
-    ...KK('coin_stack_medium', [-1.25, 0.3, -0.75], [0, 0.6, 0], [1.1, 1.1, 1.1]), ...KK('coin_stack_small', [1.3, 0.3, -0.85], [0, 2.1, 0], [1.1, 1.1, 1.1]),
-    ...KK('coin_stack_small', [1.45, 0.3, 0.85], [0, 4.0, 0]),
-    P(cyl(0.06, 0.06, 3.0, 5), WOOD, [-1.3, 1.8, 1.05]), P(box(0.05, 0.75, 1.0), 'team', [-1.3, 2.85, 0.55])] : oldTreasury();
+  // the treasury (Test Grid): KayKit's chest full of gold on a low stone step, its open front toward the opponent
+  // (+z: structures turn so their -z side, a tower's door, faces their own side), stacks of coins round it and a banner
+  // in the team colour on a pole behind it (the older vault below when the build has no KayKit models)
+  BUILD.treasury = () => kk('chest_gold') ? [P(box(3.4, 0.3, 2.8), STONE, [0, 0.15, -0.1]),
+    ...KK('chest_gold', [0, 0.3, 0], [0, 0, 0], [1.6, 1.6, 1.6]), ...chestLid(),
+    ...KK('coin_stack_medium', [-1.25, 0.3, 0.75], [0, 0.6, 0], [1.1, 1.1, 1.1]), ...KK('coin_stack_small', [1.3, 0.3, 0.85], [0, 2.1, 0], [1.1, 1.1, 1.1]),
+    ...KK('coin_stack_small', [1.45, 0.3, -0.85], [0, 4.0, 0]),
+    P(cyl(0.06, 0.06, 3.0, 5), WOOD, [-1.3, 1.8, -1.05]), P(box(0.05, 0.75, 1.0), 'team', [-1.3, 2.85, -0.55])] : oldTreasury();
   // the chest's lid, thrown open on its hinge at the back so the gold shows
   const chestLid = () => { const g = kk('chest_gold_lid'); if (!g) return [];
     g.applyMatrix4(m4.makeRotationX(-1.95)); g.translate(0, 0.5, -0.565);
-    return [P(g, 'vc', [0, 0.3, 0], [0, Math.PI, 0], [1.6, 1.6, 1.6])]; };
+    return [P(g, 'vc', [0, 0.3, 0], [0, 0, 0], [1.6, 1.6, 1.6])]; };
   const oldTreasury = () => [P(box(3.0, 0.5, 3.0), STONE, [0, 0.25, 0]), P(box(2.5, 1.7, 2.5), 'tint', [0, 1.35, 0]), P(cone(2.1, 1.2, 4), 'team', [0, 2.8, 0], [0, Math.PI / 4, 0]),
     P(box(0.8, 1.0, 0.15), DARK, [0, 1.0, -1.28]), ...[[-1.0, 1.9], [-0.55, 2.0], [-0.8, 1.6]].map(([x, z], k) => P(cyl(0.3, 0.3, 0.3 + k * 0.15, 8), 'tint', [x - 0.5, 0.65 + k * 0.08, z - 0.3])), ...flagOn(3.6)];
   // Overwatch's watchtower: four posts, a platform with a parapet in the unit's colour, a roof in the team colour
@@ -8449,14 +8452,14 @@ const Scenery3D = (THREE, scene, opts = {}) => {
     desert: { sky: '#CBBE9F', land: '#A99063', tint: [1.04, 1, 0.94], low: 'desert', trees: ['PalmTree_1', 'PalmTree_2', 'PalmTree_3', 'PalmTree_4', 'DeadTree_1'], grow: 0.5, dress: 0.7, ponds: true,
       tints: [[/^Grass_Wispy|^Grass_Common_Short/, [1.3, 1.08, 0.55]], [/^Plant_7/, [1.15, 1, 0.62]], [/^DeadTree/, [1.15, 1.02, 0.85]]] },
   };
-  BIOMES.oasis = BIOMES.desert; // Test - oasis
   // autumn: maples and birches in red and gold, red bushes, golden grass, fallen leaves on the floor
   BIOMES.autumn = { sky: '#B5AA95', land: '#5C5B39', tint: [1, 0.97, 0.92], low: 'autumn', trees: ['MapleTree_1', 'MapleTree_2', 'MapleTree_4', 'MapleTree_5', 'BirchTree_1', 'BirchTree_4', 'BirchTree_5', 'Pine_1'], grow: 1.2, dress: 1,
     tints: [[/^Grass/, [1.2, 1.02, 0.6]], [/^Fern|^Plant_1/, [1.25, 0.95, 0.5]], [/^Clover/, [1.15, 1, 0.6]]] };
-  BIOMES.testgrid = { ...BIOMES.ice }; // the Test Grid has Frozen Peak's look (its floor too: Render3D's floorAs), without the snow
-  BIOMES.ice.snow = 0.75; // Frozen Peak: snow on everything that faces up, drifts round the board and falling snow
-  const biomeOf = (id) => BIOMES[id] || BIOMES.meadow;
-  const biome = (v) => { const src = v && (v.battlePre || v.m), mp = src && Game.mapOf(src); return biomeOf(mp && mp.id); };
+  BIOMES.frost = { ...BIOMES.ice }; // Frozen Peak's look without the snow (the Test Grid's own look)
+  BIOMES.ice.snow = 0.75; // snow on everything that faces up, drifts round the board and falling snow
+  // a look (Scenery3D.LOOKS, below) -> its biome
+  const biomeOf = (look) => BIOMES[(Scenery3D.LOOKS[look] || Scenery3D.LOOKS.meadow).biome] || BIOMES.meadow;
+  const biome = (v) => biomeOf(Scenery3D.lookOf(v && (v.battlePre || v.m)));
 
   // ---------- loading ----------
   const FOLIAGE = /Leaves|Leaf|Grass|Flowers/;
@@ -8671,11 +8674,11 @@ const Scenery3D = (THREE, scene, opts = {}) => {
   function tick(dt, px = 1) { if (flakes.visible) { snowTime.value += dt; flakeMat.uniforms.uPx.value = px; } }
   function update(v, groundY, BW, BD, T) {
     if (!lib || !v || !v.m) return;
-    const src = v.battlePre || v.m, mp = Game.mapOf(src), id = (mp && mp.id) || 'standard';
-    const k = [id, v.me, Game.COLS, Game.ROWS, castShadows].join('|');
+    const src = v.battlePre || v.m, mp = Game.mapOf(src), id = (mp && mp.id) || 'standard', look = Scenery3D.lookOf(src);
+    const k = [id, look, v.me, Game.COLS, Game.ROWS, castShadows].join('|');
     if (k === key) return;
     key = k; clear();
-    const bi = biomeOf(id), hF = v.me === 1 ? -1 : 1;
+    const bi = biomeOf(look), hF = v.me === 1 ? -1 : 1;
     // seeded per map, not per side: both players get the same land, each seeing it from their own end
     let sd = 0; for (const ch of id) sd = (sd * 31 + ch.charCodeAt(0)) % 2147483647; sd = sd || 7;
     const rr = () => { sd = (sd * 16807) % 2147483647; return (sd - 1) / 2147483646; };
@@ -8792,17 +8795,27 @@ const Scenery3D = (THREE, scene, opts = {}) => {
 
 // The painted floors for maps that have no ground of their own (the 3D board only), cached per look and size:
 // meadow (dusty greens, trampled earth across no man's land, grass strokes) and sand (warm sand, wind ripples and
-// darker drifts across no man's land) and autumn (the meadow turning gold, with fallen leaves). Scenery3D.floor(ctx, W, H, t, mapId) paints the one for that map.
+// darker drifts across no man's land) and autumn (the meadow turning gold, with fallen leaves). Scenery3D.floor(ctx, W, H, t, floor) paints one.
 Scenery3D.FLOORS = {
   meadow: { base: '#5F714C', patch: ['#6A7D53', '#556944', '#718156', '#506343'], mid: ['#776C51', '#6B6248', '#7F7359'], strokes: ['#76895C', '#485B3C'], ripples: false },
   autumn: { base: '#62633E', patch: ['#6E6C3E', '#585B37', '#78693A', '#545634'], mid: ['#776146', '#6B583E', '#816A4B'], strokes: ['#8C7F4A', '#474A2C'], ripples: false, leaves: ['#B8532F', '#C9782F', '#D3A43A', '#9A3B2A'] },
   sand: { base: '#B39A6C', patch: ['#BDA478', '#A88F62', '#C2AA7E', '#A38A5F'], mid: ['#9E8457', '#A78D60', '#94794E'], strokes: ['#C9B288', '#8F7650'], ripples: true },
 };
-Scenery3D.floorOf = (mapId) => mapId === 'oasis' ? 'sand' : mapId === 'autumn' ? 'autumn' : 'meadow';
+// Looks: what each draws (its biome round the board, and its floor: one painted here, or a map's painted ground in the
+// 2D renderer, bg). A map with skins (Game.SKINS) takes the match's pick (m.skin); every map has its own look too.
+Scenery3D.LOOKS = {
+  meadow: { biome: 'meadow', floor: 'meadow' }, autumn: { biome: 'autumn', floor: 'autumn' }, desert: { biome: 'desert', floor: 'sand' },
+  snow: { biome: 'ice', bg: 'ice' }, frost: { biome: 'frost', bg: 'ice' }, forest: { biome: 'forest', bg: 'forest' }, cavern: { biome: 'cavern', bg: 'cavern' },
+};
+Scenery3D.MAP_LOOK = { standard: 'meadow', testgrid: 'frost', ice: 'snow', forest: 'forest', cavern: 'cavern' }; // the rest: meadow
+Scenery3D.lookOf = (src) => {
+  const mp = src && Game.mapOf(src);
+  return mp && mp.skins && src.skin && Scenery3D.LOOKS[src.skin] ? src.skin : (mp && Scenery3D.MAP_LOOK[mp.id]) || 'meadow';
+};
 Scenery3D.floor = (() => {
   const cache = {};
-  return (ctx, W, H, t, mapId) => {
-    const look = Scenery3D.floorOf(mapId), L = Scenery3D.FLOORS[look];
+  return (ctx, W, H, t, look) => {
+    const L = Scenery3D.FLOORS[look]; if (!L) return false;
     const key = W + 'x' + H + ':' + Game.ROWS + ':' + Game.ZONE;
     if (!cache[look] || cache[look].key !== key) {
       const oc = document.createElement('canvas'), dpr = Math.min(2, window.devicePixelRatio || 1);
@@ -8912,7 +8925,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
   document.body.appendChild(floorCv);
   let floorView = null, floorKey = null, floorAge = 0, floorDims = '';
   // on maps without a painted ground of their own, the floor is the scenery's meadow or sand, with darker grid lines
-  const floor2d = Render2D(floorCv, () => floorView, typeof Scenery3D === 'function' ? { ground: Scenery3D.floor, grid: 'rgba(20, 28, 16, 0.22)', zoneA: 0.1, floorAs: { testgrid: 'ice' } } : {});
+  const floor2d = Render2D(floorCv, () => floorView, typeof Scenery3D === 'function' ? { ground: Scenery3D.floor, look: (src) => src ? Scenery3D.LOOKS[Scenery3D.lookOf(src)] : null, grid: 'rgba(20, 28, 16, 0.22)', zoneA: 0.1 } : {});
   const groundTex = new THREE.CanvasTexture(floorCv);
   groundTex.colorSpace = THREE.SRGBColorSpace;
   groundTex.anisotropy = renderer.capabilities.getMaxAnisotropy();
@@ -9831,7 +9844,7 @@ const RICH = 1e6;   // blue's gold while you deploy: as good as unlimited, kept 
 let selected = null, drag = null, dragEndAt = 0; // the shop pick, and a squad being dragged to another tile
 const DT = Game.SETTINGS.dt;
 function newMatch() {
-  m = Game.createMatch(units, DATA.matrix, (Math.random() * 1e9) >>> 0, $('map').value);
+  m = Game.createMatch(units, DATA.matrix, (Math.random() * 1e9) >>> 0, $('map').value, null, [], { skin: $('skin').value || null });
   deploy();
 }
 function deploy() {
@@ -9872,6 +9885,7 @@ $('next').addEventListener('click', () => {
 });
 $('new').addEventListener('click', newMatch);
 $('map').addEventListener('change', newMatch);
+$('skin').addEventListener('change', newMatch);
 $('who').addEventListener('change', () => { player = $('who').value === 'you'; newMatch(); });
 $('auto').addEventListener('click', () => { if (phase === 'deploy') { aiSide(0); selected = null; shop(); } });
 

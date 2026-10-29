@@ -453,9 +453,9 @@ const Models3D = (THREE) => {
   // the tower types (Game.TOWER_TYPES and the outpost): the walls take the type's colour, as on the 2D board
   const crown = (r, y, n = 8) => [...Array(n)].map((_, k) => P(box(r * 0.3, 0.55, 0.45), 'tint', [Math.sin((k + 0.5) * Math.PI * 2 / n) * r, y, Math.cos((k + 0.5) * Math.PI * 2 / n) * r], [0, (k + 0.5) * Math.PI * 2 / n, 0]));
   const door = (z, w = 0.9, h = 1.2) => P(box(w, h, 0.2), DARK, [0, h / 2, z]);
-  // a small lit torch on a wall bracket (KayKit), on the wall facing -z at x, y, z
-  const torch = (x, y, z) => kk('torch_mounted') ? [...KK('torch_mounted', [x, y, z], [0, Math.PI, 0], [1.3, 1.3, 1.3]),
-    P(cone(0.16, 0.5, 6), FIRE, [x, y + 1.08, z - 0.62]), P(cone(0.09, 0.32, 5), EMBER, [x, y + 1.02, z - 0.64])] : [];
+  // a small lit torch on a wall bracket (KayKit), on the building's right side (its wall facing +x) at x, y
+  const torch = (x, y) => kk('torch_mounted') ? [...KK('torch_mounted', [x, y, 0], [0, Math.PI / 2, 0], [1.3, 1.3, 1.3]),
+    P(cone(0.16, 0.5, 6), FIRE, [x + 0.62, y + 1.08, 0]), P(cone(0.09, 0.32, 5), EMBER, [x + 0.64, y + 1.02, 0])] : [];
   const flagOn = (y) => [P(cyl(0.05, 0.05, 1.6, 4), WOOD, [0, y + 0.8, 0]), P(box(0.05, 0.5, 0.9), 'team', [0, y + 1.3, 0.45])];
   const mechaTower = (y0 = 0) => lifted([
     P(cyl(2.2, 2.5, 3.2, 10), 'tint', [0, 1.6, 0]),
@@ -468,14 +468,14 @@ const Models3D = (THREE) => {
     door(-2.3, 0.9, 1.3)], y0);
   const TOWERS = {
     keep: () => [P(cyl(1.9, 2.3, 4.6, 8), 'tint', [0, 2.3, 0]), P(cyl(2.3, 2.1, 0.6, 8), 'tint', [0, 4.9, 0]), ...crown(2.05, 5.5),
-      P(cone(1.7, 2.2, 8), 'team', [0, 6.3, 0]), ...flagOn(7.1), door(-2.05), ...torch(0.95, 1.75, -2.08)],
+      P(cone(1.7, 2.2, 8), 'team', [0, 6.3, 0]), ...flagOn(7.1), door(-2.05), ...torch(2.1, 1.75)],
     outpost: () => [...[[-1, -1], [1, -1], [-1, 1], [1, 1]].map(([x, z]) => P(box(0.3, 3.4, 0.3), WOOD, [x * 1.1, 1.7, z * 1.1])),
       P(box(2.8, 1.1, 2.8), 'tint', [0, 3.6, 0]), P(cone(2.2, 1.4, 4), 'team', [0, 4.85, 0], [0, Math.PI / 4, 0]), ...flagOn(5.3)],
     sniper: () => [P(cyl(1.1, 1.5, 7.5, 6), 'tint', [0, 3.75, 0]), P(cyl(1.15, 1.15, 0.6, 6), '#F2C94C', [0, 6.2, 0]),
       P(box(0.3, 1.0, 0.2), 'team', [0, 4.6, -1.25]), P(cyl(1.5, 1.2, 0.6, 6), 'tint', [0, 7.8, 0]), ...crown(1.35, 8.35, 6), ...flagOn(8.3), door(-1.4, 0.7, 1.1)],
     bastion: () => [P(cyl(2.9, 3.2, 3.2, 8), 'tint', [0, 1.6, 0]), P(cyl(3.2, 3.0, 0.5, 8), 'tint', [0, 3.45, 0]), ...crown(3.0, 3.95, 10),
       P(box(1.6, 1.9, 0.25), 'team', [0, 1.7, -3.05]), P(box(0.25, 1.2, 0.3), 'tint', [0, 1.75, -3.15]), P(box(1.0, 0.25, 0.3), 'tint', [0, 2.0, -3.15]), ...flagOn(3.7),
-      ...torch(1.35, 1.8, -3.08)],
+      ...torch(2.98, 1.8)],
     mage: () => [P(cyl(1.6, 1.9, 4.2, 7), 'tint', [0, 2.1, 0]), P(cone(2.0, 4.0, 7), 'team', [0, 6.2, 0]), P(ball(0.45), '#F2C94C', [0, 6.6, -1.0]),
       P(cyl(0.12, 0.12, 0.8, 4), WOOD, [0, 8.6, 0]), door(-1.75, 0.8, 1.4)],
     bank: () => [P(box(4.2, 3.6, 3.6), 'tint', [0, 1.8, 0]), ...[-1.6, -0.55, 0.55, 1.6].map(x => P(box(0.6, 0.55, 0.45), 'tint', [x, 3.85, -1.6])),
@@ -497,17 +497,18 @@ const Models3D = (THREE) => {
   // wall raised by a spell (a row of sharpened stakes). Placeholders until the buildings get their own models.
   BUILD.lesser = () => [P(box(3.0, 2.0, 2.6), 'tint', [0, 1.0, 0]), P(cone(2.4, 1.6, 4), 'team', [0, 2.8, 0], [0, Math.PI / 4, 0]),
     P(box(0.7, 1.1, 0.15), DARK, [0, 0.55, -1.32]), P(cyl(0.25, 0.25, 1.2, 6), STONE, [0.9, 3.0, 0.5]), ...flagOn(3.4)];
-  // the treasury (Test Grid): KayKit's chest full of gold on a low stone step, stacks of coins round it and a banner in
-  // the team colour on a pole behind it (the older vault below when the build has no KayKit models)
-  BUILD.treasury = () => kk('chest_gold') ? [P(box(3.4, 0.3, 2.8), STONE, [0, 0.15, 0.1]),
-    ...KK('chest_gold', [0, 0.3, 0], [0, Math.PI, 0], [1.6, 1.6, 1.6]), ...chestLid(),
-    ...KK('coin_stack_medium', [-1.25, 0.3, -0.75], [0, 0.6, 0], [1.1, 1.1, 1.1]), ...KK('coin_stack_small', [1.3, 0.3, -0.85], [0, 2.1, 0], [1.1, 1.1, 1.1]),
-    ...KK('coin_stack_small', [1.45, 0.3, 0.85], [0, 4.0, 0]),
-    P(cyl(0.06, 0.06, 3.0, 5), WOOD, [-1.3, 1.8, 1.05]), P(box(0.05, 0.75, 1.0), 'team', [-1.3, 2.85, 0.55])] : oldTreasury();
+  // the treasury (Test Grid): KayKit's chest full of gold on a low stone step, its open front toward the opponent
+  // (+z: structures turn so their -z side, a tower's door, faces their own side), stacks of coins round it and a banner
+  // in the team colour on a pole behind it (the older vault below when the build has no KayKit models)
+  BUILD.treasury = () => kk('chest_gold') ? [P(box(3.4, 0.3, 2.8), STONE, [0, 0.15, -0.1]),
+    ...KK('chest_gold', [0, 0.3, 0], [0, 0, 0], [1.6, 1.6, 1.6]), ...chestLid(),
+    ...KK('coin_stack_medium', [-1.25, 0.3, 0.75], [0, 0.6, 0], [1.1, 1.1, 1.1]), ...KK('coin_stack_small', [1.3, 0.3, 0.85], [0, 2.1, 0], [1.1, 1.1, 1.1]),
+    ...KK('coin_stack_small', [1.45, 0.3, -0.85], [0, 4.0, 0]),
+    P(cyl(0.06, 0.06, 3.0, 5), WOOD, [-1.3, 1.8, -1.05]), P(box(0.05, 0.75, 1.0), 'team', [-1.3, 2.85, -0.55])] : oldTreasury();
   // the chest's lid, thrown open on its hinge at the back so the gold shows
   const chestLid = () => { const g = kk('chest_gold_lid'); if (!g) return [];
     g.applyMatrix4(m4.makeRotationX(-1.95)); g.translate(0, 0.5, -0.565);
-    return [P(g, 'vc', [0, 0.3, 0], [0, Math.PI, 0], [1.6, 1.6, 1.6])]; };
+    return [P(g, 'vc', [0, 0.3, 0], [0, 0, 0], [1.6, 1.6, 1.6])]; };
   const oldTreasury = () => [P(box(3.0, 0.5, 3.0), STONE, [0, 0.25, 0]), P(box(2.5, 1.7, 2.5), 'tint', [0, 1.35, 0]), P(cone(2.1, 1.2, 4), 'team', [0, 2.8, 0], [0, Math.PI / 4, 0]),
     P(box(0.8, 1.0, 0.15), DARK, [0, 1.0, -1.28]), ...[[-1.0, 1.9], [-0.55, 2.0], [-0.8, 1.6]].map(([x, z], k) => P(cyl(0.3, 0.3, 0.3 + k * 0.15, 8), 'tint', [x - 0.5, 0.65 + k * 0.08, z - 0.3])), ...flagOn(3.6)];
   // Overwatch's watchtower: four posts, a platform with a parapet in the unit's colour, a roof in the team colour

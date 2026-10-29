@@ -15,7 +15,7 @@ const RICH = 1e6;   // blue's gold while you deploy: as good as unlimited, kept 
 let selected = null, drag = null, dragEndAt = 0; // the shop pick, and a squad being dragged to another tile
 const DT = Game.SETTINGS.dt;
 function newMatch() {
-  m = Game.createMatch(units, DATA.matrix, (Math.random() * 1e9) >>> 0, $('map').value);
+  m = Game.createMatch(units, DATA.matrix, (Math.random() * 1e9) >>> 0, $('map').value, null, [], { skin: $('skin').value || null });
   deploy();
 }
 function deploy() {
@@ -56,6 +56,7 @@ $('next').addEventListener('click', () => {
 });
 $('new').addEventListener('click', newMatch);
 $('map').addEventListener('change', newMatch);
+$('skin').addEventListener('change', newMatch);
 $('who').addEventListener('change', () => { player = $('who').value === 'you'; newMatch(); });
 $('auto').addEventListener('click', () => { if (phase === 'deploy') { aiSide(0); selected = null; shop(); } });
 

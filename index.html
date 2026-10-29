@@ -347,6 +347,8 @@ html.pc .app:has(> .panel:empty) { grid-template-columns: auto; }
 html.pc .hud, html.pc .net, html.pc #wrap { grid-column: 1; }
 html.pc .panel { grid-column: 2; grid-row: 1 / span 3; min-width: 0; max-height: calc(100svh - 40px); overflow-y: auto; }
 html.pc #wrap { width: min(calc(100vw - 32px - 460px), calc((100svh - 110px) * var(--board-ar, 0.75))); min-width: 360px; }
+html.pc.pcfight .app { grid-template-columns: minmax(0, 1fr) 320px; justify-content: stretch; }
+html.pc.pcfight #wrap:has(> .board3d) { width: 100%; aspect-ratio: auto; height: calc(100svh - 96px); } /* the 3D camera fits the board to any shape */
 html.pc .shop { display: grid; grid-template-columns: repeat(auto-fill, minmax(124px, 1fr)); overflow-x: visible; }
 html.pc .sheet { max-width: 640px; }
 html.pc .shop2 { flex-wrap: wrap; overflow-x: visible; row-gap: 10px; } /* a PC's side panel has the room: every tier group in sight, no sideways scrolling */
@@ -4021,18 +4023,14 @@ const Game = (() => {
       ...(ed.base === 'testgrid' ? { rangeAdd: 2, rangeAddMin: 5, slowSteps: [[3, 0.2], [5, 0.2]], tuneKeep: ['Shiv', 'Water Mage'] } : {}), ...extra };
   }
   const MAPS = [
-    { id: 'standard', name: 'Standard', short: 'No special rules.', text: 'No special rules.', plain: true }, // only when picked, never random
-    { id: 'autumn', name: 'Autumn Forest', short: 'No special rules. A forest in autumn.', text: 'No special rules.', plain: true }, // the Standard board in autumn colours (the 3D board's looks); only when picked
+    { id: 'standard', name: 'Standard', short: 'No special rules.', text: 'No special rules.', plain: true, skins: true }, // only when picked, never random
     { id: 'forest', name: 'Forest Clearing', short: 'Bribe the elf tower to fight for you.', text: 'Bribe the elf tower to fight for you. Healing ×1.5.', boostHp: 15, boostUnits: ['Ent', 'Earth Wizard'], healMul: 1.5, elfTower: true },
     { id: 'cavern', name: 'Mushroom Cavern', short: 'Shorter range. Mushroom tiles buff, speed up or poison.', text: '−25% range. Purple tiles buff, yellow speed up, green poison.', stealthDmg: 20, rangeCut: 25, rangeKeep: 5, shrooms: true, pointMirror: true },
     // Frozen Peak's hailstorm and altar are switched off for now (iceOff): the map is its snowy floor and music with no
     // special rules. To bring them back, take iceOff out and use iceShort / iceText as short / text again.
     { id: 'ice', name: 'Frozen Peak', short: 'A snowy mountain top. No special rules for now.', text: 'No special rules.', iceOff: true,
       iceShort: 'Hail from round 2. An ice altar rises on even rounds.', iceText: 'Every fight from round 2: a hailstorm drops 10 hail tiles in the storm band (no man’s land at first); units standing in hail take 20 damage per second. Even rounds: the altar of ice rises in the middle of the board. Tap it to buy ice walls for your tower, push the storm band toward your opponent, or summon a Snowgre.', ice: true },
-    { id: 'testgrid', name: 'Test Grid', short: 'A bigger board: each zone is 14 by 7 tiles.', text: 'Bigger board. A treasury pays 50 gold per fight it survives.', plain: true, grid: { cols: 14, rows: 18, zone: 7 }, pointMirror: true, treasury: true,
-      rangeAdd: 2, rangeAddMin: 5, slowSteps: [[3, 0.2], [5, 0.2]], tuneKeep: ['Shiv', 'Water Mage'] }, // only when picked, never random
-    // the Test Grid's board and rules on desert sand, an oasis off the board (the 3D board's looks only)
-    { id: 'oasis', name: 'Test - oasis', short: 'The Test Grid in the desert, by an oasis.', text: 'Bigger board. A treasury pays 50 gold per fight it survives.', plain: true, grid: { cols: 14, rows: 18, zone: 7 }, pointMirror: true, treasury: true,
+    { id: 'testgrid', name: 'Test Grid', short: 'A bigger board: each zone is 14 by 7 tiles.', text: 'Bigger board. A treasury pays 50 gold per fight it survives.', plain: true, skins: true, grid: { cols: 14, rows: 18, zone: 7 }, pointMirror: true, treasury: true,
       rangeAdd: 2, rangeAddMin: 5, slowSteps: [[3, 0.2], [5, 0.2]], tuneKeep: ['Shiv', 'Water Mage'] }, // only when picked, never random
     // the Test Grid's board and rules, with two rivers and a raised bridge between them across no man's land
     editorMap('bridge', EDITOR_MAPS.bridge, { name: 'Bridge', short: 'Hold the raised bridge between two rivers for 50 gold. High ground shoots further and harder.', text: 'Two rivers nobody can wade across, a raised bridge between them. Hold the bridge with more units than your opponent for 5 seconds in a row to win it: +50 gold. From higher ground: +1 m range and +2% damage per level above the target, as much less shooting uphill. A treasury pays 50 gold per fight it survives.',
@@ -4040,6 +4038,9 @@ const Game = (() => {
     // deeper zones (8 rows) and only 2 rows of no man's land: the armies meet almost at once
     editorMap('rush', EDITOR_MAPS.rush, { short: 'Deep zones, only 2 rows of no man’s land: the armies meet at once.', text: 'Each zone is 14 by 8 tiles, with only 2 rows of no man’s land between them, so the armies meet almost at once. The towers stand one column further in, and the back corners are flank tiles too. A treasury pays 50 gold per fight it survives.' }), // only when picked, never random
   ];
+  // Looks (skins) for the 3D board: a map with skins (the Standard and the Test Grid) can be played in any of them; the
+  // others have their own look. Only how the board looks: the rules stay the map's. The match keeps the host's pick (m.skin).
+  const SKINS = [{ id: 'meadow', name: 'Meadow' }, { id: 'autumn', name: 'Autumn' }, { id: 'snow', name: 'Snow' }, { id: 'frost', name: 'Frost' }, { id: 'desert', name: 'Desert' }];
   // ---------- terrain: walls, water, bushes and ground height (a map's `terrain`, from the map editor) ----------
   // A wall ('#') stops walking, shots and sight; water ('~') stops walking only; shallow water ('s') slows whoever wades
   // in it by TERRAIN.wade %; a bush ('b') hides who stands in it (see the engine's inSight). A tile with a form (a
@@ -4634,6 +4635,7 @@ const Game = (() => {
       packages: [dealPackages(units, r, offChars, packOff(0)), dealPackages(units, r, offChars, packOff(1))], // each player's 3 starting package options, each with a different random character
       pack: [null, null], // which one each player picked
       map: rollMap(seed >>> 0, mapId, lastMapId), // { id, elfCol }: the map this match is fought on (mapId picks it; otherwise random)
+      skin: null, // the 3D board's look for a map with skins (SKINS; null = the map's own)
       bribe: [[], []], // the round of each bribe each player paid the elves (see the bribe-off)
       elfOwn: [null, null], // each player's own elf tower: { col, row, round bought }
       towerSkill: [0, 0], // round each player bought their tower's skill in (0 = not bought)
@@ -4647,6 +4649,7 @@ const Game = (() => {
       offTowers: !factions && opts && Array.isArray(opts.offTowers) ? opts.offTowers.filter(id => TOWER_TYPES.some(x => x.id === id)) : [], // tower types left out (Standard pack)
     };
     m.towers = [towerSpot(m, 0), towerSpot(m, 1)];
+    { const mp = MAPS.find(x => x.id === m.map.id), sk = opts && opts.skin; if (mp && mp.skins && SKINS.some(x => x.id === sk)) m.skin = sk; }
     return m;
   }
 
@@ -6412,7 +6415,7 @@ const Game = (() => {
     TOWER, TOWER_TYPES, OUTPOST, TOWER_PICK_ROUND, towerType, towerChoices, needsTowerPick, setTowerType, settleTowerPicks, TOWER_SKILL, towerSkillOf, towerSkillVisible, towerPicked, canBuyTowerSkill, buyTowerSkill, undoTowerSkill, towerSkillCost, towerSkill2Of, towerSkill2Visible, towerSkill2Cost, canBuyTowerSkill2, buyTowerSkill2, undoTowerSkill2, towerSkill2On, AIRSHIP, MOAT, BWALL, BWALL_SQ, EDGES, bwallsOf, bwallOn, edgeOf, bwallWorld, bwallsLeft, bwallShown, bwallSpotOk, placeBwall, unplaceBwall, ensureBwalls, bwallUnit, INVEST, MAGE_GENERALS, mageGenPrice, MAGE, mageGenInfo, mageGenOf, mageTpOf, isExtraGen, mageGenCost, canBuyMageGen, buyMageGen, undoMageGen, mageTowerUnit, generalUnit, LOAN, loanNow, investNow, bankBusy, investNow, bankBusy, canTakeLoan, takeLoan, undoLoan, towerRounds, troundInfo, troundOn, troundCost, canBuyTround, buyTround, undoTround, SLIME_UNITS, slimeTowerUnit, slimeSkillDefs, TOWER_MID, towerColOk, towerAt, needsTower, placeTower, ensureTower,
     FLANK, flankRows, flankOpen, isFlank, flankTiles, reserved, canPlaceAt, isOff, enemyHolds, inNoMans, hasSkillType, garrisonAt, garrisonFree, inBuilding, WATCH_SQ, watchUnit, freeMover,
     STANDARD_PACK, ICE, ALTAR, GOLEM, isIce, hailRound, altarRound, stormShift, stormRows, hailTiles, altarCost, altarRefund, altarCount, pushRoom, altarBought, addAltar, buyAltar, undoAltar, snowgres, snowgreUnit,
-    MAPS, EDITOR_MAPS, TERRAIN, objectiveOf, objectiveTiles, SHAPE_PATH, terrainTile, terrainBlocks, terrainOf, groundHeight, ELF_TOWER, SHROOM, SHROOM_SPLIT, shroomAt, shroomTileAt, shroomRemoval, SHROOM_REMOVE, shroomCost, removeShroom, undoRemoveShroom, mapOf, elfSpot, rollMap, BRIBE_COST, bribeList, bribeGold, bribeCount, bribeNow, bribeCost, bribeRefund, ELF_POWER, elfPowered, elfUnit, ELF_OWN, elfOwnCost, elfOwnOf, elfOwnAt, elfOwnUnlocked, elfOwnOffered, canBuyElfOwn, elfOwnSpotOk, buyElfOwn, undoElfOwn, bribeLeader, canBribe, bribe, undoBribe,
+    MAPS, SKINS, EDITOR_MAPS, TERRAIN, objectiveOf, objectiveTiles, SHAPE_PATH, terrainTile, terrainBlocks, terrainOf, groundHeight, ELF_TOWER, SHROOM, SHROOM_SPLIT, shroomAt, shroomTileAt, shroomRemoval, SHROOM_REMOVE, shroomCost, removeShroom, undoRemoveShroom, mapOf, elfSpot, rollMap, BRIBE_COST, bribeList, bribeGold, bribeCount, bribeNow, bribeCost, bribeRefund, ELF_POWER, elfPowered, elfUnit, ELF_OWN, elfOwnCost, elfOwnOf, elfOwnAt, elfOwnUnlocked, elfOwnOffered, canBuyElfOwn, elfOwnSpotOk, buyElfOwn, undoElfOwn, bribeLeader, canBribe, bribe, undoBribe,
     CHARACTERS, CHAR, charOf, charInfo, enzoSkill, enzoActive, charmOf, isGentleman, canGiveCharm, giveCharm, undoCharm, ensureCharm, felixGold, isTier1, rollBuffTiles, onBuffTile, zoeBuff, yotImps, yotLevel, TOWER_SPOT, towerSpot,
     TREASURY, TREASURY_SQ, treasuryOn, treasuryUp, treasurySpot, treasuryAt, treasuryUnit, deployCost, FORTIFY, fortifyOf, canFortify, fortify, bwallsFighting, VAULT, vaultOn, MARK, markOf, markLost, markOn, markCost, markTarget, canMark, placeMark, markShown,
     FACTION_MODE, FACTIONS: () => FACTIONS, setFactions, factionInfo, factionsOf, factionTowers, towerTypeById, ownsUnit, withFactionTrait, factionSet,
@@ -6596,9 +6599,9 @@ const Art = (() => {
 // floor(plain): only the board itself (map, zones, tiles), no squads or towers: the 3D renderer lays it on the ground;
 // plain leaves out the zones, grid and tile markers (for the 3D ground-level view).
 // A 3D renderer can take its place by offering the same calls.
-// opts (the 3D board's floor): ground(ctx, W, H, tilePx, mapId) paints the land of a map that has no painted ground of its own
-// and returns true; grid and zoneA: the grid lines' colour and how strongly the zones are tinted on it; floorAs: map id ->
-// the map whose painted ground it gets.
+// opts (the 3D board's floor): look(match) -> { bg, floor }: the map ground to paint (bg: a map's painted ground, by id) or
+// the floor for ground(ctx, W, H, tilePx, floor), which paints it and returns true; grid and zoneA: the grid lines'
+// colour and how strongly the zones are tinted on a painted floor.
 const Render2D = (cv, view, opts = {}) => {
   let ctx = cv.getContext('2d'); // swapped for a moment while drawing map thumbnails (thumb)
   let m = null, me = 0, phase = 'start', units = [], mode = 'ai', bt = null, battlePre = null, fx = [], battleCam = null;
@@ -6994,9 +6997,9 @@ const Render2D = (cv, view, opts = {}) => {
     const Z = Game.ZONE, mine = (Game.ROWS - Z) * t;
     const v = phase === 'battle' && battlePre ? battlePre : m; // during a fight: the board as it was when the fight began, not the next round's
     const mp = Game.mapOf(v);
-    const bgId = mp && ((opts.floorAs && opts.floorAs[mp.id]) || mp.id), own = bgId && BACKGROUNDS[bgId];
+    const lk = opts.look ? opts.look(v) : null, bgId = lk ? lk.bg : mp && mp.id, own = bgId && BACKGROUNDS[bgId];
     if (own) ctx.drawImage(mapBackground(bgId), 0, 0, W, H);
-    else if (!(opts.ground && opts.ground(ctx, W, H, t, mp && mp.id))) { ctx.fillStyle = css('--board'); ctx.fillRect(0, 0, W, H); }
+    else if (!(opts.ground && lk && lk.floor && opts.ground(ctx, W, H, t, lk.floor))) { ctx.fillStyle = css('--board'); ctx.fillRect(0, 0, W, H); }
     const lit = !own && !!opts.ground; // the 3D board's meadow: darker grid lines, stronger zone tints
     if (mp && mp.terrain) ctx.drawImage(terrainLayer(v), 0, 0, W, H);
     if (mp && mp.objective) drawObjective(v);
@@ -8264,19 +8267,35 @@ const Render2D = (cv, view, opts = {}) => {
   }
   let mapPick = '';         // the map the host picked for the next match ('' = random)
   let pickFor = '', pickSel = null, pickPeek = false, pickHtml = ''; // the choose-one-of-3 cards over the board (syncPick)
-  const MAP_SHORT = { standard: 'Standard', autumn: 'Autumn', forest: 'Forest', cavern: 'Cavern', ice: 'Peak', testgrid: 'Test', oasis: 'Test - oasis', bridge: 'Bridge', rush: 'Rush' };
+  const MAP_SHORT = { standard: 'Standard', forest: 'Forest', cavern: 'Cavern', ice: 'Peak', testgrid: 'Test', bridge: 'Bridge', rush: 'Rush' };
+  // the 3D board's look for a map with skins (Standard, Test): '' = the map's own; saved on this device, the host's counts
+  let skinPick = '';
+  try { const v = localStorage.getItem('pb-skin') || ''; if (Game.SKINS.some(x => x.id === v)) skinPick = v; } catch (e) {}
+  const skinnable = (id) => { const mp = Game.MAPS.find(x => x.id === id); return !!(mp && mp.skins); };
   const mapSeg = () => `<div class="bar">
         <span class="hint">Map</span>
         <div class="maps" role="group" aria-label="Map">
           ${[''].concat(Game.MAPS.map(mp => mp.id)).map(id => `<button data-map="${id}" aria-pressed="${mapPick === id}"${id ? ` title="${esc(Game.MAPS.find(mp => mp.id === id).name)}"` : ''}><img src="${mapThumb(id)}" alt=""><span>${id ? esc(MAP_SHORT[id] || Game.MAPS.find(mp => mp.id === id).name) : 'Random'}</span></button>`).join('')}
         </div>
+      </div>
+      <div class="bar" id="skin-bar"${skinnable(mapPick) ? '' : ' hidden'}>
+        <span class="hint">Look</span>
+        <div class="seg" role="group" aria-label="Look of the 3D board">
+          ${[{ id: '', name: 'Own' }].concat(Game.SKINS).map(k => `<button data-skin="${k.id}" aria-pressed="${skinPick === k.id}">${esc(k.name)}</button>`).join('')}
+        </div>
       </div>`;
-  const wireMapSeg = () => $('panel').querySelectorAll('[data-map]').forEach(b => b.addEventListener('click', () => {
+  const wireMapSeg = () => { $('panel').querySelectorAll('[data-map]').forEach(b => b.addEventListener('click', () => {
     mapPick = b.dataset.map;
     $('panel').querySelectorAll('[data-map]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
     const sum = $('panel').querySelector('#settings summary span');
     if (sum) sum.textContent = mapPick ? Game.MAPS.find(mp => mp.id === mapPick).name : 'Random map';
+    const sb = $('panel').querySelector('#skin-bar'); if (sb) sb.hidden = !skinnable(mapPick);
   }));
+  $('panel').querySelectorAll('[data-skin]').forEach(b => b.addEventListener('click', () => {
+    skinPick = b.dataset.skin;
+    try { localStorage.setItem('pb-skin', skinPick); } catch (e) {}
+    $('panel').querySelectorAll('[data-skin]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+  })); };
   // characters left out of the package draw (saved on this device; the host's list counts in a match with a friend)
   let offChars = [];
   try { offChars = JSON.parse(localStorage.getItem('pb-off-chars') || '[]').filter(id => Game.charInfo(id)); } catch (e) {}
@@ -8298,7 +8317,7 @@ const Render2D = (cv, view, opts = {}) => {
   // what a new match takes from the menu: units, leaders and towers left out, and the rules of a Counter Lab roster
   const matchOff = () => packOn() && packUnits() >= 2 ? units.map((u, i) => SP.units.includes(u.name) ? -1 : i).filter(i => i >= 0) : offIdx();
   const matchChars = () => packOn() ? Game.CHARACTERS.map(c => c.id).filter(id => !SP.chars.includes(id)) : offChars;
-  const matchOpts = () => ({ offUnits: matchOff(), offTowers: packOn() ? SP.offTowers : [], rules: customSet && rawSet.rules && typeof rawSet.rules === 'object' ? rawSet.rules : null });
+  const matchOpts = () => ({ skin: skinPick || null, offUnits: matchOff(), offTowers: packOn() ? SP.offTowers : [], rules: customSet && rawSet.rules && typeof rawSet.rules === 'object' ? rawSet.rules : null });
   const packNote = () => packOn()
     ? `${packUnits()} units, ${SP.chars.length} leaders, ${packTowers().length} towers. A good first match.`
     : `All ${unitsOn() === units.length ? units.length : `${unitsOn()} of ${units.length}`} units, ${charsOn()} leaders, ${Game.TOWER_TYPES.length} towers. Pick which in Match settings.`;
@@ -8412,6 +8431,7 @@ const Render2D = (cv, view, opts = {}) => {
     try { localStorage.setItem(LAYOUT_STORE, phoneLayout); } catch (e) {}
     stopTask(); dock();
   }
+  let pcTilted = false; // the PC fight view went to the tilted view on its own (dock())
   let dockOpen = true, dockRound = 0, dockTask = null, dockH = 64, boardH = 0, dockDrag = null;
   const TAB_H = 28; // the pull tab's height, kept clear above the drawer's last row
   const CHEVRONS = (up) => `<svg width="20" height="9" viewBox="0 0 20 9" aria-hidden="true"><path d="${up ? 'M1 7.5 5 2.5 9 7.5M11 7.5 15 2.5 19 7.5' : 'M1 1.5 5 6.5 9 1.5M11 1.5 15 6.5 19 1.5'}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
@@ -8445,6 +8465,15 @@ const Render2D = (cv, view, opts = {}) => {
       taskEl.disabled = !dockTask.x; taskEl.querySelector('#task-x').hidden = taskEl.querySelector('#task-cancel').hidden = !dockTask.x;
       taskEl.setAttribute('aria-label', dockTask.x ? `${taskEl.querySelector('#task-text').textContent} Tap to cancel.` : taskEl.querySelector('#task-text').textContent);
     }
+    // a PC watching a fight on the 3D board: the side panel narrows and the board takes the rest of the window
+    const fight = root.classList.contains('pc') && !!board3d && !!m && ['battle', 'result'].includes(phase), wasFight = root.classList.contains('pcfight');
+    root.classList.toggle('pcfight', fight);
+    // and, from the strategic view, it goes to the tilted one for the fight (the wide board shows bigger that way), back after
+    if (fight !== wasFight && board3d) {
+      const cam = board3d.camera;
+      if (fight && cam.level() === 0) { cam.setLevel(1); pcTilted = true; }
+      else if (!fight && pcTilted) { pcTilted = false; if (cam.level() === 1) cam.setLevel(0); }
+    }
     let h = boardH;
     if (on) {
       dockH = panel.offsetHeight || dockH; // UI 2.0: the whole tray
@@ -8453,7 +8482,7 @@ const Render2D = (cv, view, opts = {}) => {
       h = Math.max(240, Math.floor(innerHeight - top - dockH - 8));
       root.style.setProperty('--board-h', h + 'px');
     }
-    if (on !== was || h !== boardH) { boardH = h; size(); render(); } // the board changed size: draw it again (3D too)
+    if (on !== was || h !== boardH || fight !== wasFight) { boardH = h; size(); render(); } // the board changed size: draw it again (3D too)
     boardMarks();
   }
   // the X on the task line: stop placing that unit (or the Move, the Charisma, the elf tower)
@@ -11058,7 +11087,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   // It falls back to the 2D board when it can't start (no WebGL), when the phone drops the WebGL context, and when
   // fights run under 20 fps at low quality (slower fights step the quality down first), with one line on the board.
   const THREE_URL = './vendor/three.module.min.js'; // the artifact build points this at jsDelivr
-  const V3D = '2b1698c7fe'; // the 3D code's version (src/build.js puts a hash of it here)
+  const V3D = '63713cf899'; // the 3D code's version (src/build.js puts a hash of it here)
   const B3D_STORE = 'phone-bellum-board';
   const force2d = /[?&]board=2d\b/.test(location.search);
   const force3d = !force2d && (/[?&]board=3d\b/.test(location.search) || window.PB_FORCE3D === true);

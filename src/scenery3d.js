@@ -26,14 +26,14 @@ const Scenery3D = (THREE, scene, opts = {}) => {
     desert: { sky: '#CBBE9F', land: '#A99063', tint: [1.04, 1, 0.94], low: 'desert', trees: ['PalmTree_1', 'PalmTree_2', 'PalmTree_3', 'PalmTree_4', 'DeadTree_1'], grow: 0.5, dress: 0.7, ponds: true,
       tints: [[/^Grass_Wispy|^Grass_Common_Short/, [1.3, 1.08, 0.55]], [/^Plant_7/, [1.15, 1, 0.62]], [/^DeadTree/, [1.15, 1.02, 0.85]]] },
   };
-  BIOMES.oasis = BIOMES.desert; // Test - oasis
   // autumn: maples and birches in red and gold, red bushes, golden grass, fallen leaves on the floor
   BIOMES.autumn = { sky: '#B5AA95', land: '#5C5B39', tint: [1, 0.97, 0.92], low: 'autumn', trees: ['MapleTree_1', 'MapleTree_2', 'MapleTree_4', 'MapleTree_5', 'BirchTree_1', 'BirchTree_4', 'BirchTree_5', 'Pine_1'], grow: 1.2, dress: 1,
     tints: [[/^Grass/, [1.2, 1.02, 0.6]], [/^Fern|^Plant_1/, [1.25, 0.95, 0.5]], [/^Clover/, [1.15, 1, 0.6]]] };
-  BIOMES.testgrid = { ...BIOMES.ice }; // the Test Grid has Frozen Peak's look (its floor too: Render3D's floorAs), without the snow
-  BIOMES.ice.snow = 0.75; // Frozen Peak: snow on everything that faces up, drifts round the board and falling snow
-  const biomeOf = (id) => BIOMES[id] || BIOMES.meadow;
-  const biome = (v) => { const src = v && (v.battlePre || v.m), mp = src && Game.mapOf(src); return biomeOf(mp && mp.id); };
+  BIOMES.frost = { ...BIOMES.ice }; // Frozen Peak's look without the snow (the Test Grid's own look)
+  BIOMES.ice.snow = 0.75; // snow on everything that faces up, drifts round the board and falling snow
+  // a look (Scenery3D.LOOKS, below) -> its biome
+  const biomeOf = (look) => BIOMES[(Scenery3D.LOOKS[look] || Scenery3D.LOOKS.meadow).biome] || BIOMES.meadow;
+  const biome = (v) => biomeOf(Scenery3D.lookOf(v && (v.battlePre || v.m)));
 
   // ---------- loading ----------
   const FOLIAGE = /Leaves|Leaf|Grass|Flowers/;
@@ -248,11 +248,11 @@ const Scenery3D = (THREE, scene, opts = {}) => {
   function tick(dt, px = 1) { if (flakes.visible) { snowTime.value += dt; flakeMat.uniforms.uPx.value = px; } }
   function update(v, groundY, BW, BD, T) {
     if (!lib || !v || !v.m) return;
-    const src = v.battlePre || v.m, mp = Game.mapOf(src), id = (mp && mp.id) || 'standard';
-    const k = [id, v.me, Game.COLS, Game.ROWS, castShadows].join('|');
+    const src = v.battlePre || v.m, mp = Game.mapOf(src), id = (mp && mp.id) || 'standard', look = Scenery3D.lookOf(src);
+    const k = [id, look, v.me, Game.COLS, Game.ROWS, castShadows].join('|');
     if (k === key) return;
     key = k; clear();
-    const bi = biomeOf(id), hF = v.me === 1 ? -1 : 1;
+    const bi = biomeOf(look), hF = v.me === 1 ? -1 : 1;
     // seeded per map, not per side: both players get the same land, each seeing it from their own end
     let sd = 0; for (const ch of id) sd = (sd * 31 + ch.charCodeAt(0)) % 2147483647; sd = sd || 7;
     const rr = () => { sd = (sd * 16807) % 2147483647; return (sd - 1) / 2147483646; };
@@ -369,17 +369,27 @@ const Scenery3D = (THREE, scene, opts = {}) => {
 
 // The painted floors for maps that have no ground of their own (the 3D board only), cached per look and size:
 // meadow (dusty greens, trampled earth across no man's land, grass strokes) and sand (warm sand, wind ripples and
-// darker drifts across no man's land) and autumn (the meadow turning gold, with fallen leaves). Scenery3D.floor(ctx, W, H, t, mapId) paints the one for that map.
+// darker drifts across no man's land) and autumn (the meadow turning gold, with fallen leaves). Scenery3D.floor(ctx, W, H, t, floor) paints one.
 Scenery3D.FLOORS = {
   meadow: { base: '#5F714C', patch: ['#6A7D53', '#556944', '#718156', '#506343'], mid: ['#776C51', '#6B6248', '#7F7359'], strokes: ['#76895C', '#485B3C'], ripples: false },
   autumn: { base: '#62633E', patch: ['#6E6C3E', '#585B37', '#78693A', '#545634'], mid: ['#776146', '#6B583E', '#816A4B'], strokes: ['#8C7F4A', '#474A2C'], ripples: false, leaves: ['#B8532F', '#C9782F', '#D3A43A', '#9A3B2A'] },
   sand: { base: '#B39A6C', patch: ['#BDA478', '#A88F62', '#C2AA7E', '#A38A5F'], mid: ['#9E8457', '#A78D60', '#94794E'], strokes: ['#C9B288', '#8F7650'], ripples: true },
 };
-Scenery3D.floorOf = (mapId) => mapId === 'oasis' ? 'sand' : mapId === 'autumn' ? 'autumn' : 'meadow';
+// Looks: what each draws (its biome round the board, and its floor: one painted here, or a map's painted ground in the
+// 2D renderer, bg). A map with skins (Game.SKINS) takes the match's pick (m.skin); every map has its own look too.
+Scenery3D.LOOKS = {
+  meadow: { biome: 'meadow', floor: 'meadow' }, autumn: { biome: 'autumn', floor: 'autumn' }, desert: { biome: 'desert', floor: 'sand' },
+  snow: { biome: 'ice', bg: 'ice' }, frost: { biome: 'frost', bg: 'ice' }, forest: { biome: 'forest', bg: 'forest' }, cavern: { biome: 'cavern', bg: 'cavern' },
+};
+Scenery3D.MAP_LOOK = { standard: 'meadow', testgrid: 'frost', ice: 'snow', forest: 'forest', cavern: 'cavern' }; // the rest: meadow
+Scenery3D.lookOf = (src) => {
+  const mp = src && Game.mapOf(src);
+  return mp && mp.skins && src.skin && Scenery3D.LOOKS[src.skin] ? src.skin : (mp && Scenery3D.MAP_LOOK[mp.id]) || 'meadow';
+};
 Scenery3D.floor = (() => {
   const cache = {};
-  return (ctx, W, H, t, mapId) => {
-    const look = Scenery3D.floorOf(mapId), L = Scenery3D.FLOORS[look];
+  return (ctx, W, H, t, look) => {
+    const L = Scenery3D.FLOORS[look]; if (!L) return false;
     const key = W + 'x' + H + ':' + Game.ROWS + ':' + Game.ZONE;
     if (!cache[look] || cache[look].key !== key) {
       const oc = document.createElement('canvas'), dpr = Math.min(2, window.devicePixelRatio || 1);

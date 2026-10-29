@@ -14,9 +14,9 @@
 // floor(plain): only the board itself (map, zones, tiles), no squads or towers: the 3D renderer lays it on the ground;
 // plain leaves out the zones, grid and tile markers (for the 3D ground-level view).
 // A 3D renderer can take its place by offering the same calls.
-// opts (the 3D board's floor): ground(ctx, W, H, tilePx, mapId) paints the land of a map that has no painted ground of its own
-// and returns true; grid and zoneA: the grid lines' colour and how strongly the zones are tinted on it; floorAs: map id ->
-// the map whose painted ground it gets.
+// opts (the 3D board's floor): look(match) -> { bg, floor }: the map ground to paint (bg: a map's painted ground, by id) or
+// the floor for ground(ctx, W, H, tilePx, floor), which paints it and returns true; grid and zoneA: the grid lines'
+// colour and how strongly the zones are tinted on a painted floor.
 const Render2D = (cv, view, opts = {}) => {
   let ctx = cv.getContext('2d'); // swapped for a moment while drawing map thumbnails (thumb)
   let m = null, me = 0, phase = 'start', units = [], mode = 'ai', bt = null, battlePre = null, fx = [], battleCam = null;
@@ -412,9 +412,9 @@ const Render2D = (cv, view, opts = {}) => {
     const Z = Game.ZONE, mine = (Game.ROWS - Z) * t;
     const v = phase === 'battle' && battlePre ? battlePre : m; // during a fight: the board as it was when the fight began, not the next round's
     const mp = Game.mapOf(v);
-    const bgId = mp && ((opts.floorAs && opts.floorAs[mp.id]) || mp.id), own = bgId && BACKGROUNDS[bgId];
+    const lk = opts.look ? opts.look(v) : null, bgId = lk ? lk.bg : mp && mp.id, own = bgId && BACKGROUNDS[bgId];
     if (own) ctx.drawImage(mapBackground(bgId), 0, 0, W, H);
-    else if (!(opts.ground && opts.ground(ctx, W, H, t, mp && mp.id))) { ctx.fillStyle = css('--board'); ctx.fillRect(0, 0, W, H); }
+    else if (!(opts.ground && lk && lk.floor && opts.ground(ctx, W, H, t, lk.floor))) { ctx.fillStyle = css('--board'); ctx.fillRect(0, 0, W, H); }
     const lit = !own && !!opts.ground; // the 3D board's meadow: darker grid lines, stronger zone tints
     if (mp && mp.terrain) ctx.drawImage(terrainLayer(v), 0, 0, W, H);
     if (mp && mp.objective) drawObjective(v);
