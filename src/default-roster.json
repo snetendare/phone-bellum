@@ -865,7 +865,7 @@
       "id": "obeliskEye",
       "type": "ranged",
       "name": "Eye of the Obelisk",
-      "cost": 300,
+      "cost": 0,
       "params": {
         "range": 18,
         "speed": 25,
@@ -873,6 +873,7 @@
         "duration": 4
       },
       "flat": true,
+      "evolve": true,
       "needs": "glutMax"
     }
   ],
@@ -1663,7 +1664,7 @@
       "defVal": 0,
       "level": 0,
       "unlock": 150,
-      "splash": 6,
+      "splash": 5.5,
       "skillsOn": [
         false,
         false
@@ -1772,7 +1773,7 @@
       "cost": 500,
       "bodies": 1,
       "hp": 2300,
-      "hit": 56,
+      "hit": 52,
       "aps": 1,
       "range": 20,
       "speed": 2.2,

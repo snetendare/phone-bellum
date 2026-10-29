@@ -514,7 +514,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
         if (side === me && deploying && Game.isReady(m, sq)) icon('plus', wx + camRight.x * 4, 5, wz + camRight.z * 4, 1.1);
         return [wx, wz];
       }
-      const awake = sq.awaken > 0 && (side === me || !deploying || Game.seenAwake(m, sq)); // the opponent's awakening from this round stays hidden
+      const awake = Game.shownAwake(m, sq, side === me || !deploying); // awakened or evolved (the opponent's awakening from this round stays hidden)
       const base = Game.glutOf(sq) > 0 ? Engine.glutUnit(units[sq.unit], Game.glutOf(sq)) : units[sq.unit]; // the Obelisk grows with its Glut
       const u = awake && Game.unitFor(m, side, sq.unit, sq).mech ? { ...base, mech: true } : awake && Game.unitFor(m, side, sq.unit, sq).eye ? { ...base, eye: true } : base, w = Game.tileToWorld(sq.col, sq.row), st = tileCenter(v, sq.col, sq.row);
       const list = Engine.buildSquad(u, side, w.x, w.y, sq.id, T);

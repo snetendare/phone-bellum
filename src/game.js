@@ -7,7 +7,7 @@ const Game = (() => {
   const TILE = 6, GRID = { cols: 12, rows: 16, zone: 6 };
   let COLS = GRID.cols, ROWS = GRID.rows, ZONE = GRID.zone;
   const START_HP = 100, MAX_ROUND_DMG = 35, START_GOLD = 250, INCOME = 250, LOSER_BONUS = 50, LOSER_BONUS_ROUND = 3; // no loser gold for rounds 1-2
-  const TOWER_FALL_HP = 10; // a player whose tower falls in a fight loses this much health too (on top of the round's damage)
+  const TOWER_FALL_HP = 10; // a player whose tower falls in a fight loses this much health too, but a round never costs more than MAX_ROUND_DMG in all
   const SQUAD_COST = 100;
   const SETTINGS = { dt: 0.05, timeCap: 60, spacing: 3.5, minDmgPct: 15, absorbXp: 1, armorXp: 0.5, sight: 15, minSight: 18, drift: 15, flameReach: 1.2 }; // sight: metres beyond range a unit notices an enemy (at least minSight), drift: it leans toward one this much further out. flameReach: flame cones reach 1.2x the unit's range
   // XP a squad needs in total to reach level 1, 2, 3, as multiples of its own starting health.
@@ -19,7 +19,7 @@ const Game = (() => {
   // Gold both players get at the start of a round: 250 going into round 2, then 100 more each round (like Mechabellum)
   const incomeFor = (round) => INCOME + CONFIG.incomeStep * Math.max(0, round - 2);
   const deploysAllowed = (m, side) => CONFIG.deployCap
-    ? (m.round === 1 ? CONFIG.firstRoundDeploys : CONFIG.deploysPerRound) + m.extraDeploys[side] + devDeploys(m, side)
+    ? (m.round === 1 ? CONFIG.firstRoundDeploys : CONFIG.deploysPerRound) + m.extraDeploys[side] + musterDeploys(m, side) + devDeploys(m, side)
     : Infinity;
   const deployedThisRound = (m, side) => m.armies[side].filter(s => s.round === m.round && !s.free).length; // package squads don't count
   const deploysLeft = (m, side) => deploysAllowed(m, side) - deployedThisRound(m, side);
@@ -42,7 +42,7 @@ const Game = (() => {
     { id: 'keep', name: 'Keep', text: 'Steady light shots, short range.', unit: { ...TOWER, hp: 700 },
       skill: { name: 'Guards', text: '4 Wisp guards defend the keep for 5 s each fight, then attack.' },
       skill2: { name: 'Brute guards', cost: 400, needs: true, text: 'Guards are Brutes, with your Brute skills. Needs Guards.' },
-      muster: { name: 'Muster', text: 'Your extra deployment each round is free.' } }, // see deployCost
+      muster: { name: 'Muster', text: 'One more deployment every round, by itself.' } }, // see musterDeploys
     { id: 'sniper', name: 'Sniper tower', text: 'Slow, huge range, double damage.', unit: { ...TOWER, name: 'Sniper Tower', kind: 'sniper', hp: 500, hit: 60, aps: 0.4, range: 32, color: '#B9C7D6' },
       skill: { name: 'Eagle eye', text: 'Tower and Snipers: +3 m range, +10% attack speed.' },
       skill2: { name: 'Deploy airship', cost: 400, text: 'An untouchable airship shoots like a level 3 Sniper and drops paratroopers each fight. Snipers and tower: +30 hit.' },
@@ -86,6 +86,8 @@ const Game = (() => {
   function setTowerType(m, side, id) {
     if (!needsTowerPick(m, side) || !towerChoices(m, side).some(x => x.id === id)) return false;
     m.towers[side].type = id;
+    // Muster: an extra deployment bought this round before picking the Keep is now given, so it is refunded
+    while (m.extraDeploys && m.extraDeploys[side] > extraDeployMax(m, side)) { m.extraDeploys[side]--; m.gold[side] += deployCost(m, side); }
     return true;
   }
   // Each tower type has one skill, bought once per match after the pick (TOWER_SKILL gold); it stays hidden from the
@@ -235,7 +237,7 @@ const Game = (() => {
     { id: 'teleport', name: 'Teleport mage general', cost: 100, extra: true, text: 'Stacks with another general. A fallen tower teleports instead of crippling you.' },
   ];
   const MAGE = { meteorHit: 25, meteorAps: 50, boltHit: 100, boltAps: 0.8, boltRange: 3, jumps: 5, jumpHit: 60, jumpReach: 6, waterHeal: 100, waterAps: 0.8, waterRange: 40 };
-  const METEOR = { hit: 114, aps: 0.3, range: 50, minRange: 12, burst: 3, splash: 6, windUp: 2, projSpeed: 22 }; // used when the roster has no Meteor Caller
+  const METEOR = { hit: 114, aps: 0.3, range: 50, minRange: 12, burst: 3, splash: 5.5, windUp: 2, projSpeed: 22 }; // used when the roster has no Meteor Caller
   const mageGenInfo = (id) => MAGE_GENERALS.find(x => x.id === id) || null;
   const isExtraGen = (id) => !!(mageGenInfo(id) || {}).extra;
   // what the player called this round: { id, tp } or null (an old save's { id: 'teleport' } counts as tp)
@@ -1158,9 +1160,12 @@ const Game = (() => {
   const isFlat = (m, ui, k) => !!(skillDef(m, ui, k) && skillDef(m, ui, k).flat);
   // A Master skill (master on its definition) is bought once for all squads of the unit, like any other skill. An
   // Awaken skill (any other flat one) is bought for one squad at a time: sq.awaken = the round it was bought (see awaken)
+  // An Evolve skill (evolve on its definition) isn't bought at all: a squad gets it by itself (see evolveReady)
   const isMaster = (m, ui, k) => isFlat(m, ui, k) && !!skillDef(m, ui, k).master;
-  const isAwaken = (m, ui, k) => isFlat(m, ui, k) && !skillDef(m, ui, k).master;
+  const isEvolve = (m, ui, k) => isFlat(m, ui, k) && !!skillDef(m, ui, k).evolve;
+  const isAwaken = (m, ui, k) => isFlat(m, ui, k) && !skillDef(m, ui, k).master && !skillDef(m, ui, k).evolve;
   const awakenSlot = (m, ui) => { if (!m || !m.units[ui]) return -1; const k = E.SLOTS.find(j => isAwaken(m, ui, j)); return k == null ? -1 : k; };
+  const evolveSlot = (m, ui) => { if (!m || !m.units[ui]) return -1; const k = E.SLOTS.find(j => isEvolve(m, ui, j)); return k == null ? -1 : k; };
   const skillsBought = (m, side, ui) => ((m.tech && m.tech[side] && m.tech[side][ui]) || []).filter((r, k) => r > 0 && !isInnate(m, ui, k) && !isFlat(m, ui, k)).length;
   const skillCost = (m, ui, k, side) => {
     const d = skillDef(m, ui, k); if (!d) return 0;
@@ -1188,7 +1193,8 @@ const Game = (() => {
   // sq (optional): the squad, for a skill of its own (Enzo's)
   function unitFor(m, side, ui, sq) {
     const base = m.units[ui], ek = enzoActive(m, side, ui) ? enzoSkill(m, side, sq) : null, ak = sq && sq.awaken > 0 ? awakenSlot(m, ui) : -1; // an awakened squad
-    const defs = E.SLOTS.filter(k => hasSkill(m, side, ui, k) || k === ek || k === ak).map(k => skillDef(m, ui, k));
+    const vk = sq && sq.evolved > 0 ? evolveSlot(m, ui) : -1; // an evolved one
+    const defs = E.SLOTS.filter(k => hasSkill(m, side, ui, k) || k === ek || k === ak || k === vk).map(k => skillDef(m, ui, k));
     // Mubarak: a slime unit also gets the skills bought for the other slime units
     if (charOf(m, side) === 'mubarak' && base && SLIME_UNITS.includes(base.name)) defs.push(...slimeSkillDefs(m, side, ui));
     let u = defs.length ? E.applySkills(base, defs, m.units) : base;
@@ -1273,6 +1279,7 @@ const Game = (() => {
     if (!d || hasSkill(m, side, ui, k)) return false;
     if (charOf(m, side) === 'enzo') return false; // Enzo's squads come with their skill instead
     if (isAwaken(m, ui, k)) return false; // bought for one squad at a time: see awaken
+    if (isEvolve(m, ui, k)) return false; // never bought: see evolveReady
     if (!m.armies[side].some(s => s.unit === ui)) return false; // needs a squad of that type on the board
     if (skillNeedsMissing(m, side, ui, k).length) return false;
     if (skillOrTaken(m, side, ui, k).length) return false; // either-or: it has the other one
@@ -1359,6 +1366,17 @@ const Game = (() => {
   }
   // what the opponent may know: an awakening bought this round stays hidden until the fight
   const seenAwake = (m, sq) => !!sq && sq.awaken > 0 && sq.awaken < m.round;
+
+  // ---------- Evolve skills (by themselves) ----------
+  // A squad of a unit with an Evolve skill gets it for free once it meets the skill's needs: needs 'glutMax' (the
+  // Obelisk's Eye) = its Glut is full. resolve checks after every fight and sets sq.evolved = that fight's round; it
+  // fights evolved from the next round on, for the rest of the match. Nothing to buy, so it works for Enzo too, and it
+  // isn't the match's awakened unit type (wokeUnit). Both players see it (it comes out of a fight both watched).
+  const evolveNeedMet = (m, side, sq) => { const d = skillDef(m, sq.unit, evolveSlot(m, sq.unit)); return !!d && (d.needs !== 'glutMax' || glutFull(m, side, sq)); };
+  const evolveReady = (m, side, sq) => !!sq && !(sq.evolved > 0) && evolveSlot(m, sq.unit) >= 0 && evolveNeedMet(m, side, sq);
+  const isEvolved = (sq) => !!sq && sq.evolved > 0;
+  // a squad shown awakened (the gold ring, the Eye's model): awakened (the opponent's from this round once seen) or evolved
+  const shownAwake = (m, sq, seen) => isEvolved(sq) || (!!sq && sq.awaken > 0 && (seen || seenAwake(m, sq)));
 
   // ---------- buildings (the Mechites' Factory and Altar of Build) ----------
   // A player gets a building in one of two ways:
@@ -1559,9 +1577,13 @@ const Game = (() => {
     return v;
   }
 
-  // Muster (the Keep's trait): its owner's extra deployment is free
-  const deployCost = (m, side) => towerPicked(m, side) && towerType(m, side).muster ? 0 : CONFIG.extraDeployCost;
-  const canBuyDeploy = (m, side) => CONFIG.deployCap && m.extraDeploys[side] < CONFIG.maxExtraDeploys && m.gold[side] >= deployCost(m, side);
+  // Muster (the Keep's trait): its owner gets the round's extra deployment by itself, without buying it (so there is
+  // none left to buy: extraDeployMax)
+  const musterOn = (m, side) => !!(m.towers && towerPicked(m, side) && towerType(m, side).muster);
+  function musterDeploys(m, side) { return musterOn(m, side) ? Math.min(1, CONFIG.maxExtraDeploys) : 0; }
+  const extraDeployMax = (m, side) => Math.max(0, CONFIG.maxExtraDeploys - musterDeploys(m, side)); // extra deployments a side may still buy a round
+  const deployCost = () => CONFIG.extraDeployCost;
+  const canBuyDeploy = (m, side) => CONFIG.deployCap && m.extraDeploys[side] < extraDeployMax(m, side) && m.gold[side] >= deployCost(m, side);
   function buyDeploy(m, side) {
     if (!canBuyDeploy(m, side)) return false;
     m.gold[side] -= deployCost(m, side);
@@ -2161,8 +2183,16 @@ const Game = (() => {
       sq.glut = Math.min(max, was + r.glut);
       if (sq.glut > was) glut[side].push({ id: sq.id, unit: sq.unit, gained: sq.glut - was, glut: sq.glut, full: sq.glut >= max });
     }
+    // Evolve: a squad that now meets its Evolve skill's needs has it from the next fight on
+    const evolved = [[], []];
+    for (let side = 0; side < 2; side++) for (const sq of m.armies[side]) if (evolveReady(m, side, sq)) {
+      sq.evolved = m.round;
+      evolved[side].push({ id: sq.id, unit: sq.unit, skill: skillDef(m, sq.unit, evolveSlot(m, sq.unit)).name });
+    }
     const towerFell = [0, 1].map(sd => { const q = res.squads[sd + ':-2']; return !!(q && q.alive === 0); });
-    for (const sd of [0, 1]) if (towerFell[sd]) m.hp[sd] = Math.max(0, m.hp[sd] - TOWER_FALL_HP); // a fallen tower costs health too
+    // a fallen tower costs health too, but the round's damage and the tower's together are at most MAX_ROUND_DMG
+    const towerHp = [0, 1].map(sd => towerFell[sd] ? Math.max(0, Math.min(TOWER_FALL_HP, MAX_ROUND_DMG - dmg[sd])) : 0);
+    for (const sd of [0, 1]) if (towerHp[sd]) m.hp[sd] = Math.max(0, m.hp[sd] - towerHp[sd]);
     const treasuryFell = [0, 1].map(sd => { const q = res.squads[sd + ':' + TREASURY_SQ]; return q ? q.alive === 0 : null; }); // null: no treasury in this fight
     const buildingNews = settleBuildings(m, res);
     // Matteo: the squads keep the charisma they ended the fight with; note the ones that became Gentlemen
@@ -2193,7 +2223,7 @@ const Game = (() => {
       }
       return Object.keys(by).map(key => ({ key, dealt: Math.round(by[key]), ...(key === 'tower' ? { name: towerType(m, sd).name } : key.startsWith('b:') ? { name: (buildingInfo(key.slice(2)) || {}).name || 'Building' } : {}) }));
     });
-    const summary = { round: m.round, winner: roundWinner, timeout: res.timeout, dmg, time: res.time, newlyReady, squads, towerFell, treasuryFell, gentlemen, glut, converted: res.converted || [0, 0], dealtBy, buildings: buildingNews };
+    const summary = { round: m.round, winner: roundWinner, timeout: res.timeout, dmg, time: res.time, newlyReady, squads, towerFell, towerHp, treasuryFell, gentlemen, glut, evolved, converted: res.converted || [0, 0], dealtBy, buildings: buildingNews };
     // devtest: buildings destroyed in the fight cost their owner what their onDestroyed says (health now, gold below)
     if (isDev(m)) {
       summary.devLoss = [0, 1].map(sd => {
@@ -2893,10 +2923,10 @@ const Game = (() => {
     MAX_ROUND_DMG, TIER_DMG, bankBusy, seenAt, charShown, towerTypeShown, altarShown, elfOwnShown, shroomShown, removingShroom, movedId, canMove, moveSquad, undoMove,
     COLS, ROWS, TILE, ZONE, START_HP, START_GOLD, INCOME, incomeFor, LOSER_BONUS, LOSER_BONUS_ROUND, TOWER_FALL_HP, CREDIT_LINE, loanTerms, treasurySteal, SQUAD_COST, SETTINGS, XP_STEPS, xpNeeded, unitCostOf,
     levelCost, isReady, levelUp, undoLevel, levelAllPlan, levelAll, upgradeOffer, seenLevel, aiLevel, AI, CONFIG,
-    deploysAllowed, deploysLeft, deployedThisRound, canBuyDeploy, buyDeploy, refundDeploy,
+    deploysAllowed, deploysLeft, deployedThisRound, canBuyDeploy, buyDeploy, refundDeploy, musterOn, musterDeploys, extraDeployMax,
     PACKAGE, allPackages, packOf, needsPack, freeLeft, choosePack, ensurePack,
     unlockCost, tierOf, startLevel, shopCost, mapFreeOf, mapFreeLeft, isUnlocked, unlockVisible, unlock, undoUnlock,
-    skillDef, skillCost, SKILL_STEP, skillsBought, isInnate, hasSkill, skillVisible, skillNeeds, skillNeedsAny, skillNeedsMissing, skillHeldUp, isFlat, isMaster, isAwaken, awakenSlot, awakenCost, wokeUnit, awakenBlock, canAwaken, awaken, undoAwaken, seenAwake, glutOf, glutMax, glutFull, skillOr, skillOrTaken, unitFor, withCharacter,
+    skillDef, skillCost, SKILL_STEP, skillsBought, isInnate, hasSkill, skillVisible, skillNeeds, skillNeedsAny, skillNeedsMissing, skillHeldUp, isFlat, isMaster, isAwaken, awakenSlot, awakenCost, wokeUnit, awakenBlock, canAwaken, awaken, undoAwaken, seenAwake, isEvolve, evolveSlot, evolveReady, isEvolved, shownAwake, glutOf, glutMax, glutFull, skillOr, skillOrTaken, unitFor, withCharacter,
     footprint, blockOf, spotFree, buildingRecords, recordOf, recordWorld, buildingEffects,
     setBuildings, BUILDINGS: () => BUILDINGS, buildingInfo, BUILDING_SQUAD, isBuildingSkill, buildingIdOf, buildingsOf, buildingOf, buildingAt, buildingShown, buildingSpotOk,
     canBuyBuilding, buyBuilding, buildingSkills, buildingSkillInfo, bskillOf, bskillCost, canBuyBuildingSkill, buyBuildingSkill, undoBuildingSkill,

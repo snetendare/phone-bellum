@@ -600,8 +600,8 @@ const Render2D = (cv, view, opts = {}) => {
       ctx.strokeRect(c * t + 1.5, r0 * t + 1.5, t - 3, t - 3); ctx.setLineDash([]);
     }
     const r = radius(u);
-    // an awakened squad (the opponent's from this round stays hidden): a gold ring round each body, the Leafblade suit's blades
-    const awake = sq.awaken > 0 && (side === me || phase !== 'deploy' || Game.seenAwake(m, sq)), mech = awake && Game.unitFor(m, side, sq.unit, sq).mech;
+    // an awakened or evolved squad (the opponent's awakening from this round stays hidden): a gold ring round each body, the Leafblade suit's blades
+    const awake = Game.shownAwake(m, sq, side === me || phase !== 'deploy'), mech = awake && Game.unitFor(m, side, sq.unit, sq).mech;
     for (const b of bodies) {
       Shapes.body(ctx, u.shape, PX(b.x), PY(b.y), r, upOf(side), u.color, col, 0.95);
       if (mech) bladeMark(PX(b.x), PY(b.y), r, 0);

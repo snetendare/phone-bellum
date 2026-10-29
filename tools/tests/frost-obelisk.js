@@ -1,6 +1,6 @@
 // Headless check of the Frost Wizard (Frost stacks, Deepfreeze, Multibeam, Glacial gaze, Snow storm) and the Obelisk
 // (Glut: eating, the per-round cap, the most stacks, kept between rounds, Gluttony, Hunger's haste, Crushing maw, Eye of
-// the Obelisk only at full Glut). Run from the repo root: node tools/tests/frost-obelisk.js
+// the Obelisk evolving by itself at full Glut, Enzo's too). Run from the repo root: node tools/tests/frost-obelisk.js
 const assert = require('assert');
 const E = require('../../src/engine.js');
 const Game = require('../../src/game.js');
@@ -28,7 +28,7 @@ const near = (a, b, eps = 1e-6) => Math.abs(a - b) < eps;
   assert.ok(o.cost === 3 && o.bodies === 1 && o.range === 3 && o.glut && o.glut.max === 15 && o.glut.cap === 3, 'Obelisk: melee, Glut up to 15, 3 a round');
   assert.deepStrictEqual(o.skillOr, [[1, 2]]);
   assert.strictEqual(o.lifesteal, 20, 'it heals for 20% of the damage it deals');
-  const eye = skill(o.skills[3]); assert.ok(eye.flat && !eye.master && eye.needs === 'glutMax', 'Eye of the Obelisk: an Awaken skill that needs full Glut');
+  const eye = skill(o.skills[3]); assert.ok(eye.flat && !eye.master && eye.evolve && eye.needs === 'glutMax', 'Eye of the Obelisk: an Evolve skill at full Glut');
   for (const n of ['Frost Wizard', 'Obelisk']) assert.ok(demo.units.some(u => u.name === n), n + ' is in the counter table');
 }
 // Frost: a stack on the first hit, another every 2.5 s of beam, up to 3 (20/30/40% slower); melts 2 s after
@@ -125,26 +125,36 @@ const near = (a, b, eps = 1e-6) => Math.abs(a - b) < eps;
   assert.strictEqual(withSkills('Obelisk', ['crushingMaw']).splash, 3);
   const eye = withSkills('Obelisk', ['obeliskEye']); assert.ok(eye.range === 18 && eye.projSpeed > 0 && eye.eye);
 }
-// the match: Glut is kept on the squad, is in its stats, and the Eye can only be bought at full Glut
+// the match: Glut is kept on the squad, is in its stats, and the Eye comes by itself, free, once the Glut is full
 {
   const units = demo.units.map(u => ({ ...u, skillDefs: E.SLOTS.map(k => (u.skills || [])[k] ? skill(u.skills[k]) : null) }));
   const m = Game.createMatch(units, demo.matrix, 11, 'standard');
   const ui = m.units.findIndex(u => u.name === 'Obelisk');
   m.gold[0] = 5000; Game.unlock(m, 0, ui);
   const sq = Game.place(m, 0, ui, 5, Game.zoneRows(0)[0]); assert.ok(sq, 'an Obelisk on the board');
-  const base = Game.unitFor(m, 0, ui, sq);
-  assert.strictEqual(Game.awakenBlock(m, 0, sq), 'glut', 'no Eye without full Glut');
+  const base = Game.unitFor(m, 0, ui, sq), k = Game.evolveSlot(m, ui);
+  assert.ok(k >= 0 && Game.isEvolve(m, ui, k) && !Game.isAwaken(m, ui, k) && Game.awakenSlot(m, ui) < 0, 'the Eye is an Evolve skill, not an Awaken one');
+  assert.ok(!Game.canBuySkill(m, 0, ui, k) && Game.awakenBlock(m, 0, sq) === 'none', 'nothing to buy');
+  assert.ok(!Game.isEvolved(sq) && Game.unitFor(m, 0, ui, sq).range !== 18, 'no Eye without full Glut');
   // a fight it ate 2 in: the squad keeps them, and they are in its stats next time
   const sum = Game.resolve(m, { winner: 0, timeout: false, time: 10, frac: [1, 0], squads: { ['0:' + sq.id]: { side: 0, squad: sq.id, total: 1, alive: 1, xp: 0, dealt: 0, glut: 2 } }, charm: [null, null], converted: [0, 0], buildings: [] });
   assert.strictEqual(Game.glutOf(sq), 2); assert.ok(sum.glut[0].length === 1 && sum.glut[0][0].gained === 2);
   assert.ok(near(Game.unitFor(m, 0, ui, sq).hp, base.hp * 1.12), 'its Glut is in its stats');
   const bodies = Game.bodiesFor(m, 0).filter(b => b.squad === sq.id);
   assert.ok(bodies.length === 1 && bodies[0].glutN === 2, 'it starts the fight with its Glut');
-  sq.glut = 14; Game.resolve(m, { winner: 0, timeout: false, time: 10, frac: [1, 0], squads: { ['0:' + sq.id]: { side: 0, squad: sq.id, total: 1, alive: 1, xp: 0, dealt: 0, glut: 2 } }, charm: [null, null], converted: [0, 0], buildings: [] });
+  assert.ok(!Game.isEvolved(sq) && !sum.evolved[0].length, 'not full yet: not evolved');
+  sq.glut = 14; const g0 = m.gold[0];
+  const sum2 = Game.resolve(m, { winner: 0, timeout: false, time: 10, frac: [1, 0], squads: { ['0:' + sq.id]: { side: 0, squad: sq.id, total: 1, alive: 1, xp: 0, dealt: 0, glut: 2 } }, charm: [null, null], converted: [0, 0], buildings: [] });
   assert.strictEqual(Game.glutOf(sq), 15, 'never past 15');
-  m.gold[0] = 5000;
-  assert.strictEqual(Game.awakenBlock(m, 0, sq), '', 'full Glut: it can be awakened');
-  assert.ok(Game.awaken(m, 0, sq.id) && Game.unitFor(m, 0, ui, sq).range === 18, 'Eye of the Obelisk: 18 m');
+  assert.ok(Game.isEvolved(sq) && sum2.evolved[0].length === 1 && sum2.evolved[0][0].id === sq.id, 'full Glut: it evolves by itself');
+  assert.ok(Game.unitFor(m, 0, ui, sq).range === 18 && Game.unitFor(m, 0, ui, sq).eye, 'Eye of the Obelisk: 18 m');
+  assert.ok(m.gold[0] >= g0 && Game.wokeUnit(m, 0) == null, 'free, and not the match\'s awakened unit type');
+  assert.ok(Game.shownAwake(m, sq, false), 'the opponent sees it');
+  // Enzo's Obelisk evolves too
+  const m2 = Game.createMatch(units, demo.matrix, 12, 'standard'); m2.chars[0] = 'enzo'; m2.gold[0] = 5000; Game.unlock(m2, 0, ui);
+  const sq2 = Game.place(m2, 0, ui, 5, Game.zoneRows(0)[0]); sq2.glut = 14;
+  Game.resolve(m2, { winner: 0, timeout: false, time: 10, frac: [1, 0], squads: { ['0:' + sq2.id]: { side: 0, squad: sq2.id, total: 1, alive: 1, xp: 0, dealt: 0, glut: 2 } }, charm: [null, null], converted: [0, 0], buildings: [] });
+  assert.ok(Game.isEvolved(sq2) && Game.unitFor(m2, 0, ui, sq2).range === 18, 'Enzo: evolves too');
   // a real fight in a match plays through
   Game.aiDeploy(m, 1); const fight = Game.startBattle(m); while (fight.step()); Game.resolve(m, fight.result());
 }
