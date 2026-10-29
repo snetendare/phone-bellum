@@ -8185,7 +8185,7 @@ const Render2D = (cv, view, opts = {}) => {
   const phaseSongs = new Set([...PLAYLISTS.deploy, ...PLAYLISTS.battle, ...Object.values(MUSIC_COMBOS).flatMap(o => Object.values(o).flat())]);
   PLAYLISTS.menu = Object.keys(SONGS).filter(id => !phaseSongs.has(id));
   const FADE_IN = 1, FADE_OUT = 1; // seconds
-  const DEFAULT_VOL = 60;
+  const DEFAULT_VOL = 30;
   // song: the one menu song the player picked ('' = the menu playlist); solo: on an iPhone, take over the phone's sound (see setAudioSession)
   let snd = { vol: DEFAULT_VOL, muted: false, song: '', solo: false };
   try {
