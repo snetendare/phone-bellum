@@ -8193,10 +8193,12 @@ const Render2D = (cv, view, opts = {}) => {
     menu: 'menu-click', nope: 'nope', pressBoard: 'press-board', button: 'button', pressCard: 'press-card', sell: 'sell',
     undo: 'undo', skill: 'skill',
   };
+  const SFX_GAIN = { button: 0.85, menu: 0.85, battle: 0.85 }; // these a little quieter than the rest
   const SFX_VARY = new Set(['button', 'menu', 'pressBoard', 'pressCard', 'release', 'drop']); // frequent ones: a slightly different pitch each time
-  const DEFAULT_SFX_VOL = 70;
+  const DEFAULT_SFX_VOL = 45;
   if (snd.sfx === undefined) { snd.sfx = true; snd.sfxVol = DEFAULT_SFX_VOL; }
-  try { const p = JSON.parse(localStorage.getItem(SOUND_STORE) || 'null'); if (p && isFinite(p.sfxVol)) { snd.sfx = p.sfx !== false; snd.sfxVol = Math.max(0, Math.min(100, +p.sfxVol)); } } catch (e) {}
+  try { const p = JSON.parse(localStorage.getItem(SOUND_STORE) || 'null'); if (p && isFinite(p.sfxVol)) { snd.sfx = p.sfx !== false; snd.sfxVol = Math.max(0, Math.min(100, +p.sfxVol)); if (+p.sfxVol === 70 && !p.sfx2) snd.sfxVol = DEFAULT_SFX_VOL; } } catch (e) {} // 70 was the first default
+  snd.sfx2 = true;
   const sfxBuf = {};
   let sfxLoading = false, sfxAt = -1e9, inputAt = -1e9;
   function loadSfx() {
@@ -8217,7 +8219,7 @@ const Render2D = (cv, view, opts = {}) => {
       const src = actx.createBufferSource(), g = actx.createGain();
       src.buffer = sfxBuf[k];
       if (SFX_VARY.has(k)) src.playbackRate.value = 0.96 + Math.random() * 0.08;
-      g.gain.value = snd.sfxVol / 100;
+      g.gain.value = snd.sfxVol / 100 * (SFX_GAIN[k] || 1);
       src.connect(g).connect(actx.destination); src.start();
     } catch (e) {}
   }
@@ -9097,7 +9099,9 @@ const Render2D = (cv, view, opts = {}) => {
     if (!cdrag) {
       if (cpress.held || cpress.scroll) return;
       if (cpress.pan) { const sh = $('shop'); if (sh) sh.scrollLeft = cpress.pan - dx; return; }
-      if (Math.abs(dx) > 8 && Math.abs(dx) > 1.5 * Math.abs(dy)) {
+      // a sideways swipe scrolls the tray, except on a PC: the board is beside the panel there, so a card dragged
+      // sideways is on its way to the board (the wheel scrolls the tray)
+      if (!pcLayout() && Math.abs(dx) > 8 && Math.abs(dx) > 1.5 * Math.abs(dy)) {
         clearTimeout(cpress.t);
         if (e.pointerType === 'mouse') { const sh = $('shop'); cpress.pan = sh ? sh.scrollLeft + dx || 0.01 : 0.01; cardDone = performance.now() + 1e9; return; } // a mouse drags the tray sideways
         cpress.scroll = true; return;
@@ -11191,7 +11195,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   // It falls back to the 2D board when it can't start (no WebGL), when the phone drops the WebGL context, and when
   // fights run under 20 fps at low quality (slower fights step the quality down first), with one line on the board.
   const THREE_URL = './vendor/three.module.min.js'; // the artifact build points this at jsDelivr
-  const V3D = '2bb80dff87'; // the 3D code's version (src/build.js puts a hash of it here)
+  const V3D = '1a7442f6f9'; // the 3D code's version (src/build.js puts a hash of it here)
   const B3D_STORE = 'phone-bellum-board';
   const force2d = /[?&]board=2d\b/.test(location.search);
   const force3d = !force2d && (/[?&]board=3d\b/.test(location.search) || window.PB_FORCE3D === true);

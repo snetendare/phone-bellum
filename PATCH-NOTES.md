@@ -4,6 +4,23 @@ Newest first. Each entry says what changed for players; technical details live i
 
 ---
 
+## 29 October 2026 (evening) – Fixes and tuning
+
+### Fixes
+
+- **PC: dragging units from the shop works again.** On a PC the board sits to the left of the panel, so dragging a card toward the board starts sideways, and the game took that as scrolling the shop. Sideways drags now pick up the card on a PC (the mouse wheel still scrolls the shop).
+
+### Camera
+
+- **PC: the tilted view (the second camera angle) sits a little further out**, so more of the enemy side is in view.
+
+### Sound
+
+- Sound effects now start at **45% volume** for new players (was 70%). If you had the old default, it moves to 45% too.
+- The **UI click** (menus and in-match buttons) and the **Battle start** sound are a little quieter than the other effects.
+
+---
+
 ## 29 October 2026 – Sound effects
 
 The game now has sound effects, made by Snetänd.
@@ -32,7 +49,7 @@ Only your own actions make sounds; the AI and your opponent stay quiet. The most
 ### Settings
 
 - The menu's Music button is now called Sound.
-- The Sound sheet (and the in-match Settings) has Sound effects On/Off and an Effects volume slider, separate from the music. Your choice is saved on the device.
+- The Sound sheet (and the in-match Settings) has Sound effects On/Off and an Effects volume slider (45% to start), separate from the music. Your choice is saved on the device.
 
 ---
 
