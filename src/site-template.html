@@ -242,8 +242,9 @@ html.pc .app:has(> .panel:empty) { grid-template-columns: auto; }
 html.pc .hud, html.pc .net, html.pc #wrap { grid-column: 1; }
 html.pc .panel { grid-column: 2; grid-row: 1 / span 3; min-width: 0; max-height: calc(100svh - 40px); overflow-y: auto; }
 html.pc #wrap { width: min(calc(100vw - 32px - 460px), calc((100svh - 110px) * var(--board-ar, 0.75))); min-width: 360px; }
-html.pc.pcfight .app { grid-template-columns: minmax(0, 1fr) 320px; justify-content: stretch; }
-html.pc.pcfight #wrap:has(> .board3d) { width: 100%; aspect-ratio: auto; height: calc(100svh - 96px); } /* the 3D camera fits the board to any shape */
+/* PC with the 3D board, in a match: the board takes the whole window beside a narrow side panel (deploy and fights alike) */
+html.pc.pcwide .app { grid-template-columns: minmax(0, 1fr) 340px; justify-content: stretch; }
+html.pc.pcwide #wrap:has(> .board3d) { width: 100%; aspect-ratio: auto; height: calc(100svh - 96px); } /* the 3D camera fits the board to any shape */
 html.pc .shop { display: grid; grid-template-columns: repeat(auto-fill, minmax(124px, 1fr)); overflow-x: visible; }
 html.pc .sheet { max-width: 640px; }
 html.pc .shop2 { flex-wrap: wrap; overflow-x: visible; row-gap: 10px; } /* a PC's side panel has the room: every tier group in sight, no sideways scrolling */
@@ -1058,8 +1059,10 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
       taskEl.disabled = !dockTask.x; taskEl.querySelector('#task-x').hidden = taskEl.querySelector('#task-cancel').hidden = !dockTask.x;
       taskEl.setAttribute('aria-label', dockTask.x ? `${taskEl.querySelector('#task-text').textContent} Tap to cancel.` : taskEl.querySelector('#task-text').textContent);
     }
-    // a PC watching a fight on the 3D board: the side panel narrows and the board takes the rest of the window
-    const fight = root.classList.contains('pc') && !!board3d && !!m && ['battle', 'result'].includes(phase), wasFight = root.classList.contains('pcfight');
+    // a PC in a match on the 3D board: the board takes the rest of the window beside the side panel, deploy and fights alike
+    const wide = root.classList.contains('pc') && !!board3d && !!m && ['deploy', 'battle', 'result', 'end'].includes(phase), wasWide = root.classList.contains('pcwide');
+    root.classList.toggle('pcwide', wide);
+    const fight = wide && ['battle', 'result'].includes(phase), wasFight = root.classList.contains('pcfight');
     root.classList.toggle('pcfight', fight);
     // and, from the strategic view, it goes to the tilted one for the fight (the wide board shows bigger that way), back after
     if (fight !== wasFight && board3d) {
@@ -1075,7 +1078,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
       h = Math.max(240, Math.floor(innerHeight - top - dockH - 8));
       root.style.setProperty('--board-h', h + 'px');
     }
-    if (on !== was || h !== boardH || fight !== wasFight) { boardH = h; size(); render(); } // the board changed size: draw it again (3D too)
+    if (on !== was || h !== boardH || fight !== wasFight || wide !== wasWide) { boardH = h; size(); render(); } // the board changed size: draw it again (3D too)
     boardMarks();
   }
   // the X on the task line: stop placing that unit (or the Move, the Charisma, the elf tower)
@@ -3708,7 +3711,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
         board3d = b;
         cv.style.display = 'none';
         startMeter(el);
-        size(); wake3d();
+        size(); dock(); wake3d();
       } catch (e) {
         if (b) try { b.dispose(); } catch (e2) {}
         board3d = null; el.remove(); cv.style.display = ''; size(); render();
@@ -3728,7 +3731,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     const el = $('wrap').querySelector('.board3d');
     if (el) el.remove();
     cv.style.display = '';
-    size(); render();
+    size(); render(); dock();
   }
   // the Board setting (on: true for 3D); saved on this device
   function set3d(on) {
