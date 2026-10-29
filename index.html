@@ -6593,7 +6593,8 @@ const Art = (() => {
 // plain leaves out the zones, grid and tile markers (for the 3D ground-level view).
 // A 3D renderer can take its place by offering the same calls.
 // opts (the 3D board's floor): ground(ctx, W, H, tilePx) paints the land of a map that has no painted ground of its own
-// and returns true; grid and zoneA: the grid lines' colour and how strongly the zones are tinted on it.
+// and returns true; grid and zoneA: the grid lines' colour and how strongly the zones are tinted on it; floorAs: map id ->
+// the map whose painted ground it gets.
 const Render2D = (cv, view, opts = {}) => {
   let ctx = cv.getContext('2d'); // swapped for a moment while drawing map thumbnails (thumb)
   let m = null, me = 0, phase = 'start', units = [], mode = 'ai', bt = null, battlePre = null, fx = [], battleCam = null;
@@ -6989,8 +6990,8 @@ const Render2D = (cv, view, opts = {}) => {
     const Z = Game.ZONE, mine = (Game.ROWS - Z) * t;
     const v = phase === 'battle' && battlePre ? battlePre : m; // during a fight: the board as it was when the fight began, not the next round's
     const mp = Game.mapOf(v);
-    const own = mp && BACKGROUNDS[mp.id];
-    if (own) ctx.drawImage(mapBackground(mp.id), 0, 0, W, H);
+    const bgId = mp && ((opts.floorAs && opts.floorAs[mp.id]) || mp.id), own = bgId && BACKGROUNDS[bgId];
+    if (own) ctx.drawImage(mapBackground(bgId), 0, 0, W, H);
     else if (!(opts.ground && opts.ground(ctx, W, H, t))) { ctx.fillStyle = css('--board'); ctx.fillRect(0, 0, W, H); }
     const lit = !own && !!opts.ground; // the 3D board's meadow: darker grid lines, stronger zone tints
     if (mp && mp.terrain) ctx.drawImage(terrainLayer(v), 0, 0, W, H);
@@ -11053,7 +11054,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   // It falls back to the 2D board when it can't start (no WebGL), when the phone drops the WebGL context, and when
   // fights run under 20 fps at low quality (slower fights step the quality down first), with one line on the board.
   const THREE_URL = './vendor/three.module.min.js'; // the artifact build points this at jsDelivr
-  const V3D = 'c1e3241fd8'; // the 3D code's version (src/build.js puts a hash of it here)
+  const V3D = '41f8b2b028'; // the 3D code's version (src/build.js puts a hash of it here)
   const B3D_STORE = 'phone-bellum-board';
   const force2d = /[?&]board=2d\b/.test(location.search);
   const force3d = !force2d && (/[?&]board=3d\b/.test(location.search) || window.PB_FORCE3D === true);

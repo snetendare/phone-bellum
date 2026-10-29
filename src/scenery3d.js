@@ -18,11 +18,12 @@ const Scenery3D = (THREE, scene, opts = {}) => {
   // trees: which tree models; tint: a colour every model is multiplied by (1 = as painted); grow: how much of the
   // space round the board gets something (0 to 1); dress: small plants on the board itself.
   const BIOMES = {
-    meadow: { sky: '#AFC2C0', land: '#778C5C', tint: [1, 1, 1], trees: ['CommonTree_1', 'CommonTree_2', 'CommonTree_3', 'CommonTree_4', 'CommonTree_5', 'Pine_1', 'Pine_3'], grow: 1.2, dress: 1 },
+    meadow: { sky: '#A3B6B4', land: '#64764D', tint: [1, 1, 1], trees: ['CommonTree_1', 'CommonTree_2', 'CommonTree_3', 'CommonTree_4', 'CommonTree_5', 'Pine_1', 'Pine_3'], grow: 1.2, dress: 1 },
     forest: { sky: '#1D2B22', land: '#16271B', tint: [0.55, 0.68, 0.58], trees: ['CommonTree_1', 'CommonTree_2', 'CommonTree_4', 'Pine_1', 'Pine_2', 'Pine_3', 'TwistedTree_1'], grow: 1.25, dress: 0 },
     ice: { sky: '#26323A', land: '#1C2830', tint: [0.62, 0.72, 0.82], low: 'rocks', trees: ['Pine_1', 'Pine_2', 'Pine_3', 'Pine_5', 'DeadTree_1', 'DeadTree_3'], grow: 0.8, dress: 0 },
     cavern: { sky: '#120E17', land: '#17121D', tint: [0.42, 0.36, 0.5], low: 'rocks', trees: [], grow: 0.7, dress: 0 },
   };
+  BIOMES.testgrid = BIOMES.ice; // the Test Grid has Frozen Peak's look (its floor too: Render3D's floorAs)
   const biomeOf = (id) => BIOMES[id] || BIOMES.meadow;
   const biome = (v) => { const src = v && (v.battlePre || v.m), mp = src && Game.mapOf(src); return biomeOf(mp && mp.id); };
 
@@ -287,18 +288,18 @@ Scenery3D.meadow = (() => {
       oc.width = Math.round(W * dpr); oc.height = Math.round(H * dpr);
       const c = oc.getContext('2d'); c.scale(dpr, dpr);
       let sd = 99991; const rr = () => { sd = (sd * 16807) % 2147483647; return (sd - 1) / 2147483646; };
-      c.fillStyle = '#71875A'; c.fillRect(0, 0, W, H);
+      c.fillStyle = '#5F714C'; c.fillRect(0, 0, W, H);
       const blob = (x, y, rx, ry, col, a) => { const g = c.createRadialGradient(x, y, 0, x, y, Math.max(rx, ry)); g.addColorStop(0, col); g.addColorStop(1, col + '00');
         c.globalAlpha = a; c.fillStyle = g; c.beginPath(); c.ellipse(x, y, rx, ry, rr() * 3, 0, Math.PI * 2); c.fill(); };
-      for (let k = 0; k < 70; k++) blob(rr() * W, rr() * H, t * (0.8 + rr() * 2.2), t * (0.6 + rr() * 1.6), ['#7E9563', '#657D51', '#869A66', '#5F7650'][k % 4], 0.55);
+      for (let k = 0; k < 70; k++) blob(rr() * W, rr() * H, t * (0.8 + rr() * 2.2), t * (0.6 + rr() * 1.6), ['#6A7D53', '#556944', '#718156', '#506343'][k % 4], 0.55);
       // no man's land: trampled, earthy
       const y0 = Game.ZONE * t, y1 = (Game.ROWS - Game.ZONE) * t;
-      for (let k = 0; k < 55; k++) blob(rr() * W, y0 + rr() * (y1 - y0), t * (0.6 + rr() * 1.5), t * (0.4 + rr() * 0.8), ['#8E8160', '#7F7556', '#97896A'][k % 3], 0.5);
+      for (let k = 0; k < 55; k++) blob(rr() * W, y0 + rr() * (y1 - y0), t * (0.6 + rr() * 1.5), t * (0.4 + rr() * 0.8), ['#776C51', '#6B6248', '#7F7359'][k % 3], 0.5);
       // painted grass strokes
       c.lineCap = 'round';
       for (let k = 0; k < W * H / (t * t) * 14; k++) {
         const x = rr() * W, y = rr() * H, l = t * (0.06 + rr() * 0.1);
-        c.globalAlpha = 0.25 + rr() * 0.25; c.strokeStyle = rr() < 0.5 ? '#8DA36E' : '#566C47'; c.lineWidth = 0.8 + rr() * 0.8;
+        c.globalAlpha = 0.25 + rr() * 0.25; c.strokeStyle = rr() < 0.5 ? '#76895C' : '#485B3C'; c.lineWidth = 0.8 + rr() * 0.8;
         c.beginPath(); c.moveTo(x, y); c.lineTo(x + (rr() - 0.5) * l * 0.6, y - l); c.stroke();
       }
       c.globalAlpha = 1;
