@@ -700,15 +700,20 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
     let track = Math.floor(Math.random() * tracks.length), gain = null, stopT = 0;
     const el = new Audio(SONGS[tracks[track]].file);
     el.preload = 'none';
-    const pl = { el, playing: false };
-    el.addEventListener('ended', () => {
-      track = pickNext(track); el.src = SONGS[tracks[track]].file;
-      if (pl.playing) el.play().catch(() => {});
-    });
+    const pl = { el, playing: false, onChange: null }, past = []; // past: the songs played before, for Back
+    const load = (t) => { track = t; el.src = SONGS[tracks[track]].file; if (pl.playing) el.play().catch(() => {}); if (pl.onChange) pl.onChange(); };
+    el.addEventListener('ended', () => pl.next());
+    pl.song = () => tracks[track];
+    pl.next = () => { past.push(tracks[track]); if (past.length > 20) past.shift(); load(pickNext(track)); };
+    // Back: to the start of this song, or (in its first 3 seconds) to the one before
+    pl.back = () => {
+      const prev = past.length && tracks.indexOf(past[past.length - 1]);
+      if (el.currentTime > 3 || !past.length || prev < 0) { past.length = 0; try { el.currentTime = 0; } catch (e) {} return; }
+      past.pop(); load(prev);
+    };
     pl.tracks = (list) => { // switch to another list of songs, from the start of a random one
       if (list.join() === tracks.join()) return;
-      tracks = list; track = Math.floor(Math.random() * tracks.length); el.src = SONGS[tracks[track]].file;
-      if (pl.playing) el.play().catch(() => {});
+      tracks = list; past.length = 0; load(Math.floor(Math.random() * tracks.length));
     };
     pl.ramp = (v, secs) => {
       if (!gain) { el.volume = v; return; }
@@ -738,11 +743,12 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
     return pl;
   }
   const menuSongs = () => snd.song ? [snd.song] : PLAYLISTS.menu;
+  let menuPaused = false; // the menu player's Pause (this visit only; the sheet's Music Off is the lasting switch)
   const music = { menu: playlist(menuSongs()), deploy: playlist(PLAYLISTS.deploy), battle: playlist(PLAYLISTS.battle) };
   for (const id in MUSIC_COMBOS) for (const k in MUSIC_COMBOS[id]) music[k + '-' + id] = playlist(MUSIC_COMBOS[id][k]);
   function syncMusic() {
     const on = musicUnlocked && musicLevel() > 0;
-    music.menu.set(on && (phase === 'start' || phase === 'lobby' || phase === 'draft'));
+    music.menu.set(on && !menuPaused && (phase === 'start' || phase === 'lobby' || phase === 'draft'));
     const combo = m && m.map ? LOOK_MUSIC[Game.lookOf(m)] : null, own = (combo && MUSIC_COMBOS[combo]) || {};
     const pick = (k) => own[k] ? k + '-' + combo : k; // this look's player for that phase, or the standard one
     const cur = phase === 'deploy' ? pick('deploy') : (phase === 'battle' || phase === 'result') ? pick('battle') : '';
@@ -778,6 +784,44 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
     syncMusic();
     if (on) Object.values(music).forEach(pl => pl.wake());
   }
+  // ---------- the menu's music player: Back, Play / Pause, Next and the song playing. Icons from Kenney's Mobile
+  // Controls (CC0): play and pause as drawn, Back and Next made of its play triangle and pause bar.
+  const ICON_PLAY = 'M6 43.35 L6 4.55 Q6 2.85 7 1.55 7.9 0.25 9.4 0.05 10.8 -0.2 12.1 0.65 L40.2 20.05 Q41.3 20.85 41.8 22.45 42.2 23.95 41.8 25.55 41.3 27.05 40.2 27.95 L12.1 47.35 Q10.8 48.15 9.4 47.95 7.9 47.55 7 46.35 6 45.05 6 43.35';
+  const ICON_PAUSE = 'M4 0 L16 0 Q20 0 20 4 L20 44 Q20 48 16 48 L4 48 Q0 48 0 44 L0 4 Q0 0 4 0 M44 0 Q48 0 48 4 L48 44 Q48 48 44 48 L32 48 Q28 48 28 44 L28 4 Q28 0 32 0 L44 0';
+  const icon = (inner) => `<svg viewBox="0 0 48 48" width="16" height="16" aria-hidden="true" fill="currentColor">${inner}</svg>`;
+  const ICONS = {
+    play: icon(`<path d="${ICON_PLAY}"/>`), pause: icon(`<path d="${ICON_PAUSE}"/>`),
+    next: icon(`<g transform="translate(0 6) scale(0.75)"><path d="${ICON_PLAY}"/></g><rect x="34" y="6" width="9" height="36" rx="3"/>`),
+    back: icon(`<g transform="translate(48 0) scale(-1 1)"><g transform="translate(0 6) scale(0.75)"><path d="${ICON_PLAY}"/></g><rect x="34" y="6" width="9" height="36" rx="3"/></g>`),
+  };
+  const menuPlaying = () => musicOn() && !menuPaused;
+  const playerHtml = () => `<div class="mplayer" role="group" aria-label="Music player">
+      <span class="mp-label">Now playing</span>
+      <span id="mp-title">${esc(songName(music.menu.song()))}</span>
+      <span class="mp-row">
+        <button class="mp-btn" id="mp-back" aria-label="Back">${ICONS.back}</button>
+        <button class="mp-btn mp-main" id="mp-play" aria-label="${menuPlaying() ? 'Pause' : 'Play'}">${menuPlaying() ? ICONS.pause : ICONS.play}</button>
+        <button class="mp-btn" id="mp-next" aria-label="Next">${ICONS.next}</button>
+      </span>
+    </div>`;
+  function showPlayer() {
+    const t = $('mp-title'), pb = $('mp-play');
+    if (t) t.textContent = songName(music.menu.song());
+    if (pb) { pb.innerHTML = menuPlaying() ? ICONS.pause : ICONS.play; pb.setAttribute('aria-label', menuPlaying() ? 'Pause' : 'Play'); }
+  }
+  music.menu.onChange = showPlayer;
+  function wirePlayer() {
+    if (!$('mp-play')) return;
+    $('mp-play').addEventListener('click', () => {
+      if (menuPlaying()) menuPaused = true;
+      else { menuPaused = false; if (!musicOn()) setMusic(true); else { wakeAudio(true); music.menu.wake(); } }
+      syncMusic(); showPlayer();
+    });
+    // a picked menu song plays on its own: Next goes back to all the menu songs
+    $('mp-next').addEventListener('click', () => { if (snd.song) { snd.song = ''; saveSound(); music.menu.tracks(menuSongs()); } else music.menu.next(); showPlayer(); });
+    $('mp-back').addEventListener('click', () => { music.menu.back(); showPlayer(); });
+  }
+
   // ---------- sound effects (audio/sfx/, by Snetänd): played through Web Audio from decoded buffers, so they start at
   // once and several can overlap. Game actions make their sound when this screen's player did them by hand (see
   // SFX_ACTS); a tap on any other button makes the plain click (menu click outside a match, UI button in one).
@@ -934,10 +978,10 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
     $('sheet').querySelectorAll('[data-song]').forEach(b => b.addEventListener('click', () => {
       snd.song = b.dataset.song; saveSound();
       $('sheet').querySelectorAll('[data-song]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
-      music.menu.tracks(menuSongs());
+      music.menu.tracks(menuSongs()); showPlayer();
     }));
     $('sheet').querySelectorAll('[data-mute]').forEach(b => b.addEventListener('click', () => {
-      setMusic(b.dataset.mute === '0');
+      setMusic(b.dataset.mute === '0'); if (musicOn()) menuPaused = false; showPlayer();
       $('vol').value = snd.vol; $('vol-n').textContent = snd.vol; showOn();
     }));
     if ($('to-menu')) $('to-menu').addEventListener('click', askForfeit);
@@ -2078,7 +2122,9 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
       <h2>No Mans Land</h2>
       <p class="big">Build an army. Watch it fight. Last one standing wins.</p>
       <span class="btnrow">${newcomer ? '' : '<button class="btn small" id="tutorial">Tutorial</button>'}<button class="btn small" id="how">How to play</button><button class="btn small" id="ency-open">Encyclopedia</button><button class="btn small" id="music-open">Sound</button>${HISTORY_URL ? `<button class="btn small" id="hist-open">Match history</button>` : ''}</span>
+      ${playerHtml()}
     </div>`);
+    wirePlayer();
     $('music-open').addEventListener('click', openSoundSheet);
     $('ency-open').addEventListener('click', () => openEncyclopedia());
     if ($('hist-open')) $('hist-open').addEventListener('click', openHistorySheet);

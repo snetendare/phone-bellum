@@ -24,6 +24,16 @@ Maps keep the music of their own look, so Mushroom Cavern and Frozen Peak sound 
 
 ---
 
+## 29 October 2026 (evening) – Music player on the start screen
+
+- The start screen now has a **music player** under the menu buttons: the song playing, plus **Back**, **Play / Pause** and **Next**.
+  - Back goes to the start of the song, or to the previous song if you press it in the first few seconds.
+  - Next skips to another menu song. If you had picked one song in the Sound sheet, Next goes back to playing all menu songs.
+  - Pause stops the menu music until you press Play. Turning music fully off is still done in the Sound sheet.
+- The player's icons come from Kenney's Mobile Controls pack (CC0).
+
+---
+
 ## 29 October 2026 (evening) – Fixes and tuning
 
 ### Fixes
