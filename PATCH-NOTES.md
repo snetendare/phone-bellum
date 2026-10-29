@@ -6,6 +6,11 @@ Newest first. Each entry says what changed for players; technical details live i
 
 ## 29 October 2026 – Balance
 
+- **Tower falls:** a fallen tower still costs up to 10 health, but a round now costs at most **35 in all**, the tower included. A round that already did 35 damage costs nothing more for the tower; one that did 30 costs 5 more.
+- **Necromancer:** hit 56 → **52**.
+- **Meteor Caller:** splash 6 m → **5.5 m** (the mage tower's meteors too).
+- **Obelisk – Evolve:** Eye of the Obelisk isn't bought any more. An Obelisk **evolves by itself, for free**, after the fight that fills its Glut (15), and keeps the Eye for the rest of the match. Enzo's Obelisks evolve too, and it doesn't use up your one awakened unit type.
+- **Keep:** if you bought the +1 deployment before picking the Keep, you get the 50 gold back (Muster gives it for free).
 - **Sniper tower:** can't hit anything within **1 tile** (6 m) of it.
 - **Ember Imps:** health 110 → **90**. Ember Mortar: −0.2 attack speed (now −0.1 attacks/s instead of +0.1).
 - **Wisps:** health 80 → **65**, attack speed 0.8 → **0.7**/s. Keep Guards (Wisps) follow.
