@@ -484,7 +484,26 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
     'Spiders': 'Fast biters that split on death.',
     'Truespear': 'Long-range spears that cut % health.',
     'Just a horse': 'Rams the tower. Can carry a hidden squad.',
+    'Frost Wizard': 'Freezing beam. Slows its target more the longer it holds.',
+    'Obelisk': 'Eats kills to grow. Heals as it hits.',
+    'Rollers': 'Fast rolling brawlers.',
+    'Cog Builder': 'Builds turrets that shoot from afar.',
+    'Mechite Guards': 'Armored shotgun guards. Knock enemies back.',
+    'Drowned Swarm': 'Cheap drowned melee swarm.',
+    'Lure Angler': 'Looks like a Drowned Swarm until it strikes.',
+    'Tide Caller': 'Ranged splashing water bolts.',
+    'Kelp Horror': 'Warded brute. Big hits barely hurt it.',
+    'Leviathan': 'Huge sea beast. Splashes everything near it.',
   };
+  // a unit's short text: its own line, else its trait, else one made from its role symbols (never empty)
+  function roleLine(u, i) {
+    if (ROLES[u.name]) return ROLES[u.name];
+    if (u.trait && u.trait.text) return u.trait.text;
+    if (u.text) return u.text;
+    const [is, beats, extra] = (i !== undefined && ROLE_SET[u.name]) || autoRole(u);
+    const t = [IS_TXT[is], beats && BEATS_TXT[beats], extra && EXTRA_TXT[extra]].filter(Boolean).join(', ');
+    return t ? t + '.' : '';
+  }
   // ---------- role symbols: what a unit is, what it beats, one extra trait, and its range ----------
   // [is, beats, extra] for the built-in units. Units from Counter Lab get theirs from their stats (autoRole).
   const ROLE_SET = {
@@ -551,8 +570,8 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
   }
   const roleIcons = (r) => ico(IS_SVG[r.is], 'is') + (r.beats ? ico(BEATS_SVG[r.beats], 'beats') : '') + (r.extra ? ico(EXTRA_SVG[r.extra], 'ex') : '');
   const roleRow = (i) => { const r = roleOf(i); return `<span class="roles" title="${r.text}">${roleIcons(r)}${rangeSvg(r.range)}</span>`; };
-  const DEPLOY_SECONDS = 60;   // deploy countdown each round
-  const FIRST_DEPLOY_SECONDS = 60;   // round 1: package and squads
+  const DEPLOY_SECONDS = 90;   // deploy countdown each round (1:30)
+  const FIRST_DEPLOY_SECONDS = 90;   // round 1: package and squads
   const deployMs = () => (m && m.round === 1 ? FIRST_DEPLOY_SECONDS : DEPLOY_SECONDS) * 1000;
   const NEXT_SECONDS = 20;     // results screen moves on by itself after this long
   const PEER_PREFIX = 'phonebellum-v1-';
@@ -867,7 +886,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
   // game actions and their sounds (a function: the sound depends on what was bought)
   const SFX_ACTS = {
     place: 'drop', placeLesser: 'drop', placeBwall: 'drop', buyBuilding: 'drop', buyElfOwn: 'drop',
-    moveSquad: 'release', sell: 'sell',
+    moveSquad: (a, g0) => a[0].gold[a[1]] < g0 ? 'skill' : 'release', sell: 'sell', // the Move ability's gold: the buy sound
     levelUp: 'level', levelAll: 'level', levelBuilding: 'level',
     buySkill: (a) => Game.isMaster(a[0], a[2], a[3]) ? 'evolve' : 'skill',
     awaken: 'evolve', buyTowerSkill: 'skill', buyBuildingSkill: 'skill', unlock: 'skill',
@@ -878,8 +897,9 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
     if (!act || typeof Game[name] !== 'function') continue;
     const fn = Game[name];
     Game[name] = function (...a) {
+      const g0 = a[0] && a[0].gold ? a[0].gold[a[1]] : 0;
       const r = fn.apply(this, a);
-      if (r && a[1] === me && byHand()) sfx(typeof act === 'function' ? act(a) : act);
+      if (r && a[1] === me && byHand()) sfx(typeof act === 'function' ? act(a, g0) : act);
       return r;
     };
   }
@@ -1067,7 +1087,8 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
       <span class="hint" id="pack-note" style="margin-top:-6px">${packNote()}</span>`;
   const wirePackSeg = () => $('panel').querySelectorAll('[data-pack]').forEach(b => b.addEventListener('click', () => {
     unitPack = b.dataset.pack === 'all' ? 'all' : 'standard';
-    try { localStorage.setItem(PACK_STORE, unitPack); } catch (e) {}
+    if (unitPack === 'all') offChars = []; // All units brings every leader into the draw too
+    try { localStorage.setItem(PACK_STORE, unitPack); if (unitPack === 'all') localStorage.setItem('pb-off-chars', '[]'); } catch (e) {}
     $('panel').querySelectorAll('[data-pack]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
     $('pack-note').textContent = packNote();
     const picks = $('panel').querySelector('.picks');
@@ -1686,9 +1707,9 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
     const can = editable();
     $('sheet').innerHTML = `<div class="bar"><h3 id="sheet-h">Unlock a tier ${t} unit</h3><button class="btn small" id="close">Close</button></div>
       <p class="hint" style="margin:0">Unlock once and field it for the rest of the match. The opponent sees it after the next fight.</p>
-      <div style="display:grid;gap:6px">${list.map(i => { const u = units[i], c = Game.unlockCost(m, i, me), d = ROLES[u.name] || '';
+      <div style="display:grid;gap:6px">${list.map(i => { const u = units[i], c = Game.unlockCost(m, i, me), d = roleLine(u, i);
         return `<div class="urow"><span style="color:${u.color};display:grid;place-items:center">${Shapes.svg(u.shape, 28)}</span>
-          <button class="info2" data-uinfo="${i}"><b>${esc(u.name)}</b><span>${esc(d.split('. ')[0].replace(/\.$/, ''))}.</span></button>
+          <button class="info2" data-uinfo="${i}"><b>${esc(u.name)}</b><span>${d ? esc(d.split('. ')[0].replace(/\.$/, '')) + '.' : ''}</span></button>
           <button class="btn small primary" data-unl="${i}" ${can && m.gold[me] >= c ? '' : 'disabled'}>${c ? `Unlock · ${c}` : 'Unlock'}</button></div>`; }).join('')}</div>`;
     $('sheet-back').hidden = false;
     $('close').addEventListener('click', closeSheet);
@@ -1763,7 +1784,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
     render();
   }
   addEventListener('pointermove', (e) => {
-    if (drag && drag.id != null && phase === 'deploy') dropZone({ x: e.clientX, y: e.clientY });
+    if (drag && drag.id != null && !drag.denied && phase === 'deploy') dropZone({ x: e.clientX, y: e.clientY });
     if (!cpress || e.pointerId !== cpress.id) return;
     const dx = e.clientX - cpress.x, dy = e.clientY - cpress.y;
     if (!cdrag) {
@@ -1850,7 +1871,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
       hint = selected !== null
         ? (canBuy(selected) ? `Tap a tile in your zone${Game.flankOpen(m) ? ' or a flank tile in theirs' : ''} to place ${esc(units[selected].name)}.` : left <= 0 ? 'No deployments left this round.' : `Not enough gold for ${esc(units[selected].name)}.`)
         : (fresh ? 'Drag a squad to move it.' : 'Pick a unit, then tap a tile in your zone.');
-      if (left <= 0 && selected === null) hint = Game.canBuyDeploy(m, me) || m.extraDeploys[me] < Game.CONFIG.maxExtraDeploys ? `No deployments left. +1 costs ${Game.deployCost(m, me) ? Game.deployCost(m, me) : 'nothing (Muster)'}.` : 'No deployments left.';
+      if (left <= 0 && selected === null) hint = Game.deployBuyable(m, me) ? `No deployments left. +1 costs ${Game.deployCost(m, me)}.` : 'No deployments left.';
       if (readyN && selected === null) hint = `${readyN} squad${readyN === 1 ? '' : 's'} ready to level up.`;
       if (Game.charOf(m, me) === 'zoe' && selected === null && (m.buff && m.buff[me] || []).length) hint += ` Starred tiles: ${(zb => `+${zb.dmg}% damage, +${zb.hp}% health${zb.aps ? `, +${zb.aps}% attack speed` : ''}`)(Game.zoeBuff(m, me))}.`;
       if (Game.hailRound(m) && selected === null && !fresh) hint = `Hail this round: ${Game.ICE.hailDps} damage a second on hail tiles. ${MORE('map-more')}`;
@@ -1941,7 +1962,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
       <div class="trow">
         <span class="g2 num">${g}<small>gold</small></span>
         <span class="pips" aria-label="${Math.max(0, left)} of ${allowed} deployments left">${pips}</span>
-        ${Game.CONFIG.deployCap && m.extraDeploys[me] < Game.CONFIG.maxExtraDeploys ? `<button class="chip2" id="buy-deploy" ${can && Game.canBuyDeploy(m, me) ? '' : 'disabled'} aria-label="One more deployment for ${Game.deployCost(m, me)} gold">+1 <span class="num">${Game.deployCost(m, me)}</span></button>` : ''}
+        ${Game.deployBuyable(m, me) ? `<button class="chip2" id="buy-deploy" ${can && Game.canBuyDeploy(m, me) ? '' : 'disabled'} aria-label="One more deployment for ${Game.deployCost(m, me)} gold">+1 <span class="num">${Game.deployCost(m, me)}</span></button>` : ''}
         <span class="sp"></span>
         <span class="timer" id="timer">${deadline ? fmtClock(deadline - now()) : ''}</span>
         <button class="cog help${news && helpSeen !== m.round ? ' new' : ''}" id="help-btn" aria-label="${news && helpSeen !== m.round ? 'Help, news this round' : 'Help'}">?</button>
@@ -2234,7 +2255,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
       const i = view.unit, u = units[i];
       head = `<span style="color:${u.color}">${Shapes.svg(u.shape, 18)}</span> ${esc(u.name)}`;
       const armor = u.defense === 'armor' && u.defVal > 0 ? u.defVal : 0;
-      body = back('units') + `<p class="role" style="margin:0">${esc(ROLES[u.name] || '')} Tier ${tierOf(i)}, ${Game.unitCostOf(u)} gold a squad.</p>
+      body = back('units') + `<p class="role" style="margin:0">${esc(roleLine(u, i))} Tier ${tierOf(i)}, ${Game.unitCostOf(u)} gold a squad.</p>
         <div class="stats">${stat('Bodies', u.bodies)}${stat('Health', r2(u.hp))}${stat('Hit', r2(u.hit))}${stat('Attacks/s', r2(u.aps))}${stat('Range', r2(u.range) + ' m')}${stat('Speed', r2(u.speed) + ' m/s')}${u.splash ? stat('Splash', r2(u.splash) + ' m') : ''}${armor ? stat('Armor', armor) : ''}</div>
         ${(u.skillDefs || []).filter(Boolean).length ? `<h4 style="margin:0;font-size:12px;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted)">Skills</h4>` : ''}
         ${(u.skillDefs || []).map(d => d ? row(d.name, esc(Engine.describeSkill(d)), d.cost != null ? `${d.cost} gold` : '') : '').join('')}`;
@@ -2689,7 +2710,7 @@ RULES
 - The fight is automatic. Every body marches straight ahead in its own column (a squad on a flank tile marches sideways, toward the middle of the board, instead) until an enemy comes within its range + ${Game.SETTINGS.sight} m in any direction (at least ${Game.SETTINGS.minSight} m), then turns toward the nearest enemy and attacks once in range, staying on that enemy until it dies or leaves its range. Within ${Game.SETTINGS.drift} m beyond that it already starts curving toward the nearest enemy. Once no enemy is ahead of it, it turns toward the nearest one. So columns are lanes: a squad fights what stands in or near its lane, a squad in an empty lane far from the enemy walks past and hits the enemy from the side or behind, and long-range units in the back only get attacked once the front is gone. Short-range units in front shield long-range units behind. Spreading out limits splash damage.
 - The round's loser loses health: for each surviving enemy squad, by its tier (${Object.entries(Game.TIER_DMG).map(([t, d]) => `tier ${t}: ${d}`).join(', ')}), scaled by the share of its bodies alive. If time runs out, both sides take damage. A round costs the loser at most ${Game.MAX_ROUND_DMG} health. Health starts at ${Game.START_HP} and the match ends at 0.
 - Gold: both players get ${Game.incomeFor(2)} going into round 2, and ${Game.CONFIG.incomeStep} more every round after that (next round: +${Game.incomeFor(m.round + 1)}). From round ${Game.LOSER_BONUS_ROUND}, the round's loser gets +${Game.LOSER_BONUS} extra. A player whose tower falls in a fight also loses ${Game.TOWER_FALL_HP} health. At most ${Game.CARRY_CAP} unspent gold carries over; the rest is lost. Breaking a streak of ${Game.SHUTDOWN.from}+ wins in a row pays ${Game.SHUTDOWN.gold}, +${Game.SHUTDOWN.step} for each win past ${Game.SHUTDOWN.from} (current streaks: you ${(m.streak || [0, 0])[1]}, them ${(m.streak || [0, 0])[0]}).
-- This round you may place ${Game.deploysAllowed(m, 1)} new squad(s). You may buy ONE extra deployment per round for ${Game.deployCost(m, 1)} gold.
+- This round you may place ${Game.deploysAllowed(m, 1)} new squad(s). ${Game.deployBuyable(m, 1) ? `You may buy ONE extra deployment per round for ${Game.deployCost(m, 1)} gold.` : 'Your Muster already gives you the extra deployment.'}
 - Squads earn XP by dealing and taking damage. A squad marked READY TO LEVEL UP can be upgraded for its unit's level-up cost: level 2 doubles health and hit, level 3 triples them. Leveling up chaff (many cheap bodies) gives the enemy lots of XP when they die.
 ${Game.needsPack(m, 1) ? `- STARTING PACKAGE (round 1, choose first): add "package": N to your reply. Each one unlocks its two units for free and gives you its squads for free (no gold, no deployment); you place them with "place" like any squad, and any you leave out are placed for you. Your options:
 ${m.packages[1].map((p, k) => `  ${k}: ${p.squads.map(ui => units[ui].name).join(' + ')}${p.char ? ` with character ${Game.charInfo(p.char).name} (${Game.charInfo(p.char).ability})` : ''} (counter-table average of its units: ${p.units.map(ui => `${units[ui].name} ${Math.round(M[ui].reduce((a, b) => a + b, 0) / Math.max(1, units.length - 1) * 100)}`).join(', ')})`).join('\n')}
@@ -3033,7 +3054,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       : step === 'place' ? { text: '', x: false } // the coach says it; the drawer goes down, so the whole zone is in sight
       : open && sel ? { text: step === 'flank' ? `Tap a blinking flank tile to place ${sel}.` : `Tap a tile in your zone to place ${sel}.`, x: true } : null;
     $('panel').innerHTML = step === 'tower' || step === 'zone' || step === 'towerpick' ? '' : `
-      ${r >= 3 ? `<div class="bar"><span class="deploys num">${Math.max(0, left)} of ${Game.deploysAllowed(m, me)} deployments left</span><span class="xbtns" style="display:flex;gap:6px"><button class="btn small" id="buy-deploy" ${editable() && Game.canBuyDeploy(m, me) ? '' : 'disabled'}>+1 deployment · ${Game.deployCost(m, me)}</button>${towerBtn()}</span></div>` : ''}
+      ${r >= 3 ? `<div class="bar"><span class="deploys num">${Math.max(0, left)} of ${Game.deploysAllowed(m, me)} deployments left</span><span class="xbtns" style="display:flex;gap:6px">${Game.deployBuyable(m, me) ? `<button class="btn small" id="buy-deploy" ${editable() && Game.canBuyDeploy(m, me) ? '' : 'disabled'}>+1 deployment · ${Game.deployCost(m, me)}</button>` : ''}${towerBtn()}</span></div>` : ''}
       ${cards.length ? `<div class="shop" id="shop">${cards.map(n => shopCard(unitIx(n), !canBuy(unitIx(n)))).join('')}</div>` : ''}
       <div class="bar"><span class="gold num">${g} gold</span>${step === 'fight' || step === 'free' ? '<button class="btn primary" id="fight">Fight</button>' : ''}</div>`;
     $('panel').querySelectorAll('.ucard').forEach(b => b.addEventListener('click', () => {
@@ -3314,13 +3335,15 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     const sq = Game.squadAt(m, me, t.col, t.row);
     if (!sq) return false;
     sfx('pressBoard');
-    if (sq.round < m.round && !(moveMode || Game.movedId(m, me) === sq.id || Game.freeMover(m, me, sq) || (Game.movedId(m, me) == null && m.gold[me] >= Game.CONFIG.moveCost))) return false;
-    if (!Game.canMove(m, me, sq)) return false;
+    const denied = (sq.round < m.round && !(moveMode || Game.movedId(m, me) === sq.id || Game.freeMover(m, me, sq) || Game.freeOut(m, me, sq) || (Game.movedId(m, me) == null && m.gold[me] >= Game.CONFIG.moveCost)))
+      || !Game.canMove(m, me, sq);
+    if (denied) { if (!editable()) return false; drag = { id: sq.id, from: t, over: t, moved: false, denied: true }; return true; } // a drag of it only says no (a tap still opens it)
     drag = { id: sq.id, from: t, over: t, moved: false };
     return true;
   }
   function boardDrag(t) {
     if (guideDrag && t) { const l = guideDrag.pts[guideDrag.pts.length - 1]; if (t.col !== l.col || t.row !== l.row) { guideDrag.pts.push({ col: t.col, row: t.row }); render(); } return; }
+    if (drag && drag.denied) { if (t && !drag.tried && (t.col !== drag.over.col || t.row !== drag.over.row)) { drag.tried = true; sfx('nope'); } return; } // can't move it (no gold, or already moved one)
     if (drag && t && (t.col !== drag.over.col || t.row !== drag.over.row)) { drag.over = t; drag.moved = true; render(); }
   }
   // the drag ends on tile t (null: the last tile it was over); ended is false when it was cancelled
@@ -3335,6 +3358,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       render(); return; // a press without a drag: the tap that follows picks the squad
     }
     if (!drag) return;
+    if (drag.denied) { const d = drag; drag = null; if (ended && d.tried) dragEndAt = performance.now(); render(); return; }
     if (drag.id != null && drag.toTray) { // UI 2.0: dropped on the tray
       const d = drag; drag = null; dropZone(null); dragEndAt = performance.now();
       const sq = m.armies[me].find(q => q.id === d.id);
@@ -3466,6 +3490,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       const own = Game.squadAt(m, me, t.col, t.row), mv = moving != null && m.armies[me].find(s => s.id === moving);
       if (mv && (!own || Game.boardable(m, me, t.col, t.row, mv.unit)) && Game.moveSquad(m, me, moving, t.col, t.row)) { moveMode = false; moving = null; changed(); return; }
       if (own && own.round < m.round) { moving = moving === own.id ? null : own.id; changed(); return; }
+      if (mv) sfx('nope'); // not a tile it can go to
       return;
     }
     if (Game.towerAt(m, me, t.col, t.row) && !Game.towerUp(m, me)) { overlayMsgSheet('Your Powertower', `This tile is kept for your Powertower. You pick it in round ${Game.TOWER_PICK_ROUND}, from your two factions’ towers.`); return; }
@@ -4497,7 +4522,8 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
         if (sq.round === m.round && editable()) { const back = sq.cost + (sq.awaken > 0 ? Game.awakenCost(m, sq.unit) : 0); btns.push(`<button class="btn" data-act="take-back">Take back${back ? ` · +${back}` : ''}</button>`); }
         if (sq.round === m.round && editable() && Game.isRider(sq)) btns.push(`<button class="btn" data-act="move-sq">Take out</button>`);
         if (sq.round < m.round && editable() && Game.movedId(m, me) === sq.id) btns.push(`<button class="btn" data-act="move-undo">Undo move · +${Game.CONFIG.moveCost}</button>`);
-        else if (sq.round < m.round && editable() && Game.movedId(m, me) == null) btns.push(`<button class="btn" data-act="move-sq" ${m.gold[me] >= Game.CONFIG.moveCost ? '' : 'disabled'}>${Game.isRider(sq) ? 'Take out' : 'Move'} · ${Game.CONFIG.moveCost} gold</button>`);
+        else if (sq.round < m.round && editable() && Game.isRider(sq)) btns.push(`<button class="btn" data-act="move-sq">Take out · free</button>`);
+        else if (sq.round < m.round && editable() && Game.movedId(m, me) == null) btns.push(`<button class="btn" data-act="move-sq" ${m.gold[me] >= Game.CONFIG.moveCost || Game.freeOut(m, me, sq) ? '' : 'disabled'}>Move${Game.freeOut(m, me, sq) ? ' · free' : ` · ${Game.CONFIG.moveCost} gold`}</button>`);
         if (sq.round < m.round && editable()) btns.push(`<button class="btn" data-act="sell">Sell · ${Game.sellValue(m, sq)} gold</button>`);
         if (editable() && Game.canGuide(m, me, sq)) btns.push(`<button class="btn" data-act="guide">${sq.guide ? 'Redraw path' : 'Draw path'}</button>`);
         if (editable() && sq.guide) btns.push(`<button class="btn" data-act="unguide">Clear path</button>`);
@@ -4982,7 +5008,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     // the guest's move this round: one squad at most
     if (!m.moved) m.moved = [null, null];
     m.moved[1] = null;
-    for (const q of m.armies[1]) if (q.movedRound === m.round && !Game.freeMover(m, 1, q)) { if (m.moved[1] == null) m.moved[1] = q.id; else { delete q.from; delete q.movedRound; } }
+    for (const q of m.armies[1]) if (q.movedRound === m.round && !Game.freeMover(m, 1, q) && !(q.from && q.from.in != null)) { if (m.moved[1] == null) m.moved[1] = q.id; else { delete q.from; delete q.movedRound; } }
     // one unit type a match: this round's awakenings of any other type than the one they may awaken don't count
     const woke = Game.wokeUnit(m, 1);
     for (const q of m.armies[1]) if (q.awaken === m.round && woke != null && q.unit !== woke) delete q.awaken;

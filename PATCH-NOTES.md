@@ -4,6 +4,25 @@ Newest first. Each entry says what changed for players; technical details live i
 
 ---
 
+## 29 October 2026 (late night) – Quality of life
+
+### Deploying
+- The deploy clock is now **1:30** every round (it was 1:00).
+- **Keep tower – Muster:** you simply get **1 extra deployment every round**. There's no "+1" button to press any more.
+- **Just a horse:** taking a squad out of a horse is **free**. It doesn't use your once-a-round Move, and the squad can keep moving (or get back in) for free that round.
+
+### Sounds
+- Using the **Move ability** now plays the purchase sound, so you hear that 50 gold was spent.
+- Trying to drag an older squad you can't move (not enough gold, or you already moved one this round), or tapping a tile it can't go to, plays the "can't do that" sound.
+
+### Board and menus
+- The **tilted camera view** sits further back, so the enemy tower, its flag and its health bar are always on screen.
+- **Path arrows** (Draw path) now show the squad's movement speed written along the arrow.
+- The **Unlock** list shows a short description for every unit. Frost Wizard and the faction units used to show only a dot.
+- Choosing **All units** in the main menu now also puts every leader back into the draw.
+
+---
+
 ## 29 October 2026 (night) – Gold cap and shutdown bounty
 
 ### Gold carry cap

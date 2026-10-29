@@ -23,7 +23,7 @@ const Game = (() => {
   // Gold both players get at the start of a round: 250 going into round 2, then 100 more each round (like Mechabellum)
   const incomeFor = (round) => INCOME + CONFIG.incomeStep * Math.max(0, round - 2);
   const deploysAllowed = (m, side) => CONFIG.deployCap
-    ? (m.round === 1 ? CONFIG.firstRoundDeploys : CONFIG.deploysPerRound) + m.extraDeploys[side] + devDeploys(m, side)
+    ? (m.round === 1 ? CONFIG.firstRoundDeploys : CONFIG.deploysPerRound) + m.extraDeploys[side] + devDeploys(m, side) + (musterOn(m, side) ? 1 : 0)
     : Infinity;
   const deployedThisRound = (m, side) => m.armies[side].filter(s => s.round === m.round && !s.free).length; // package squads don't count
   const deploysLeft = (m, side) => deploysAllowed(m, side) - deployedThisRound(m, side);
@@ -46,7 +46,7 @@ const Game = (() => {
     { id: 'keep', name: 'Keep', text: 'Steady light shots, short range.', unit: { ...TOWER, hp: 700 },
       skill: { name: 'Guards', text: '4 Wisp guards defend the keep for 5 s each fight, then attack.' },
       skill2: { name: 'Brute guards', cost: 400, needs: true, text: 'Guards are Brutes, with your Brute skills. Needs Guards.' },
-      muster: { name: 'Muster', text: 'Your extra deployment each round is free.' } }, // see deployCost
+      muster: { name: 'Muster', text: '1 extra deployment every round, for free.' } }, // see musterOn
     { id: 'sniper', name: 'Sniper tower', text: 'Slow, huge range, double damage.', unit: { ...TOWER, name: 'Sniper Tower', kind: 'sniper', hp: 500, hit: 60, aps: 0.4, range: 32, color: '#B9C7D6' },
       skill: { name: 'Eagle eye', text: 'Tower and Snipers: +3 m range, +10% attack speed.' },
       skill2: { name: 'Deploy airship', cost: 400, text: 'An untouchable airship shoots like a level 3 Sniper and drops paratroopers each fight. Snipers and tower: +30 hit.' },
@@ -1574,9 +1574,12 @@ const Game = (() => {
     return v;
   }
 
-  // Muster (the Keep's trait): its owner's extra deployment is free
-  const deployCost = (m, side) => towerPicked(m, side) && towerType(m, side).muster ? 0 : CONFIG.extraDeployCost;
-  const canBuyDeploy = (m, side) => CONFIG.deployCap && m.extraDeploys[side] < CONFIG.maxExtraDeploys && m.gold[side] >= deployCost(m, side);
+  // Muster (the Keep's trait): its owner gets the extra deployment every round on its own (counted in deploysAllowed),
+  // so there is nothing to buy
+  const musterOn = (m, side) => !!(towerPicked(m, side) && towerType(m, side).muster);
+  const deployCost = (m, side) => CONFIG.extraDeployCost;
+  const deployBuyable = (m, side) => CONFIG.deployCap && !musterOn(m, side) && m.extraDeploys[side] < CONFIG.maxExtraDeploys; // the +1 is offered
+  const canBuyDeploy = (m, side) => deployBuyable(m, side) && m.gold[side] >= deployCost(m, side);
   function buyDeploy(m, side) {
     if (!canBuyDeploy(m, side)) return false;
     m.gold[side] -= deployCost(m, side);
@@ -1598,7 +1601,11 @@ const Game = (() => {
   const movedId = (m, side) => (m.moved && m.moved[side] != null) ? m.moved[side] : null;
   // A unit with Spirit walk (freeMove) moves any squad of it, any number of times, for free
   const freeMover = (m, side, sq) => !!sq && hasSkillType(m, side, sq.unit, 'freeMove');
-  const canMove = (m, side, sq) => !!sq && !(m.units[sq.unit] && m.units[sq.unit].building) && (sq.round === m.round || freeMover(m, side, sq) || // a building stays put
+  // Stepping out of a carrier (Just a horse) is free: a rider from an earlier round, or one that stepped out this round
+  // (it can go on moving, or get back in, for free); the opponent still sees nothing until the fight
+  const freeOut = (m, side, sq) => !!sq && sq.round !== m.round && movedId(m, side) !== sq.id
+    && (isRider(sq) || (!!sq.from && sq.movedRound === m.round && sq.from.in != null));
+  const canMove = (m, side, sq) => !!sq && !(m.units[sq.unit] && m.units[sq.unit].building) && (sq.round === m.round || freeMover(m, side, sq) || freeOut(m, side, sq) || // a building stays put
     (movedId(m, side) == null ? m.gold[side] >= CONFIG.moveCost : movedId(m, side) === sq.id));
   function moveSquad(m, side, sqId, col, row) {
     const sq = m.armies[side].find(s => s.id === sqId);
@@ -1607,14 +1614,15 @@ const Game = (() => {
     const into = boardable(m, side, col, row, sq.unit);
     if (into && into.id === sq.in) return false;
     if (!canPlaceAt(m, side, col, row, sq.unit, true) || (occupied(m, side, col, row) && !into && !garrisonFree(m, side, col, row, sq.unit))) return false;
-    if (sq.round !== m.round && !freeMover(m, side, sq) && movedId(m, side) == null) {
+    const free = freeMover(m, side, sq) || freeOut(m, side, sq);
+    if (sq.round !== m.round && !free && movedId(m, side) == null) {
       if (!m.moved) m.moved = [null, null];
       m.gold[side] -= CONFIG.moveCost;
       m.moved[side] = sq.id;
       sq.from = { col: sq.col, row: sq.row, ...(isRider(sq) ? { in: sq.in } : {}) };
       sq.movedRound = m.round;
     }
-    if (sq.round !== m.round && freeMover(m, side, sq) && !(sq.from && sq.movedRound === m.round)) { // free, but the opponent still sees it where it was until the fight
+    if (sq.round !== m.round && free && !(sq.from && sq.movedRound === m.round)) { // free, but the opponent still sees it where it was until the fight
       sq.from = { col: sq.col, row: sq.row, ...(isRider(sq) ? { in: sq.in } : {}) };
       sq.movedRound = m.round;
     }
@@ -2918,7 +2926,7 @@ const Game = (() => {
     MAX_ROUND_DMG, TIER_DMG, bankBusy, seenAt, charShown, towerTypeShown, altarShown, elfOwnShown, shroomShown, removingShroom, movedId, canMove, moveSquad, undoMove,
     COLS, ROWS, TILE, ZONE, START_HP, START_GOLD, INCOME, incomeFor, LOSER_BONUS, LOSER_BONUS_ROUND, TOWER_FALL_HP, CARRY_CAP, SHUTDOWN, shutdownGold, CREDIT_LINE, loanTerms, treasurySteal, SQUAD_COST, SETTINGS, XP_STEPS, xpNeeded, unitCostOf,
     levelCost, isReady, levelUp, undoLevel, levelAllPlan, levelAll, upgradeOffer, seenLevel, aiLevel, AI, CONFIG,
-    deploysAllowed, deploysLeft, deployedThisRound, canBuyDeploy, buyDeploy, refundDeploy,
+    deploysAllowed, deploysLeft, deployedThisRound, canBuyDeploy, buyDeploy, refundDeploy, musterOn, deployBuyable,
     PACKAGE, allPackages, packOf, needsPack, freeLeft, choosePack, ensurePack,
     unlockCost, tierOf, startLevel, shopCost, mapFreeOf, mapFreeLeft, isUnlocked, unlockVisible, unlock, undoUnlock,
     skillDef, skillCost, SKILL_STEP, skillsBought, isInnate, hasSkill, skillVisible, skillNeeds, skillNeedsAny, skillNeedsMissing, skillHeldUp, isFlat, isMaster, isAwaken, awakenSlot, awakenCost, wokeUnit, awakenBlock, canAwaken, awaken, undoAwaken, seenAwake, glutOf, glutMax, glutFull, skillOr, skillOrTaken, unitFor, withCharacter,
@@ -2926,7 +2934,7 @@ const Game = (() => {
     setBuildings, BUILDINGS: () => BUILDINGS, buildingInfo, BUILDING_SQUAD, isBuildingSkill, buildingIdOf, buildingsOf, buildingOf, buildingAt, buildingShown, buildingSpotOk,
     canBuyBuilding, buyBuilding, buildingSkills, buildingSkillInfo, bskillOf, bskillCost, canBuyBuildingSkill, buyBuildingSkill, undoBuildingSkill,
     buildingXpNeeded, buildingLevelCost, buildingReady, levelBuilding, undoLevelBuilding, constructBuff, buildingBodies, canBuySkill, buySkill, undoSkill, sellValue, sell,
-    isRider, hiddenFromFoe, isCarrier, riderOf, carrierOf, squadAt, boardable, unplaceSquad,
+    isRider, freeOut, hiddenFromFoe, isCarrier, riderOf, carrierOf, squadAt, boardable, unplaceSquad,
     TOWER, TOWER_TYPES, OUTPOST, TOWER_PICK_ROUND, towerType, towerChoices, needsTowerPick, setTowerType, settleTowerPicks, TOWER_SKILL, towerSkillOf, towerSkillVisible, towerPicked, canBuyTowerSkill, buyTowerSkill, undoTowerSkill, towerSkillCost, towerSkill2Of, towerSkill2Visible, towerSkill2Cost, canBuyTowerSkill2, buyTowerSkill2, undoTowerSkill2, towerSkill2On, AIRSHIP, MOAT, BWALL, BWALL_SQ, EDGES, bwallsOf, bwallOn, edgeOf, bwallWorld, bwallsLeft, bwallShown, bwallSpotOk, placeBwall, unplaceBwall, ensureBwalls, bwallUnit, INVEST, MAGE_GENERALS, mageGenPrice, MAGE, mageGenInfo, mageGenOf, mageTpOf, isExtraGen, mageGenCost, canBuyMageGen, buyMageGen, undoMageGen, mageTowerUnit, generalUnit, LOAN, loanNow, investNow, bankBusy, investNow, bankBusy, canTakeLoan, takeLoan, undoLoan, towerRounds, troundInfo, troundOn, troundCost, canBuyTround, buyTround, undoTround, SLIME_UNITS, slimeTowerUnit, slimeSkillDefs, TOWER_MID, towerColOk, towerAt, needsTower, placeTower, ensureTower,
     FLANK, flankRows, flankOpen, isFlank, flankTiles, reserved, canPlaceAt, isOff, enemyHolds, inNoMans, hasSkillType, garrisonAt, garrisonFree, inBuilding, WATCH_SQ, watchUnit, freeMover,
     STANDARD_PACK, ICE, ALTAR, GOLEM, isIce, hailRound, altarRound, stormShift, stormRows, hailTiles, altarCost, altarRefund, altarCount, pushRoom, altarBought, addAltar, buyAltar, undoAltar, snowgres, snowgreUnit,

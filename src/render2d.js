@@ -493,8 +493,8 @@ const Render2D = (cv, view, opts = {}) => {
     }
     if (plain || !deploying) return;
     // your arrows, and the one being drawn
-    for (const sq of v.armies[me]) if (sq.guide && !(dev && dev.guideId === sq.id)) drawArrow(sq, sq.guide, 0.75);
-    if (dev && dev.guideId != null && dev.guide) { const sq = v.armies[me].find(q => q.id === dev.guideId); if (sq) drawArrow(sq, dev.guide, 1); }
+    for (const sq of v.armies[me]) if (sq.guide && !(dev && dev.guideId === sq.id)) drawArrow(v, sq, sq.guide, 0.75);
+    if (dev && dev.guideId != null && dev.guide) { const sq = v.armies[me].find(q => q.id === dev.guideId); if (sq) drawArrow(v, sq, dev.guide, 1); }
     if (!dev || !editable) return;
     if (dev.bPlacing != null) { // where the building may go
       const b = Game.lessersOf(v, me).find(x => x.key === dev.bPlacing), d = b && Game.devBuilding(b.id);
@@ -508,8 +508,9 @@ const Render2D = (cv, view, opts = {}) => {
     }
     ctx.globalAlpha = 1;
   }
-  // a squad's arrow: from its tile through its points, with a head at the end
-  function drawArrow(sq, pts, a) {
+  // a squad's arrow: from its tile through its points, with a head at the end, and the squad's speed written along
+  // its longest leg
+  function drawArrow(v, sq, pts, a) {
     const t = tilePx(), at = (p) => [(scol(p.col) + 0.5) * t, (srow(p.row) + 0.5) * t];
     const list = [sq, ...pts].map(at).filter((p, i, l) => !i || p[0] !== l[i - 1][0] || p[1] !== l[i - 1][1]);
     if (list.length < 2) return;
@@ -517,6 +518,21 @@ const Render2D = (cv, view, opts = {}) => {
     ctx.beginPath(); ctx.moveTo(...list[0]); for (const p of list.slice(1)) ctx.lineTo(...p); ctx.stroke(); ctx.setLineDash([]);
     const [x2, y2] = list[list.length - 1], [x1, y1] = list[list.length - 2], ang = Math.atan2(y2 - y1, x2 - x1), h = t * 0.32;
     ctx.beginPath(); ctx.moveTo(x2, y2); ctx.lineTo(x2 - h * Math.cos(ang - 0.5), y2 - h * Math.sin(ang - 0.5)); ctx.lineTo(x2 - h * Math.cos(ang + 0.5), y2 - h * Math.sin(ang + 0.5)); ctx.closePath(); ctx.fill();
+    const u = Game.unitFor(v, me, sq.unit, sq);
+    if (u && u.speed > 0) {
+      let k = 1, best = 0;
+      for (let i = 1; i < list.length; i++) { const d = Math.hypot(list[i][0] - list[i - 1][0], list[i][1] - list[i - 1][1]); if (d > best) { best = d; k = i; } }
+      const [ax, ay] = list[k - 1], [bx, by] = list[k];
+      let rot = Math.atan2(by - ay, bx - ax);
+      if (rot > Math.PI / 2 || rot < -Math.PI / 2) rot += Math.PI; // never upside down
+      const txt = `${Math.round(u.speed * 10) / 10} m/s`, fs = Math.max(10, Math.round(t * 0.3));
+      ctx.save();
+      ctx.translate((ax + bx) / 2, (ay + by) / 2); ctx.rotate(rot); ctx.translate(0, -t * 0.24); // just beside the line
+      ctx.font = `600 ${fs}px "IBM Plex Mono", monospace`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.globalAlpha = a; ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(11,15,17,0.85)'; ctx.strokeText(txt, 0, 0);
+      ctx.fillStyle = css('--you'); ctx.fillText(txt, 0, 0);
+      ctx.restore();
+    }
     ctx.globalAlpha = 1;
   }
   // a lesser building: a small house in its faction's colour with a roof in its side's colour (hpr: health left in a fight)
