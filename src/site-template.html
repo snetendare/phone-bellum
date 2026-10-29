@@ -861,9 +861,9 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
   let mapPick = '';         // the map the host picked for the next match ('' = random)
   let pickFor = '', pickSel = null, pickPeek = false, pickHtml = ''; // the choose-one-of-3 cards over the board (syncPick)
   const MAP_SHORT = { standard: 'Standard', forest: 'Forest', cavern: 'Cavern', ice: 'Peak', testgrid: 'Test', bridge: 'Bridge', rush: 'Rush' };
-  // the 3D board's look for a map with skins (Standard, Test): '' = the map's own; saved on this device, the host's counts
+  // the 3D board's look for a map with skins (Standard, Test): '' = the map's own, 'random' = a new one each match; saved on this device, the host's counts
   let skinPick = '';
-  try { const v = localStorage.getItem('pb-skin') || ''; if (Game.SKINS.some(x => x.id === v)) skinPick = v; } catch (e) {}
+  try { const v = localStorage.getItem('pb-skin') || ''; if (v === 'random' || Game.SKINS.some(x => x.id === v)) skinPick = v; } catch (e) {}
   const skinnable = (id) => { const mp = Game.MAPS.find(x => x.id === id); return !!(mp && mp.skins); };
   const mapSeg = () => `<div class="bar">
         <span class="hint">Map</span>
@@ -874,7 +874,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
       <div class="bar" id="skin-bar"${skinnable(mapPick) ? '' : ' hidden'}>
         <span class="hint">Look</span>
         <div class="seg" role="group" aria-label="Look of the 3D board">
-          ${[{ id: '', name: 'Own' }].concat(Game.SKINS).map(k => `<button data-skin="${k.id}" aria-pressed="${skinPick === k.id}">${esc(k.name)}</button>`).join('')}
+          ${[{ id: '', name: 'Own' }].concat(Game.SKINS, [{ id: 'random', name: 'Random' }]).map(k => `<button data-skin="${k.id}" aria-pressed="${skinPick === k.id}">${esc(k.name)}</button>`).join('')}
         </div>
       </div>`;
   const wireMapSeg = () => { $('panel').querySelectorAll('[data-map]').forEach(b => b.addEventListener('click', () => {
@@ -910,7 +910,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
   // what a new match takes from the menu: units, leaders and towers left out, and the rules of a Counter Lab roster
   const matchOff = () => packOn() && packUnits() >= 2 ? units.map((u, i) => SP.units.includes(u.name) ? -1 : i).filter(i => i >= 0) : offIdx();
   const matchChars = () => packOn() ? Game.CHARACTERS.map(c => c.id).filter(id => !SP.chars.includes(id)) : offChars;
-  const matchOpts = () => ({ skin: skinPick || null, offUnits: matchOff(), offTowers: packOn() ? SP.offTowers : [], rules: customSet && rawSet.rules && typeof rawSet.rules === 'object' ? rawSet.rules : null });
+  const matchOpts = () => ({ skin: skinPick || null, lastSkin: (m && m.skin) || null, offUnits: matchOff(), offTowers: packOn() ? SP.offTowers : [], rules: customSet && rawSet.rules && typeof rawSet.rules === 'object' ? rawSet.rules : null });
   const packNote = () => packOn()
     ? `${packUnits()} units, ${SP.chars.length} leaders, ${packTowers().length} towers. A good first match.`
     : `All ${unitsOn() === units.length ? units.length : `${unitsOn()} of ${units.length}`} units, ${charsOn()} leaders, ${Game.TOWER_TYPES.length} towers. Pick which in Match settings.`;

@@ -1139,7 +1139,11 @@ const Game = (() => {
       offTowers: !factions && opts && Array.isArray(opts.offTowers) ? opts.offTowers.filter(id => TOWER_TYPES.some(x => x.id === id)) : [], // tower types left out (Standard pack)
     };
     m.towers = [towerSpot(m, 0), towerSpot(m, 1)];
-    { const mp = MAPS.find(x => x.id === m.map.id), sk = opts && opts.skin; if (mp && mp.skins && SKINS.some(x => x.id === sk)) m.skin = sk; }
+    { // the look: the host's pick, or 'random': one of the looks from the match's seed (never the last match's again)
+      const mp = MAPS.find(x => x.id === m.map.id); let sk = opts && opts.skin;
+      if (sk === 'random') { const pool = SKINS.filter(x => x.id !== (opts && opts.lastSkin)); sk = pool[Math.floor(rng((seed >>> 0) + 4242)() * pool.length)].id; }
+      if (mp && mp.skins && SKINS.some(x => x.id === sk)) m.skin = sk;
+    }
     return m;
   }
 
