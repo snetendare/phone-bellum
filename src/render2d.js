@@ -171,13 +171,14 @@ const Render2D = (cv, view, opts = {}) => {
   }
   // a mushroom tile: tinted tile with a small glowing mushroom in the tile's colour
   // Frozen Peak: a dark icy floor with snow drifts and cracks in the ice, and snow-capped rock on both flanks.
-  function paintIce(c, rr, t) {
+  // snow = false: Darkwoods (the same dark ground and rock, with no snow drifts, snow caps or snowflakes)
+  function paintIce(c, rr, t, snow = true) {
     c.fillStyle = '#131B22'; c.fillRect(0, 0, W, H);
     const gl = c.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, Math.max(W, H) * 0.6);
     gl.addColorStop(0, '#1D2833'); gl.addColorStop(0.6, '#18212A'); gl.addColorStop(1, '#121920');
     c.fillStyle = gl; c.fillRect(0, 0, W, H);
     // snow drifts: soft pale patches
-    for (let k = 0; k < 30; k++) {
+    if (snow) for (let k = 0; k < 30; k++) {
       c.globalAlpha = 0.12 + rr() * 0.08; c.fillStyle = k % 3 ? '#3A4B5A' : '#4B5E6E';
       c.beginPath(); c.ellipse(rr() * W, rr() * H, t * (0.6 + rr() * 1.5), t * (0.25 + rr() * 0.5), (rr() - 0.5) * 0.6, 0, Math.PI * 2); c.fill();
     }
@@ -207,15 +208,16 @@ const Render2D = (cv, view, opts = {}) => {
         c.beginPath(); // a jagged rock
         for (let j = 0; j < 6; j++) { const ang = j / 6 * Math.PI * 2 + rr() * 0.4, rad = q.r * (0.75 + rr() * 0.35); const px = q.x + Math.cos(ang) * rad, py = q.y + Math.sin(ang) * rad * 0.8; j ? c.lineTo(px, py) : c.moveTo(px, py); }
         c.closePath(); c.fill();
+        if (!snow) continue;
         c.globalAlpha = a * 0.45; c.fillStyle = '#C8D7E2'; // snow cap
         c.beginPath(); c.ellipse(q.x - q.r * 0.1, q.y - q.r * 0.45, q.r * 0.55, q.r * 0.2, 0, 0, Math.PI * 2); c.fill();
       }
     }
     // a few snowflakes
     c.fillStyle = '#DCE8F0';
-    for (let k = 0; k < 120; k++) { c.globalAlpha = 0.08 + rr() * 0.14; c.beginPath(); c.arc(rr() * W, rr() * H, 0.6 + rr() * 0.9, 0, Math.PI * 2); c.fill(); }
+    if (snow) for (let k = 0; k < 120; k++) { c.globalAlpha = 0.08 + rr() * 0.14; c.beginPath(); c.arc(rr() * W, rr() * H, 0.6 + rr() * 0.9, 0, Math.PI * 2); c.fill(); }
   }
-  const BACKGROUNDS = { forest: [1234567, paintForest], cavern: [7654321, paintCavern], ice: [4242421, paintIce] };
+  const BACKGROUNDS = { forest: [1234567, paintForest], cavern: [7654321, paintCavern], ice: [4242421, paintIce], darkwoods: [4242421, (c, rr, t) => paintIce(c, rr, t, false)] };
   // ---------- terrain: a map's ground height, water, walls, shallow water and bushes (Game.TERRAIN) ----------
   // Painted once per map, board size and side onto a canvas of its own, then copied onto the board every frame.
   // Height is light and shade: higher ground lighter, lower darker, slopes lit from the top left, as Game.groundHeight
@@ -491,8 +493,8 @@ const Render2D = (cv, view, opts = {}) => {
     }
     if (plain || !deploying) return;
     // your arrows, and the one being drawn
-    for (const sq of v.armies[me]) if (sq.guide && !(dev && dev.guideId === sq.id)) drawArrow(sq, sq.guide, 0.75);
-    if (dev && dev.guideId != null && dev.guide) { const sq = v.armies[me].find(q => q.id === dev.guideId); if (sq) drawArrow(sq, dev.guide, 1); }
+    for (const sq of v.armies[me]) if (sq.guide && !(dev && dev.guideId === sq.id)) drawArrow(v, sq, sq.guide, 0.75);
+    if (dev && dev.guideId != null && dev.guide) { const sq = v.armies[me].find(q => q.id === dev.guideId); if (sq) drawArrow(v, sq, dev.guide, 1); }
     if (!dev || !editable) return;
     if (dev.bPlacing != null) { // where the building may go
       const b = Game.lessersOf(v, me).find(x => x.key === dev.bPlacing), d = b && Game.devBuilding(b.id);
@@ -506,8 +508,9 @@ const Render2D = (cv, view, opts = {}) => {
     }
     ctx.globalAlpha = 1;
   }
-  // a squad's arrow: from its tile through its points, with a head at the end
-  function drawArrow(sq, pts, a) {
+  // a squad's arrow: from its tile through its points, with a head at the end, and the squad's speed written along
+  // its longest leg
+  function drawArrow(v, sq, pts, a) {
     const t = tilePx(), at = (p) => [(scol(p.col) + 0.5) * t, (srow(p.row) + 0.5) * t];
     const list = [sq, ...pts].map(at).filter((p, i, l) => !i || p[0] !== l[i - 1][0] || p[1] !== l[i - 1][1]);
     if (list.length < 2) return;
@@ -515,6 +518,21 @@ const Render2D = (cv, view, opts = {}) => {
     ctx.beginPath(); ctx.moveTo(...list[0]); for (const p of list.slice(1)) ctx.lineTo(...p); ctx.stroke(); ctx.setLineDash([]);
     const [x2, y2] = list[list.length - 1], [x1, y1] = list[list.length - 2], ang = Math.atan2(y2 - y1, x2 - x1), h = t * 0.32;
     ctx.beginPath(); ctx.moveTo(x2, y2); ctx.lineTo(x2 - h * Math.cos(ang - 0.5), y2 - h * Math.sin(ang - 0.5)); ctx.lineTo(x2 - h * Math.cos(ang + 0.5), y2 - h * Math.sin(ang + 0.5)); ctx.closePath(); ctx.fill();
+    const u = Game.unitFor(v, me, sq.unit, sq);
+    if (u && u.speed > 0) {
+      let k = 1, best = 0;
+      for (let i = 1; i < list.length; i++) { const d = Math.hypot(list[i][0] - list[i - 1][0], list[i][1] - list[i - 1][1]); if (d > best) { best = d; k = i; } }
+      const [ax, ay] = list[k - 1], [bx, by] = list[k];
+      let rot = Math.atan2(by - ay, bx - ax);
+      if (rot > Math.PI / 2 || rot < -Math.PI / 2) rot += Math.PI; // never upside down
+      const txt = `${Math.round(u.speed * 10) / 10} m/s`, fs = Math.max(10, Math.round(t * 0.3));
+      ctx.save();
+      ctx.translate((ax + bx) / 2, (ay + by) / 2); ctx.rotate(rot); ctx.translate(0, -t * 0.24); // just beside the line
+      ctx.font = `600 ${fs}px "IBM Plex Mono", monospace`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.globalAlpha = a; ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(11,15,17,0.85)'; ctx.strokeText(txt, 0, 0);
+      ctx.fillStyle = css('--you'); ctx.fillText(txt, 0, 0);
+      ctx.restore();
+    }
     ctx.globalAlpha = 1;
   }
   // a lesser building: a small house in its faction's colour with a roof in its side's colour (hpr: health left in a fight)

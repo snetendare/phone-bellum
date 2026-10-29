@@ -27,6 +27,7 @@ const ctxFor = require('./board2d');
   const phase = () => p.evaluate(() => document.querySelector('#phase').textContent);
   const fight = async () => {
     await p.locator('#fight').click();
+    await p.waitForTimeout(200); if (await p.locator('#cap-go').count()) await p.locator('#cap-go').click(); // over the carry cap
     for (let k = 0; k < 400 && (await phase()) === 'Battle'; k++) await p.waitForTimeout(250);
   };
   const next = async () => { if (await p.locator('#next').count()) { await p.locator('#next').click(); await p.waitForTimeout(500); } };
@@ -80,7 +81,8 @@ const ctxFor = require('./board2d');
   check(await p.evaluate(() => window.__pb().m.dev.casts.length === 1), 'spell cast');
   await p.screenshot({ path: 'devtest-3.png' });
   await p.locator('#fight').click();
-  await p.waitForTimeout(3500);
+  await p.waitForTimeout(200); if (await p.locator('#cap-go').count()) await p.locator('#cap-go').click();
+  await p.waitForTimeout(3300);
   await p.screenshot({ path: 'devtest-4.png' });
   for (let k = 0; k < 400 && (await phase()) === 'Battle'; k++) await p.waitForTimeout(250);
   check(await p.evaluate(() => window.__pb().bt.bodies.some(x => x.squad === -2)), 'tower in the round 3 fight');

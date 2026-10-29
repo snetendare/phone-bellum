@@ -72,6 +72,15 @@ canvas { display: block; width: 100%; height: 100%; }
 .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
 .seg button { border: 0; background: transparent; padding: 7px 12px; font-family: var(--font-data); font-size: 13px; }
 .seg button[aria-pressed="true"] { background: var(--line); color: var(--gold); }
+/* the Look picker: wraps onto more lines instead of growing wider than the panel (a long row of looks used to widen
+   the whole page), and its size doesn't change with the pick */
+.seg.looks { display: flex; flex-wrap: wrap; width: 100%; }
+.seg.looks button { flex: 1 1 auto; padding: 7px 8px; white-space: nowrap; }
+/* the start screen while a look is picked: the title card fades back so the map behind it shows */
+.overlay.peek { background: rgba(13, 19, 21, 0.12); }
+.overlay.peek > .card { opacity: 0.12; }
+.overlay { transition: background-color 0.35s ease; }
+.overlay > .card { transition: opacity 0.35s ease; }
 
 .shop { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; scroll-snap-type: x proximity; -webkit-overflow-scrolling: touch; }
 .uwrap { flex: 0 0 132px; scroll-snap-align: start; position: relative; display: grid; }
@@ -103,3 +112,16 @@ canvas { display: block; width: 100%; height: 100%; }
 .lvl-pair { display: inline-flex; gap: 2px; }
 .lvl-pair .btn:first-child:not(:only-child) { border-top-right-radius: 0; border-bottom-right-radius: 0; }
 .lvl-pair .lvl-all { padding: 10px 10px; font-size: 12px; letter-spacing: 0.04em; border-top-left-radius: 0; border-bottom-left-radius: 0; }
+
+/* the menu's music player */
+.mplayer { display: flex; flex-direction: column; align-items: center; gap: 4px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+.mp-label { font-family: var(--font-data); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+#mp-title { font-size: 14px; font-weight: 600; }
+.mp-row { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
+.mp-btn { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; flex: none; border-radius: 50%; border: 1px solid var(--line); background: transparent; color: var(--ink); padding: 0; cursor: pointer; }
+.mp-btn svg { width: 13px; height: 13px; }
+.mp-btn:hover { border-color: var(--muted); }
+.mp-btn:active { transform: scale(0.94); }
+.mp-main { width: 40px; height: 40px; background: var(--gold); border-color: var(--gold); color: var(--bg); }
+.mp-main svg { width: 15px; height: 15px; }
+.mp-main:hover { border-color: var(--gold-dark); background: var(--gold-dark); }

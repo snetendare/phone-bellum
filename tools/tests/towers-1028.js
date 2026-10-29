@@ -16,17 +16,16 @@ const mk = (type, map = 'standard', seed = 77) => {
 const sq = (m, side, name, col, row, round) => { const s = { id: m.nextId[side]++, unit: ui(name), col, row, level: 0, xp: 0, round, cost: units[ui(name)].cost }; m.armies[side].push(s); return s; };
 const T = Game.TOWER_TYPES;
 
-// Keep: Muster gives the extra deployment by itself (nothing to buy); Brute guards cost 400
+// Keep: Muster gives the extra deployment every round on its own (nothing to buy); Brute guards cost 400
 let m = mk('keep');
 assert.strictEqual(T.find(t => t.id === 'keep').skill2.cost, 400);
 const base = Game.CONFIG.deploysPerRound;
-assert.strictEqual(Game.deploysAllowed(m, 0), base + 1, 'Muster: one more deployment, not bought');
-assert.strictEqual(Game.extraDeployMax(m, 0), 0); assert.ok(!Game.canBuyDeploy(m, 0));
-const g0 = m.gold[0]; assert.ok(!Game.buyDeploy(m, 0)); assert.strictEqual(m.gold[0], g0);
-m.towers[1].type = 'sniper'; assert.strictEqual(Game.deploysAllowed(m, 1), base);
-assert.ok(Game.buyDeploy(m, 1) && m.gold[1] === 2000 - Game.CONFIG.extraDeployCost && Game.deploysAllowed(m, 1) === base + 1);
+assert.strictEqual(Game.deploysAllowed(m, 0), base + 1, 'Muster: +1 deployment');
+assert.ok(!Game.deployBuyable(m, 0) && !Game.buyDeploy(m, 0), 'nothing to buy with Muster');
+m.towers[1].type = 'sniper'; assert.strictEqual(Game.deploysAllowed(m, 1), base); assert.ok(Game.deployBuyable(m, 1));
+const g0 = m.gold[1]; assert.ok(Game.buyDeploy(m, 1)); assert.strictEqual(m.gold[1], g0 - Game.CONFIG.extraDeployCost);
 // an extra deployment bought before picking the Keep is refunded when it's picked
-m = mk('keep'); m.towers[1].type = null; m.extraDeploys[1] = 0;
+m = mk('keep'); m.towers[1].type = null; m.extraDeploys[1] = 0; m.gold[1] = 2000;
 assert.ok(Game.buyDeploy(m, 1) && m.gold[1] === 2000 - Game.CONFIG.extraDeployCost);
 assert.ok(Game.setTowerType(m, 1, 'keep') && m.extraDeploys[1] === 0 && m.gold[1] === 2000 && Game.deploysAllowed(m, 1) === base + 1);
 

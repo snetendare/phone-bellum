@@ -7,6 +7,10 @@ const Game = (() => {
   const TILE = 6, GRID = { cols: 12, rows: 16, zone: 6 };
   let COLS = GRID.cols, ROWS = GRID.rows, ZONE = GRID.zone;
   const START_HP = 100, MAX_ROUND_DMG = 35, START_GOLD = 250, INCOME = 250, LOSER_BONUS = 50, LOSER_BONUS_ROUND = 3; // no loser gold for rounds 1-2
+  // Gold carry cap: at most CARRY_CAP unspent gold goes into the next round (the rest is lost before the new gold comes in).
+  // Shutdown: breaking an opponent's streak of SHUTDOWN.from+ round wins pays SHUTDOWN.gold, +SHUTDOWN.step per win past that.
+  const CARRY_CAP = 500, SHUTDOWN = { from: 3, gold: 100, step: 50 };
+  const shutdownGold = (streak) => streak >= SHUTDOWN.from ? SHUTDOWN.gold + SHUTDOWN.step * (streak - SHUTDOWN.from) : 0;
   const TOWER_FALL_HP = 10; // a player whose tower falls in a fight loses this much health too, but a round never costs more than MAX_ROUND_DMG in all
   const SQUAD_COST = 100;
   const SETTINGS = { dt: 0.05, timeCap: 60, spacing: 3.5, minDmgPct: 15, absorbXp: 1, armorXp: 0.5, sight: 15, minSight: 18, drift: 15, flameReach: 1.2 }; // sight: metres beyond range a unit notices an enemy (at least minSight), drift: it leans toward one this much further out. flameReach: flame cones reach 1.2x the unit's range
@@ -19,9 +23,9 @@ const Game = (() => {
   // Gold both players get at the start of a round: 250 going into round 2, then 100 more each round (like Mechabellum)
   const incomeFor = (round) => INCOME + CONFIG.incomeStep * Math.max(0, round - 2);
   const deploysAllowed = (m, side) => CONFIG.deployCap
-    ? (m.round === 1 ? CONFIG.firstRoundDeploys : CONFIG.deploysPerRound) + m.extraDeploys[side] + musterDeploys(m, side) + devDeploys(m, side)
+    ? (m.round === 1 ? CONFIG.firstRoundDeploys : CONFIG.deploysPerRound) + m.extraDeploys[side] + devDeploys(m, side) + (musterOn(m, side) ? 1 : 0) + slotWins(m, side, 'shoe')
     : Infinity;
-  const deployedThisRound = (m, side) => m.armies[side].filter(s => s.round === m.round && !s.free).length; // package squads don't count
+  const deployedThisRound = (m, side) => m.armies[side].filter(s => s.round === m.round && !s.free && !s.gift).length; // package squads and slot machine goblins don't count
   const deploysLeft = (m, side) => deploysAllowed(m, side) - deployedThisRound(m, side);
   // A unit's `cost` is in lab units: 1 = one standard squad (SQUAD_COST gold)
   const unitCostOf = (unit) => Math.max(10, Math.round((unit.cost || 1) * SQUAD_COST / 10) * 10);
@@ -42,7 +46,7 @@ const Game = (() => {
     { id: 'keep', name: 'Keep', text: 'Steady light shots, short range.', unit: { ...TOWER, hp: 700 },
       skill: { name: 'Guards', text: '4 Wisp guards defend the keep for 5 s each fight, then attack.' },
       skill2: { name: 'Brute guards', cost: 400, needs: true, text: 'Guards are Brutes, with your Brute skills. Needs Guards.' },
-      muster: { name: 'Muster', text: 'One more deployment every round, by itself.' } }, // see musterDeploys
+      muster: { name: 'Muster', text: '1 extra deployment every round, for free.' } }, // see musterOn
     { id: 'sniper', name: 'Sniper tower', text: 'Slow, huge range, double damage.', unit: { ...TOWER, name: 'Sniper Tower', kind: 'sniper', hp: 500, hit: 60, aps: 0.4, range: 32, color: '#B9C7D6' },
       skill: { name: 'Eagle eye', text: 'Tower and Snipers: +3 m range, +10% attack speed.' },
       skill2: { name: 'Deploy airship', cost: 400, text: 'An untouchable airship shoots like a level 3 Sniper and drops paratroopers each fight. Snipers and tower: +30 hit.' },
@@ -87,7 +91,7 @@ const Game = (() => {
     if (!needsTowerPick(m, side) || !towerChoices(m, side).some(x => x.id === id)) return false;
     m.towers[side].type = id;
     // Muster: an extra deployment bought this round before picking the Keep is now given, so it is refunded
-    while (m.extraDeploys && m.extraDeploys[side] > extraDeployMax(m, side)) { m.extraDeploys[side]--; m.gold[side] += deployCost(m, side); }
+    while (m.extraDeploys && musterOn(m, side) && m.extraDeploys[side] > 0) { m.extraDeploys[side]--; m.gold[side] += deployCost(m, side); }
     return true;
   }
   // Each tower type has one skill, bought once per match after the pick (TOWER_SKILL gold); it stays hidden from the
@@ -406,6 +410,7 @@ const Game = (() => {
     { id: 'felix', name: 'Felix', ability: '+50 gold a round from round 3, +100 from round 6.' },
     { id: 'enzo', name: 'Enzo', ability: 'No skill buying. Each unit gets its first skill free with 2+ squads.' },
     { id: 'matteo', name: 'Matteo - the Gentleman', ability: 'Charisma spreads with kills. At 5, a squad converts its first kill each fight.' },
+    { id: 'otto', name: 'Otto - The Gambler', ability: 'Slot machine: 50 gold a spin, 3 spins a round. Three of a kind pays out, or hurts.' },
   ];
   // ---------- the Standard pack ----------
   // A smaller match for new players, picked on the menu: fewer units with clear jobs (one or two of each kind per tier),
@@ -532,7 +537,14 @@ const Game = (() => {
   ];
   // Looks (skins) for the 3D board: a map with skins (the Standard and the Test Grid) can be played in any of them; the
   // others have their own look. Only how the board looks: the rules stay the map's. The match keeps the host's pick (m.skin).
-  const SKINS = [{ id: 'meadow', name: 'Meadow' }, { id: 'autumn', name: 'Autumn' }, { id: 'snow', name: 'Snow' }, { id: 'frost', name: 'Frost' }, { id: 'desert', name: 'Desert' }];
+  const SKINS = [{ id: 'meadow', name: 'Meadow' }, { id: 'autumn', name: 'Autumn' }, { id: 'snow', name: 'Snow' }, { id: 'frost', name: 'Darkwoods' }, { id: 'desert', name: 'Desert' }];
+  // each map's own look (the rest: meadow), and the look a match is drawn in: the host's pick on a map with skins, else
+  // the map's own. The deployment and battle music follow the look too (LOOK_MUSIC in the page).
+  const MAP_LOOK = { standard: 'meadow', testgrid: 'frost', ice: 'snow', forest: 'forest', cavern: 'cavern' };
+  function lookOf(src) {
+    const mp = src && mapOf(src);
+    return mp && mp.skins && src.skin && SKINS.some(x => x.id === src.skin) ? src.skin : (mp && MAP_LOOK[mp.id]) || 'meadow';
+  }
   // ---------- terrain: walls, water, bushes and ground height (a map's `terrain`, from the map editor) ----------
   // A wall ('#') stops walking, shots and sight; water ('~') stops walking only; shallow water ('s') slows whoever wades
   // in it by TERRAIN.wade %; a bush ('b') hides who stands in it (see the engine's inSight). A tile with a form (a
@@ -1110,7 +1122,7 @@ const Game = (() => {
     const rules = opts && opts.rules && typeof opts.rules === 'object' ? { ...opts.rules } : null;
     const m = {
       units, matrix, seed: seed >>> 0,
-      round: 1, hp: [START_HP, START_HP], gold: [START_GOLD, START_GOLD],
+      round: 1, hp: [START_HP, START_HP], gold: [START_GOLD, START_GOLD], streak: [0, 0],
       armies: [[], []], nextId: [1, 1], history: [], over: false, winner: -1,
       extraDeploys: [0, 0],
       moved: [null, null], // id of the squad each player moved this round (one move per round, CONFIG.moveCost gold)
@@ -1141,7 +1153,11 @@ const Game = (() => {
       offTowers: !factions && opts && Array.isArray(opts.offTowers) ? opts.offTowers.filter(id => TOWER_TYPES.some(x => x.id === id)) : [], // tower types left out (Standard pack)
     };
     m.towers = [towerSpot(m, 0), towerSpot(m, 1)];
-    { const mp = MAPS.find(x => x.id === m.map.id), sk = opts && opts.skin; if (mp && mp.skins && SKINS.some(x => x.id === sk)) m.skin = sk; }
+    { // the look: the host's pick, or 'random': one of the looks from the match's seed (never the last match's again)
+      const mp = MAPS.find(x => x.id === m.map.id); let sk = opts && opts.skin;
+      if (sk === 'random') { const pool = SKINS.filter(x => x.id !== (opts && opts.lastSkin)); sk = pool[Math.floor(rng((seed >>> 0) + 4242)() * pool.length)].id; }
+      if (mp && mp.skins && SKINS.some(x => x.id === sk)) m.skin = sk;
+    }
     return m;
   }
 
@@ -1577,13 +1593,12 @@ const Game = (() => {
     return v;
   }
 
-  // Muster (the Keep's trait): its owner gets the round's extra deployment by itself, without buying it (so there is
-  // none left to buy: extraDeployMax)
-  const musterOn = (m, side) => !!(m.towers && towerPicked(m, side) && towerType(m, side).muster);
-  function musterDeploys(m, side) { return musterOn(m, side) ? Math.min(1, CONFIG.maxExtraDeploys) : 0; }
-  const extraDeployMax = (m, side) => Math.max(0, CONFIG.maxExtraDeploys - musterDeploys(m, side)); // extra deployments a side may still buy a round
-  const deployCost = () => CONFIG.extraDeployCost;
-  const canBuyDeploy = (m, side) => CONFIG.deployCap && m.extraDeploys[side] < extraDeployMax(m, side) && m.gold[side] >= deployCost(m, side);
+  // Muster (the Keep's trait): its owner gets the extra deployment every round on its own (counted in deploysAllowed),
+  // so there is nothing to buy
+  const musterOn = (m, side) => !!(towerPicked(m, side) && towerType(m, side).muster);
+  const deployCost = (m, side) => CONFIG.extraDeployCost;
+  const deployBuyable = (m, side) => CONFIG.deployCap && !musterOn(m, side) && m.extraDeploys[side] < CONFIG.maxExtraDeploys; // the +1 is offered
+  const canBuyDeploy = (m, side) => deployBuyable(m, side) && m.gold[side] >= deployCost(m, side);
   function buyDeploy(m, side) {
     if (!canBuyDeploy(m, side)) return false;
     m.gold[side] -= deployCost(m, side);
@@ -1605,7 +1620,12 @@ const Game = (() => {
   const movedId = (m, side) => (m.moved && m.moved[side] != null) ? m.moved[side] : null;
   // A unit with Spirit walk (freeMove) moves any squad of it, any number of times, for free
   const freeMover = (m, side, sq) => !!sq && hasSkillType(m, side, sq.unit, 'freeMove');
-  const canMove = (m, side, sq) => !!sq && !(m.units[sq.unit] && m.units[sq.unit].building) && (sq.round === m.round || freeMover(m, side, sq) || // a building stays put
+  // Stepping out of a carrier (Just a horse) is free: a rider from an earlier round, or one that stepped out this round
+  // (it can go on moving, or get back in, for free); the opponent still sees nothing until the fight
+  const freeOut = (m, side, sq) => !!sq && sq.round !== m.round && movedId(m, side) !== sq.id
+    && (isRider(sq) || (!!sq.from && sq.movedRound === m.round && sq.from.in != null));
+  const canMove = (m, side, sq) => !!sq && !(m.units[sq.unit] && m.units[sq.unit].building) && (sq.round === m.round || freeMover(m, side, sq) || freeOut(m, side, sq) || // a building stays put
+    sq.luckMove === m.round || (movedId(m, side) !== sq.id && slotMovesLeft(m, side) > 0) || // Otto's horseshoe: a free move
     (movedId(m, side) == null ? m.gold[side] >= CONFIG.moveCost : movedId(m, side) === sq.id));
   function moveSquad(m, side, sqId, col, row) {
     const sq = m.armies[side].find(s => s.id === sqId);
@@ -1614,14 +1634,18 @@ const Game = (() => {
     const into = boardable(m, side, col, row, sq.unit);
     if (into && into.id === sq.in) return false;
     if (!canPlaceAt(m, side, col, row, sq.unit, true) || (occupied(m, side, col, row) && !into && !garrisonFree(m, side, col, row, sq.unit))) return false;
-    if (sq.round !== m.round && !freeMover(m, side, sq) && movedId(m, side) == null) {
+    const free = freeMover(m, side, sq) || freeOut(m, side, sq);
+    if (sq.round !== m.round && !free && movedId(m, side) !== sq.id && sq.luckMove !== m.round && slotMovesLeft(m, side) > 0) { // a horseshoe move: free
+      sq.from = { col: sq.col, row: sq.row, ...(isRider(sq) ? { in: sq.in } : {}) };
+      sq.movedRound = m.round; sq.luckMove = m.round;
+    } else if (sq.round !== m.round && !free && sq.luckMove !== m.round && movedId(m, side) == null) {
       if (!m.moved) m.moved = [null, null];
       m.gold[side] -= CONFIG.moveCost;
       m.moved[side] = sq.id;
       sq.from = { col: sq.col, row: sq.row, ...(isRider(sq) ? { in: sq.in } : {}) };
       sq.movedRound = m.round;
     }
-    if (sq.round !== m.round && freeMover(m, side, sq) && !(sq.from && sq.movedRound === m.round)) { // free, but the opponent still sees it where it was until the fight
+    if (sq.round !== m.round && free && !(sq.from && sq.movedRound === m.round)) { // free, but the opponent still sees it where it was until the fight
       sq.from = { col: sq.col, row: sq.row, ...(isRider(sq) ? { in: sq.in } : {}) };
       sq.movedRound = m.round;
     }
@@ -1629,7 +1653,7 @@ const Game = (() => {
     if (into) sq.in = into.id; else delete sq.in;
     syncRiders(m, side);
     if (sq.from && sq.movedRound === m.round && sq.from.col === col && sq.from.row === row && sq.from.in === sq.in) {
-      if (movedId(m, side) === sq.id) undoMove(m, side); else { delete sq.from; delete sq.movedRound; } // back where it was (a free move costs nothing to undo)
+      if (movedId(m, side) === sq.id) undoMove(m, side); else { delete sq.from; delete sq.movedRound; delete sq.luckMove; } // back where it was (a free move costs nothing to undo)
     }
     return true;
   }
@@ -1702,7 +1726,7 @@ const Game = (() => {
     return !!sq && unplaceSquad(m, side, sq.id);
   }
   function unplaceSquad(m, side, id) {
-    const i = m.armies[side].findIndex(s => s.id === id && s.round === m.round);
+    const i = m.armies[side].findIndex(s => s.id === id && s.round === m.round && !s.gift); // a slot machine goblin is kept
     if (i < 0) return false;
     const [sq] = m.armies[side].splice(i, 1);
     m.gold[side] += sq.cost + (sq.awaken > 0 ? awakenCost(m, sq.unit) : 0); // its awakening too
@@ -2248,8 +2272,11 @@ const Game = (() => {
     m.round++;
     m.extraDeploys = [0, 0];
     m.moved = [null, null];
-    for (const a of m.armies) for (const sq of a) { delete sq.from; delete sq.movedRound; }
+    for (const a of m.armies) for (const sq of a) { delete sq.from; delete sq.movedRound; delete sq.luckMove; }
     rollBuffTiles(m, 0); rollBuffTiles(m, 1);
+    // the carry cap: unspent gold over CARRY_CAP is lost before this round's gold comes in
+    summary.capLost = [0, 1].map(sd => Math.max(0, m.gold[sd] - CARRY_CAP));
+    for (const sd of [0, 1]) m.gold[sd] -= summary.capLost[sd];
     const income = incomeFor(m.round), before = m.gold.slice();
     m.gold[0] += income; m.gold[1] += income;
     summary.income = income;
@@ -2262,6 +2289,13 @@ const Game = (() => {
     const loser = summary.round >= LOSER_BONUS_ROUND ? (dmg[0] > dmg[1] ? 0 : dmg[1] > dmg[0] ? 1 : -1) : -1;
     if (loser >= 0) m.gold[loser] += LOSER_BONUS;
     summary.bonusTo = loser;
+    // win streaks and the shutdown bounty (a draw ends both streaks and pays nothing)
+    const rw = dmg[0] < dmg[1] ? 0 : dmg[1] < dmg[0] ? 1 : -1;
+    const st = m.streak || [0, 0];
+    summary.shutdown = [0, 1].map(sd => sd === rw ? shutdownGold(st[1 - sd]) : 0);
+    for (const sd of [0, 1]) m.gold[sd] += summary.shutdown[sd];
+    m.streak = [0, 1].map(sd => sd === rw ? st[sd] + 1 : 0);
+    summary.streak = m.streak.slice();
     // treasuries: one that stood through the fight pays its owner; a destroyed one lets the opponent steal from its owner
     summary.treasury = [0, 1].map(sd => ({ gold: treasuryFell[sd] === false ? TREASURY.gold : 0, lost: 0 }));
     for (const sd of [0, 1]) m.gold[sd] += summary.treasury[sd].gold;
@@ -2292,6 +2326,84 @@ const Game = (() => {
 
   // Felix: extra gold every round from CHAR.felixRound on, more from CHAR.felixRound2 on (on top of the income)
   const felixGold = (m, side, round = m.round) => charOf(m, side) !== 'felix' ? 0 : round >= CHAR.felixRound2 ? CHAR.felixGold2 : round >= CHAR.felixRound ? CHAR.felixGold : 0;
+
+  // ---------- Otto - The Gambler: the slot machine ----------
+  // SLOT.cost gold a spin, SLOT.perRound spins a round. Each spin's outcome comes from the match seed, the side, the
+  // round and the spin's number, so both phones get the same one. Three of a kind pays (odds in %, the rest is nothing):
+  // skull −SLOT.skullHp health (never below 1), shoe a free move and +1 deployment this round, coin +SLOT.coinGold,
+  // goblin a random tier 1 squad at level 2 (unlocked too, no deployment used), chest +SLOT.chestGold.
+  // m.slots[side][round] = [{ win: symbol or null, unit (goblin) }, ...]. A spin can't be undone.
+  const SLOT = { cost: 50, perRound: 3, skullHp: 5, coinGold: 100, chestGold: 500,
+    odds: [['skull', 12], ['shoe', 12], ['coin', 12], ['goblin', 3], ['chest', 1]], symbols: ['skull', 'shoe', 'coin', 'goblin', 'chest'] };
+  const slotSpins = (m, side, round = m && m.round) => (m && m.slots && m.slots[side] && m.slots[side][round]) || [];
+  const slotWins = (m, side, sym) => slotSpins(m, side).filter(x => x.win === sym).length;
+  const slotMovesLeft = (m, side) => slotWins(m, side, 'shoe') - m.armies[side].filter(q => q.luckMove === m.round).length;
+  const canSpin = (m, side) => !!m && !m.over && charOf(m, side) === 'otto' && slotSpins(m, side).length < SLOT.perRound && m.gold[side] >= SLOT.cost;
+  const slotRng = (m, side, round, k) => rng(m.seed + round * 5471 + side * 7919 + k * 613 + 29);
+  // the k-th spin of a round: what it wins, and for a goblin, which tier 1 unit (one not left out of the match)
+  function slotOutcome(m, side, round, k) {
+    const r = slotRng(m, side, round, k), x = r() * 100;
+    let acc = 0, win = null;
+    for (const [sym, p] of SLOT.odds) { acc += p; if (x < acc) { win = sym; break; } }
+    const out = { win };
+    if (win === 'goblin') {
+      const pool = m.units.map((_, i) => i).filter(i => isTier1(m, i) && !isOff(m, i, side) && !m.units[i].building);
+      if (pool.length) out.unit = pool[Math.floor(r() * pool.length)];
+    }
+    return out;
+  }
+  // what the three reels show: three of the winning symbol, or a mix (sometimes two of a kind, a near miss)
+  function slotReels(m, side, round, k) {
+    const o = slotOutcome(m, side, round, k);
+    if (o.win) return [o.win, o.win, o.win];
+    const r = rng(m.seed + round * 5477 + side * 7927 + k * 617 + 31), S = SLOT.symbols, pick = () => S[Math.floor(r() * S.length)];
+    let reels = [pick(), pick(), pick()];
+    if (r() < 0.3) { const a = pick(); let b = pick(); while (b === a) b = pick(); reels = [a, a, b]; for (let i = 2; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [reels[i], reels[j]] = [reels[j], reels[i]]; } }
+    while (reels[0] === reels[1] && reels[1] === reels[2]) reels[2] = pick();
+    return reels;
+  }
+  // a spin's effects on this phone's match (gold, health, the goblin squad); returns the spin's record
+  function spin(m, side) {
+    if (!canSpin(m, side)) return null;
+    if (!m.slots) m.slots = [{}, {}];
+    const list = m.slots[side][m.round] || (m.slots[side][m.round] = []);
+    const o = slotOutcome(m, side, m.round, list.length), rec = { win: o.win };
+    m.gold[side] -= SLOT.cost;
+    if (o.win === 'skull') m.hp[side] = Math.max(1, m.hp[side] - SLOT.skullHp);
+    else if (o.win === 'coin') m.gold[side] += SLOT.coinGold;
+    else if (o.win === 'chest') m.gold[side] += SLOT.chestGold;
+    else if (o.win === 'goblin') {
+      if (o.unit == null) m.gold[side] += SLOT.coinGold * 2;
+      else {
+        const ui = o.unit; rec.unit = ui;
+        if (!m.unlocks) m.unlocks = [{}, {}];
+        if (!isUnlocked(m, side, ui)) m.unlocks[side][ui] = m.round;
+        const spot = aiSpot(m, side, ui, m.armies[1 - side].filter(q => q.round < m.round), slotRng(m, side, m.round, list.length + 97));
+        if (spot) m.armies[side].push({ id: m.nextId[side]++, unit: ui, col: spot.col, row: spot.row, round: m.round, xp: xpNeeded(m.units[ui], 0), level: 1, cost: 0, gift: true });
+        else m.gold[side] += unitCostOf(m.units[ui]) + levelCost(m.units[ui]); // no room: its worth in gold
+      }
+    }
+    list.push(rec);
+    return rec;
+  }
+  // the host takes the guest's spins: up to n this round, replayed here for the health they cost (the gold and the
+  // goblin squad come with the guest's side)
+  function takeSpins(m, side, n) {
+    if (charOf(m, side) !== 'otto') return;
+    n = Math.max(0, Math.min(SLOT.perRound, n | 0));
+    if (!m.slots) m.slots = [{}, {}];
+    const list = m.slots[side][m.round] || (m.slots[side][m.round] = []);
+    while (list.length < n) {
+      const o = slotOutcome(m, side, m.round, list.length);
+      if (o.win === 'skull') m.hp[side] = Math.max(1, m.hp[side] - SLOT.skullHp);
+      list.push(o.unit != null ? { win: o.win, unit: o.unit } : { win: o.win });
+    }
+  }
+  // the bot: now and then a spin, while it keeps a squad's worth of gold
+  function aiSlots(m, side) {
+    const r = rng(m.seed + m.round * 853 + side * 59);
+    while (canSpin(m, side) && m.gold[side] - SLOT.cost >= SQUAD_COST && r() < 0.5) spin(m, side);
+  }
 
   // ---------- leveling (manual, costs gold) ----------
   const isReady = (m, sq) => sq.level < E.MAX_LEVEL && sq.xp >= xpNeeded(m.units[sq.unit], sq.level) && !(m.units[sq.unit].building && !sq.built); // a building levels once built
@@ -2784,6 +2896,7 @@ const Game = (() => {
       if (q() < 0.6 && m.gold[side] - g.cost >= SQUAD_COST) buyMageGen(m, side, g.id);
     }
     aiDev(m, side, rng(m.seed + m.round * 829 + side * 53)); // devtest: pick, buildings, spells (own stream)
+    aiSlots(m, side); // Otto: the slot machine (own stream)
     const opp = 1 - side;
     const oppArmy = m.armies[opp].filter(s => s.round < m.round);
     for (const ui of freeLeft(m, side)) { const spot = aiSpot(m, side, ui, oppArmy, r); if (spot) place(m, side, ui, spot.col, spot.row); }
@@ -2921,9 +3034,9 @@ const Game = (() => {
 
   const api = {
     MAX_ROUND_DMG, TIER_DMG, bankBusy, seenAt, charShown, towerTypeShown, altarShown, elfOwnShown, shroomShown, removingShroom, movedId, canMove, moveSquad, undoMove,
-    COLS, ROWS, TILE, ZONE, START_HP, START_GOLD, INCOME, incomeFor, LOSER_BONUS, LOSER_BONUS_ROUND, TOWER_FALL_HP, CREDIT_LINE, loanTerms, treasurySteal, SQUAD_COST, SETTINGS, XP_STEPS, xpNeeded, unitCostOf,
+    COLS, ROWS, TILE, ZONE, START_HP, START_GOLD, INCOME, incomeFor, LOSER_BONUS, LOSER_BONUS_ROUND, TOWER_FALL_HP, CARRY_CAP, SHUTDOWN, shutdownGold, CREDIT_LINE, loanTerms, treasurySteal, SQUAD_COST, SETTINGS, XP_STEPS, xpNeeded, unitCostOf,
     levelCost, isReady, levelUp, undoLevel, levelAllPlan, levelAll, upgradeOffer, seenLevel, aiLevel, AI, CONFIG,
-    deploysAllowed, deploysLeft, deployedThisRound, canBuyDeploy, buyDeploy, refundDeploy, musterOn, musterDeploys, extraDeployMax,
+    deploysAllowed, deploysLeft, deployedThisRound, canBuyDeploy, buyDeploy, refundDeploy, musterOn, deployBuyable,
     PACKAGE, allPackages, packOf, needsPack, freeLeft, choosePack, ensurePack,
     unlockCost, tierOf, startLevel, shopCost, mapFreeOf, mapFreeLeft, isUnlocked, unlockVisible, unlock, undoUnlock,
     skillDef, skillCost, SKILL_STEP, skillsBought, isInnate, hasSkill, skillVisible, skillNeeds, skillNeedsAny, skillNeedsMissing, skillHeldUp, isFlat, isMaster, isAwaken, awakenSlot, awakenCost, wokeUnit, awakenBlock, canAwaken, awaken, undoAwaken, seenAwake, isEvolve, evolveSlot, evolveReady, isEvolved, shownAwake, glutOf, glutMax, glutFull, skillOr, skillOrTaken, unitFor, withCharacter,
@@ -2931,12 +3044,12 @@ const Game = (() => {
     setBuildings, BUILDINGS: () => BUILDINGS, buildingInfo, BUILDING_SQUAD, isBuildingSkill, buildingIdOf, buildingsOf, buildingOf, buildingAt, buildingShown, buildingSpotOk,
     canBuyBuilding, buyBuilding, buildingSkills, buildingSkillInfo, bskillOf, bskillCost, canBuyBuildingSkill, buyBuildingSkill, undoBuildingSkill,
     buildingXpNeeded, buildingLevelCost, buildingReady, levelBuilding, undoLevelBuilding, constructBuff, buildingBodies, canBuySkill, buySkill, undoSkill, sellValue, sell,
-    isRider, hiddenFromFoe, isCarrier, riderOf, carrierOf, squadAt, boardable, unplaceSquad,
+    isRider, freeOut, hiddenFromFoe, isCarrier, riderOf, carrierOf, squadAt, boardable, unplaceSquad,
     TOWER, TOWER_TYPES, OUTPOST, TOWER_PICK_ROUND, towerType, towerChoices, needsTowerPick, setTowerType, settleTowerPicks, TOWER_SKILL, towerSkillOf, towerSkillVisible, towerPicked, canBuyTowerSkill, buyTowerSkill, undoTowerSkill, towerSkillCost, towerSkill2Of, towerSkill2Visible, towerSkill2Cost, canBuyTowerSkill2, buyTowerSkill2, undoTowerSkill2, towerSkill2On, AIRSHIP, MOAT, BWALL, BWALL_SQ, EDGES, bwallsOf, bwallOn, edgeOf, bwallWorld, bwallsLeft, bwallShown, bwallSpotOk, placeBwall, unplaceBwall, ensureBwalls, bwallUnit, INVEST, MAGE_GENERALS, mageGenPrice, MAGE, mageGenInfo, mageGenOf, mageTpOf, isExtraGen, mageGenCost, canBuyMageGen, buyMageGen, undoMageGen, mageTowerUnit, generalUnit, LOAN, loanNow, investNow, bankBusy, investNow, bankBusy, canTakeLoan, takeLoan, undoLoan, towerRounds, troundInfo, troundOn, troundCost, canBuyTround, buyTround, undoTround, SLIME_UNITS, slimeTowerUnit, slimeSkillDefs, TOWER_MID, towerColOk, towerAt, needsTower, placeTower, ensureTower,
     FLANK, flankRows, flankOpen, isFlank, flankTiles, reserved, canPlaceAt, isOff, enemyHolds, inNoMans, hasSkillType, garrisonAt, garrisonFree, inBuilding, WATCH_SQ, watchUnit, freeMover,
     STANDARD_PACK, ICE, ALTAR, GOLEM, isIce, hailRound, altarRound, stormShift, stormRows, hailTiles, altarCost, altarRefund, altarCount, pushRoom, altarBought, addAltar, buyAltar, undoAltar, snowgres, snowgreUnit,
-    MAPS, SKINS, EDITOR_MAPS, TERRAIN, objectiveOf, objectiveTiles, SHAPE_PATH, terrainTile, terrainBlocks, terrainOf, groundHeight, ELF_TOWER, SHROOM, SHROOM_SPLIT, shroomAt, shroomTileAt, shroomRemoval, SHROOM_REMOVE, shroomCost, removeShroom, undoRemoveShroom, mapOf, elfSpot, rollMap, BRIBE_COST, bribeList, bribeGold, bribeCount, bribeNow, bribeCost, bribeRefund, ELF_POWER, elfPowered, elfUnit, ELF_OWN, elfOwnCost, elfOwnOf, elfOwnAt, elfOwnUnlocked, elfOwnOffered, canBuyElfOwn, elfOwnSpotOk, buyElfOwn, undoElfOwn, bribeLeader, canBribe, bribe, undoBribe,
-    CHARACTERS, CHAR, charOf, charInfo, enzoSkill, enzoActive, charmOf, isGentleman, canGiveCharm, giveCharm, undoCharm, ensureCharm, felixGold, isTier1, rollBuffTiles, onBuffTile, zoeBuff, yotImps, yotLevel, TOWER_SPOT, towerSpot,
+    MAPS, SKINS, MAP_LOOK, lookOf, EDITOR_MAPS, TERRAIN, objectiveOf, objectiveTiles, SHAPE_PATH, terrainTile, terrainBlocks, terrainOf, groundHeight, ELF_TOWER, SHROOM, SHROOM_SPLIT, shroomAt, shroomTileAt, shroomRemoval, SHROOM_REMOVE, shroomCost, removeShroom, undoRemoveShroom, mapOf, elfSpot, rollMap, BRIBE_COST, bribeList, bribeGold, bribeCount, bribeNow, bribeCost, bribeRefund, ELF_POWER, elfPowered, elfUnit, ELF_OWN, elfOwnCost, elfOwnOf, elfOwnAt, elfOwnUnlocked, elfOwnOffered, canBuyElfOwn, elfOwnSpotOk, buyElfOwn, undoElfOwn, bribeLeader, canBribe, bribe, undoBribe,
+    CHARACTERS, CHAR, charOf, SLOT, slotSpins, slotWins, slotMovesLeft, canSpin, slotOutcome, slotReels, spin, takeSpins, aiSlots, charInfo, enzoSkill, enzoActive, charmOf, isGentleman, canGiveCharm, giveCharm, undoCharm, ensureCharm, felixGold, isTier1, rollBuffTiles, onBuffTile, zoeBuff, yotImps, yotLevel, TOWER_SPOT, towerSpot,
     TREASURY, TREASURY_SQ, treasuryOn, treasuryUp, treasurySpot, treasuryAt, treasuryUnit, deployCost, FORTIFY, fortifyOf, canFortify, fortify, bwallsFighting, VAULT, vaultOn, MARK, markOf, markLost, markOn, markCost, markTarget, canMark, placeMark, markShown,
     FACTION_MODE, FACTIONS: () => FACTIONS, setFactions, factionInfo, factionsOf, factionTowers, towerTypeById, ownsUnit, withFactionTrait, factionSet,
     createDraft, draftTurn, draftOpen, draftAct, draftDone, draftPossible, aiDraftChoice,

@@ -902,7 +902,7 @@
       "range": 2,
       "speed": 7.5,
       "splash": 0,
-      "shape": "triangle",
+      "shape": "goblin",
       "color": "#9BD35A",
       "skills": [
         "aaargh",

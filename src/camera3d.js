@@ -44,7 +44,9 @@ const Camera3D = (THREE, camera, el, opts) => {
   const PINCH_PER_LEVEL = Math.log(2.1); // spreading the fingers 2.1x apart goes in one level
   const PAN_SPEED = 2;                 // a drag moves the view this many times as far as the finger
   const TILT = 50;                     // pitch of the tilted view (degrees above the horizon)
-  const TILT_IN = 0.86;                // the tilted view sits this much closer than a fit of the whole board (the far corners may leave the screen)
+  const TILT_IN = 1;                   // the tilted view sits this much closer than a fit of the whole board (below 1 the far corners may leave the screen)
+  const TILT_IN_PC = 1;                 // the same on a PC (a wide window beside the panel)
+  const FAR_TOP = 13;                  // the tilted fit also keeps this height above the far edge on screen (the enemy tower, its flag and health bar)
   const FOCUS = { pitch: 58, dist: 0.6 }; // the battle cam at full strength: at most this pitch, this much of the view's distance
 
   // zoom along the gestures: 0 strategic, 1 tilted, 2 angled, 3 ground (fractional while pinching or settling)
@@ -75,7 +77,10 @@ const Camera3D = (THREE, camera, el, opts) => {
     const ext = (d, tz) => {
       probe.position.set(0, Math.sin(p) * d, tz + Math.cos(p) * d); probe.lookAt(0, 0, tz); probe.updateMatrixWorld();
       let x = 0, y0 = Infinity, y1 = -Infinity;
-      for (const cx of [-W / 2, W / 2]) for (const cz of [-D / 2, D / 2]) for (const h of [0, 2.5]) {
+      const pts = [];
+      for (const cx of [-W / 2, W / 2]) for (const cz of [-D / 2, D / 2]) for (const h of [0, 2.5]) pts.push([cx, h, cz]);
+      for (const cx of [-W / 4, 0, W / 4]) pts.push([cx, FAR_TOP, -D / 2]); // the enemy tower's top, flag and health bar
+      for (const [cx, h, cz] of pts) {
         corner.set(cx, h, cz).project(probe);
         x = Math.max(x, Math.abs(corner.x)); y0 = Math.min(y0, corner.y); y1 = Math.max(y1, corner.y);
       }
@@ -91,7 +96,8 @@ const Camera3D = (THREE, camera, el, opts) => {
       const d = (lo + hi) / 2, e = ext(d, centre(d));
       if (e.x <= 0.97 && (e.y1 - e.y0) / 2 <= 0.97) hi = d; else lo = d;
     }
-    tilt = { pitch: TILT, dist: hi * TILT_IN, tz: centre(hi * TILT_IN) };
+    const tin = document.documentElement.classList.contains('pc') ? TILT_IN_PC : TILT_IN;
+    tilt = { pitch: TILT, dist: hi * tin, tz: centre(hi * tin) };
   }
   // pitch and distance for any zoom value, gliding between levels (distance on a log scale, so it feels even)
   function pose(zz) {
