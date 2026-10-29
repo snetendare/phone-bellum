@@ -233,13 +233,14 @@
       "params": {
         "range": 18,
         "min": 5,
-        "aps": 0.1
+        "aps": 0
       },
       "also": [
         {
           "type": "stats",
           "params": {
-            "hit": -20
+            "hit": -20,
+            "aps": -0.1
           }
         }
       ]
@@ -1002,7 +1003,7 @@
       "name": "Ember Imps",
       "cost": 100,
       "bodies": 4,
-      "hp": 110,
+      "hp": 90,
       "hit": 20,
       "aps": 0.8,
       "range": 10,
@@ -1247,9 +1248,9 @@
       "name": "Wisps",
       "cost": 100,
       "bodies": 2,
-      "hp": 80,
+      "hp": 65,
       "hit": 75,
-      "aps": 0.8,
+      "aps": 0.7,
       "range": 19,
       "speed": 4,
       "splash": 0,

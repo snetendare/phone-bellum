@@ -350,7 +350,7 @@ const Engine = (() => {
       case 'turret': return `Attacks ${n('turrets')} different enemies at once.`;
       case 'frenzy': return `Each hit: +${n('pct')}% attack speed (max ${n('cap')}/s).`;
       case 'spread': return `Bodies scatter ${n('min')}–${n('max')} m at fight start.`;
-      case 'mortar': return `+${n('range')} m range, +${n('aps')} attacks/s. Can’t hit within ${n('min')} m.`;
+      case 'mortar': return `+${n('range')} m range${+P('aps') ? `, +${n('aps')} attacks/s` : ''}. Can’t hit within ${n('min')} m.`;
       case 'shield': return `Blocks the first ${+P('hits') === 1 ? 'hit' : `${n('hits')} hits`} each fight.`;
       case 'building': return `Place a ${String(P('building'))}. Builders build it in the fight.`;
       case 'momentum': return `Reaches full roll speed ${n('accel')}% faster.`;

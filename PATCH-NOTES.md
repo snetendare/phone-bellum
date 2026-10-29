@@ -4,6 +4,14 @@ Newest first. Each entry says what changed for players; technical details live i
 
 ---
 
+## 29 October 2026 – Balance
+
+- **Sniper tower:** can't hit anything within **1 tile** (6 m) of it.
+- **Ember Imps:** health 110 → **90**. Ember Mortar: −0.2 attack speed (now −0.1 attacks/s instead of +0.1).
+- **Wisps:** health 80 → **65**, attack speed 0.8 → **0.7**/s. Keep Guards (Wisps) follow.
+
+---
+
 ## 29 October 2026 (late night) – Otto - The Gambler
 
 ### New leader: Otto - The Gambler

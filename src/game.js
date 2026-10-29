@@ -47,7 +47,7 @@ const Game = (() => {
       skill: { name: 'Guards', text: '4 Wisp guards defend the keep for 5 s each fight, then attack.' },
       skill2: { name: 'Brute guards', cost: 400, needs: true, text: 'Guards are Brutes, with your Brute skills. Needs Guards.' },
       muster: { name: 'Muster', text: '1 extra deployment every round, for free.' } }, // see musterOn
-    { id: 'sniper', name: 'Sniper tower', text: 'Slow, huge range, double damage.', unit: { ...TOWER, name: 'Sniper Tower', kind: 'sniper', hp: 500, hit: 60, aps: 0.4, range: 32, color: '#B9C7D6' },
+    { id: 'sniper', name: 'Sniper tower', text: 'Slow, huge range, double damage. Can’t hit within 1 tile.', unit: { ...TOWER, name: 'Sniper Tower', kind: 'sniper', hp: 500, hit: 60, aps: 0.4, range: 32, minRange: TILE, color: '#B9C7D6' },
       skill: { name: 'Eagle eye', text: 'Tower and Snipers: +3 m range, +10% attack speed.' },
       skill2: { name: 'Deploy airship', cost: 400, text: 'An untouchable airship shoots like a level 3 Sniper and drops paratroopers each fight. Snipers and tower: +30 hit.' },
       mark: { name: 'Mark Bounty', cost: 50, text: 'Mark one enemy squad for the rest of the match. Your Snipers deal it +15% damage and see it through stealth; +100 gold each fight a Sniper takes its last body. The mark can’t be moved; if they sell the squad, place it again for free.' } }, // see MARK
@@ -97,7 +97,7 @@ const Game = (() => {
   // Each tower type has one skill, bought once per match after the pick (TOWER_SKILL gold); it stays hidden from the
   // opponent until the fight of the round it was bought in. m.towerSkill[side] = round it was bought (0 = not)
   const TOWER_SKILL = { cost: 100, guards: 4, guardHold: 5, eagleRange: 3, eagleAps: 10, homeArmor: 2, homeHp: 10 };
-  const GUARD = { name: 'Wisps', cost: 1, bodies: 2, hp: 80, hit: 75, aps: 0.8, range: 19, speed: 4, splash: 0, projSpeed: 20 }; // used when the roster has no Wisps
+  const GUARD = { name: 'Wisps', cost: 1, bodies: 2, hp: 65, hit: 75, aps: 0.7, range: 19, speed: 4, splash: 0, projSpeed: 20 }; // used when the roster has no Wisps
   const towerSkillOf = (m, side) => !!(m && m.towerSkill && m.towerSkill[side] > 0);
   const towerSkillVisible = (m, side) => towerSkillOf(m, side) && m.towerSkill[side] < m.round;
   const towerPicked = (m, side) => !!(m && m.round >= TOWER_PICK_ROUND && m.towers && m.towers[side] && m.towers[side].type);
