@@ -4,6 +4,21 @@ Newest first. Each entry says what changed for players; technical details live i
 
 ---
 
+## 29 October 2026 (night) – Gold cap and shutdown bounty
+
+### Gold carry cap
+- You can carry at most **500 gold** into the next round. Anything above that is lost when the fight starts.
+- If you press Fight or Ready with more than 500 gold, a warning tells you how much you'd lose, so you can keep shopping or go anyway.
+- This stops "save everything, then flood the board with tier 4" from being the best plan.
+
+### Shutdown bounty
+- Win 3 rounds in a row and a 🔥 with your streak appears next to your health.
+- The opponent who breaks the streak earns **+100 gold**, plus **+50** for each win past 3 (4 in a row pays 150, 5 pays 200).
+- A draw ends both streaks without paying anything.
+- The loser's +50 gold (from round 3) stays as it was.
+
+---
+
 ## 29 October 2026 (late evening) – Main menu: map looks
 
 ### Looks

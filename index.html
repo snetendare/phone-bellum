@@ -522,6 +522,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
 .marks .intent-n circle { fill: rgba(13, 19, 21, 0.85); stroke-width: 1.2; }
 .marks .intent-n text { fill: var(--ink); font: 700 10px/1 var(--font-body, sans-serif); text-anchor: middle; }
 @media (prefers-reduced-motion: reduce) { .coach, .coach-ring, .tut-glow, .marks .tut-tile, .seg.speeds button.offer { animation: none; } .tut-glow { box-shadow: inset 0 0 0 2px var(--gold); } }
+.streak { font-size: 11px; font-weight: 700; color: var(--gold); margin-right: 4px; white-space: nowrap; }
 </style>
 <script>
 // PC or phone: a fine pointer that can hover (a mouse) and room for the board and controls side by side
@@ -534,9 +535,9 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
 <body>
 <div class="app">
   <div class="hud" aria-label="Match status">
-    <div class="side you"><div class="lbl"><span>You</span><span class="num" id="hp-you">50</span></div><div class="hp"><i id="hpbar-you" style="width:100%"></i></div></div>
+    <div class="side you"><div class="lbl"><span>You</span><span class="streak" id="streak-you" hidden></span><span class="num" id="hp-you">50</span></div><div class="hp"><i id="hpbar-you" style="width:100%"></i></div></div>
     <div class="round"><b class="num" id="round">1</b><div class="round-sub"><span id="phase">Deploy</span><button class="cog" id="stats" aria-label="Damage last round" aria-expanded="false"><svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M4 5h9v3H4zM4 10.5h15v3H4zM4 16h6v3H4z"/></svg></button><button class="cog" id="cog" aria-label="Settings"><svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M19.4 13a7.6 7.6 0 0 0 0-2l2.1-1.6-2-3.4-2.5 1a7.4 7.4 0 0 0-1.7-1L15 3.3h-4l-.4 2.7a7.4 7.4 0 0 0-1.7 1l-2.5-1-2 3.4L6.6 11a7.6 7.6 0 0 0 0 2l-2.1 1.6 2 3.4 2.5-1a7.4 7.4 0 0 0 1.7 1l.4 2.7h4l.4-2.7a7.4 7.4 0 0 0 1.7-1l2.5 1 2-3.4zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)"/></svg></button></div></div>
-    <div class="side foe"><div class="lbl"><span id="foe-name">Enemy</span><span class="num" id="hp-foe">50</span></div><div class="hp"><i id="hpbar-foe" style="width:100%"></i></div></div>
+    <div class="side foe"><div class="lbl"><span id="foe-name">Enemy</span><span class="streak" id="streak-foe" hidden></span><span class="num" id="hp-foe">50</span></div><div class="hp"><i id="hpbar-foe" style="width:100%"></i></div></div>
   </div>
   <div class="net" id="net" hidden aria-live="polite"><i></i><span id="net-text"></span></div>
 
@@ -3540,6 +3541,10 @@ const Game = (() => {
   const TILE = 6, GRID = { cols: 12, rows: 16, zone: 6 };
   let COLS = GRID.cols, ROWS = GRID.rows, ZONE = GRID.zone;
   const START_HP = 100, MAX_ROUND_DMG = 35, START_GOLD = 250, INCOME = 250, LOSER_BONUS = 50, LOSER_BONUS_ROUND = 3; // no loser gold for rounds 1-2
+  // Gold carry cap: at most CARRY_CAP unspent gold goes into the next round (the rest is lost before the new gold comes in).
+  // Shutdown: breaking an opponent's streak of SHUTDOWN.from+ round wins pays SHUTDOWN.gold, +SHUTDOWN.step per win past that.
+  const CARRY_CAP = 500, SHUTDOWN = { from: 3, gold: 100, step: 50 };
+  const shutdownGold = (streak) => streak >= SHUTDOWN.from ? SHUTDOWN.gold + SHUTDOWN.step * (streak - SHUTDOWN.from) : 0;
   const TOWER_FALL_HP = 10; // a player whose tower falls in a fight loses this much health too (on top of the round's damage)
   const SQUAD_COST = 100;
   const SETTINGS = { dt: 0.05, timeCap: 60, spacing: 3.5, minDmgPct: 15, absorbXp: 1, armorXp: 0.5, sight: 15, minSight: 18, drift: 15, flameReach: 1.2 }; // sight: metres beyond range a unit notices an enemy (at least minSight), drift: it leans toward one this much further out. flameReach: flame cones reach 1.2x the unit's range
@@ -4648,7 +4653,7 @@ const Game = (() => {
     const rules = opts && opts.rules && typeof opts.rules === 'object' ? { ...opts.rules } : null;
     const m = {
       units, matrix, seed: seed >>> 0,
-      round: 1, hp: [START_HP, START_HP], gold: [START_GOLD, START_GOLD],
+      round: 1, hp: [START_HP, START_HP], gold: [START_GOLD, START_GOLD], streak: [0, 0],
       armies: [[], []], nextId: [1, 1], history: [], over: false, winner: -1,
       extraDeploys: [0, 0],
       moved: [null, null], // id of the squad each player moved this round (one move per round, CONFIG.moveCost gold)
@@ -5764,6 +5769,9 @@ const Game = (() => {
     m.moved = [null, null];
     for (const a of m.armies) for (const sq of a) { delete sq.from; delete sq.movedRound; }
     rollBuffTiles(m, 0); rollBuffTiles(m, 1);
+    // the carry cap: unspent gold over CARRY_CAP is lost before this round's gold comes in
+    summary.capLost = [0, 1].map(sd => Math.max(0, m.gold[sd] - CARRY_CAP));
+    for (const sd of [0, 1]) m.gold[sd] -= summary.capLost[sd];
     const income = incomeFor(m.round), before = m.gold.slice();
     m.gold[0] += income; m.gold[1] += income;
     summary.income = income;
@@ -5776,6 +5784,13 @@ const Game = (() => {
     const loser = summary.round >= LOSER_BONUS_ROUND ? (dmg[0] > dmg[1] ? 0 : dmg[1] > dmg[0] ? 1 : -1) : -1;
     if (loser >= 0) m.gold[loser] += LOSER_BONUS;
     summary.bonusTo = loser;
+    // win streaks and the shutdown bounty (a draw ends both streaks and pays nothing)
+    const rw = dmg[0] < dmg[1] ? 0 : dmg[1] < dmg[0] ? 1 : -1;
+    const st = m.streak || [0, 0];
+    summary.shutdown = [0, 1].map(sd => sd === rw ? shutdownGold(st[1 - sd]) : 0);
+    for (const sd of [0, 1]) m.gold[sd] += summary.shutdown[sd];
+    m.streak = [0, 1].map(sd => sd === rw ? st[sd] + 1 : 0);
+    summary.streak = m.streak.slice();
     // treasuries: one that stood through the fight pays its owner; a destroyed one lets the opponent steal from its owner
     summary.treasury = [0, 1].map(sd => ({ gold: treasuryFell[sd] === false ? TREASURY.gold : 0, lost: 0 }));
     for (const sd of [0, 1]) m.gold[sd] += summary.treasury[sd].gold;
@@ -6435,7 +6450,7 @@ const Game = (() => {
 
   const api = {
     MAX_ROUND_DMG, TIER_DMG, bankBusy, seenAt, charShown, towerTypeShown, altarShown, elfOwnShown, shroomShown, removingShroom, movedId, canMove, moveSquad, undoMove,
-    COLS, ROWS, TILE, ZONE, START_HP, START_GOLD, INCOME, incomeFor, LOSER_BONUS, LOSER_BONUS_ROUND, TOWER_FALL_HP, CREDIT_LINE, loanTerms, treasurySteal, SQUAD_COST, SETTINGS, XP_STEPS, xpNeeded, unitCostOf,
+    COLS, ROWS, TILE, ZONE, START_HP, START_GOLD, INCOME, incomeFor, LOSER_BONUS, LOSER_BONUS_ROUND, TOWER_FALL_HP, CARRY_CAP, SHUTDOWN, shutdownGold, CREDIT_LINE, loanTerms, treasurySteal, SQUAD_COST, SETTINGS, XP_STEPS, xpNeeded, unitCostOf,
     levelCost, isReady, levelUp, undoLevel, levelAllPlan, levelAll, upgradeOffer, seenLevel, aiLevel, AI, CONFIG,
     deploysAllowed, deploysLeft, deployedThisRound, canBuyDeploy, buyDeploy, refundDeploy,
     PACKAGE, allPackages, packOf, needsPack, freeLeft, choosePack, ensurePack,
@@ -8803,6 +8818,11 @@ const Render2D = (cv, view, opts = {}) => {
     $('hpbar-you').style.width = (hpMe / Game.START_HP * 100) + '%';
     $('hpbar-foe').style.width = (hpFoe / Game.START_HP * 100) + '%';
     $('round').textContent = v ? v.round : 1;
+    for (const [id, sd] of [['streak-you', me], ['streak-foe', foe()]]) { // a live shutdown bounty on a win streak
+      const n = v && v.streak ? v.streak[sd] || 0 : 0, el = $(id), b = Game.shutdownGold(n);
+      el.hidden = !b;
+      if (b) { el.textContent = `🔥${n}`; el.title = `${n} wins in a row · breaking the streak pays ${b} gold`; }
+    }
     $('phase').textContent = { start: 'Ready', lobby: 'Lobby', draft: 'Draft', deploy: 'Deploy', battle: 'Battle', result: 'Result', end: 'Match over' }[phase];
     $('foe-name').textContent = foeName();
     document.querySelector('.hud').hidden = phase === 'start' || phase === 'lobby' || phase === 'draft'; // no match yet: nothing to show
@@ -9134,6 +9154,17 @@ const Render2D = (cv, view, opts = {}) => {
       if (editable() && Game.unlock(m, me, i)) { closeSheet(); selected = i; scrollTo2 = i; changed(); }
     }));
   }
+  // the carry cap: going into a fight with more than Game.CARRY_CAP unspent asks first
+  function capCheck(go) {
+    const g = m && m.gold[me] || 0, lost = g - Game.CARRY_CAP;
+    if (mode === 'tutorial' || lost <= 0) { go(); return; }
+    $('sheet').innerHTML = `<div class="bar"><h3 id="sheet-h">Unspent gold</h3><button class="btn small" id="close">Keep shopping</button></div>
+      <p style="margin:0">You have ${g} gold. Only ${Game.CARRY_CAP} carries over to the next round, so ${lost} will be lost.</p>
+      <div class="btnrow"><button class="btn primary" id="cap-go">${solo() ? 'Fight anyway' : 'Ready anyway'}</button></div>`;
+    $('sheet-back').hidden = false;
+    $('close').addEventListener('click', closeSheet);
+    $('cap-go').addEventListener('click', () => { closeSheet(); if (phase === 'deploy' && !timeUp) go(); });
+  }
   function askSell(sq) {
     const u = units[sq.unit], v = Game.sellValue(m, sq);
     $('sheet').innerHTML = `<div class="bar"><h3 id="sheet-h">Sell ${esc(u.name)}?</h3><button class="btn small" id="close">Cancel</button></div>
@@ -9401,8 +9432,8 @@ const Render2D = (cv, view, opts = {}) => {
       addEventListener('pointermove', mv); addEventListener('pointerup', up);
     });
     if (scrollTo2 != null) { const c = shop.querySelector(`.uc2[data-i="${scrollTo2}"]`); scrollTo2 = null; if (c) c.scrollIntoView({ block: 'nearest', inline: 'center' }); }
-    if ($('fight')) $('fight').addEventListener('click', runFight);
-    if ($('ready')) $('ready').addEventListener('click', toggleReady);
+    if ($('fight')) $('fight').addEventListener('click', () => capCheck(runFight));
+    if ($('ready')) $('ready').addEventListener('click', () => ready[me] ? toggleReady() : capCheck(toggleReady));
     if ($('buy-deploy')) $('buy-deploy').addEventListener('click', () => { if (editable() && Game.buyDeploy(m, me)) changed(); });
     wireMore();
     $('help-btn').addEventListener('click', openHelp);
@@ -9698,6 +9729,7 @@ const Render2D = (cv, view, opts = {}) => {
         <li>Squads stay all match, and you see the enemy’s earlier ones while you deploy. Build counters.</li>
         <li>The loser of a fight takes damage from every enemy squad still standing, at most ${Game.MAX_ROUND_DMG} a round. Run out of health and you lose.</li>
         <li>A squad costs ${Game.SQUAD_COST}, income grows by ${Game.CONFIG.incomeStep} a round, and you have ${DEPLOY_SECONDS} s and 2 deployments a round (3 in round 1).</li>
+        <li>At most ${Game.CARRY_CAP} unspent gold carries over to the next round. Break an enemy streak of ${Game.SHUTDOWN.from} or more wins (🔥 by their health) for +${Game.SHUTDOWN.gold} gold, and +${Game.SHUTDOWN.step} more for each win past ${Game.SHUTDOWN.from}.</li>
       </ul>
       <div class="learn">
         ${[
@@ -9784,6 +9816,8 @@ const Render2D = (cv, view, opts = {}) => {
     phase = 'result'; hud(); netStatus();
     const gold = [`+${sum.income || Game.incomeFor(sum.round + 1)} gold`];
     if (sum.bonusTo === me) gold.push(`+${Game.LOSER_BONUS} for losing`);
+    if (sum.shutdown && sum.shutdown[me]) gold.push(`+${sum.shutdown[me]} shutdown`);
+    if (sum.capLost && sum.capLost[me]) gold.push(`−${sum.capLost[me]} over the ${Game.CARRY_CAP} cap`);
     if (sum.felix && sum.felix[me]) gold.push(`+${sum.felix[me]} Felix`);
     if (sum.invest && sum.invest[me]) gold.push(`+${sum.invest[me]} investment`);
     if (sum.loan && sum.loan[me]) gold.push(`−${sum.loan[me]} loan`);
@@ -10110,7 +10144,7 @@ RULES
 - Board: columns 0-${Game.COLS - 1}, rows 0-${Game.ROWS - 1}, tiles ${Game.TILE} m wide. Your zone is rows 0-${Game.ZONE - 1}; row ${Game.ZONE - 1} is your front line, nearest the enemy, and row 0 is the back. Rows ${Game.ZONE}-${Game.ROWS - Game.ZONE - 1} are no man's land. From round ${Game.FLANK.round} each player may also deploy on flank tiles: columns ${Game.FLANK.cols.join(' and ')}, on the OPPONENT's half of the board: their whole zone plus their half of no man's land (yours: rows ${Math.min(...Game.flankRows(1))}-${Math.max(...Game.flankRows(1))}; theirs: rows ${Math.min(...Game.flankRows(0))}-${Math.max(...Game.flankRows(0))})${Game.flankOpen(m) ? ', OPEN NOW' : ''}. You can't use a tile the opponent already holds with a squad or their tower. Their flank columns on YOUR half (columns ${Game.FLANK.cols.join(' and ')}, rows ${Math.min(...Game.flankRows(0))}-${Math.max(...Game.flankRows(0))}) are reserved for them for the whole match: you can never place a squad or your tower there. Squads there start inside the enemy's lines, good for hitting their tower or backline from the side, so guard your own edges against theirs. A squad placed on a flank can't move or attack for the first ${Game.FLANK.delay} s of the first fight after it was placed; from the next round on it starts normally. The enemy zone is rows ${Game.ROWS - Game.ZONE}-${Game.ROWS - 1}; row ${Game.ROWS - Game.ZONE} is their front. One squad per tile. Squads keep their tile, except: once per round you may move ONE of your squads from an earlier round to another free tile you could place on, for ${Game.CONFIG.moveCost} gold ("move"). The opponent sees it on its old tile until the fight.
 - The fight is automatic. Every body marches straight ahead in its own column (a squad on a flank tile marches sideways, toward the middle of the board, instead) until an enemy comes within its range + ${Game.SETTINGS.sight} m in any direction (at least ${Game.SETTINGS.minSight} m), then turns toward the nearest enemy and attacks once in range, staying on that enemy until it dies or leaves its range. Within ${Game.SETTINGS.drift} m beyond that it already starts curving toward the nearest enemy. Once no enemy is ahead of it, it turns toward the nearest one. So columns are lanes: a squad fights what stands in or near its lane, a squad in an empty lane far from the enemy walks past and hits the enemy from the side or behind, and long-range units in the back only get attacked once the front is gone. Short-range units in front shield long-range units behind. Spreading out limits splash damage.
 - The round's loser loses health: for each surviving enemy squad, by its tier (${Object.entries(Game.TIER_DMG).map(([t, d]) => `tier ${t}: ${d}`).join(', ')}), scaled by the share of its bodies alive. If time runs out, both sides take damage. A round costs the loser at most ${Game.MAX_ROUND_DMG} health. Health starts at ${Game.START_HP} and the match ends at 0.
-- Gold: both players get ${Game.incomeFor(2)} going into round 2, and ${Game.CONFIG.incomeStep} more every round after that (next round: +${Game.incomeFor(m.round + 1)}). From round ${Game.LOSER_BONUS_ROUND}, the round's loser gets +${Game.LOSER_BONUS} extra. A player whose tower falls in a fight also loses ${Game.TOWER_FALL_HP} health. Unspent gold carries over.
+- Gold: both players get ${Game.incomeFor(2)} going into round 2, and ${Game.CONFIG.incomeStep} more every round after that (next round: +${Game.incomeFor(m.round + 1)}). From round ${Game.LOSER_BONUS_ROUND}, the round's loser gets +${Game.LOSER_BONUS} extra. A player whose tower falls in a fight also loses ${Game.TOWER_FALL_HP} health. At most ${Game.CARRY_CAP} unspent gold carries over; the rest is lost. Breaking a streak of ${Game.SHUTDOWN.from}+ wins in a row pays ${Game.SHUTDOWN.gold}, +${Game.SHUTDOWN.step} for each win past ${Game.SHUTDOWN.from} (current streaks: you ${(m.streak || [0, 0])[1]}, them ${(m.streak || [0, 0])[0]}).
 - This round you may place ${Game.deploysAllowed(m, 1)} new squad(s). You may buy ONE extra deployment per round for ${Game.deployCost(m, 1)} gold.
 - Squads earn XP by dealing and taking damage. A squad marked READY TO LEVEL UP can be upgraded for its unit's level-up cost: level 2 doubles health and hit, level 3 triples them. Leveling up chaff (many cheap bodies) gives the enemy lots of XP when they die.
 ${Game.needsPack(m, 1) ? `- STARTING PACKAGE (round 1, choose first): add "package": N to your reply. Each one unlocks its two units for free and gives you its squads for free (no gold, no deployment); you place them with "place" like any squad, and any you leave out are placed for you. Your options:
@@ -10160,7 +10194,7 @@ CHARACTERS (each package comes with one; its ability lasts the whole match)
 Reply with only a JSON object in this shape:
 {${Game.needsPack(m, 1) ? '"package":0,' : ''}${Game.needsTowerPick(m, 1) ? '"towerType":"keep",' : ''}${Game.needsTowerPick(m, 1) || (Game.towerPicked(m, 1) && !Game.towerSkillOf(m, 1) && Game.towerType(m, 1).skill) ? '"towerSkill":false,' : ''}${Game.needsTowerPick(m, 1) || (Game.towerPicked(m, 1) && !Game.towerSkill2Of(m, 1) && Game.towerType(m, 1).skill2) ? '"towerSkill2":false,' : ''}${Game.needsTowerPick(m, 1) || (Game.towerPicked(m, 1) && Game.towerType(m, 1).id === 'mage') ? '"mageGeneral":null,' : ''}${Game.needsTowerPick(m, 1) || Game.canTakeLoan(m, 1) ? '"loan":false,' : ''}${Game.towerRounds(m, 1).length ? '"towerRounds":[],' : ''}${hasBuildings() ? '"buildingSkills":{},"levelBuilding":[],' : ''}"unlock":["unit name"],"sell":[squad ids],"levelUp":[squad ids, list one twice to level it twice],"skills":[{"unit":"unit name","slot":1}],"awaken":[squad ids],"extraDeployments":0,${Game.elfSpot(m) ? '"bribe":0,' : ''}${Game.elfOwnOffered(m, 1) && !Game.elfOwnOf(m, 1) ? '"elfTower":null,' : ''}${(Game.mapOf(m) || {}).shrooms ? '"removeTiles":[],' : ''}${Game.altarRound(m) ? '"altar":[],' : ''}"move":{"id":squad id,"col":5,"row":3} or null,"place":[{"unit":"unit name","col":5,"row":3}],"say":"one short playful line to your opponent, at most 15 words, shown after the fight"}
 For "say": make it about what is happening in this match, and never repeat a line.${claude.history.length ? ' Lines you already used:\n' + claude.history.slice(-6).map(x => '- ' + x).join('\n') : ''}
-Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills, awaken, ${hasBuildings() ? 'levelBuilding, buildingSkills, ' : ''}${Game.elfSpot(m) ? 'bribe, ' : ''}${Game.elfOwnOffered(m, 1) && !Game.elfOwnOf(m, 1) ? 'elfTower, ' : ''}${(Game.mapOf(m) || {}).shrooms ? 'removeTiles, ' : ''}${Game.altarRound(m) ? 'altar, ' : ''}extraDeployments, move, place. Anything you can't afford or that breaks a rule is skipped, so keep the total cost within your gold (${m.gold[1]} plus any sales). Use exact unit names. Unspent gold isn't lost, but squads on the board win rounds.`;
+Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills, awaken, ${hasBuildings() ? 'levelBuilding, buildingSkills, ' : ''}${Game.elfSpot(m) ? 'bribe, ' : ''}${Game.elfOwnOffered(m, 1) && !Game.elfOwnOf(m, 1) ? 'elfTower, ' : ''}${(Game.mapOf(m) || {}).shrooms ? 'removeTiles, ' : ''}${Game.altarRound(m) ? 'altar, ' : ''}extraDeployments, move, place. Anything you can't afford or that breaks a rule is skipped, so keep the total cost within your gold (${m.gold[1]} plus any sales). Use exact unit names. Unspent gold over ${Game.CARRY_CAP} is lost at the fight, and squads on the board win rounds.`;
   }
 
   // the Claude opponent: buildings (the Mechites' Factory), when the match has a unit that places one
@@ -11300,7 +11334,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   // It falls back to the 2D board when it can't start (no WebGL), when the phone drops the WebGL context, and when
   // fights run under 20 fps at low quality (slower fights step the quality down first), with one line on the board.
   const THREE_URL = './vendor/three.module.min.js'; // the artifact build points this at jsDelivr
-  const V3D = 'a15d095be3'; // the 3D code's version (src/build.js puts a hash of it here)
+  const V3D = 'b7ff7b9cb4'; // the 3D code's version (src/build.js puts a hash of it here)
   const B3D_STORE = 'phone-bellum-board';
   const force2d = /[?&]board=2d\b/.test(location.search);
   const force3d = !force2d && (/[?&]board=3d\b/.test(location.search) || window.PB_FORCE3D === true);

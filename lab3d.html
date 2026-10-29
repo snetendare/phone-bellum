@@ -3158,6 +3158,10 @@ const Game = (() => {
   const TILE = 6, GRID = { cols: 12, rows: 16, zone: 6 };
   let COLS = GRID.cols, ROWS = GRID.rows, ZONE = GRID.zone;
   const START_HP = 100, MAX_ROUND_DMG = 35, START_GOLD = 250, INCOME = 250, LOSER_BONUS = 50, LOSER_BONUS_ROUND = 3; // no loser gold for rounds 1-2
+  // Gold carry cap: at most CARRY_CAP unspent gold goes into the next round (the rest is lost before the new gold comes in).
+  // Shutdown: breaking an opponent's streak of SHUTDOWN.from+ round wins pays SHUTDOWN.gold, +SHUTDOWN.step per win past that.
+  const CARRY_CAP = 500, SHUTDOWN = { from: 3, gold: 100, step: 50 };
+  const shutdownGold = (streak) => streak >= SHUTDOWN.from ? SHUTDOWN.gold + SHUTDOWN.step * (streak - SHUTDOWN.from) : 0;
   const TOWER_FALL_HP = 10; // a player whose tower falls in a fight loses this much health too (on top of the round's damage)
   const SQUAD_COST = 100;
   const SETTINGS = { dt: 0.05, timeCap: 60, spacing: 3.5, minDmgPct: 15, absorbXp: 1, armorXp: 0.5, sight: 15, minSight: 18, drift: 15, flameReach: 1.2 }; // sight: metres beyond range a unit notices an enemy (at least minSight), drift: it leans toward one this much further out. flameReach: flame cones reach 1.2x the unit's range
@@ -4266,7 +4270,7 @@ const Game = (() => {
     const rules = opts && opts.rules && typeof opts.rules === 'object' ? { ...opts.rules } : null;
     const m = {
       units, matrix, seed: seed >>> 0,
-      round: 1, hp: [START_HP, START_HP], gold: [START_GOLD, START_GOLD],
+      round: 1, hp: [START_HP, START_HP], gold: [START_GOLD, START_GOLD], streak: [0, 0],
       armies: [[], []], nextId: [1, 1], history: [], over: false, winner: -1,
       extraDeploys: [0, 0],
       moved: [null, null], // id of the squad each player moved this round (one move per round, CONFIG.moveCost gold)
@@ -5382,6 +5386,9 @@ const Game = (() => {
     m.moved = [null, null];
     for (const a of m.armies) for (const sq of a) { delete sq.from; delete sq.movedRound; }
     rollBuffTiles(m, 0); rollBuffTiles(m, 1);
+    // the carry cap: unspent gold over CARRY_CAP is lost before this round's gold comes in
+    summary.capLost = [0, 1].map(sd => Math.max(0, m.gold[sd] - CARRY_CAP));
+    for (const sd of [0, 1]) m.gold[sd] -= summary.capLost[sd];
     const income = incomeFor(m.round), before = m.gold.slice();
     m.gold[0] += income; m.gold[1] += income;
     summary.income = income;
@@ -5394,6 +5401,13 @@ const Game = (() => {
     const loser = summary.round >= LOSER_BONUS_ROUND ? (dmg[0] > dmg[1] ? 0 : dmg[1] > dmg[0] ? 1 : -1) : -1;
     if (loser >= 0) m.gold[loser] += LOSER_BONUS;
     summary.bonusTo = loser;
+    // win streaks and the shutdown bounty (a draw ends both streaks and pays nothing)
+    const rw = dmg[0] < dmg[1] ? 0 : dmg[1] < dmg[0] ? 1 : -1;
+    const st = m.streak || [0, 0];
+    summary.shutdown = [0, 1].map(sd => sd === rw ? shutdownGold(st[1 - sd]) : 0);
+    for (const sd of [0, 1]) m.gold[sd] += summary.shutdown[sd];
+    m.streak = [0, 1].map(sd => sd === rw ? st[sd] + 1 : 0);
+    summary.streak = m.streak.slice();
     // treasuries: one that stood through the fight pays its owner; a destroyed one lets the opponent steal from its owner
     summary.treasury = [0, 1].map(sd => ({ gold: treasuryFell[sd] === false ? TREASURY.gold : 0, lost: 0 }));
     for (const sd of [0, 1]) m.gold[sd] += summary.treasury[sd].gold;
@@ -6053,7 +6067,7 @@ const Game = (() => {
 
   const api = {
     MAX_ROUND_DMG, TIER_DMG, bankBusy, seenAt, charShown, towerTypeShown, altarShown, elfOwnShown, shroomShown, removingShroom, movedId, canMove, moveSquad, undoMove,
-    COLS, ROWS, TILE, ZONE, START_HP, START_GOLD, INCOME, incomeFor, LOSER_BONUS, LOSER_BONUS_ROUND, TOWER_FALL_HP, CREDIT_LINE, loanTerms, treasurySteal, SQUAD_COST, SETTINGS, XP_STEPS, xpNeeded, unitCostOf,
+    COLS, ROWS, TILE, ZONE, START_HP, START_GOLD, INCOME, incomeFor, LOSER_BONUS, LOSER_BONUS_ROUND, TOWER_FALL_HP, CARRY_CAP, SHUTDOWN, shutdownGold, CREDIT_LINE, loanTerms, treasurySteal, SQUAD_COST, SETTINGS, XP_STEPS, xpNeeded, unitCostOf,
     levelCost, isReady, levelUp, undoLevel, levelAllPlan, levelAll, upgradeOffer, seenLevel, aiLevel, AI, CONFIG,
     deploysAllowed, deploysLeft, deployedThisRound, canBuyDeploy, buyDeploy, refundDeploy,
     PACKAGE, allPackages, packOf, needsPack, freeLeft, choosePack, ensurePack,
