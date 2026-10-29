@@ -681,14 +681,15 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
     long: { title: 'Long', file: 'audio/long.mp3' },
     superCoffee: { title: 'Super coffee', file: 'audio/super-coffee.mp3' },
     reveal: { title: 'Reveal', file: 'audio/reveal.mp3' },
+    salig: { title: 'Salig', file: 'audio/salig.mp3', artist: 'Emil Helleday' },
     bulgaria: { title: 'Bulgaria', file: 'audio/bulgaria.mp3' },
     icyOne: { title: 'Icy one', file: 'audio/icy-one.mp3' },
     sirski: { title: 'SIRSKI', file: 'audio/sirski.mp3' },
     knarkkungn: { title: 'Knarkkungn', file: 'audio/knarkkungn.mp3' },
     habbyourmam: { title: 'Habbyourmam', file: 'audio/habbyourmam.mp3' },
   };
-  const ARTIST = 'Snetänd';
-  const songName = (id) => `“${SONGS[id].title}” - ${ARTIST}`;
+  const ARTIST = 'Snetänd'; // unless a song names its own
+  const songName = (id) => `“${SONGS[id].title}” - ${SONGS[id].artist || ARTIST}`;
   const PLAYLISTS = { deploy: ['bulgaria'], battle: ['habbyourmam'] };
   // Music combos: deployment and battle music in place of PLAYLISTS.deploy / .battle (a phase a combo leaves out plays
   // the standard one). The music follows the match's look (Game.lookOf), not its map; looks not in LOOK_MUSIC play
