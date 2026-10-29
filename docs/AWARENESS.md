@@ -5,7 +5,7 @@ The goal: units should notice what's around them, without every unit locking on 
 ## How it works now (src/engine.js, `step()`)
 
 1. Marching. A body walks straight ahead (or in from its flank) until any enemy comes within its sight: its range + 15 m, at least 18 m, in any direction. From 15 m beyond that it starts to lean toward the nearest enemy ahead.
-2. Engaged. Once it has spotted something, it is engaged for the rest of the fight. Every tick it walks toward the nearest living enemy on the whole board, wherever that is.
+2. Engaged. Once it has spotted something, it is engaged for the rest of the fight. Every tick it walks toward the nearest living enemy on the whole board, wherever that is. Its heading swings round smoothly (`TURN`), except within half a second's walk of where it stops (`HOME`), where it turns straight at the enemy: a smooth turn that close made fast bodies (an Assassin's dash above all) circle their target just out of reach.
 3. Attacking. It attacks the nearest enemy in reach and stays on it until it dies, hides or leaves its reach.
 4. Allies push each other apart (separation), so a crowd on one target spreads into a ring.
 

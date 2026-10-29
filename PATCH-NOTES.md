@@ -4,6 +4,20 @@ Newest first. Each entry says what changed for players; technical details live i
 
 ---
 
+## 29 October 2026 (late night) – Balance and a fix
+
+### Fix
+- **Units no longer circle each other without hitting.** A fast unit closing in on its target turned smoothly, and could end up running in circles around it just out of reach. The Assassin's dash did it most. Units now turn straight at their target once they're nearly there.
+
+### Balance
+- **Slime Wizard:** splash 6 → 5.5 m, range 25 → 23 m.
+- **Slimeshots:** move speed 6 → 5.
+- **Wisps:** health 80 → 70, attacks a second 0.8 → 0.65. The Keep's guards are Wisps, so they change too.
+- **Ent, Explode on death:** 30% → 40% of its health.
+- **Spiders:** damage 20 → 25.
+
+---
+
 ## 29 October 2026 (night) – Gold cap and shutdown bounty
 
 ### Gold carry cap

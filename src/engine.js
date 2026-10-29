@@ -193,6 +193,7 @@ const Engine = (() => {
   const CONVERT_HP = 50;
   const CONVERT_SQUAD = -200;  // squad id of bodies that switched sides (not a squad in either army)
   const TURN = 6;              // how fast a walking body swings to a new heading (share of the turn per second)
+  const HOME = 0.5;            // ...but within this many seconds of walking from where it stops, it turns straight at its enemy
   const SIGHT = 15;            // metres beyond its own range at which a unit notices an enemy and turns toward it
   const MIN_SIGHT = 18;        // ...but never less than this many metres from the unit (3 tiles), however short its range
   const DRIFT = 15;            // metres beyond that at which a marching unit starts to lean toward the nearest enemy
@@ -2180,9 +2181,11 @@ const Engine = (() => {
             const far = b.engaged ? 0 : 400, gx = b.engaged ? near.x : b.x + wx * far, gy = b.engaged ? near.y : b.y + wy * far;
             [wx, wy] = steer(b, gx, gy, wx, wy);
           }
-          // turn smoothly instead of snapping: the heading swings toward the wanted direction
+          // turn smoothly instead of snapping: the heading swings toward the wanted direction. Within HOME s of walking
+          // from where it stops it turns straight at its enemy: a smooth turn that close (a dash above all) left it
+          // circling the enemy just out of reach, never hitting it
           if (b.hx === undefined) { b.hx = mx; b.hy = my; }
-          const k = Math.min(1, TURN * dt);
+          const k = b.engaged && !blind && nd - stopAt(rgN) <= step / dt * HOME ? 1 : Math.min(1, TURN * dt);
           let hx = b.hx + (wx - b.hx) * k, hy = b.hy + (wy - b.hy) * k, hl = hyp(hx, hy);
           if (hl < 1e-6) { hx = wx; hy = wy; hl = 1; }
           b.hx = hx / hl; b.hy = hy / hl;

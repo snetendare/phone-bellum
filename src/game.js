@@ -95,7 +95,7 @@ const Game = (() => {
   // Each tower type has one skill, bought once per match after the pick (TOWER_SKILL gold); it stays hidden from the
   // opponent until the fight of the round it was bought in. m.towerSkill[side] = round it was bought (0 = not)
   const TOWER_SKILL = { cost: 100, guards: 4, guardHold: 5, eagleRange: 3, eagleAps: 10, homeArmor: 2, homeHp: 10 };
-  const GUARD = { name: 'Wisps', cost: 1, bodies: 2, hp: 80, hit: 75, aps: 0.8, range: 19, speed: 4, splash: 0, projSpeed: 20 }; // used when the roster has no Wisps
+  const GUARD = { name: 'Wisps', cost: 1, bodies: 2, hp: 70, hit: 75, aps: 0.65, range: 19, speed: 4, splash: 0, projSpeed: 20 }; // used when the roster has no Wisps
   const towerSkillOf = (m, side) => !!(m && m.towerSkill && m.towerSkill[side] > 0);
   const towerSkillVisible = (m, side) => towerSkillOf(m, side) && m.towerSkill[side] < m.round;
   const towerPicked = (m, side) => !!(m && m.round >= TOWER_PICK_ROUND && m.towers && m.towers[side] && m.towers[side].type);
