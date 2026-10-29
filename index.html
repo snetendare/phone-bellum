@@ -8167,6 +8167,7 @@ const Render2D = (cv, view, opts = {}) => {
   const wakeAudio = (force) => {
     if (!actx) try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
     const hookAll = () => Object.values(music).forEach(pl => pl.hook());
+    if (actx) loadSfx();
     if (actx && actx.state === 'running') hookAll();
     if (actx && (force || actx.state !== 'running')) try { actx.resume().then(hookAll).catch(() => {}); } catch (e) {}
     musicUnlocked = true;
@@ -8184,12 +8185,80 @@ const Render2D = (cv, view, opts = {}) => {
     syncMusic();
     if (on) Object.values(music).forEach(pl => pl.wake());
   }
+  // ---------- sound effects (audio/sfx/, by Snetänd): played through Web Audio from decoded buffers, so they start at
+  // once and several can overlap. Game actions make their sound when this screen's player did them by hand (see
+  // SFX_ACTS); a tap on any other button makes the plain click (menu click outside a match, UI button in one).
+  const SFX = {
+    battle: 'battle-start', release: 'release', drop: 'drop-unit', evolve: 'evolve', toMenu: 'to-menu', level: 'level-up',
+    menu: 'menu-click', nope: 'nope', pressBoard: 'press-board', button: 'button', pressCard: 'press-card', sell: 'sell',
+    undo: 'undo', skill: 'skill',
+  };
+  const SFX_VARY = new Set(['button', 'menu', 'pressBoard', 'pressCard', 'release', 'drop']); // frequent ones: a slightly different pitch each time
+  const DEFAULT_SFX_VOL = 70;
+  if (snd.sfx === undefined) { snd.sfx = true; snd.sfxVol = DEFAULT_SFX_VOL; }
+  try { const p = JSON.parse(localStorage.getItem(SOUND_STORE) || 'null'); if (p && isFinite(p.sfxVol)) { snd.sfx = p.sfx !== false; snd.sfxVol = Math.max(0, Math.min(100, +p.sfxVol)); } } catch (e) {}
+  const sfxBuf = {};
+  let sfxLoading = false, sfxAt = -1e9, inputAt = -1e9;
+  function loadSfx() {
+    if (sfxLoading || !actx) return;
+    sfxLoading = true;
+    for (const k in SFX) {
+      const inl = window.PB_SFX && window.PB_SFX[SFX[k]]; // the artifact carries them inline (it can't fetch files)
+      const got = inl ? Promise.resolve(Uint8Array.from(atob(inl), c => c.charCodeAt(0)).buffer)
+        : fetch(`audio/sfx/${SFX[k]}.mp3`).then(r => { if (!r.ok) throw new Error(r.status); return r.arrayBuffer(); });
+      got.then(ab => new Promise((ok, no) => actx.decodeAudioData(ab, ok, no))).then(b => { sfxBuf[k] = b; }).catch(() => {});
+    }
+  }
+  function sfx(k) {
+    sfxAt = performance.now();
+    if (window.__sfxLog) window.__sfxLog.push(k + (sfxBuf[k] ? '' : '?')); // tests (? = not loaded)
+    if (!snd.sfx || !snd.sfxVol || !actx || actx.state !== 'running' || !sfxBuf[k]) return;
+    try {
+      const src = actx.createBufferSource(), g = actx.createGain();
+      src.buffer = sfxBuf[k];
+      if (SFX_VARY.has(k)) src.playbackRate.value = 0.96 + Math.random() * 0.08;
+      g.gain.value = snd.sfxVol / 100;
+      src.connect(g).connect(actx.destination); src.start();
+    } catch (e) {}
+  }
+  // a hand of this screen's player: only actions within a moment of a touch, click or key count
+  ['pointerdown', 'pointerup', 'click', 'keydown'].forEach(t => document.addEventListener(t, () => { inputAt = performance.now(); }, { capture: true, passive: true }));
+  const byHand = () => performance.now() - inputAt < 700;
+  // game actions and their sounds (a function: the sound depends on what was bought)
+  const SFX_ACTS = {
+    place: 'drop', placeLesser: 'drop', placeBwall: 'drop', buyBuilding: 'drop', buyElfOwn: 'drop',
+    moveSquad: 'release', sell: 'sell',
+    levelUp: 'level', levelAll: 'level', levelBuilding: 'level',
+    buySkill: (a) => Game.isMaster(a[0], a[2], a[3]) ? 'evolve' : 'skill',
+    awaken: 'evolve', buyTowerSkill: 'skill', buyBuildingSkill: 'skill', unlock: 'skill',
+    unplaceSquad: 'undo', unplaceBwall: 'undo',
+  };
+  for (const name of Object.keys(Game)) {
+    const act = SFX_ACTS[name] || (/^undo[A-Z]/.test(name) ? 'undo' : null);
+    if (!act || typeof Game[name] !== 'function') continue;
+    const fn = Game[name];
+    Game[name] = function (...a) {
+      const r = fn.apply(this, a);
+      if (r && a[1] === me && byHand()) sfx(typeof act === 'function' ? act(a) : act);
+      return r;
+    };
+  }
+  // the plain click, after the button's own handler (which may have made a sound of its own); in a match or not is
+  // decided as the click starts, so Start (or Main menu) clicks like the screen it was on
+  let clickInMatch = false;
+  document.addEventListener('click', () => { clickInMatch = !!m && ['deploy', 'battle', 'result'].includes(phase); }, { capture: true });
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest && e.target.closest('button, .btn, [role="button"]');
+    if (!b || b.disabled || b.closest('.uc2') || performance.now() - sfxAt < 150) return;
+    sfx(clickInMatch ? 'button' : 'menu');
+  });
+
   // the cog in a match opens it as Settings (music, the 2D / 3D board and Main menu), the menu's Music button as music only.
   // data-keep: phase changes leave this sheet open (closeSheet)
   function openSoundSheet() {
     const inMatch = !!m && phase !== 'start' && phase !== 'lobby';
     $('sheet').innerHTML = `
-      <div class="bar" data-keep><h3 id="sheet-h">${inMatch ? 'Settings' : 'Music'}</h3><button class="btn small" id="close">Close</button></div>
+      <div class="bar" data-keep><h3 id="sheet-h">${inMatch ? 'Settings' : 'Sound'}</h3><button class="btn small" id="close">Close</button></div>
       <div class="bar">
         <span class="hint">Music</span>
         <div class="seg" role="group" aria-label="Music">
@@ -8199,6 +8268,16 @@ const Render2D = (cv, view, opts = {}) => {
       <div class="bar">
         <span class="hint">Music volume</span>
         <span class="volrow"><input type="range" id="vol" min="0" max="100" step="5" value="${snd.vol}" aria-label="Music volume"><span class="num" id="vol-n">${snd.vol}</span></span>
+      </div>
+      <div class="bar">
+        <span class="hint">Sound effects</span>
+        <div class="seg" role="group" aria-label="Sound effects">
+          <button data-sfx="1" aria-pressed="${snd.sfx}">On</button><button data-sfx="0" aria-pressed="${!snd.sfx}">Off</button>
+        </div>
+      </div>
+      <div class="bar">
+        <span class="hint">Effects volume</span>
+        <span class="volrow"><input type="range" id="sfx-vol" min="0" max="100" step="5" value="${snd.sfxVol}" aria-label="Effects volume"><span class="num" id="sfx-vol-n">${snd.sfxVol}</span></span>
       </div>
       ${navigator.audioSession ? `<div class="bar">
         <span class="hint">Other apps' sound</span>
@@ -8241,6 +8320,17 @@ const Render2D = (cv, view, opts = {}) => {
       saveSound();
       Object.values(music).forEach(pl => { if (pl.playing) pl.ramp(musicLevel(), 0.05); });
       syncMusic(); showOn();
+    });
+    $('sheet').querySelectorAll('[data-sfx]').forEach(b => b.addEventListener('click', () => {
+      snd.sfx = b.dataset.sfx === '1'; if (snd.sfx && !snd.sfxVol) { snd.sfxVol = DEFAULT_SFX_VOL; $('sfx-vol').value = snd.sfxVol; $('sfx-vol-n').textContent = snd.sfxVol; }
+      saveSound(); wakeAudio(true);
+      $('sheet').querySelectorAll('[data-sfx]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+    }));
+    $('sfx-vol').addEventListener('change', () => sfx('button')); // a sample at the new volume
+    $('sfx-vol').addEventListener('input', (e) => {
+      snd.sfxVol = +e.target.value; $('sfx-vol-n').textContent = snd.sfxVol;
+      if (snd.sfxVol && !snd.sfx) { snd.sfx = true; $('sheet').querySelectorAll('[data-sfx]').forEach(x => x.setAttribute('aria-pressed', String(x.dataset.sfx === '1'))); }
+      saveSound();
     });
     $('sheet').querySelectorAll('[data-solo]').forEach(b => b.addEventListener('click', () => {
       snd.solo = b.dataset.solo === '1'; saveSound(); setAudioSession(); wakeAudio(true);
@@ -8979,6 +9069,7 @@ const Render2D = (cv, view, opts = {}) => {
   let cpress = null, cdrag = null, cardDone = 0;
   function cardPress(e, i, el) {
     if (!m || phase !== 'deploy') return;
+    sfx(el && el.getAttribute('aria-disabled') === 'true' ? 'nope' : 'pressCard');
     cpress = { x: e.clientX, y: e.clientY, i, el, id: e.pointerId, t: setTimeout(() => { if (cpress && !cdrag && !cpress.scroll) { cpress.held = true; cardDone = performance.now(); openSheet(i); } }, 450) };
   }
   function flyShow(i, x, y, hide, label, bad) {
@@ -8994,6 +9085,7 @@ const Render2D = (cv, view, opts = {}) => {
     if (!d) return;
     cardDone = performance.now(); hoverTile = null;
     if (ok && d.t && m && phase === 'deploy' && editable() && (Game.canPlaceAt(m, me, d.t.col, d.t.row, d.i) || Game.boardable(m, me, d.t.col, d.t.row, d.i))) { selected = d.i; tapTile(d.t, null); }
+    else if (ok && d.t) sfx('nope');
     if (selected === d.i && d.prev !== d.i) selected = d.prev;
     if (phase === 'deploy') panelDeploy();
     render();
@@ -9349,6 +9441,7 @@ const Render2D = (cv, view, opts = {}) => {
   }
 
   function showStart() {
+    if (phase !== 'start' && byHand()) sfx('toMenu');
     if (mode === 'tutorial') speed = tutSpeed;
     tutHint = '';
     leaveNet();
@@ -9363,7 +9456,7 @@ const Render2D = (cv, view, opts = {}) => {
     overlay(`<div class="card">
       <h2>No Mans Land</h2>
       <p class="big">Build an army. Watch it fight. Last one standing wins.</p>
-      <span class="btnrow">${newcomer ? '' : '<button class="btn small" id="tutorial">Tutorial</button>'}<button class="btn small" id="how">How to play</button><button class="btn small" id="ency-open">Encyclopedia</button><button class="btn small" id="music-open">Music</button>${HISTORY_URL ? `<button class="btn small" id="hist-open">Match history</button>` : ''}</span>
+      <span class="btnrow">${newcomer ? '' : '<button class="btn small" id="tutorial">Tutorial</button>'}<button class="btn small" id="how">How to play</button><button class="btn small" id="ency-open">Encyclopedia</button><button class="btn small" id="music-open">Sound</button>${HISTORY_URL ? `<button class="btn small" id="hist-open">Match history</button>` : ''}</span>
     </div>`);
     $('music-open').addEventListener('click', openSoundSheet);
     $('ency-open').addEventListener('click', () => openEncyclopedia());
@@ -10423,6 +10516,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
 
   function playBattle(pre) {
     phase = 'battle'; selected = null; deadline = 0; timeUp = false; watchSq = null;
+    sfx('battle');
     battlePre = withUnits(pre); lastPre = battlePre;
     bt = Game.startBattle(battlePre);
     fx = []; acc = 0; lastTs = 0;
@@ -10532,6 +10626,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (myB && myB.round === m.round) { guideDrag = null; drag = { bkey: myB.key, from: t, over: t, moved: false }; return true; } // drag a new building
     const sq = Game.squadAt(m, me, t.col, t.row);
     if (!sq) return false;
+    sfx('pressBoard');
     if (sq.round < m.round && !(moveMode || Game.movedId(m, me) === sq.id || Game.freeMover(m, me, sq) || (Game.movedId(m, me) == null && m.gold[me] >= Game.CONFIG.moveCost))) return false;
     if (!Game.canMove(m, me, sq)) return false;
     drag = { id: sq.id, from: t, over: t, moved: false };
@@ -10567,7 +10662,8 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (!ended || !d.moved || (d.over.col === d.from.col && d.over.row === d.from.row)) { render(); return; }
     dragEndAt = performance.now(); // the click that follows a drag is not a tap
     if (d.bkey != null) { Game.placeLesser(m, me, d.bkey, d.over.col, d.over.row); changed(); return; } // a building dragged
-    if (Game.moveSquad(m, me, d.id, d.over.col, d.over.row) && m.armies[me].find(s => s.id === d.id).round < m.round) { moveMode = false; moving = null; }
+    if (!Game.moveSquad(m, me, d.id, d.over.col, d.over.row)) sfx('nope');
+    else if (m.armies[me].find(s => s.id === d.id).round < m.round) { moveMode = false; moving = null; }
     changed();
   }
   // the mouse over a tile (null: off the board), for the placement preview while deploying
@@ -10714,6 +10810,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     }
     const enemy = m.armies[foe()].find(s => { const p = Game.seenAt(m, s); return !Game.hiddenFromFoe(m, s) && Game.blockOf(m, s.unit, p.col, p.row).some(([c, r]) => c === t.col && r === t.row) && s.round < m.round; });
     if (enemy) { rangeOf = { side: foe(), id: enemy.id }; openSheet(Game.shownUnit(m, me, foe(), enemy.unit), { ...enemy, unit: Game.shownUnit(m, me, foe(), enemy.unit) }, foe()); return; } // a disguise shows as what it pretends to be
+    if (selected !== null && editable() && !Game.canPlaceAt(m, me, t.col, t.row, selected)) sfx('nope');
     if (selected !== null && editable() && Game.canPlaceAt(m, me, t.col, t.row, selected)) {
       const sq = Game.place(m, me, selected, t.col, t.row);
       if (sq) {

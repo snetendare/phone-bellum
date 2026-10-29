@@ -9,6 +9,11 @@ let art = head + '\n' + body;
 art = art.replace('<script src="peerjs.min.js"></script>', '<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>')
   .replace(/<a class="btn small" id="lab-link"[^>]*>Counter Lab<\/a>/, '');
 if (art.includes('id="lab-link"') || !art.includes('jsdelivr')) throw new Error('artifact build failed');
+// the sound effects (audio/sfx/, about 390 KB) inlined, since an artifact can't fetch files next to it
+const sfxData = {};
+for (const f of fs.readdirSync('audio/sfx')) if (f.endsWith('.mp3')) sfxData[f.slice(0, -4)] = fs.readFileSync('audio/sfx/' + f).toString('base64');
+art = art.replace('</style>', () => '</style>\n<script>window.PB_SFX = ' + JSON.stringify(sfxData) + ';</script>');
+if (!art.includes('window.PB_SFX')) throw new Error('sound effects build failed');
 // The 3D board (the Board setting): its code inlined (about 75 KB; it only defines functions, so the 2D game opens
 // as before), three.js imported from jsDelivr only when 3D starts.
 const code3d = ['camera3d', 'kaykit3d', 'models3d', 'scenery3d', 'render3d'].map(f => fs.readFileSync(`src/${f}.js`, 'utf8')).join('\n')
