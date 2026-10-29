@@ -4,6 +4,27 @@ Newest first. Each entry says what changed for players; technical details live i
 
 ---
 
+## 29 October 2026 (late night) – Otto - The Gambler
+
+### New leader: Otto - The Gambler
+- Otto has a **slot machine**. Tap **Slots** in the tray: each spin costs **50 gold**, up to **3 spins a round**.
+- Three of a kind pays out (or hurts):
+  - 💀 **Skulls (12%):** −5 health. A skull never takes you below 1 health.
+  - **Horseshoes (12%):** a free Move and +1 deployment this round. The free Move comes on top of your normal one.
+  - 🪙 **Coins (12%):** +100 gold.
+  - **Goblins "T1" (3%):** a random tier 1 squad at level 2, placed for you. Its unit is unlocked too, and it doesn't use a deployment.
+  - 🧰 **Chest (1%):** +500 gold. Jackpot!
+  - Anything else (60%): nothing.
+- On average the machine loses money. Otto isn't meant to be strong, he's meant to be fun.
+- Spins can't be undone, and your opponent sees what you rolled (from round 2, once leaders are revealed).
+- The AI and Claude spin now and then when they play Otto.
+
+### Looks
+- **Goblin Swarm** has a new symbol on the board: a goblin head with big pointy ears.
+- **Enzo's** crest is now a gift box (his free skill). Otto's crest has the dice.
+
+---
+
 ## 29 October 2026 (late night) – Quality of life
 
 ### Deploying

@@ -42,9 +42,15 @@ const Art = (() => {
     felix: { field: '#3E6B2F', charge: '#F2C94C', draw(g) { // a stack of coins: more gold
       for (const dy of [0.3, 0.12, -0.06]) { g.beginPath(); g.ellipse(0, dy, 0.28, 0.1, 0, 0, Math.PI * 2); g.fill(); }
       g.lineWidth = 0.035; g.strokeStyle = '#3E6B2F'; for (const dy of [0.3, 0.12, -0.06]) { g.beginPath(); g.ellipse(0, dy, 0.28, 0.1, 0, 0, Math.PI * 2); g.stroke(); } } },
-    enzo: { field: '#5A2E6E', charge: '#EDEFF2', draw(g) { // a die
-      g.beginPath(); g.roundRect(-0.3, -0.26, 0.6, 0.6, 0.08); g.fill();
-      g.fillStyle = '#5A2E6E'; for (const [px, py] of [[-0.15, -0.11], [0, 0.04], [0.15, 0.19]]) { g.beginPath(); g.arc(px, py, 0.06, 0, Math.PI * 2); g.fill(); } } },
+    enzo: { field: '#5A2E6E', charge: '#EDEFF2', draw(g) { // a gift box: the free skill
+      g.fillRect(-0.3, -0.04, 0.6, 0.42); g.fillRect(-0.36, -0.18, 0.72, 0.14);
+      g.fillStyle = '#F2C94C'; g.fillRect(-0.05, -0.18, 0.1, 0.56);
+      g.lineWidth = 0.07; g.strokeStyle = '#F2C94C'; g.beginPath(); g.ellipse(-0.12, -0.27, 0.12, 0.07, -0.4, 0, Math.PI * 2); g.ellipse(0.12, -0.27, 0.12, 0.07, 0.4, 0, Math.PI * 2); g.stroke(); } },
+    otto: { field: '#7A1F2B', charge: '#EDEFF2', draw(g) { // two dice: the slot machine
+      const die = (x, y, a, pips) => { g.save(); g.translate(x, y); g.rotate(a); g.fillStyle = '#EDEFF2'; g.beginPath(); g.roundRect(-0.18, -0.18, 0.36, 0.36, 0.06); g.fill();
+        g.fillStyle = '#7A1F2B'; for (const [px, py] of pips) { g.beginPath(); g.arc(px, py, 0.04, 0, Math.PI * 2); g.fill(); } g.restore(); };
+      die(-0.15, 0.14, -0.25, [[-0.09, -0.09], [0.09, -0.09], [0, 0], [-0.09, 0.09], [0.09, 0.09]]);
+      die(0.17, -0.12, 0.3, [[-0.09, -0.09], [0.09, 0.09]]); } },
     matteo: { field: '#5B1F3A', charge: '#EDEFF2', draw(g) { // a top hat with a pink band: the Gentleman
       g.fillRect(-0.38, 0.22, 0.76, 0.1); g.fillRect(-0.22, -0.34, 0.44, 0.58);
       g.fillStyle = '#FF7AB6'; g.fillRect(-0.22, 0.06, 0.44, 0.1); } },

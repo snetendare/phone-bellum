@@ -1856,6 +1856,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
     addEventListener('pointercancel', () => { sw = null; });
   }
   function panelDeploy() {
+    foeSlotNews();
     if (phase !== 'deploy') return;
     if (mode === 'tutorial') { panelTutorial(); return; }
     const g = m.gold[me];
@@ -1920,6 +1921,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
     const extraBtns = `<span class="xbtns" style="display:flex;gap:6px;flex-wrap:wrap">
         ${undoable ? '<button class="btn small" id="undo-all">Undo all</button>' : ''}
         ${loanOffer() ? (Game.loanNow(m, me) ? `<button class="btn small" id="loan-undo" ${can && m.gold[me] >= Game.loanTerms(m, me).gold ? '' : 'disabled'}>Pay back loan · −${Game.loanTerms(m, me).gold}</button>` : `<button class="btn small" id="loan" title="${esc(loanText())}" ${can && Game.canTakeLoan(m, me) ? '' : 'disabled'}${Game.investNow(m, me) ? ' title="Not this round: you made the Major investment"' : ''}>Loan · +${Game.loanTerms(m, me).gold}</button>`) : ''}
+        ${Game.charOf(m, me) === 'otto' ? `<button class="btn small" id="slot-open" ${can ? '' : 'disabled'}>Slots · ${Game.SLOT.perRound - Game.slotSpins(m, me).length} left</button>` : ''}
         ${markOffer() ? `<button class="btn small" id="mark" ${can ? '' : 'disabled'}>${pickingMark() ? 'Cancel mark' : `Mark · ${Game.markCost(m, me) || 'free'}`}</button>` : ''}
         ${fortOffer() ? (Game.fortifyOf(m, me) ? '<button class="btn small" id="fort-undo">Undo Fortify</button>' : `<button class="btn small" id="fort" ${can && Game.canFortify(m, me) ? '' : 'disabled'}>${placingFort() ? 'Cancel Fortify' : `Fortify · ${Game.FORTIFY.cost}`}</button>`) : ''}
         ${mageOffer() ? `<button class="btn small" id="mage-gen" ${can ? '' : 'disabled'}>${Game.mageGenOf(m, me) || Game.mageTpOf(m, me) ? [Game.mageGenOf(m, me), Game.mageTpOf(m, me) && 'teleport'].filter(Boolean).map(id => esc(Game.mageGenInfo(id).name)).join(' + ') : 'Mage general'}…</button>` : ''}
@@ -2007,6 +2009,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
     $('help-btn').addEventListener('click', openHelp);
     if ($('mage-gen')) $('mage-gen').addEventListener('click', () => openTowerSheet(me));
     if ($('loan')) $('loan').addEventListener('click', () => { if (editable() && Game.takeLoan(m, me)) changed(); });
+    if ($('slot-open')) $('slot-open').addEventListener('click', openSlots);
     if ($('mark')) $('mark').addEventListener('click', () => { if (!editable()) return; markPicking = !markPicking; fortPlacing = false; render(); hud(); panelDeploy(); });
     if ($('fort')) $('fort').addEventListener('click', () => { if (!editable()) return; fortPlacing = !fortPlacing; markPicking = false; render(); hud(); panelDeploy(); });
     if ($('fort-undo')) $('fort-undo').addEventListener('click', () => { const w = Game.fortifyOf(m, me); if (editable() && w && Game.unplaceBwall(m, me, w.col, w.row, w.edge)) changed(); });
@@ -2792,6 +2795,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       if (!(tw && Game.placeTower(m, 1, int(tw.col), int(tw.row)))) Game.ensureTower(m, 1);
     }
     if (mv.towerType) Game.setTowerType(m, 1, String(mv.towerType));
+    if (Game.charOf(m, 1) === 'otto') { const n0 = Game.slotSpins(m, 1).length; Game.aiSlots(m, 1); const n = Game.slotSpins(m, 1).length - n0; if (n) did.push(`spun the slot machine ${n === 1 ? 'once' : n + ' times'}`); } // Otto: the bot's rule
     if (mv.towerSkill === true && Game.buyTowerSkill(m, 1)) did.push('bought its tower skill');
     if (mv.towerSkill2 === true && Game.buyTowerSkill2(m, 1)) did.push(`bought ${Game.towerType(m, 1).skill2.name}`);
     if (mv.loan === true && Game.takeLoan(m, 1)) did.push('took a bank loan');
@@ -4177,6 +4181,69 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       [c.skill, towerSkillBlock(side, tt)], [c.skill2, towerSkill2Block(side, tt)], [c.generals, mageGenBlock(side, tt)], [c.rounds, troundBlock(side, tt)]]
       .filter(([, h]) => h).sort((a, b) => a[0] - b[0]).map(([, h]) => h).join('');
   }
+  // ---------- Otto - The Gambler: the slot machine ----------
+  const SLOT_NAME = { skull: 'skulls', shoe: 'horseshoes', coin: 'coins', goblin: 'goblins', chest: 'chests' };
+  const SLOT_PAYS = { skull: `−${Game.SLOT.skullHp} health`, shoe: 'a free move and +1 deployment this round', coin: `+${Game.SLOT.coinGold} gold`, goblin: 'a random tier 1 squad at level 2, unlocked', chest: `+${Game.SLOT.chestGold} gold` };
+  // a reel symbol as a small picture (40 x 40)
+  function slotSvg(sym, size = 40) {
+    const body = {
+      skull: '<circle cx="20" cy="17" r="12" fill="#E0453A"/><rect x="13" y="24" width="14" height="10" rx="2" fill="#E0453A"/><circle cx="15.2" cy="17" r="3.4" fill="#1B1B22"/><circle cx="24.8" cy="17" r="3.4" fill="#1B1B22"/><path d="M20 21l-2 3.4h4z" fill="#1B1B22"/><path d="M17 29v5M20 29v5M23 29v5" stroke="#1B1B22" stroke-width="1.4"/>',
+      shoe: '<path d="M10 7v14a10 10 0 0 0 20 0V7" fill="none" stroke="#C9CED6" stroke-width="6.5"/><g fill="#4A4E58"><circle cx="10" cy="11" r="1.3"/><circle cx="10" cy="18" r="1.3"/><circle cx="30" cy="11" r="1.3"/><circle cx="30" cy="18" r="1.3"/><circle cx="14" cy="27" r="1.3"/><circle cx="26" cy="27" r="1.3"/></g>',
+      coin: '<circle cx="20" cy="20" r="14" fill="#F2C94C"/><circle cx="20" cy="20" r="10" fill="none" stroke="#B8892A" stroke-width="2"/><path d="M20 13v14M16.5 16.5h7M16.5 23.5h7" stroke="#B8892A" stroke-width="2.4" stroke-linecap="round"/>',
+      goblin: `<polygon points="${Shapes.GOBLIN_PTS.map(([x, y]) => `${(20 + x * 13).toFixed(1)},${(21 + y * 13).toFixed(1)}`).join(' ')}" fill="#9BD35A"/>` + Shapes.GOBLIN_EARS.map(e => `<polygon points="${e.map(([x, y]) => `${(20 + x * 13).toFixed(1)},${(21 + y * 13).toFixed(1)}`).join(' ')}" fill="#9BD35A"/>`).join('') + '<text x="20" y="25.5" text-anchor="middle" font-size="11" font-weight="800" font-family="sans-serif" fill="#1F3A12">T1</text>',
+      chest: '<path d="M6 18a14 9 0 0 1 28 0v2H6z" fill="#8A5A2B"/><rect x="6" y="19" width="28" height="15" rx="1.5" fill="#A86B34"/><rect x="6" y="18" width="28" height="3" fill="#F2C94C"/><rect x="17" y="17" width="6" height="8" rx="1" fill="#F2C94C"/><circle cx="20" cy="21.5" r="1.3" fill="#5A3A1A"/>',
+    }[sym] || '';
+    return `<svg width="${size}" height="${size}" viewBox="0 0 40 40" aria-label="${esc(sym)}">${body}</svg>`;
+  }
+  const slotLine = (rec) => rec.win ? `three ${SLOT_NAME[rec.win]}${rec.win === 'goblin' && rec.unit != null && units[rec.unit] ? ` (${esc(units[rec.unit].name)})` : ''}: ${SLOT_PAYS[rec.win]}` : 'no luck';
+  // the opponent's spins: a banner over the board when new ones show up
+  let foeSlotSeen = '';
+  function foeSlotNews() {
+    if (!m || phase !== 'deploy') return;
+    const foe = 1 - me, list = Game.slotSpins(m, foe), key = m.round + ':' + list.length;
+    if (!list.length || foeSlotSeen === key || !charVisible(foe)) { if (!list.length) foeSlotSeen = key; return; }
+    const was = foeSlotSeen.startsWith(m.round + ':') ? +foeSlotSeen.split(':')[1] : 0;
+    foeSlotSeen = key;
+    const fresh = list.slice(was), wins = fresh.filter(x => x.win);
+    setTimeout(() => banner(`${foeName()} spun the slots`, wins.length ? wins.map(x => 'three ' + SLOT_NAME[x.win]).join(', ') : (fresh.length > 1 ? `${fresh.length} spins, no luck` : 'No luck')), 200);
+  }
+  let slotBusy = false;
+  function openSlots() {
+    const spins = Game.slotSpins(m, me), last = spins.length ? Game.slotReels(m, me, m.round, spins.length - 1) : ['coin', 'chest', 'shoe'];
+    $('sheet').innerHTML = `
+      <div class="bar"><h3 id="sheet-h">${armsImg('otto')}Slot machine</h3><button class="btn small" id="close">Close</button></div>
+      <div id="reels" style="display:flex;gap:8px;justify-content:center;padding:10px;border-radius:12px;background:#15151B;border:2px solid #F2C94C">${last.map((x, i) => `<div class="reel" data-r="${i}" style="width:64px;height:64px;display:grid;place-items:center;border-radius:8px;background:#23232C">${slotSvg(x, 52)}</div>`).join('')}</div>
+      <p id="slot-res" style="margin:0;text-align:center;min-height:1.3em">${spins.length ? `Last spin: ${slotLine(spins[spins.length - 1])}` : 'Three of a kind pays out.'}</p>
+      <button class="btn primary" id="slot-spin" ${editable() && Game.canSpin(m, me) && !slotBusy ? '' : 'disabled'}>Spin · ${Game.SLOT.cost} gold (${Game.SLOT.perRound - spins.length} left this round)</button>
+      <div style="display:grid;gap:4px">${Game.SLOT.odds.map(([x, p]) => `<div style="display:flex;align-items:center;gap:6px;font-size:13px"><span style="white-space:nowrap">${slotSvg(x, 18).repeat(3)}</span><span style="flex:1">${SLOT_PAYS[x]}</span><span class="hint num">${p}%</span></div>`).join('')}</div>
+      <p class="hint" style="margin:0">Spins can't be undone. A skull never takes you below 1 health.</p>`;
+    $('sheet-back').hidden = false;
+    $('close').addEventListener('click', () => { if (!slotBusy) closeSheet(); });
+    $('slot-spin').addEventListener('click', doSpin);
+  }
+  function doSpin() {
+    if (slotBusy || !editable()) return;
+    const rec = Game.spin(m, me);
+    if (!rec) return;
+    slotBusy = true;
+    const k = Game.slotSpins(m, me).length - 1, reels = Game.slotReels(m, me, m.round, k);
+    if (undoSnap) undoSnap = { key: undoKey(), state: sideState() }; // a spin can't be undone: Undo all goes back to here at most
+    changed(); hud();
+    const btn = $('slot-spin'); if (btn) btn.disabled = true;
+    const res = $('slot-res'); if (res) res.textContent = 'Spinning…';
+    const S = Game.SLOT.symbols, els = [...document.querySelectorAll('#reels .reel')];
+    let t = 0;
+    const iv = setInterval(() => { t++; els.forEach((e, i) => { if (!e.dataset.stop) e.innerHTML = slotSvg(S[(t + i * 2) % S.length], 52); }); }, 70);
+    els.forEach((e, i) => setTimeout(() => { e.dataset.stop = '1'; e.innerHTML = slotSvg(reels[i], 52); sfx('pressCard'); }, 600 + i * 350));
+    setTimeout(() => {
+      clearInterval(iv); slotBusy = false;
+      sfx(rec.win === 'skull' ? 'nope' : rec.win ? 'skill' : 'release');
+      if ($('reels')) { openSlots(); const r = $('slot-res'); if (r) r.innerHTML = rec.win ? `<b>${rec.win === 'skull' ? 'Ouch!' : 'Winner!'}</b> ${slotLine(rec)}` : 'No luck.'; }
+      if (rec.win === 'chest') banner('Jackpot!', `+${Game.SLOT.chestGold} gold`);
+      hud(); panelDeploy(); render();
+    }, 600 + 2 * 350 + 250);
+  }
+
   function openTowerSheet(side) {
     const D = Engine.TOWER_DOWN, shown = towerTypeVisible(side), tt = Game.towerType(m, side), T = tt.unit;
     $('sheet').innerHTML = `
@@ -4908,7 +4975,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (phase === 'deploy') {
       s.armies[0] = s.armies[0].filter(q => q.round < m.round && !Game.hiddenFromFoe(m, q)).map(q => { // a squad moved this round shows on its old tile
         if (q.from && q.movedRound === m.round) { q.col = q.from.col; q.row = q.from.row; }
-        delete q.from; delete q.movedRound;
+        delete q.from; delete q.movedRound; delete q.luckMove;
         if (q.charmGiven === m.round) { delete q.charm; delete q.charmGiven; } // Matteo's first stack, given this round
         if (q.awaken === m.round) delete q.awaken; // an awakening bought this round
         return q;
@@ -4918,6 +4985,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       for (const ui in (s.tech && s.tech[0]) || {}) s.tech[0][ui] = s.tech[0][ui].map(r => r === m.round ? 0 : r);
       if (m.round === 1) { // the host's character and buff tiles stay hidden until the first fight
         if (s.chars) s.chars = [null, s.chars[1]];
+        if (s.slots) s.slots = [{}, s.slots[1]]; // and so do Otto's spins
         if (s.buff) s.buff = [[], s.buff[1]];
       }
       if (m.round === Game.TOWER_PICK_ROUND && s.towers && s.towers[0]) delete s.towers[0].type; // and the host's tower pick
@@ -4974,6 +5042,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   function applySide(d) {
     if (!Array.isArray(d.army)) return;
     const n = units.length;
+    Game.takeSpins(m, 1, d.slots | 0); // Otto's slot machine: the guest's spins this round (their health cost is taken here)
     // skills first: they decide where some squads may stand (Forward planting)
     const tech = {};
     if (d.tech && typeof d.tech === 'object') for (const ui in d.tech) {
@@ -4988,11 +5057,11 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       ...(Number.isInteger(s.in) ? { in: s.in } : {}),
       id: s.id | 0, unit: s.unit, col: s.col, row: s.row, round: s.round | 0, xp: Math.max(0, +s.xp || 0),
       ...(had.get(s.id | 0) && units[s.unit] && units[s.unit].building ? { progress: had.get(s.id | 0).progress || 0, built: !!had.get(s.id | 0).built } : {}), // a building's progress comes from the fights played here
-      level: Math.max(0, Math.min(Engine.MAX_LEVEL, s.level | 0)), cost: Math.max(0, +s.cost || 0), ...(s.free ? { free: true } : {}),
+      level: Math.max(0, Math.min(Engine.MAX_LEVEL, s.level | 0)), cost: Math.max(0, +s.cost || 0), ...(s.free ? { free: true } : {}), ...(s.gift ? { gift: true } : {}),
       ...(s.boughtLevels && typeof s.boughtLevels === 'object' ? { boughtLevels: s.boughtLevels } : {}),
       ...((a, h) => a > 0 && Game.awakenSlot(m, s.unit) >= 0 && (a === m.round || (h && h.awaken === a)) ? { awaken: a } : {})(s.awaken | 0, had.get(s.id | 0)), // this round's awakening as sent (gold was checked on their side), earlier ones as they were
 
-      ...(s.from && (s.movedRound | 0) === m.round && (s.round | 0) < m.round && Number.isInteger(s.from.col) && Number.isInteger(s.from.row) ? { from: { col: s.from.col, row: s.from.row, ...(Number.isInteger(s.from.in) ? { in: s.from.in } : {}) }, movedRound: m.round } : {}),
+      ...(s.from && (s.movedRound | 0) === m.round && (s.round | 0) < m.round && Number.isInteger(s.from.col) && Number.isInteger(s.from.row) ? { from: { col: s.from.col, row: s.from.row, ...(Number.isInteger(s.from.in) ? { in: s.from.in } : {}) }, movedRound: m.round, ...((s.luckMove | 0) === m.round ? { luckMove: m.round } : {}) } : {}),
     }));
     // riders: each inside a carrier squad on the same tile, one per carrier, never a carrier itself
     const byId = new Map(m.armies[1].map(q => [q.id, q])), full = new Set();
@@ -5011,7 +5080,12 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     // the guest's move this round: one squad at most
     if (!m.moved) m.moved = [null, null];
     m.moved[1] = null;
-    for (const q of m.armies[1]) if (q.movedRound === m.round && !Game.freeMover(m, 1, q) && !(q.from && q.from.in != null)) { if (m.moved[1] == null) m.moved[1] = q.id; else { delete q.from; delete q.movedRound; } }
+    let luck = Game.slotWins(m, 1, 'shoe'); // Otto's horseshoe moves are free, one per horseshoe
+    for (const q of m.armies[1]) if (q.movedRound === m.round && !Game.freeMover(m, 1, q) && !(q.from && q.from.in != null)) {
+      if (q.luckMove === m.round && luck > 0) { luck--; continue; }
+      delete q.luckMove;
+      if (m.moved[1] == null) m.moved[1] = q.id; else { delete q.from; delete q.movedRound; }
+    }
     // one unit type a match: this round's awakenings of any other type than the one they may awaken don't count
     const woke = Game.wokeUnit(m, 1);
     for (const q of m.armies[1]) if (q.awaken === m.round && woke != null && q.unit !== woke) delete q.awaken;
@@ -5223,7 +5297,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
 
   function sendSide() {
     if (mode !== 'guest' || !m || phase !== 'deploy') return;
-    send({ t: 'side', round: m.round, army: m.armies[1], gold: m.gold[1], extra: m.extraDeploys[1], nextId: m.nextId[1], tech: (m.tech && m.tech[1]) || {}, tower: (m.towers && m.towers[1]) || null, pack: m.pack ? m.pack[1] : null, unlocks: (m.unlocks && m.unlocks[1]) || {}, bribe: Game.bribeList(m, 1), elfOwn: Game.elfOwnOf(m, 1), bwalls: Game.bwallsOf(m, 1), mark: Game.markOf(m, 1), towerSkill: (m.towerSkill && m.towerSkill[1]) || 0, towerSkill2: (m.towerSkill2 && m.towerSkill2[1]) || 0, mageGen: Game.mageGenOf(m, 1) || Game.mageTpOf(m, 1) ? { id: Game.mageGenOf(m, 1), tp: Game.mageTpOf(m, 1) } : null, loan: Game.loanNow(m, 1) ? m.round : 0, tround: Game.towerRounds(m, 1).filter(x => Game.troundOn(m, 1, x.id)).map(x => x.id), altar: (m.altar || []).filter(x => x.side === 1 && x.round === m.round).map(x => x.type), shrooms: ((m.map && m.map.removed) || []).filter(x => x.side === 1 && x.round === m.round).map(x => ({ col: x.col, row: x.row })), buildings: Game.buildingsOf(m, 1), bskill: (m.bskill && m.bskill[1]) || {}, ready: ready[1] || timeUp });
+    send({ t: 'side', round: m.round, slots: Game.slotSpins(m, 1).length, army: m.armies[1], gold: m.gold[1], extra: m.extraDeploys[1], nextId: m.nextId[1], tech: (m.tech && m.tech[1]) || {}, tower: (m.towers && m.towers[1]) || null, pack: m.pack ? m.pack[1] : null, unlocks: (m.unlocks && m.unlocks[1]) || {}, bribe: Game.bribeList(m, 1), elfOwn: Game.elfOwnOf(m, 1), bwalls: Game.bwallsOf(m, 1), mark: Game.markOf(m, 1), towerSkill: (m.towerSkill && m.towerSkill[1]) || 0, towerSkill2: (m.towerSkill2 && m.towerSkill2[1]) || 0, mageGen: Game.mageGenOf(m, 1) || Game.mageTpOf(m, 1) ? { id: Game.mageGenOf(m, 1), tp: Game.mageTpOf(m, 1) } : null, loan: Game.loanNow(m, 1) ? m.round : 0, tround: Game.towerRounds(m, 1).filter(x => Game.troundOn(m, 1, x.id)).map(x => x.id), altar: (m.altar || []).filter(x => x.side === 1 && x.round === m.round).map(x => x.type), shrooms: ((m.map && m.map.removed) || []).filter(x => x.side === 1 && x.round === m.round).map(x => ({ col: x.col, row: x.row })), buildings: Game.buildingsOf(m, 1), bskill: (m.bskill && m.bskill[1]) || {}, ready: ready[1] || timeUp });
   }
 
   function guestRecv(d) {
@@ -5276,7 +5350,10 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
           if (!incoming.bskill) incoming.bskill = [{}, {}];
           if (!incoming.tround) incoming.tround = [{}, {}];
           if (!m.bskill) m.bskill = [{}, {}];
-          for (const k of ['armies', 'gold', 'extraDeploys', 'nextId', 'tech', 'towers', 'unlocks', 'pack', 'chars', 'buff', 'bribe', 'towerSkill', 'towerSkill2', 'elfOwn', 'bwalls', 'mark', 'mapFree', 'mageGen', 'loan', 'tround', 'buildings', 'bskill']) incoming[k][1] = (m[k] || [null, null])[1];
+          if (!incoming.slots) incoming.slots = [{}, {}];
+          if (!m.slots) m.slots = [{}, {}];
+          incoming.hp[1] = m.hp[1]; // a skull from the slot machine the host hasn't taken yet
+          for (const k of ['slots', 'armies', 'gold', 'extraDeploys', 'nextId', 'tech', 'towers', 'unlocks', 'pack', 'chars', 'buff', 'bribe', 'towerSkill', 'towerSkill2', 'elfOwn', 'bwalls', 'mark', 'mapFree', 'mageGen', 'loan', 'tround', 'buildings', 'bskill']) incoming[k][1] = (m[k] || [null, null])[1];
           if (incoming.map && m.map) incoming.map.removed = (incoming.map.removed || []).filter(x => !(x.side === 1 && x.round === incoming.round)).concat((m.map.removed || []).filter(x => x.side === 1 && x.round === incoming.round));
           incoming.altar = (incoming.altar || []).filter(x => !(x.side === 1 && x.round === incoming.round)).concat((m.altar || []).filter(x => x.side === 1 && x.round === incoming.round));
           m = incoming; ready[0] = theirReady;

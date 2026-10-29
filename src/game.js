@@ -23,9 +23,9 @@ const Game = (() => {
   // Gold both players get at the start of a round: 250 going into round 2, then 100 more each round (like Mechabellum)
   const incomeFor = (round) => INCOME + CONFIG.incomeStep * Math.max(0, round - 2);
   const deploysAllowed = (m, side) => CONFIG.deployCap
-    ? (m.round === 1 ? CONFIG.firstRoundDeploys : CONFIG.deploysPerRound) + m.extraDeploys[side] + devDeploys(m, side) + (musterOn(m, side) ? 1 : 0)
+    ? (m.round === 1 ? CONFIG.firstRoundDeploys : CONFIG.deploysPerRound) + m.extraDeploys[side] + devDeploys(m, side) + (musterOn(m, side) ? 1 : 0) + slotWins(m, side, 'shoe')
     : Infinity;
-  const deployedThisRound = (m, side) => m.armies[side].filter(s => s.round === m.round && !s.free).length; // package squads don't count
+  const deployedThisRound = (m, side) => m.armies[side].filter(s => s.round === m.round && !s.free && !s.gift).length; // package squads and slot machine goblins don't count
   const deploysLeft = (m, side) => deploysAllowed(m, side) - deployedThisRound(m, side);
   // A unit's `cost` is in lab units: 1 = one standard squad (SQUAD_COST gold)
   const unitCostOf = (unit) => Math.max(10, Math.round((unit.cost || 1) * SQUAD_COST / 10) * 10);
@@ -408,6 +408,7 @@ const Game = (() => {
     { id: 'felix', name: 'Felix', ability: '+50 gold a round from round 3, +100 from round 6.' },
     { id: 'enzo', name: 'Enzo', ability: 'No skill buying. Each unit gets its first skill free with 2+ squads.' },
     { id: 'matteo', name: 'Matteo - the Gentleman', ability: 'Charisma spreads with kills. At 5, a squad converts its first kill each fight.' },
+    { id: 'otto', name: 'Otto - The Gambler', ability: 'Slot machine: 50 gold a spin, 3 spins a round. Three of a kind pays out, or hurts.' },
   ];
   // ---------- the Standard pack ----------
   // A smaller match for new players, picked on the menu: fewer units with clear jobs (one or two of each kind per tier),
@@ -1606,6 +1607,7 @@ const Game = (() => {
   const freeOut = (m, side, sq) => !!sq && sq.round !== m.round && movedId(m, side) !== sq.id
     && (isRider(sq) || (!!sq.from && sq.movedRound === m.round && sq.from.in != null));
   const canMove = (m, side, sq) => !!sq && !(m.units[sq.unit] && m.units[sq.unit].building) && (sq.round === m.round || freeMover(m, side, sq) || freeOut(m, side, sq) || // a building stays put
+    sq.luckMove === m.round || (movedId(m, side) !== sq.id && slotMovesLeft(m, side) > 0) || // Otto's horseshoe: a free move
     (movedId(m, side) == null ? m.gold[side] >= CONFIG.moveCost : movedId(m, side) === sq.id));
   function moveSquad(m, side, sqId, col, row) {
     const sq = m.armies[side].find(s => s.id === sqId);
@@ -1615,7 +1617,10 @@ const Game = (() => {
     if (into && into.id === sq.in) return false;
     if (!canPlaceAt(m, side, col, row, sq.unit, true) || (occupied(m, side, col, row) && !into && !garrisonFree(m, side, col, row, sq.unit))) return false;
     const free = freeMover(m, side, sq) || freeOut(m, side, sq);
-    if (sq.round !== m.round && !free && movedId(m, side) == null) {
+    if (sq.round !== m.round && !free && movedId(m, side) !== sq.id && sq.luckMove !== m.round && slotMovesLeft(m, side) > 0) { // a horseshoe move: free
+      sq.from = { col: sq.col, row: sq.row, ...(isRider(sq) ? { in: sq.in } : {}) };
+      sq.movedRound = m.round; sq.luckMove = m.round;
+    } else if (sq.round !== m.round && !free && sq.luckMove !== m.round && movedId(m, side) == null) {
       if (!m.moved) m.moved = [null, null];
       m.gold[side] -= CONFIG.moveCost;
       m.moved[side] = sq.id;
@@ -1630,7 +1635,7 @@ const Game = (() => {
     if (into) sq.in = into.id; else delete sq.in;
     syncRiders(m, side);
     if (sq.from && sq.movedRound === m.round && sq.from.col === col && sq.from.row === row && sq.from.in === sq.in) {
-      if (movedId(m, side) === sq.id) undoMove(m, side); else { delete sq.from; delete sq.movedRound; } // back where it was (a free move costs nothing to undo)
+      if (movedId(m, side) === sq.id) undoMove(m, side); else { delete sq.from; delete sq.movedRound; delete sq.luckMove; } // back where it was (a free move costs nothing to undo)
     }
     return true;
   }
@@ -1703,7 +1708,7 @@ const Game = (() => {
     return !!sq && unplaceSquad(m, side, sq.id);
   }
   function unplaceSquad(m, side, id) {
-    const i = m.armies[side].findIndex(s => s.id === id && s.round === m.round);
+    const i = m.armies[side].findIndex(s => s.id === id && s.round === m.round && !s.gift); // a slot machine goblin is kept
     if (i < 0) return false;
     const [sq] = m.armies[side].splice(i, 1);
     m.gold[side] += sq.cost + (sq.awaken > 0 ? awakenCost(m, sq.unit) : 0); // its awakening too
@@ -2241,7 +2246,7 @@ const Game = (() => {
     m.round++;
     m.extraDeploys = [0, 0];
     m.moved = [null, null];
-    for (const a of m.armies) for (const sq of a) { delete sq.from; delete sq.movedRound; }
+    for (const a of m.armies) for (const sq of a) { delete sq.from; delete sq.movedRound; delete sq.luckMove; }
     rollBuffTiles(m, 0); rollBuffTiles(m, 1);
     // the carry cap: unspent gold over CARRY_CAP is lost before this round's gold comes in
     summary.capLost = [0, 1].map(sd => Math.max(0, m.gold[sd] - CARRY_CAP));
@@ -2295,6 +2300,84 @@ const Game = (() => {
 
   // Felix: extra gold every round from CHAR.felixRound on, more from CHAR.felixRound2 on (on top of the income)
   const felixGold = (m, side, round = m.round) => charOf(m, side) !== 'felix' ? 0 : round >= CHAR.felixRound2 ? CHAR.felixGold2 : round >= CHAR.felixRound ? CHAR.felixGold : 0;
+
+  // ---------- Otto - The Gambler: the slot machine ----------
+  // SLOT.cost gold a spin, SLOT.perRound spins a round. Each spin's outcome comes from the match seed, the side, the
+  // round and the spin's number, so both phones get the same one. Three of a kind pays (odds in %, the rest is nothing):
+  // skull −SLOT.skullHp health (never below 1), shoe a free move and +1 deployment this round, coin +SLOT.coinGold,
+  // goblin a random tier 1 squad at level 2 (unlocked too, no deployment used), chest +SLOT.chestGold.
+  // m.slots[side][round] = [{ win: symbol or null, unit (goblin) }, ...]. A spin can't be undone.
+  const SLOT = { cost: 50, perRound: 3, skullHp: 5, coinGold: 100, chestGold: 500,
+    odds: [['skull', 12], ['shoe', 12], ['coin', 12], ['goblin', 3], ['chest', 1]], symbols: ['skull', 'shoe', 'coin', 'goblin', 'chest'] };
+  const slotSpins = (m, side, round = m && m.round) => (m && m.slots && m.slots[side] && m.slots[side][round]) || [];
+  const slotWins = (m, side, sym) => slotSpins(m, side).filter(x => x.win === sym).length;
+  const slotMovesLeft = (m, side) => slotWins(m, side, 'shoe') - m.armies[side].filter(q => q.luckMove === m.round).length;
+  const canSpin = (m, side) => !!m && !m.over && charOf(m, side) === 'otto' && slotSpins(m, side).length < SLOT.perRound && m.gold[side] >= SLOT.cost;
+  const slotRng = (m, side, round, k) => rng(m.seed + round * 5471 + side * 7919 + k * 613 + 29);
+  // the k-th spin of a round: what it wins, and for a goblin, which tier 1 unit (one not left out of the match)
+  function slotOutcome(m, side, round, k) {
+    const r = slotRng(m, side, round, k), x = r() * 100;
+    let acc = 0, win = null;
+    for (const [sym, p] of SLOT.odds) { acc += p; if (x < acc) { win = sym; break; } }
+    const out = { win };
+    if (win === 'goblin') {
+      const pool = m.units.map((_, i) => i).filter(i => isTier1(m, i) && !isOff(m, i, side) && !m.units[i].building);
+      if (pool.length) out.unit = pool[Math.floor(r() * pool.length)];
+    }
+    return out;
+  }
+  // what the three reels show: three of the winning symbol, or a mix (sometimes two of a kind, a near miss)
+  function slotReels(m, side, round, k) {
+    const o = slotOutcome(m, side, round, k);
+    if (o.win) return [o.win, o.win, o.win];
+    const r = rng(m.seed + round * 5477 + side * 7927 + k * 617 + 31), S = SLOT.symbols, pick = () => S[Math.floor(r() * S.length)];
+    let reels = [pick(), pick(), pick()];
+    if (r() < 0.3) { const a = pick(); let b = pick(); while (b === a) b = pick(); reels = [a, a, b]; for (let i = 2; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [reels[i], reels[j]] = [reels[j], reels[i]]; } }
+    while (reels[0] === reels[1] && reels[1] === reels[2]) reels[2] = pick();
+    return reels;
+  }
+  // a spin's effects on this phone's match (gold, health, the goblin squad); returns the spin's record
+  function spin(m, side) {
+    if (!canSpin(m, side)) return null;
+    if (!m.slots) m.slots = [{}, {}];
+    const list = m.slots[side][m.round] || (m.slots[side][m.round] = []);
+    const o = slotOutcome(m, side, m.round, list.length), rec = { win: o.win };
+    m.gold[side] -= SLOT.cost;
+    if (o.win === 'skull') m.hp[side] = Math.max(1, m.hp[side] - SLOT.skullHp);
+    else if (o.win === 'coin') m.gold[side] += SLOT.coinGold;
+    else if (o.win === 'chest') m.gold[side] += SLOT.chestGold;
+    else if (o.win === 'goblin') {
+      if (o.unit == null) m.gold[side] += SLOT.coinGold * 2;
+      else {
+        const ui = o.unit; rec.unit = ui;
+        if (!m.unlocks) m.unlocks = [{}, {}];
+        if (!isUnlocked(m, side, ui)) m.unlocks[side][ui] = m.round;
+        const spot = aiSpot(m, side, ui, m.armies[1 - side].filter(q => q.round < m.round), slotRng(m, side, m.round, list.length + 97));
+        if (spot) m.armies[side].push({ id: m.nextId[side]++, unit: ui, col: spot.col, row: spot.row, round: m.round, xp: xpNeeded(m.units[ui], 0), level: 1, cost: 0, gift: true });
+        else m.gold[side] += unitCostOf(m.units[ui]) + levelCost(m.units[ui]); // no room: its worth in gold
+      }
+    }
+    list.push(rec);
+    return rec;
+  }
+  // the host takes the guest's spins: up to n this round, replayed here for the health they cost (the gold and the
+  // goblin squad come with the guest's side)
+  function takeSpins(m, side, n) {
+    if (charOf(m, side) !== 'otto') return;
+    n = Math.max(0, Math.min(SLOT.perRound, n | 0));
+    if (!m.slots) m.slots = [{}, {}];
+    const list = m.slots[side][m.round] || (m.slots[side][m.round] = []);
+    while (list.length < n) {
+      const o = slotOutcome(m, side, m.round, list.length);
+      if (o.win === 'skull') m.hp[side] = Math.max(1, m.hp[side] - SLOT.skullHp);
+      list.push(o.unit != null ? { win: o.win, unit: o.unit } : { win: o.win });
+    }
+  }
+  // the bot: now and then a spin, while it keeps a squad's worth of gold
+  function aiSlots(m, side) {
+    const r = rng(m.seed + m.round * 853 + side * 59);
+    while (canSpin(m, side) && m.gold[side] - SLOT.cost >= SQUAD_COST && r() < 0.5) spin(m, side);
+  }
 
   // ---------- leveling (manual, costs gold) ----------
   const isReady = (m, sq) => sq.level < E.MAX_LEVEL && sq.xp >= xpNeeded(m.units[sq.unit], sq.level) && !(m.units[sq.unit].building && !sq.built); // a building levels once built
@@ -2787,6 +2870,7 @@ const Game = (() => {
       if (q() < 0.6 && m.gold[side] - g.cost >= SQUAD_COST) buyMageGen(m, side, g.id);
     }
     aiDev(m, side, rng(m.seed + m.round * 829 + side * 53)); // devtest: pick, buildings, spells (own stream)
+    aiSlots(m, side); // Otto: the slot machine (own stream)
     const opp = 1 - side;
     const oppArmy = m.armies[opp].filter(s => s.round < m.round);
     for (const ui of freeLeft(m, side)) { const spot = aiSpot(m, side, ui, oppArmy, r); if (spot) place(m, side, ui, spot.col, spot.row); }
@@ -2939,7 +3023,7 @@ const Game = (() => {
     FLANK, flankRows, flankOpen, isFlank, flankTiles, reserved, canPlaceAt, isOff, enemyHolds, inNoMans, hasSkillType, garrisonAt, garrisonFree, inBuilding, WATCH_SQ, watchUnit, freeMover,
     STANDARD_PACK, ICE, ALTAR, GOLEM, isIce, hailRound, altarRound, stormShift, stormRows, hailTiles, altarCost, altarRefund, altarCount, pushRoom, altarBought, addAltar, buyAltar, undoAltar, snowgres, snowgreUnit,
     MAPS, SKINS, MAP_LOOK, lookOf, EDITOR_MAPS, TERRAIN, objectiveOf, objectiveTiles, SHAPE_PATH, terrainTile, terrainBlocks, terrainOf, groundHeight, ELF_TOWER, SHROOM, SHROOM_SPLIT, shroomAt, shroomTileAt, shroomRemoval, SHROOM_REMOVE, shroomCost, removeShroom, undoRemoveShroom, mapOf, elfSpot, rollMap, BRIBE_COST, bribeList, bribeGold, bribeCount, bribeNow, bribeCost, bribeRefund, ELF_POWER, elfPowered, elfUnit, ELF_OWN, elfOwnCost, elfOwnOf, elfOwnAt, elfOwnUnlocked, elfOwnOffered, canBuyElfOwn, elfOwnSpotOk, buyElfOwn, undoElfOwn, bribeLeader, canBribe, bribe, undoBribe,
-    CHARACTERS, CHAR, charOf, charInfo, enzoSkill, enzoActive, charmOf, isGentleman, canGiveCharm, giveCharm, undoCharm, ensureCharm, felixGold, isTier1, rollBuffTiles, onBuffTile, zoeBuff, yotImps, yotLevel, TOWER_SPOT, towerSpot,
+    CHARACTERS, CHAR, charOf, SLOT, slotSpins, slotWins, slotMovesLeft, canSpin, slotOutcome, slotReels, spin, takeSpins, aiSlots, charInfo, enzoSkill, enzoActive, charmOf, isGentleman, canGiveCharm, giveCharm, undoCharm, ensureCharm, felixGold, isTier1, rollBuffTiles, onBuffTile, zoeBuff, yotImps, yotLevel, TOWER_SPOT, towerSpot,
     TREASURY, TREASURY_SQ, treasuryOn, treasuryUp, treasurySpot, treasuryAt, treasuryUnit, deployCost, FORTIFY, fortifyOf, canFortify, fortify, bwallsFighting, VAULT, vaultOn, MARK, markOf, markLost, markOn, markCost, markTarget, canMark, placeMark, markShown,
     FACTION_MODE, FACTIONS: () => FACTIONS, setFactions, factionInfo, factionsOf, factionTowers, towerTypeById, ownsUnit, withFactionTrait, factionSet,
     createDraft, draftTurn, draftOpen, draftAct, draftDone, draftPossible, aiDraftChoice,
