@@ -8391,7 +8391,12 @@ const Models3D = (THREE) => {
 // per map and side: instanced, one mesh per model part, so the whole scenery costs a few dozen draw calls.
 // Purely visual: nothing here touches the game, and it is placed with its own seeded random numbers, so both players
 // see the same land (each from their own side: the world always has your side toward +z).
-// opts.onReady(): the models have loaded (the page draws a frame). opts.url: where scenery.bin is.
+// opts.onReady(): the models have loaded (the page draws a frame). opts.url: where scenery.bin is. opts.renderer: the
+// WebGLRenderer, for baking the impostors.
+// Keeping it cheap (a phone draws the whole scenery for well under 200 000 triangles): only trees and bushes near the
+// board are real models (they cast real shadows onto it); everything further out is an impostor, a flat card facing
+// the camera with a picture of that model, baked once at load from three heights (8°, 40° and straight down) and
+// blended by the angle the camera sees it from, with a soft round shadow on the ground under it.
 // Calls: update(v, groundY, BW, BD, T): lay out the scenery for this view's map and side (cheap when nothing changed);
 // biome(v) -> the look for this map { sky, land } (colours); shadows(on); dispose().
 // The floor itself (the meadow under the zones) is painted by meadow() below, through the 2D renderer's ground hook.
@@ -8400,7 +8405,7 @@ const Scenery3D = (THREE, scene, opts = {}) => {
   // trees: which tree models; tint: a colour every model is multiplied by (1 = as painted); grow: how much of the
   // space round the board gets something (0 to 1); dress: small plants on the board itself.
   const BIOMES = {
-    meadow: { sky: '#AFC2C0', land: '#778C5C', tint: [1, 1, 1], trees: ['CommonTree_1', 'CommonTree_2', 'CommonTree_3', 'CommonTree_4', 'CommonTree_5', 'Pine_1', 'Pine_3'], grow: 1, dress: 1 },
+    meadow: { sky: '#AFC2C0', land: '#778C5C', tint: [1, 1, 1], trees: ['CommonTree_1', 'CommonTree_2', 'CommonTree_3', 'CommonTree_4', 'CommonTree_5', 'Pine_1', 'Pine_3'], grow: 1.2, dress: 1 },
     forest: { sky: '#1D2B22', land: '#16271B', tint: [0.55, 0.68, 0.58], trees: ['CommonTree_1', 'CommonTree_2', 'CommonTree_4', 'Pine_1', 'Pine_2', 'Pine_3', 'TwistedTree_1'], grow: 1.25, dress: 0 },
     ice: { sky: '#26323A', land: '#1C2830', tint: [0.62, 0.72, 0.82], low: 'rocks', trees: ['Pine_1', 'Pine_2', 'Pine_3', 'Pine_5', 'DeadTree_1', 'DeadTree_3'], grow: 0.8, dress: 0 },
     cavern: { sky: '#120E17', land: '#17121D', tint: [0.42, 0.36, 0.5], low: 'rocks', trees: [], grow: 0.7, dress: 0 },
@@ -8458,16 +8463,114 @@ const Scenery3D = (THREE, scene, opts = {}) => {
       }) };
     }
   }
-  const ready = load().then(() => { key = ''; opts.onReady && opts.onReady(); }).catch((e) => console.warn('No Mans Land: no 3D scenery', e));
+  const ready = load().then(() => { if (opts.renderer) bake(opts.renderer); key = ''; opts.onReady && opts.onReady(); }).catch((e) => console.warn('No Mans Land: no 3D scenery', e));
+
+  // ---------- impostors: pictures of the far trees and bushes, baked into one atlas ----------
+  const ELEV = [8, 40, 90], ICELL = 256, IGRID = 8; // views per model, cell size in pixels, cells per atlas row
+  let atlas = null, impIndex = null, impMat = null, impGeo = null, blobMat = null, blobGeo = null;
+  function bake(renderer) {
+    const names = Object.keys(lib).filter((n) => lib[n].h > 2.5 || /^Bush/.test(n));
+    impIndex = {};
+    const rows = Math.ceil(names.length * ELEV.length / IGRID);
+    atlas = new THREE.WebGLRenderTarget(IGRID * ICELL, rows * ICELL, { generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter, magFilter: THREE.LinearFilter });
+    const bs = new THREE.Scene();
+    bs.add(new THREE.HemisphereLight('#cfe3ff', '#20262a', 1.6));
+    const lamp = new THREE.DirectionalLight('#fff3dc', 2.0); bs.add(lamp); bs.add(lamp.target);
+    const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 400);
+    const prevTarget = renderer.getRenderTarget(), prevAuto = renderer.autoClear, prevCol = renderer.getClearColor(new THREE.Color()), prevA = renderer.getClearAlpha();
+    renderer.autoClear = false; renderer.setClearColor(0x000000, 0);
+    names.forEach((name, mi) => {
+      const md = lib[name], rad = Math.max(md.r, 0.3);
+      const S = 1.06 * Math.max(md.h, 2 * rad, md.h * Math.cos(0.7) + 2 * rad * Math.sin(0.7)); // the picture's side (m)
+      impIndex[name] = { i: mi, S };
+      const group = new THREE.Group(); for (const p of md.parts) group.add(new THREE.Mesh(p.geo, p.mat)); bs.add(group);
+      ELEV.forEach((e, vi) => {
+        const c = mi * ELEV.length + vi, a = e * Math.PI / 180;
+        Object.assign(cam, { left: -S / 2, right: S / 2, top: S / 2, bottom: -S / 2 }); cam.updateProjectionMatrix();
+        cam.up.set(0, e === 90 ? 0 : 1, e === 90 ? -1 : 0);
+        cam.position.set(0, md.h / 2 + Math.sin(a) * 150, Math.cos(a) * 150); cam.lookAt(0, md.h / 2, 0);
+        lamp.position.set(-40, 80, 60); // light from up front-left, as the board's sun
+        atlas.viewport.set((c % IGRID) * ICELL, Math.floor(c / IGRID) * ICELL, ICELL, ICELL); atlas.scissor.copy(atlas.viewport); atlas.scissorTest = true;
+        renderer.setRenderTarget(atlas); renderer.clear(); renderer.render(bs, cam);
+      });
+      bs.remove(group);
+    });
+    renderer.setRenderTarget(prevTarget); renderer.autoClear = prevAuto; renderer.setClearColor(prevCol, prevA);
+    impGeo = new THREE.InstancedBufferGeometry().copy(new THREE.PlaneGeometry(1, 1));
+    impMat = new THREE.ShaderMaterial({
+      uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { uAtlas: { value: null }, uGrid: { value: new THREE.Vector2(IGRID, rows) } }]),
+      fog: true,
+      vertexShader: `
+        attribute vec3 iPos; attribute float iSize; attribute float iModel; attribute vec3 iTint; attribute float iFlip;
+        uniform vec2 uGrid;
+        varying vec2 vUv0; varying vec2 vUv1; varying float vMix; varying vec3 vTint;
+        #include <fog_pars_vertex>
+        vec2 cellUv(float c, vec2 uv) { return (vec2(mod(c, uGrid.x), floor(c / uGrid.x)) + uv) / uGrid; }
+        void main() {
+          vec3 toCam = normalize(cameraPosition - iPos);
+          float elev = degrees(asin(clamp(toCam.y, -1.0, 1.0)));
+          float i0 = elev < 40.0 ? 0.0 : 1.0;
+          vMix = elev < 40.0 ? clamp((elev - 8.0) / 32.0, 0.0, 1.0) : clamp((elev - 40.0) / 50.0, 0.0, 1.0);
+          vec3 right = vec3(viewMatrix[0][0], viewMatrix[1][0], viewMatrix[2][0]);
+          vec3 up = vec3(viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1]);
+          vec3 wp = iPos + (right * position.x + up * position.y) * iSize;
+          vec2 uv = vec2(position.x * iFlip + 0.5, position.y + 0.5);
+          float c0 = iModel * 3.0 + i0;
+          vUv0 = cellUv(c0, uv); vUv1 = cellUv(c0 + 1.0, uv); vTint = iTint;
+          vec4 mvPosition = viewMatrix * vec4(wp, 1.0);
+          gl_Position = projectionMatrix * mvPosition;
+          #include <fog_vertex>
+        }`,
+      fragmentShader: `
+        uniform sampler2D uAtlas;
+        varying vec2 vUv0; varying vec2 vUv1; varying float vMix; varying vec3 vTint;
+        #include <fog_pars_fragment>
+        void main() {
+          vec4 c = mix(texture2D(uAtlas, vUv0), texture2D(uAtlas, vUv1), vMix);
+          if (c.a < 0.4) discard;
+          gl_FragColor = vec4(c.rgb / c.a * vTint, 1.0);
+          #include <colorspace_fragment>
+          #include <fog_fragment>
+        }`,
+    });
+    impMat.uniforms.uAtlas.value = atlas.texture;
+    // a soft round shadow, for the ground under an impostor
+    const sc = document.createElement('canvas'); sc.width = sc.height = 64;
+    const g = sc.getContext('2d'), gr = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+    gr.addColorStop(0, 'rgba(0,0,0,1)'); gr.addColorStop(0.55, 'rgba(0,0,0,0.6)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
+    blobMat = new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(sc), color: '#1A2414', transparent: true, opacity: 0.45, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 });
+    blobGeo = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
+  }
+  // the impostors and their shadows for one layout: list of [name, x, y, z, s, shade, flip]
+  function impostors(list, tint) {
+    const n = list.length; if (!n || !impMat) return;
+    const geo = impGeo.clone(); geo.instanceCount = n;
+    const P = new Float32Array(n * 3), Z = new Float32Array(n), M = new Float32Array(n), C = new Float32Array(n * 3), F = new Float32Array(n);
+    const blobs = new THREE.InstancedMesh(blobGeo, blobMat, n);
+    list.forEach(([name, x, y, z, s, sh, flip], i) => {
+      const md = lib[name], im = impIndex[name];
+      P.set([x, y + md.h * s / 2, z], i * 3); Z[i] = im.S * s; M[i] = im.i; F[i] = flip;
+      C.set([tint[0] * sh, tint[1] * sh, tint[2] * sh], i * 3);
+      const b = Math.max(1.5, md.r * s * 1.6);
+      blobs.setMatrixAt(i, tmpM.compose(tmpP.set(x + b * 0.15, y + 0.02, z + b * 0.1), tmpQ.identity(), tmpS.set(b, 1, b)));
+    });
+    geo.setAttribute('iPos', new THREE.InstancedBufferAttribute(P, 3)); geo.setAttribute('iSize', new THREE.InstancedBufferAttribute(Z, 1));
+    geo.setAttribute('iModel', new THREE.InstancedBufferAttribute(M, 1)); geo.setAttribute('iTint', new THREE.InstancedBufferAttribute(C, 3));
+    geo.setAttribute('iFlip', new THREE.InstancedBufferAttribute(F, 1));
+    const mesh = new THREE.Mesh(geo, impMat); mesh.frustumCulled = false; mesh.raycast = () => {}; mesh.name = 'impostors'; mesh.count = n;
+    blobs.instanceMatrix.needsUpdate = true; blobs.computeBoundingSphere(); blobs.raycast = () => {}; blobs.name = 'blobs';
+    scene.add(mesh, blobs); meshes.push(mesh, blobs);
+  }
 
   // ---------- layout ----------
   let key = null, castShadows = true;
   const tmpM = new THREE.Matrix4(), tmpP = new THREE.Vector3(), tmpQ = new THREE.Quaternion(), tmpS = new THREE.Vector3(), upY = new THREE.Vector3(0, 1, 0), tmpC = new THREE.Color();
-  function clear() { for (const m of meshes) { scene.remove(m); m.dispose(); } meshes.length = 0; }
+  function clear() { for (const m of meshes) { scene.remove(m); if (m.isInstancedMesh) m.dispose(); else m.geometry.dispose(); } meshes.length = 0; }
   // what goes where. Each pick is [model, weight]; scale is [lo, hi].
-  const LOW = [['Bush_Common_Flowers', 3], ['Fern_1', 2], ['Rock_Medium_1', 0.6], ['Rock_Medium_2', 0.6], ['Rock_Medium_3', 0.6], ['Plant_1_Big', 1.5], ['Grass_Wispy_Short', 2], ['Grass_Common_Tall', 3]];
-  const TUFT = [['Grass_Common_Short', 6], ['Grass_Wispy_Short', 4], ['Grass_Common_Tall', 2], ['Clover_1', 2], ['Flower_3_Group', 1], ['Flower_4_Group', 1], ['Pebble_Round_1', 1], ['Pebble_Round_2', 1], ['Mushroom_Common', 0.5]];
-  const DRESS = [['Grass_Common_Short', 6], ['Grass_Wispy_Short', 3], ['Clover_1', 2], ['Flower_3_Group', 1], ['Pebble_Round_1', 1.5], ['Pebble_Round_2', 1.5], ['Pebble_Square_2', 1]];
+  const LOW = [['Bush_Common_Flowers', 1.2], ['Fern_1', 2.5], ['Rock_Medium_1', 0.6], ['Rock_Medium_2', 0.6], ['Rock_Medium_3', 0.6], ['Plant_1_Big', 1.5], ['Grass_Wispy_Short', 1], ['Grass_Common_Tall', 3]];
+  const TUFT = [['Grass_Common_Short', 7], ['Grass_Wispy_Short', 1], ['Grass_Common_Tall', 2], ['Clover_1', 2], ['Flower_3_Group', 1], ['Pebble_Round_1', 1], ['Pebble_Round_2', 1], ['Mushroom_Common', 0.5]];
+  const DRESS = [['Grass_Common_Short', 7], ['Grass_Wispy_Short', 1], ['Clover_1', 1], ['Flower_3_Group', 1], ['Pebble_Round_1', 1.5], ['Pebble_Round_2', 1.5], ['Pebble_Square_2', 1]];
   const PEBBLES = [['Pebble_Round_1', 1], ['Pebble_Round_2', 1], ['Pebble_Square_2', 1], ['Mushroom_Common', 0.3]];
   const ROCKS = [['Rock_Medium_1', 1], ['Rock_Medium_2', 1], ['Rock_Medium_3', 1], ['Pebble_Square_2', 0.5]];
   function update(v, groundY, BW, BD, T) {
@@ -8482,9 +8585,9 @@ const Scenery3D = (THREE, scene, opts = {}) => {
     const rr = () => { sd = (sd * 16807) % 2147483647; return (sd - 1) / 2147483646; };
     const pickOf = (list) => { let s = 0; for (const [, w] of list) s += w; let x = rr() * s; for (const [n, w] of list) { if ((x -= w) <= 0) return n; } return list[0][0]; };
     const hw = BW / 2, hd = BD / 2;
-    // model (+ '~' when too far out for its shadow to reach the board) -> [[x, y, z, ang, s, shade]]
+    // model (+ '~' when far out: no shadow, an impostor if it has one; bushes from 6 m) -> [[x, y, z, ang, s, shade]]
     const placed = new Map();
-    const put = (name, x, z, s, y = 0) => { if (!lib[name]) return; const k = name + (outside(x, z) > 16 ? '~' : ''); (placed.get(k) || placed.set(k, []).get(k)).push([x, y, z, rr() * Math.PI * 2, s, 0.85 + rr() * 0.3]); };
+    const put = (name, x, z, s, y = 0) => { if (!lib[name]) return; const d = outside(x, z), k = name + (d > 16 || (d > 6 && /^Bush/.test(name)) ? '~' : ''); (placed.get(k) || placed.set(k, []).get(k)).push([x, y, z, rr() * Math.PI * 2, s, 0.85 + rr() * 0.3]); };
     const low = () => bi.low === 'rocks' ? pickOf(ROCKS) : pickOf(LOW), tuft = () => bi.low === 'rocks' ? pickOf(PEBBLES) : pickOf(TUFT);
     const outside = (x, z) => Math.max(Math.abs(x) - hw, Math.abs(z) - hd, 0) > 0 ? Math.hypot(Math.max(0, Math.abs(x) - hw), Math.max(0, Math.abs(z) - hd)) : 0;
     // 1. the edge: a frame of bushes, rocks and tall grass hugging the board, so its edge doesn't end in a hard line
@@ -8497,22 +8600,25 @@ const Scenery3D = (THREE, scene, opts = {}) => {
       put(low(), x, z, (near ? 0.8 : 1) * (1 + rr() * 0.8));
     }
     // 2. the land around: trees thicken with distance; your end gets only low things (the angled view looks over it)
-    const CELL = 9.5; // trees are the heavy part (about 4000 triangles each): a tree at most every 9 m
+    const CELL = 8; // a tree at most every 8 m (near the board a real model of about 4000 triangles, further out an impostor)
     for (let gx = -hw - 50; gx < hw + 50; gx += CELL) for (let gz = -hd - 70; gz < hd + 40; gz += CELL) {
       const x = gx + rr() * CELL, z = gz + rr() * CELL, d = outside(x, z);
       if (d < 4) continue;
+      const nearBoard = d < 16; // real models here: keep them fewer
       const behindMe = z > hd - 4 && Math.abs(x) < hw + 14;
       if (behindMe) { if (d < 22 && rr() < 0.35 * bi.grow) put(low(), x, z, 0.9 + rr() * 0.8); continue; }
-      const p = Math.min(1, (d - 3) / 10) * 0.8 * bi.grow;
+      const p = Math.min(1, (d - 3) / 10) * (nearBoard ? 0.55 : 0.85) * bi.grow;
       if (rr() > p) { if (d < 16 && rr() < 0.6) put(low(), x, z, 0.9 + rr() * 0.9); continue; }
       if (!bi.trees.length || rr() < 0.12) { put(pickOf(ROCKS), x, z, 1.6 + rr() * 2.2); continue; } // a boulder now and then
-      put(bi.trees[Math.floor(rr() * bi.trees.length)], x, z, 1.6 + rr() * 0.9);
-      if (rr() < 0.5) put(low(), x + (rr() - 0.5) * 4, z + (rr() - 0.5) * 4, 0.9 + rr() * 0.6); // undergrowth
+      let tree = bi.trees[Math.floor(rr() * bi.trees.length)];
+      if (nearBoard && /^Twisted/.test(tree)) tree = bi.trees[0]; // the big twisted trees (9000 triangles) only stand far out, as impostors
+      put(tree, x, z, 1.6 + rr() * 0.9);
+      if (nearBoard && rr() < 0.5) put(low(), x + (rr() - 0.5) * 4, z + (rr() - 0.5) * 4, 0.9 + rr() * 0.6); // undergrowth
     }
     // 3. grass round the board's edge, out in the open land
-    for (let n = 0; n < 300 * bi.grow; n++) {
+    for (let n = 0; n < 220 * bi.grow; n++) {
       const x = (rr() * 2 - 1) * (hw + 24), z = (rr() * 2 - 1) * (hd + 24), d = outside(x, z);
-      if (d > 0.3 && d < 22) put(tuft(), x, z, 1.1 + rr() * 0.9);
+      if (d > 0.3 && d < 14) put(tuft(), x, z, 1.1 + rr() * 0.9);
     }
     // 4. on the board: a light dressing of small plants (not on walls or water), low enough to stay out of the way
     if (bi.dress) {
@@ -8526,7 +8632,16 @@ const Scenery3D = (THREE, scene, opts = {}) => {
         put(pickOf(DRESS), x, z, 0.55 + rr() * 0.45, groundY(x, z));
       }
     }
-    // the meshes: one per model part, holding every placement of that model
+    // far trees and bushes: impostors
+    const far = [];
+    for (const [k, list] of [...placed]) {
+      const name = k.replace('~', '');
+      if (!k.endsWith('~') || !impIndex || !impIndex[name]) continue;
+      for (const [x, y, z, ang, s, sh] of list) far.push([name, x, y, z, s, sh, ang < Math.PI ? 1 : -1]);
+      placed.delete(k);
+    }
+    impostors(far, bi.tint);
+    // the rest: one mesh per model part, holding every placement of that model
     for (const [k, list] of placed) {
       const md = lib[k.replace('~', '')], tall = md.h > 3 && !k.endsWith('~');
       for (const part of md.parts) {
@@ -8539,13 +8654,13 @@ const Scenery3D = (THREE, scene, opts = {}) => {
         im.instanceMatrix.needsUpdate = true; if (im.instanceColor) im.instanceColor.needsUpdate = true;
         im.castShadow = castShadows && tall; im.receiveShadow = false;
         im.computeBoundingSphere(); im.raycast = () => {}; // scenery never takes a touch
-        scene.add(im); meshes.push(im);
+        im.name = k; scene.add(im); meshes.push(im);
       }
     }
   }
   function shadows(on) { if (on !== castShadows) { castShadows = on; key = ''; } }
-  function dispose() { clear(); for (const m of mats) { if (m.map) m.map.dispose(); m.dispose(); } if (lib) for (const md of Object.values(lib)) for (const p of md.parts) p.geo.dispose(); }
-  return { _lib: () => lib, update, biome, shadows, dispose, ready, count: () => meshes.reduce((s, m) => s + m.count, 0) };
+  function dispose() { clear(); if (atlas) { atlas.dispose(); impMat.dispose(); impGeo.dispose(); blobMat.map.dispose(); blobMat.dispose(); blobGeo.dispose(); } for (const m of mats) { if (m.map) m.map.dispose(); m.dispose(); } if (lib) for (const md of Object.values(lib)) for (const p of md.parts) p.geo.dispose(); }
+  return { _lib: () => lib, _meshes: () => meshes, update, biome, shadows, dispose, ready, count: () => meshes.reduce((s, m) => s + m.count, 0) };
 };
 
 // The meadow floor under the zones, for maps that have no painted ground of their own (the 3D board only): dusty
@@ -8661,7 +8776,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
   around.rotation.x = -Math.PI / 2; around.position.y = -0.05; around.receiveShadow = true;
   scene.add(around);
   // the land around the board and small plants on it (src/scenery3d.js; missing in builds without it)
-  const scenery = typeof Scenery3D === 'function' ? Scenery3D(THREE, scene, { onReady: () => { biomeKey = null; if (opts.onInput) opts.onInput(); } }) : null;
+  const scenery = typeof Scenery3D === 'function' ? Scenery3D(THREE, scene, { renderer, onReady: () => { biomeKey = null; if (opts.onInput) opts.onInput(); } }) : null;
   let biomeKey = null;
   function useScenery(v) {
     if (!scenery) return;

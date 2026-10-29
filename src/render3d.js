@@ -78,7 +78,7 @@ const Render3D = (THREE, el, view, opts = {}) => {
   around.rotation.x = -Math.PI / 2; around.position.y = -0.05; around.receiveShadow = true;
   scene.add(around);
   // the land around the board and small plants on it (src/scenery3d.js; missing in builds without it)
-  const scenery = typeof Scenery3D === 'function' ? Scenery3D(THREE, scene, { onReady: () => { biomeKey = null; if (opts.onInput) opts.onInput(); } }) : null;
+  const scenery = typeof Scenery3D === 'function' ? Scenery3D(THREE, scene, { renderer, onReady: () => { biomeKey = null; if (opts.onInput) opts.onInput(); } }) : null;
   let biomeKey = null;
   function useScenery(v) {
     if (!scenery) return;

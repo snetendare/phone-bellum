@@ -67,7 +67,7 @@ Still to try on phones: the phone layout, the Tilted view and the 3D battle cam 
 
 - `src/scenery3d.js` lays out the land around the board (trees, bushes, rocks, grass) and small plants on it, instanced, purely visual, seeded per map (both players get the same land). Looks per map in `BIOMES`: meadow (Standard, Bridge, Rush, Test Grid; also paints the meadow floor through Render2D's new `opts.ground`, with darker grid lines), forest, ice, cavern (these keep their own painted floors).
 - Models: Quaternius Stylized Nature MegaKit (CC0) from the owner's D:\3DASSETS, packed into `models/scenery.bin` (1.7 MB) by `tools/scenery/build-scenery.js <MegaKit glTF folder>` (needs @gltf-transform/core, @gltf-transform/functions, meshoptimizer, sharp). The artifact builds inline it as `window.PB_SCENERY`.
-- Cost: about 1.1 M triangles a frame with shadows on (trees are ~4000 each; only trees within 16 m of the board cast shadows). Not tried on a phone yet; the too-slow fallback still applies. Other packs there (KayKit Forest/Dungeon/ResourceBits, Kenney mini-forest) are unused so far.
+- Cost (2026-10-29): far trees and bushes are impostors (camera-facing cards baked at load from three heights, 8°/40°/90°, blended by viewing angle, with a soft round shadow), so the scenery is about 190-240 k triangles in the main pass (was about 1 M), plus near trees (within 16 m) again in the shadow pass. Budget aimed for: under about 300 k triangles a frame in all and under 100 draw calls. Not tried on a phone yet; the too-slow fallback still applies. Other packs there (KayKit Forest/Dungeon/ResourceBits, Kenney mini-forest) are unused so far.
 - The "Phone Bellum" artifact wasn't republished (its live copy is an older build); the website has it.
 
 ## Checks
