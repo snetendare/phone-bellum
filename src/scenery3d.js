@@ -29,7 +29,7 @@ const Scenery3D = (THREE, scene, opts = {}) => {
   // autumn: maples and birches in red and gold, red bushes, golden grass, fallen leaves on the floor
   BIOMES.autumn = { sky: '#B5AA95', land: '#5C5B39', tint: [1, 0.97, 0.92], low: 'autumn', trees: ['MapleTree_1', 'MapleTree_2', 'MapleTree_4', 'MapleTree_5', 'BirchTree_1', 'BirchTree_4', 'BirchTree_5', 'Pine_1'], grow: 1.2, dress: 1,
     tints: [[/^Grass/, [1.2, 1.02, 0.6]], [/^Fern|^Plant_1/, [1.25, 0.95, 0.5]], [/^Clover/, [1.15, 1, 0.6]]] };
-  BIOMES.frost = { ...BIOMES.ice }; // Frozen Peak's look without the snow (the Test Grid's own look)
+  BIOMES.frost = { ...BIOMES.ice }; // Darkwoods: Frozen Peak's look without the snow (the Test Grid's own look)
   BIOMES.ice.snow = 0.75; // snow on everything that faces up, drifts round the board and falling snow
   // a look (Scenery3D.LOOKS, below) -> its biome
   const biomeOf = (look) => BIOMES[(Scenery3D.LOOKS[look] || Scenery3D.LOOKS.meadow).biome] || BIOMES.meadow;
@@ -379,13 +379,10 @@ Scenery3D.FLOORS = {
 // 2D renderer, bg). A map with skins (Game.SKINS) takes the match's pick (m.skin); every map has its own look too.
 Scenery3D.LOOKS = {
   meadow: { biome: 'meadow', floor: 'meadow' }, autumn: { biome: 'autumn', floor: 'autumn' }, desert: { biome: 'desert', floor: 'sand' },
-  snow: { biome: 'ice', bg: 'ice' }, frost: { biome: 'frost', bg: 'ice' }, forest: { biome: 'forest', bg: 'forest' }, cavern: { biome: 'cavern', bg: 'cavern' },
+  snow: { biome: 'ice', bg: 'ice' }, frost: { biome: 'frost', bg: 'darkwoods' }, forest: { biome: 'forest', bg: 'forest' }, cavern: { biome: 'cavern', bg: 'cavern' },
 };
-Scenery3D.MAP_LOOK = { standard: 'meadow', testgrid: 'frost', ice: 'snow', forest: 'forest', cavern: 'cavern' }; // the rest: meadow
-Scenery3D.lookOf = (src) => {
-  const mp = src && Game.mapOf(src);
-  return mp && mp.skins && src.skin && Scenery3D.LOOKS[src.skin] ? src.skin : (mp && Scenery3D.MAP_LOOK[mp.id]) || 'meadow';
-};
+Scenery3D.MAP_LOOK = Game.MAP_LOOK; // each map's own look (in game.js, so the page's music can follow it without the 3D code)
+Scenery3D.lookOf = (src) => { const k = Game.lookOf(src); return Scenery3D.LOOKS[k] ? k : 'meadow'; };
 Scenery3D.floor = (() => {
   const cache = {};
   return (ctx, W, H, t, look) => {

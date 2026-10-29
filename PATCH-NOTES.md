@@ -4,6 +4,26 @@ Newest first. Each entry says what changed for players; technical details live i
 
 ---
 
+## 29 October 2026 (late evening) – Main menu: map looks
+
+### Looks
+- The Frost look is now called **Darkwoods**, and its board no longer has the pale snow patches, snow caps and snowflakes painted on it.
+- The board behind the title on the start screen now shows the map you picked in Match settings, in the look you picked. Change the map or the look and the board changes with it, while the title card fades back for a couple of seconds so you can see it properly.
+- The Look picker wraps onto two lines instead of stretching out of the panel, so clicking through the looks no longer resizes the whole screen.
+
+### Music follows the look
+Deployment and battle music now belong to the look of the match, not the map:
+
+| Look | Music |
+|---|---|
+| Darkwoods, Autumn | Mushroom Cavern combo |
+| Snow | Icy Peak combo |
+| Meadow, Desert, Forest (placeholder) | Standard combo |
+
+Maps keep the music of their own look, so Mushroom Cavern and Frozen Peak sound as before, and Test Grid (whose own look is Darkwoods) now plays the Mushroom Cavern combo.
+
+---
+
 ## 29 October 2026 (evening) – Fixes and tuning
 
 ### Fixes

@@ -90,6 +90,15 @@ canvas { display: block; width: 100%; height: 100%; }
 .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
 .seg button { border: 0; background: transparent; padding: 7px 12px; font-family: var(--font-data); font-size: 13px; }
 .seg button[aria-pressed="true"] { background: var(--line); color: var(--gold); }
+/* the Look picker: wraps onto more lines instead of growing wider than the panel (a long row of looks used to widen
+   the whole page), and its size doesn't change with the pick */
+.seg.looks { display: flex; flex-wrap: wrap; width: 100%; }
+.seg.looks button { flex: 1 1 auto; padding: 7px 8px; white-space: nowrap; }
+/* the start screen while a look is picked: the title card fades back so the map behind it shows */
+.overlay.peek { background: rgba(13, 19, 21, 0.12); }
+.overlay.peek > .card { opacity: 0.12; }
+.overlay { transition: background-color 0.35s ease; }
+.overlay > .card { transition: opacity 0.35s ease; }
 
 .shop { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; scroll-snap-type: x proximity; -webkit-overflow-scrolling: touch; }
 .uwrap { flex: 0 0 132px; scroll-snap-align: start; position: relative; display: grid; }
@@ -4041,7 +4050,14 @@ const Game = (() => {
   ];
   // Looks (skins) for the 3D board: a map with skins (the Standard and the Test Grid) can be played in any of them; the
   // others have their own look. Only how the board looks: the rules stay the map's. The match keeps the host's pick (m.skin).
-  const SKINS = [{ id: 'meadow', name: 'Meadow' }, { id: 'autumn', name: 'Autumn' }, { id: 'snow', name: 'Snow' }, { id: 'frost', name: 'Frost' }, { id: 'desert', name: 'Desert' }];
+  const SKINS = [{ id: 'meadow', name: 'Meadow' }, { id: 'autumn', name: 'Autumn' }, { id: 'snow', name: 'Snow' }, { id: 'frost', name: 'Darkwoods' }, { id: 'desert', name: 'Desert' }];
+  // each map's own look (the rest: meadow), and the look a match is drawn in: the host's pick on a map with skins, else
+  // the map's own. The deployment and battle music follow the look too (LOOK_MUSIC in the page).
+  const MAP_LOOK = { standard: 'meadow', testgrid: 'frost', ice: 'snow', forest: 'forest', cavern: 'cavern' };
+  function lookOf(src) {
+    const mp = src && mapOf(src);
+    return mp && mp.skins && src.skin && SKINS.some(x => x.id === src.skin) ? src.skin : (mp && MAP_LOOK[mp.id]) || 'meadow';
+  }
   // ---------- terrain: walls, water, bushes and ground height (a map's `terrain`, from the map editor) ----------
   // A wall ('#') stops walking, shots and sight; water ('~') stops walking only; shallow water ('s') slows whoever wades
   // in it by TERRAIN.wade %; a bush ('b') hides who stands in it (see the engine's inSight). A tile with a form (a
@@ -6420,7 +6436,7 @@ const Game = (() => {
     TOWER, TOWER_TYPES, OUTPOST, TOWER_PICK_ROUND, towerType, towerChoices, needsTowerPick, setTowerType, settleTowerPicks, TOWER_SKILL, towerSkillOf, towerSkillVisible, towerPicked, canBuyTowerSkill, buyTowerSkill, undoTowerSkill, towerSkillCost, towerSkill2Of, towerSkill2Visible, towerSkill2Cost, canBuyTowerSkill2, buyTowerSkill2, undoTowerSkill2, towerSkill2On, AIRSHIP, MOAT, BWALL, BWALL_SQ, EDGES, bwallsOf, bwallOn, edgeOf, bwallWorld, bwallsLeft, bwallShown, bwallSpotOk, placeBwall, unplaceBwall, ensureBwalls, bwallUnit, INVEST, MAGE_GENERALS, mageGenPrice, MAGE, mageGenInfo, mageGenOf, mageTpOf, isExtraGen, mageGenCost, canBuyMageGen, buyMageGen, undoMageGen, mageTowerUnit, generalUnit, LOAN, loanNow, investNow, bankBusy, investNow, bankBusy, canTakeLoan, takeLoan, undoLoan, towerRounds, troundInfo, troundOn, troundCost, canBuyTround, buyTround, undoTround, SLIME_UNITS, slimeTowerUnit, slimeSkillDefs, TOWER_MID, towerColOk, towerAt, needsTower, placeTower, ensureTower,
     FLANK, flankRows, flankOpen, isFlank, flankTiles, reserved, canPlaceAt, isOff, enemyHolds, inNoMans, hasSkillType, garrisonAt, garrisonFree, inBuilding, WATCH_SQ, watchUnit, freeMover,
     STANDARD_PACK, ICE, ALTAR, GOLEM, isIce, hailRound, altarRound, stormShift, stormRows, hailTiles, altarCost, altarRefund, altarCount, pushRoom, altarBought, addAltar, buyAltar, undoAltar, snowgres, snowgreUnit,
-    MAPS, SKINS, EDITOR_MAPS, TERRAIN, objectiveOf, objectiveTiles, SHAPE_PATH, terrainTile, terrainBlocks, terrainOf, groundHeight, ELF_TOWER, SHROOM, SHROOM_SPLIT, shroomAt, shroomTileAt, shroomRemoval, SHROOM_REMOVE, shroomCost, removeShroom, undoRemoveShroom, mapOf, elfSpot, rollMap, BRIBE_COST, bribeList, bribeGold, bribeCount, bribeNow, bribeCost, bribeRefund, ELF_POWER, elfPowered, elfUnit, ELF_OWN, elfOwnCost, elfOwnOf, elfOwnAt, elfOwnUnlocked, elfOwnOffered, canBuyElfOwn, elfOwnSpotOk, buyElfOwn, undoElfOwn, bribeLeader, canBribe, bribe, undoBribe,
+    MAPS, SKINS, MAP_LOOK, lookOf, EDITOR_MAPS, TERRAIN, objectiveOf, objectiveTiles, SHAPE_PATH, terrainTile, terrainBlocks, terrainOf, groundHeight, ELF_TOWER, SHROOM, SHROOM_SPLIT, shroomAt, shroomTileAt, shroomRemoval, SHROOM_REMOVE, shroomCost, removeShroom, undoRemoveShroom, mapOf, elfSpot, rollMap, BRIBE_COST, bribeList, bribeGold, bribeCount, bribeNow, bribeCost, bribeRefund, ELF_POWER, elfPowered, elfUnit, ELF_OWN, elfOwnCost, elfOwnOf, elfOwnAt, elfOwnUnlocked, elfOwnOffered, canBuyElfOwn, elfOwnSpotOk, buyElfOwn, undoElfOwn, bribeLeader, canBribe, bribe, undoBribe,
     CHARACTERS, CHAR, charOf, charInfo, enzoSkill, enzoActive, charmOf, isGentleman, canGiveCharm, giveCharm, undoCharm, ensureCharm, felixGold, isTier1, rollBuffTiles, onBuffTile, zoeBuff, yotImps, yotLevel, TOWER_SPOT, towerSpot,
     TREASURY, TREASURY_SQ, treasuryOn, treasuryUp, treasurySpot, treasuryAt, treasuryUnit, deployCost, FORTIFY, fortifyOf, canFortify, fortify, bwallsFighting, VAULT, vaultOn, MARK, markOf, markLost, markOn, markCost, markTarget, canMark, placeMark, markShown,
     FACTION_MODE, FACTIONS: () => FACTIONS, setFactions, factionInfo, factionsOf, factionTowers, towerTypeById, ownsUnit, withFactionTrait, factionSet,
@@ -6761,13 +6777,14 @@ const Render2D = (cv, view, opts = {}) => {
   }
   // a mushroom tile: tinted tile with a small glowing mushroom in the tile's colour
   // Frozen Peak: a dark icy floor with snow drifts and cracks in the ice, and snow-capped rock on both flanks.
-  function paintIce(c, rr, t) {
+  // snow = false: Darkwoods (the same dark ground and rock, with no snow drifts, snow caps or snowflakes)
+  function paintIce(c, rr, t, snow = true) {
     c.fillStyle = '#131B22'; c.fillRect(0, 0, W, H);
     const gl = c.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, Math.max(W, H) * 0.6);
     gl.addColorStop(0, '#1D2833'); gl.addColorStop(0.6, '#18212A'); gl.addColorStop(1, '#121920');
     c.fillStyle = gl; c.fillRect(0, 0, W, H);
     // snow drifts: soft pale patches
-    for (let k = 0; k < 30; k++) {
+    if (snow) for (let k = 0; k < 30; k++) {
       c.globalAlpha = 0.12 + rr() * 0.08; c.fillStyle = k % 3 ? '#3A4B5A' : '#4B5E6E';
       c.beginPath(); c.ellipse(rr() * W, rr() * H, t * (0.6 + rr() * 1.5), t * (0.25 + rr() * 0.5), (rr() - 0.5) * 0.6, 0, Math.PI * 2); c.fill();
     }
@@ -6797,15 +6814,16 @@ const Render2D = (cv, view, opts = {}) => {
         c.beginPath(); // a jagged rock
         for (let j = 0; j < 6; j++) { const ang = j / 6 * Math.PI * 2 + rr() * 0.4, rad = q.r * (0.75 + rr() * 0.35); const px = q.x + Math.cos(ang) * rad, py = q.y + Math.sin(ang) * rad * 0.8; j ? c.lineTo(px, py) : c.moveTo(px, py); }
         c.closePath(); c.fill();
+        if (!snow) continue;
         c.globalAlpha = a * 0.45; c.fillStyle = '#C8D7E2'; // snow cap
         c.beginPath(); c.ellipse(q.x - q.r * 0.1, q.y - q.r * 0.45, q.r * 0.55, q.r * 0.2, 0, 0, Math.PI * 2); c.fill();
       }
     }
     // a few snowflakes
     c.fillStyle = '#DCE8F0';
-    for (let k = 0; k < 120; k++) { c.globalAlpha = 0.08 + rr() * 0.14; c.beginPath(); c.arc(rr() * W, rr() * H, 0.6 + rr() * 0.9, 0, Math.PI * 2); c.fill(); }
+    if (snow) for (let k = 0; k < 120; k++) { c.globalAlpha = 0.08 + rr() * 0.14; c.beginPath(); c.arc(rr() * W, rr() * H, 0.6 + rr() * 0.9, 0, Math.PI * 2); c.fill(); }
   }
-  const BACKGROUNDS = { forest: [1234567, paintForest], cavern: [7654321, paintCavern], ice: [4242421, paintIce] };
+  const BACKGROUNDS = { forest: [1234567, paintForest], cavern: [7654321, paintCavern], ice: [4242421, paintIce], darkwoods: [4242421, (c, rr, t) => paintIce(c, rr, t, false)] };
   // ---------- terrain: a map's ground height, water, walls, shallow water and bushes (Game.TERRAIN) ----------
   // Painted once per map, board size and side onto a canvas of its own, then copied onto the board every frame.
   // Height is light and shade: higher ground lighter, lower darker, slopes lit from the top left, as Game.groundHeight
@@ -8081,12 +8099,16 @@ const Render2D = (cv, view, opts = {}) => {
   const ARTIST = 'Snetänd';
   const songName = (id) => `“${SONGS[id].title}” - ${ARTIST}`;
   const PLAYLISTS = { deploy: ['bulgaria'], battle: ['habbyourmam'] };
-  const MAP_MUSIC = { // maps with their own deployment or battle music, in place of PLAYLISTS.deploy / .battle
-    ice: { deploy: ['icyOne'], battle: ['knarkkungn'] },
-    cavern: { deploy: ['sirski'] },
+  // Music combos: deployment and battle music in place of PLAYLISTS.deploy / .battle (a phase a combo leaves out plays
+  // the standard one). The music follows the match's look (Game.lookOf), not its map; looks not in LOOK_MUSIC play
+  // the standard combo.
+  const MUSIC_COMBOS = {
+    cavern: { deploy: ['sirski'] },                         // Mushroom Cavern
+    icy: { deploy: ['icyOne'], battle: ['knarkkungn'] },    // Icy Peak
   };
+  const LOOK_MUSIC = { frost: 'cavern', autumn: 'cavern', cavern: 'cavern', snow: 'icy' }; // frost = Darkwoods
   // the menu playlist: every song that isn't deployment or battle music (a new song shows up in it by itself)
-  const phaseSongs = new Set([...PLAYLISTS.deploy, ...PLAYLISTS.battle, ...Object.values(MAP_MUSIC).flatMap(o => Object.values(o).flat())]);
+  const phaseSongs = new Set([...PLAYLISTS.deploy, ...PLAYLISTS.battle, ...Object.values(MUSIC_COMBOS).flatMap(o => Object.values(o).flat())]);
   PLAYLISTS.menu = Object.keys(SONGS).filter(id => !phaseSongs.has(id));
   const FADE_IN = 1, FADE_OUT = 1; // seconds
   const DEFAULT_VOL = 60;
@@ -8146,12 +8168,12 @@ const Render2D = (cv, view, opts = {}) => {
   }
   const menuSongs = () => snd.song ? [snd.song] : PLAYLISTS.menu;
   const music = { menu: playlist(menuSongs()), deploy: playlist(PLAYLISTS.deploy), battle: playlist(PLAYLISTS.battle) };
-  for (const id in MAP_MUSIC) for (const k in MAP_MUSIC[id]) music[k + '-' + id] = playlist(MAP_MUSIC[id][k]);
+  for (const id in MUSIC_COMBOS) for (const k in MUSIC_COMBOS[id]) music[k + '-' + id] = playlist(MUSIC_COMBOS[id][k]);
   function syncMusic() {
     const on = musicUnlocked && musicLevel() > 0;
     music.menu.set(on && (phase === 'start' || phase === 'lobby' || phase === 'draft'));
-    const own = m && m.map && MAP_MUSIC[m.map.id] || {};
-    const pick = (k) => own[k] ? k + '-' + m.map.id : k; // this map's player for that phase, or the general one
+    const combo = m && m.map ? LOOK_MUSIC[Game.lookOf(m)] : null, own = (combo && MUSIC_COMBOS[combo]) || {};
+    const pick = (k) => own[k] ? k + '-' + combo : k; // this look's player for that phase, or the standard one
     const cur = phase === 'deploy' ? pick('deploy') : (phase === 'battle' || phase === 'result') ? pick('battle') : '';
     for (const k in music) if (k !== 'menu') music[k].set(on && k === cur);
   }
@@ -8377,7 +8399,7 @@ const Render2D = (cv, view, opts = {}) => {
       </div>
       <div class="bar" id="skin-bar"${skinnable(mapPick) ? '' : ' hidden'}>
         <span class="hint">Look</span>
-        <div class="seg" role="group" aria-label="Look of the 3D board">
+        <div class="seg looks" role="group" aria-label="Look of the 3D board">
           ${[{ id: '', name: 'Own' }].concat(Game.SKINS, [{ id: 'random', name: 'Random' }]).map(k => `<button data-skin="${k.id}" aria-pressed="${skinPick === k.id}">${esc(k.name)}</button>`).join('')}
         </div>
       </div>`;
@@ -8387,11 +8409,13 @@ const Render2D = (cv, view, opts = {}) => {
     const sum = $('panel').querySelector('#settings summary span');
     if (sum) sum.textContent = mapPick ? Game.MAPS.find(mp => mp.id === mapPick).name : 'Random map';
     const sb = $('panel').querySelector('#skin-bar'); if (sb) sb.hidden = !skinnable(mapPick);
+    peekMap();
   }));
   $('panel').querySelectorAll('[data-skin]').forEach(b => b.addEventListener('click', () => {
     skinPick = b.dataset.skin;
     try { localStorage.setItem('pb-skin', skinPick); } catch (e) {}
     $('panel').querySelectorAll('[data-skin]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+    peekMap();
   })); };
   // characters left out of the package draw (saved on this device; the host's list counts in a match with a friend)
   let offChars = [];
@@ -8505,7 +8529,21 @@ const Render2D = (cv, view, opts = {}) => {
   // ---------- board: drawn by the renderer (src/render2d.js), which reads what to show from view() ----------
   const cv = $('board');
   const lookPre = () => (endLook && phase === 'end' && lastPre) || null; // Look at board after a match: the last fight's start
-  const boardView = () => ({ m: lookPre() || m, me, phase, units, mode, bt: lookPre() ? null : bt, battlePre, fx, selected, moving, drag, hoverTile, rangeOf,
+  // The start screen: the board behind the title card shows the map and look picked in Match settings (a map on a
+  // bigger grid shows as Standard in that map's look, so the board keeps its size). A match made once per pick, never played.
+  let menuPreKey = '', menuPreM = null;
+  const menuPre = () => {
+    if (phase !== 'start' || m) return null;
+    const mp = Game.MAPS.find(x => x.id === mapPick), id = mp && !mp.grid ? mapPick : 'standard';
+    const sk = skinPick && skinPick !== 'random' ? skinPick : mp && mp.grid ? Game.MAP_LOOK[mapPick] : null;
+    const key = id + '|' + sk;
+    if (key !== menuPreKey) {
+      menuPreKey = key;
+      try { menuPreM = Game.createMatch(units, M, 4242, id, null, [], { skin: sk }); } catch (e) { menuPreM = null; }
+    }
+    return menuPreM;
+  };
+  const boardView = () => ({ m: lookPre() || m || menuPre(), me, phase, units, mode, bt: lookPre() ? null : bt, battlePre, fx, selected, moving, drag, hoverTile, rangeOf,
     editable: editable(), placingUnit: placingUnit(), placingElf: placingElf(), placingTower: placingTower(), placingWall: placingWall(),
     dev: m && m.dev ? { bPlacing, castMode, guideMode, guideId: guideDrag ? guideDrag.id : guideMode !== 'pick' ? guideMode : null, guide: guideDrag ? guideDrag.pts : guideMode != null && guideMode !== 'pick' ? guideDraft : null } : null,
     battleCam: cam && cam.k > 0 ? { zoom: 1 + (CAM.zoom - 1) * cam.k, x: cam.x, y: cam.y, k: cam.k } : null,
@@ -9438,8 +9476,16 @@ const Render2D = (cv, view, opts = {}) => {
   }
 
   // ---------- overlays ----------
+  // a pick of map or look on the start screen: the title card fades back for a moment so the map behind it shows
+  let peekTimer = 0;
+  function peekMap() {
+    render();
+    const o = $('overlay'); if (phase !== 'start' || o.hidden) return;
+    o.classList.add('peek'); clearTimeout(peekTimer);
+    peekTimer = setTimeout(() => o.classList.remove('peek'), 2200);
+  }
   function overlay(html) {
-    const o = $('overlay');
+    const o = $('overlay'); clearTimeout(peekTimer); o.classList.remove('peek');
     if (!html) { o.hidden = true; o.innerHTML = ''; return; }
     o.hidden = false; o.innerHTML = html;
   }
@@ -11195,7 +11241,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   // It falls back to the 2D board when it can't start (no WebGL), when the phone drops the WebGL context, and when
   // fights run under 20 fps at low quality (slower fights step the quality down first), with one line on the board.
   const THREE_URL = './vendor/three.module.min.js'; // the artifact build points this at jsDelivr
-  const V3D = '1a7442f6f9'; // the 3D code's version (src/build.js puts a hash of it here)
+  const V3D = 'a15d095be3'; // the 3D code's version (src/build.js puts a hash of it here)
   const B3D_STORE = 'phone-bellum-board';
   const force2d = /[?&]board=2d\b/.test(location.search);
   const force3d = !force2d && (/[?&]board=3d\b/.test(location.search) || window.PB_FORCE3D === true);

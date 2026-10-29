@@ -670,12 +670,16 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
   const ARTIST = 'Snetänd';
   const songName = (id) => `“${SONGS[id].title}” - ${ARTIST}`;
   const PLAYLISTS = { deploy: ['bulgaria'], battle: ['habbyourmam'] };
-  const MAP_MUSIC = { // maps with their own deployment or battle music, in place of PLAYLISTS.deploy / .battle
-    ice: { deploy: ['icyOne'], battle: ['knarkkungn'] },
-    cavern: { deploy: ['sirski'] },
+  // Music combos: deployment and battle music in place of PLAYLISTS.deploy / .battle (a phase a combo leaves out plays
+  // the standard one). The music follows the match's look (Game.lookOf), not its map; looks not in LOOK_MUSIC play
+  // the standard combo.
+  const MUSIC_COMBOS = {
+    cavern: { deploy: ['sirski'] },                         // Mushroom Cavern
+    icy: { deploy: ['icyOne'], battle: ['knarkkungn'] },    // Icy Peak
   };
+  const LOOK_MUSIC = { frost: 'cavern', autumn: 'cavern', cavern: 'cavern', snow: 'icy' }; // frost = Darkwoods
   // the menu playlist: every song that isn't deployment or battle music (a new song shows up in it by itself)
-  const phaseSongs = new Set([...PLAYLISTS.deploy, ...PLAYLISTS.battle, ...Object.values(MAP_MUSIC).flatMap(o => Object.values(o).flat())]);
+  const phaseSongs = new Set([...PLAYLISTS.deploy, ...PLAYLISTS.battle, ...Object.values(MUSIC_COMBOS).flatMap(o => Object.values(o).flat())]);
   PLAYLISTS.menu = Object.keys(SONGS).filter(id => !phaseSongs.has(id));
   const FADE_IN = 1, FADE_OUT = 1; // seconds
   const DEFAULT_VOL = 60;
@@ -735,12 +739,12 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
   }
   const menuSongs = () => snd.song ? [snd.song] : PLAYLISTS.menu;
   const music = { menu: playlist(menuSongs()), deploy: playlist(PLAYLISTS.deploy), battle: playlist(PLAYLISTS.battle) };
-  for (const id in MAP_MUSIC) for (const k in MAP_MUSIC[id]) music[k + '-' + id] = playlist(MAP_MUSIC[id][k]);
+  for (const id in MUSIC_COMBOS) for (const k in MUSIC_COMBOS[id]) music[k + '-' + id] = playlist(MUSIC_COMBOS[id][k]);
   function syncMusic() {
     const on = musicUnlocked && musicLevel() > 0;
     music.menu.set(on && (phase === 'start' || phase === 'lobby' || phase === 'draft'));
-    const own = m && m.map && MAP_MUSIC[m.map.id] || {};
-    const pick = (k) => own[k] ? k + '-' + m.map.id : k; // this map's player for that phase, or the general one
+    const combo = m && m.map ? LOOK_MUSIC[Game.lookOf(m)] : null, own = (combo && MUSIC_COMBOS[combo]) || {};
+    const pick = (k) => own[k] ? k + '-' + combo : k; // this look's player for that phase, or the standard one
     const cur = phase === 'deploy' ? pick('deploy') : (phase === 'battle' || phase === 'result') ? pick('battle') : '';
     for (const k in music) if (k !== 'menu') music[k].set(on && k === cur);
   }
@@ -966,7 +970,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
       </div>
       <div class="bar" id="skin-bar"${skinnable(mapPick) ? '' : ' hidden'}>
         <span class="hint">Look</span>
-        <div class="seg" role="group" aria-label="Look of the 3D board">
+        <div class="seg looks" role="group" aria-label="Look of the 3D board">
           ${[{ id: '', name: 'Own' }].concat(Game.SKINS, [{ id: 'random', name: 'Random' }]).map(k => `<button data-skin="${k.id}" aria-pressed="${skinPick === k.id}">${esc(k.name)}</button>`).join('')}
         </div>
       </div>`;
@@ -976,11 +980,13 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
     const sum = $('panel').querySelector('#settings summary span');
     if (sum) sum.textContent = mapPick ? Game.MAPS.find(mp => mp.id === mapPick).name : 'Random map';
     const sb = $('panel').querySelector('#skin-bar'); if (sb) sb.hidden = !skinnable(mapPick);
+    peekMap();
   }));
   $('panel').querySelectorAll('[data-skin]').forEach(b => b.addEventListener('click', () => {
     skinPick = b.dataset.skin;
     try { localStorage.setItem('pb-skin', skinPick); } catch (e) {}
     $('panel').querySelectorAll('[data-skin]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+    peekMap();
   })); };
   // characters left out of the package draw (saved on this device; the host's list counts in a match with a friend)
   let offChars = [];
@@ -1094,7 +1100,21 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
   // ---------- board: drawn by the renderer (src/render2d.js), which reads what to show from view() ----------
   const cv = $('board');
   const lookPre = () => (endLook && phase === 'end' && lastPre) || null; // Look at board after a match: the last fight's start
-  const boardView = () => ({ m: lookPre() || m, me, phase, units, mode, bt: lookPre() ? null : bt, battlePre, fx, selected, moving, drag, hoverTile, rangeOf,
+  // The start screen: the board behind the title card shows the map and look picked in Match settings (a map on a
+  // bigger grid shows as Standard in that map's look, so the board keeps its size). A match made once per pick, never played.
+  let menuPreKey = '', menuPreM = null;
+  const menuPre = () => {
+    if (phase !== 'start' || m) return null;
+    const mp = Game.MAPS.find(x => x.id === mapPick), id = mp && !mp.grid ? mapPick : 'standard';
+    const sk = skinPick && skinPick !== 'random' ? skinPick : mp && mp.grid ? Game.MAP_LOOK[mapPick] : null;
+    const key = id + '|' + sk;
+    if (key !== menuPreKey) {
+      menuPreKey = key;
+      try { menuPreM = Game.createMatch(units, M, 4242, id, null, [], { skin: sk }); } catch (e) { menuPreM = null; }
+    }
+    return menuPreM;
+  };
+  const boardView = () => ({ m: lookPre() || m || menuPre(), me, phase, units, mode, bt: lookPre() ? null : bt, battlePre, fx, selected, moving, drag, hoverTile, rangeOf,
     editable: editable(), placingUnit: placingUnit(), placingElf: placingElf(), placingTower: placingTower(), placingWall: placingWall(),
     dev: m && m.dev ? { bPlacing, castMode, guideMode, guideId: guideDrag ? guideDrag.id : guideMode !== 'pick' ? guideMode : null, guide: guideDrag ? guideDrag.pts : guideMode != null && guideMode !== 'pick' ? guideDraft : null } : null,
     battleCam: cam && cam.k > 0 ? { zoom: 1 + (CAM.zoom - 1) * cam.k, x: cam.x, y: cam.y, k: cam.k } : null,
@@ -2027,8 +2047,16 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
   }
 
   // ---------- overlays ----------
+  // a pick of map or look on the start screen: the title card fades back for a moment so the map behind it shows
+  let peekTimer = 0;
+  function peekMap() {
+    render();
+    const o = $('overlay'); if (phase !== 'start' || o.hidden) return;
+    o.classList.add('peek'); clearTimeout(peekTimer);
+    peekTimer = setTimeout(() => o.classList.remove('peek'), 2200);
+  }
   function overlay(html) {
-    const o = $('overlay');
+    const o = $('overlay'); clearTimeout(peekTimer); o.classList.remove('peek');
     if (!html) { o.hidden = true; o.innerHTML = ''; return; }
     o.hidden = false; o.innerHTML = html;
   }

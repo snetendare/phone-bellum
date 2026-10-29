@@ -530,7 +530,14 @@ const Game = (() => {
   ];
   // Looks (skins) for the 3D board: a map with skins (the Standard and the Test Grid) can be played in any of them; the
   // others have their own look. Only how the board looks: the rules stay the map's. The match keeps the host's pick (m.skin).
-  const SKINS = [{ id: 'meadow', name: 'Meadow' }, { id: 'autumn', name: 'Autumn' }, { id: 'snow', name: 'Snow' }, { id: 'frost', name: 'Frost' }, { id: 'desert', name: 'Desert' }];
+  const SKINS = [{ id: 'meadow', name: 'Meadow' }, { id: 'autumn', name: 'Autumn' }, { id: 'snow', name: 'Snow' }, { id: 'frost', name: 'Darkwoods' }, { id: 'desert', name: 'Desert' }];
+  // each map's own look (the rest: meadow), and the look a match is drawn in: the host's pick on a map with skins, else
+  // the map's own. The deployment and battle music follow the look too (LOOK_MUSIC in the page).
+  const MAP_LOOK = { standard: 'meadow', testgrid: 'frost', ice: 'snow', forest: 'forest', cavern: 'cavern' };
+  function lookOf(src) {
+    const mp = src && mapOf(src);
+    return mp && mp.skins && src.skin && SKINS.some(x => x.id === src.skin) ? src.skin : (mp && MAP_LOOK[mp.id]) || 'meadow';
+  }
   // ---------- terrain: walls, water, bushes and ground height (a map's `terrain`, from the map editor) ----------
   // A wall ('#') stops walking, shots and sight; water ('~') stops walking only; shallow water ('s') slows whoever wades
   // in it by TERRAIN.wade %; a bush ('b') hides who stands in it (see the engine's inSight). A tile with a form (a
@@ -2909,7 +2916,7 @@ const Game = (() => {
     TOWER, TOWER_TYPES, OUTPOST, TOWER_PICK_ROUND, towerType, towerChoices, needsTowerPick, setTowerType, settleTowerPicks, TOWER_SKILL, towerSkillOf, towerSkillVisible, towerPicked, canBuyTowerSkill, buyTowerSkill, undoTowerSkill, towerSkillCost, towerSkill2Of, towerSkill2Visible, towerSkill2Cost, canBuyTowerSkill2, buyTowerSkill2, undoTowerSkill2, towerSkill2On, AIRSHIP, MOAT, BWALL, BWALL_SQ, EDGES, bwallsOf, bwallOn, edgeOf, bwallWorld, bwallsLeft, bwallShown, bwallSpotOk, placeBwall, unplaceBwall, ensureBwalls, bwallUnit, INVEST, MAGE_GENERALS, mageGenPrice, MAGE, mageGenInfo, mageGenOf, mageTpOf, isExtraGen, mageGenCost, canBuyMageGen, buyMageGen, undoMageGen, mageTowerUnit, generalUnit, LOAN, loanNow, investNow, bankBusy, investNow, bankBusy, canTakeLoan, takeLoan, undoLoan, towerRounds, troundInfo, troundOn, troundCost, canBuyTround, buyTround, undoTround, SLIME_UNITS, slimeTowerUnit, slimeSkillDefs, TOWER_MID, towerColOk, towerAt, needsTower, placeTower, ensureTower,
     FLANK, flankRows, flankOpen, isFlank, flankTiles, reserved, canPlaceAt, isOff, enemyHolds, inNoMans, hasSkillType, garrisonAt, garrisonFree, inBuilding, WATCH_SQ, watchUnit, freeMover,
     STANDARD_PACK, ICE, ALTAR, GOLEM, isIce, hailRound, altarRound, stormShift, stormRows, hailTiles, altarCost, altarRefund, altarCount, pushRoom, altarBought, addAltar, buyAltar, undoAltar, snowgres, snowgreUnit,
-    MAPS, SKINS, EDITOR_MAPS, TERRAIN, objectiveOf, objectiveTiles, SHAPE_PATH, terrainTile, terrainBlocks, terrainOf, groundHeight, ELF_TOWER, SHROOM, SHROOM_SPLIT, shroomAt, shroomTileAt, shroomRemoval, SHROOM_REMOVE, shroomCost, removeShroom, undoRemoveShroom, mapOf, elfSpot, rollMap, BRIBE_COST, bribeList, bribeGold, bribeCount, bribeNow, bribeCost, bribeRefund, ELF_POWER, elfPowered, elfUnit, ELF_OWN, elfOwnCost, elfOwnOf, elfOwnAt, elfOwnUnlocked, elfOwnOffered, canBuyElfOwn, elfOwnSpotOk, buyElfOwn, undoElfOwn, bribeLeader, canBribe, bribe, undoBribe,
+    MAPS, SKINS, MAP_LOOK, lookOf, EDITOR_MAPS, TERRAIN, objectiveOf, objectiveTiles, SHAPE_PATH, terrainTile, terrainBlocks, terrainOf, groundHeight, ELF_TOWER, SHROOM, SHROOM_SPLIT, shroomAt, shroomTileAt, shroomRemoval, SHROOM_REMOVE, shroomCost, removeShroom, undoRemoveShroom, mapOf, elfSpot, rollMap, BRIBE_COST, bribeList, bribeGold, bribeCount, bribeNow, bribeCost, bribeRefund, ELF_POWER, elfPowered, elfUnit, ELF_OWN, elfOwnCost, elfOwnOf, elfOwnAt, elfOwnUnlocked, elfOwnOffered, canBuyElfOwn, elfOwnSpotOk, buyElfOwn, undoElfOwn, bribeLeader, canBribe, bribe, undoBribe,
     CHARACTERS, CHAR, charOf, charInfo, enzoSkill, enzoActive, charmOf, isGentleman, canGiveCharm, giveCharm, undoCharm, ensureCharm, felixGold, isTier1, rollBuffTiles, onBuffTile, zoeBuff, yotImps, yotLevel, TOWER_SPOT, towerSpot,
     TREASURY, TREASURY_SQ, treasuryOn, treasuryUp, treasurySpot, treasuryAt, treasuryUnit, deployCost, FORTIFY, fortifyOf, canFortify, fortify, bwallsFighting, VAULT, vaultOn, MARK, markOf, markLost, markOn, markCost, markTarget, canMark, placeMark, markShown,
     FACTION_MODE, FACTIONS: () => FACTIONS, setFactions, factionInfo, factionsOf, factionTowers, towerTypeById, ownsUnit, withFactionTrait, factionSet,

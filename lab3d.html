@@ -81,6 +81,15 @@ canvas { display: block; width: 100%; height: 100%; }
 .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
 .seg button { border: 0; background: transparent; padding: 7px 12px; font-family: var(--font-data); font-size: 13px; }
 .seg button[aria-pressed="true"] { background: var(--line); color: var(--gold); }
+/* the Look picker: wraps onto more lines instead of growing wider than the panel (a long row of looks used to widen
+   the whole page), and its size doesn't change with the pick */
+.seg.looks { display: flex; flex-wrap: wrap; width: 100%; }
+.seg.looks button { flex: 1 1 auto; padding: 7px 8px; white-space: nowrap; }
+/* the start screen while a look is picked: the title card fades back so the map behind it shows */
+.overlay.peek { background: rgba(13, 19, 21, 0.12); }
+.overlay.peek > .card { opacity: 0.12; }
+.overlay { transition: background-color 0.35s ease; }
+.overlay > .card { transition: opacity 0.35s ease; }
 
 .shop { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; scroll-snap-type: x proximity; -webkit-overflow-scrolling: touch; }
 .uwrap { flex: 0 0 132px; scroll-snap-align: start; position: relative; display: grid; }
@@ -150,7 +159,7 @@ body { display: flex; flex-direction: column; }
   <div id="shop" hidden><div class="line"><span id="hint"></span><span id="gold"></span></div><div id="cards"></div></div>
   <div class="row">
   <select id="map" aria-label="Map"><option value="standard">Standard</option><option value="forest">Forest Clearing</option><option value="cavern">Mushroom Cavern</option><option value="ice">Frozen Peak</option><option value="testgrid">Test Grid</option></select>
-  <select id="skin" aria-label="Look"><option value="">Own look</option><option value="meadow">Meadow</option><option value="autumn">Autumn</option><option value="snow">Snow</option><option value="frost">Frost</option><option value="desert">Desert</option><option value="random">Random</option></select>
+  <select id="skin" aria-label="Look"><option value="">Own look</option><option value="meadow">Meadow</option><option value="autumn">Autumn</option><option value="snow">Snow</option><option value="frost">Darkwoods</option><option value="desert">Desert</option><option value="random">Random</option></select>
   <select id="who" aria-label="Who deploys blue"><option value="you">Blue: you</option><option value="ai">Blue: AI</option></select>
   <button class="btn" id="auto">Auto</button>
   <button class="btn primary" id="fight">Fight</button>
@@ -3659,7 +3668,14 @@ const Game = (() => {
   ];
   // Looks (skins) for the 3D board: a map with skins (the Standard and the Test Grid) can be played in any of them; the
   // others have their own look. Only how the board looks: the rules stay the map's. The match keeps the host's pick (m.skin).
-  const SKINS = [{ id: 'meadow', name: 'Meadow' }, { id: 'autumn', name: 'Autumn' }, { id: 'snow', name: 'Snow' }, { id: 'frost', name: 'Frost' }, { id: 'desert', name: 'Desert' }];
+  const SKINS = [{ id: 'meadow', name: 'Meadow' }, { id: 'autumn', name: 'Autumn' }, { id: 'snow', name: 'Snow' }, { id: 'frost', name: 'Darkwoods' }, { id: 'desert', name: 'Desert' }];
+  // each map's own look (the rest: meadow), and the look a match is drawn in: the host's pick on a map with skins, else
+  // the map's own. The deployment and battle music follow the look too (LOOK_MUSIC in the page).
+  const MAP_LOOK = { standard: 'meadow', testgrid: 'frost', ice: 'snow', forest: 'forest', cavern: 'cavern' };
+  function lookOf(src) {
+    const mp = src && mapOf(src);
+    return mp && mp.skins && src.skin && SKINS.some(x => x.id === src.skin) ? src.skin : (mp && MAP_LOOK[mp.id]) || 'meadow';
+  }
   // ---------- terrain: walls, water, bushes and ground height (a map's `terrain`, from the map editor) ----------
   // A wall ('#') stops walking, shots and sight; water ('~') stops walking only; shallow water ('s') slows whoever wades
   // in it by TERRAIN.wade %; a bush ('b') hides who stands in it (see the engine's inSight). A tile with a form (a
@@ -6038,7 +6054,7 @@ const Game = (() => {
     TOWER, TOWER_TYPES, OUTPOST, TOWER_PICK_ROUND, towerType, towerChoices, needsTowerPick, setTowerType, settleTowerPicks, TOWER_SKILL, towerSkillOf, towerSkillVisible, towerPicked, canBuyTowerSkill, buyTowerSkill, undoTowerSkill, towerSkillCost, towerSkill2Of, towerSkill2Visible, towerSkill2Cost, canBuyTowerSkill2, buyTowerSkill2, undoTowerSkill2, towerSkill2On, AIRSHIP, MOAT, BWALL, BWALL_SQ, EDGES, bwallsOf, bwallOn, edgeOf, bwallWorld, bwallsLeft, bwallShown, bwallSpotOk, placeBwall, unplaceBwall, ensureBwalls, bwallUnit, INVEST, MAGE_GENERALS, mageGenPrice, MAGE, mageGenInfo, mageGenOf, mageTpOf, isExtraGen, mageGenCost, canBuyMageGen, buyMageGen, undoMageGen, mageTowerUnit, generalUnit, LOAN, loanNow, investNow, bankBusy, investNow, bankBusy, canTakeLoan, takeLoan, undoLoan, towerRounds, troundInfo, troundOn, troundCost, canBuyTround, buyTround, undoTround, SLIME_UNITS, slimeTowerUnit, slimeSkillDefs, TOWER_MID, towerColOk, towerAt, needsTower, placeTower, ensureTower,
     FLANK, flankRows, flankOpen, isFlank, flankTiles, reserved, canPlaceAt, isOff, enemyHolds, inNoMans, hasSkillType, garrisonAt, garrisonFree, inBuilding, WATCH_SQ, watchUnit, freeMover,
     STANDARD_PACK, ICE, ALTAR, GOLEM, isIce, hailRound, altarRound, stormShift, stormRows, hailTiles, altarCost, altarRefund, altarCount, pushRoom, altarBought, addAltar, buyAltar, undoAltar, snowgres, snowgreUnit,
-    MAPS, SKINS, EDITOR_MAPS, TERRAIN, objectiveOf, objectiveTiles, SHAPE_PATH, terrainTile, terrainBlocks, terrainOf, groundHeight, ELF_TOWER, SHROOM, SHROOM_SPLIT, shroomAt, shroomTileAt, shroomRemoval, SHROOM_REMOVE, shroomCost, removeShroom, undoRemoveShroom, mapOf, elfSpot, rollMap, BRIBE_COST, bribeList, bribeGold, bribeCount, bribeNow, bribeCost, bribeRefund, ELF_POWER, elfPowered, elfUnit, ELF_OWN, elfOwnCost, elfOwnOf, elfOwnAt, elfOwnUnlocked, elfOwnOffered, canBuyElfOwn, elfOwnSpotOk, buyElfOwn, undoElfOwn, bribeLeader, canBribe, bribe, undoBribe,
+    MAPS, SKINS, MAP_LOOK, lookOf, EDITOR_MAPS, TERRAIN, objectiveOf, objectiveTiles, SHAPE_PATH, terrainTile, terrainBlocks, terrainOf, groundHeight, ELF_TOWER, SHROOM, SHROOM_SPLIT, shroomAt, shroomTileAt, shroomRemoval, SHROOM_REMOVE, shroomCost, removeShroom, undoRemoveShroom, mapOf, elfSpot, rollMap, BRIBE_COST, bribeList, bribeGold, bribeCount, bribeNow, bribeCost, bribeRefund, ELF_POWER, elfPowered, elfUnit, ELF_OWN, elfOwnCost, elfOwnOf, elfOwnAt, elfOwnUnlocked, elfOwnOffered, canBuyElfOwn, elfOwnSpotOk, buyElfOwn, undoElfOwn, bribeLeader, canBribe, bribe, undoBribe,
     CHARACTERS, CHAR, charOf, charInfo, enzoSkill, enzoActive, charmOf, isGentleman, canGiveCharm, giveCharm, undoCharm, ensureCharm, felixGold, isTier1, rollBuffTiles, onBuffTile, zoeBuff, yotImps, yotLevel, TOWER_SPOT, towerSpot,
     TREASURY, TREASURY_SQ, treasuryOn, treasuryUp, treasurySpot, treasuryAt, treasuryUnit, deployCost, FORTIFY, fortifyOf, canFortify, fortify, bwallsFighting, VAULT, vaultOn, MARK, markOf, markLost, markOn, markCost, markTarget, canMark, placeMark, markShown,
     FACTION_MODE, FACTIONS: () => FACTIONS, setFactions, factionInfo, factionsOf, factionTowers, towerTypeById, ownsUnit, withFactionTrait, factionSet,
@@ -6379,13 +6395,14 @@ const Render2D = (cv, view, opts = {}) => {
   }
   // a mushroom tile: tinted tile with a small glowing mushroom in the tile's colour
   // Frozen Peak: a dark icy floor with snow drifts and cracks in the ice, and snow-capped rock on both flanks.
-  function paintIce(c, rr, t) {
+  // snow = false: Darkwoods (the same dark ground and rock, with no snow drifts, snow caps or snowflakes)
+  function paintIce(c, rr, t, snow = true) {
     c.fillStyle = '#131B22'; c.fillRect(0, 0, W, H);
     const gl = c.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, Math.max(W, H) * 0.6);
     gl.addColorStop(0, '#1D2833'); gl.addColorStop(0.6, '#18212A'); gl.addColorStop(1, '#121920');
     c.fillStyle = gl; c.fillRect(0, 0, W, H);
     // snow drifts: soft pale patches
-    for (let k = 0; k < 30; k++) {
+    if (snow) for (let k = 0; k < 30; k++) {
       c.globalAlpha = 0.12 + rr() * 0.08; c.fillStyle = k % 3 ? '#3A4B5A' : '#4B5E6E';
       c.beginPath(); c.ellipse(rr() * W, rr() * H, t * (0.6 + rr() * 1.5), t * (0.25 + rr() * 0.5), (rr() - 0.5) * 0.6, 0, Math.PI * 2); c.fill();
     }
@@ -6415,15 +6432,16 @@ const Render2D = (cv, view, opts = {}) => {
         c.beginPath(); // a jagged rock
         for (let j = 0; j < 6; j++) { const ang = j / 6 * Math.PI * 2 + rr() * 0.4, rad = q.r * (0.75 + rr() * 0.35); const px = q.x + Math.cos(ang) * rad, py = q.y + Math.sin(ang) * rad * 0.8; j ? c.lineTo(px, py) : c.moveTo(px, py); }
         c.closePath(); c.fill();
+        if (!snow) continue;
         c.globalAlpha = a * 0.45; c.fillStyle = '#C8D7E2'; // snow cap
         c.beginPath(); c.ellipse(q.x - q.r * 0.1, q.y - q.r * 0.45, q.r * 0.55, q.r * 0.2, 0, 0, Math.PI * 2); c.fill();
       }
     }
     // a few snowflakes
     c.fillStyle = '#DCE8F0';
-    for (let k = 0; k < 120; k++) { c.globalAlpha = 0.08 + rr() * 0.14; c.beginPath(); c.arc(rr() * W, rr() * H, 0.6 + rr() * 0.9, 0, Math.PI * 2); c.fill(); }
+    if (snow) for (let k = 0; k < 120; k++) { c.globalAlpha = 0.08 + rr() * 0.14; c.beginPath(); c.arc(rr() * W, rr() * H, 0.6 + rr() * 0.9, 0, Math.PI * 2); c.fill(); }
   }
-  const BACKGROUNDS = { forest: [1234567, paintForest], cavern: [7654321, paintCavern], ice: [4242421, paintIce] };
+  const BACKGROUNDS = { forest: [1234567, paintForest], cavern: [7654321, paintCavern], ice: [4242421, paintIce], darkwoods: [4242421, (c, rr, t) => paintIce(c, rr, t, false)] };
   // ---------- terrain: a map's ground height, water, walls, shallow water and bushes (Game.TERRAIN) ----------
   // Painted once per map, board size and side onto a canvas of its own, then copied onto the board every frame.
   // Height is light and shade: higher ground lighter, lower darker, slopes lit from the top left, as Game.groundHeight
@@ -8461,7 +8479,7 @@ const Scenery3D = (THREE, scene, opts = {}) => {
   // autumn: maples and birches in red and gold, red bushes, golden grass, fallen leaves on the floor
   BIOMES.autumn = { sky: '#B5AA95', land: '#5C5B39', tint: [1, 0.97, 0.92], low: 'autumn', trees: ['MapleTree_1', 'MapleTree_2', 'MapleTree_4', 'MapleTree_5', 'BirchTree_1', 'BirchTree_4', 'BirchTree_5', 'Pine_1'], grow: 1.2, dress: 1,
     tints: [[/^Grass/, [1.2, 1.02, 0.6]], [/^Fern|^Plant_1/, [1.25, 0.95, 0.5]], [/^Clover/, [1.15, 1, 0.6]]] };
-  BIOMES.frost = { ...BIOMES.ice }; // Frozen Peak's look without the snow (the Test Grid's own look)
+  BIOMES.frost = { ...BIOMES.ice }; // Darkwoods: Frozen Peak's look without the snow (the Test Grid's own look)
   BIOMES.ice.snow = 0.75; // snow on everything that faces up, drifts round the board and falling snow
   // a look (Scenery3D.LOOKS, below) -> its biome
   const biomeOf = (look) => BIOMES[(Scenery3D.LOOKS[look] || Scenery3D.LOOKS.meadow).biome] || BIOMES.meadow;
@@ -8811,13 +8829,10 @@ Scenery3D.FLOORS = {
 // 2D renderer, bg). A map with skins (Game.SKINS) takes the match's pick (m.skin); every map has its own look too.
 Scenery3D.LOOKS = {
   meadow: { biome: 'meadow', floor: 'meadow' }, autumn: { biome: 'autumn', floor: 'autumn' }, desert: { biome: 'desert', floor: 'sand' },
-  snow: { biome: 'ice', bg: 'ice' }, frost: { biome: 'frost', bg: 'ice' }, forest: { biome: 'forest', bg: 'forest' }, cavern: { biome: 'cavern', bg: 'cavern' },
+  snow: { biome: 'ice', bg: 'ice' }, frost: { biome: 'frost', bg: 'darkwoods' }, forest: { biome: 'forest', bg: 'forest' }, cavern: { biome: 'cavern', bg: 'cavern' },
 };
-Scenery3D.MAP_LOOK = { standard: 'meadow', testgrid: 'frost', ice: 'snow', forest: 'forest', cavern: 'cavern' }; // the rest: meadow
-Scenery3D.lookOf = (src) => {
-  const mp = src && Game.mapOf(src);
-  return mp && mp.skins && src.skin && Scenery3D.LOOKS[src.skin] ? src.skin : (mp && Scenery3D.MAP_LOOK[mp.id]) || 'meadow';
-};
+Scenery3D.MAP_LOOK = Game.MAP_LOOK; // each map's own look (in game.js, so the page's music can follow it without the 3D code)
+Scenery3D.lookOf = (src) => { const k = Game.lookOf(src); return Scenery3D.LOOKS[k] ? k : 'meadow'; };
 Scenery3D.floor = (() => {
   const cache = {};
   return (ctx, W, H, t, look) => {

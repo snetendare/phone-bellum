@@ -171,13 +171,14 @@ const Render2D = (cv, view, opts = {}) => {
   }
   // a mushroom tile: tinted tile with a small glowing mushroom in the tile's colour
   // Frozen Peak: a dark icy floor with snow drifts and cracks in the ice, and snow-capped rock on both flanks.
-  function paintIce(c, rr, t) {
+  // snow = false: Darkwoods (the same dark ground and rock, with no snow drifts, snow caps or snowflakes)
+  function paintIce(c, rr, t, snow = true) {
     c.fillStyle = '#131B22'; c.fillRect(0, 0, W, H);
     const gl = c.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, Math.max(W, H) * 0.6);
     gl.addColorStop(0, '#1D2833'); gl.addColorStop(0.6, '#18212A'); gl.addColorStop(1, '#121920');
     c.fillStyle = gl; c.fillRect(0, 0, W, H);
     // snow drifts: soft pale patches
-    for (let k = 0; k < 30; k++) {
+    if (snow) for (let k = 0; k < 30; k++) {
       c.globalAlpha = 0.12 + rr() * 0.08; c.fillStyle = k % 3 ? '#3A4B5A' : '#4B5E6E';
       c.beginPath(); c.ellipse(rr() * W, rr() * H, t * (0.6 + rr() * 1.5), t * (0.25 + rr() * 0.5), (rr() - 0.5) * 0.6, 0, Math.PI * 2); c.fill();
     }
@@ -207,15 +208,16 @@ const Render2D = (cv, view, opts = {}) => {
         c.beginPath(); // a jagged rock
         for (let j = 0; j < 6; j++) { const ang = j / 6 * Math.PI * 2 + rr() * 0.4, rad = q.r * (0.75 + rr() * 0.35); const px = q.x + Math.cos(ang) * rad, py = q.y + Math.sin(ang) * rad * 0.8; j ? c.lineTo(px, py) : c.moveTo(px, py); }
         c.closePath(); c.fill();
+        if (!snow) continue;
         c.globalAlpha = a * 0.45; c.fillStyle = '#C8D7E2'; // snow cap
         c.beginPath(); c.ellipse(q.x - q.r * 0.1, q.y - q.r * 0.45, q.r * 0.55, q.r * 0.2, 0, 0, Math.PI * 2); c.fill();
       }
     }
     // a few snowflakes
     c.fillStyle = '#DCE8F0';
-    for (let k = 0; k < 120; k++) { c.globalAlpha = 0.08 + rr() * 0.14; c.beginPath(); c.arc(rr() * W, rr() * H, 0.6 + rr() * 0.9, 0, Math.PI * 2); c.fill(); }
+    if (snow) for (let k = 0; k < 120; k++) { c.globalAlpha = 0.08 + rr() * 0.14; c.beginPath(); c.arc(rr() * W, rr() * H, 0.6 + rr() * 0.9, 0, Math.PI * 2); c.fill(); }
   }
-  const BACKGROUNDS = { forest: [1234567, paintForest], cavern: [7654321, paintCavern], ice: [4242421, paintIce] };
+  const BACKGROUNDS = { forest: [1234567, paintForest], cavern: [7654321, paintCavern], ice: [4242421, paintIce], darkwoods: [4242421, (c, rr, t) => paintIce(c, rr, t, false)] };
   // ---------- terrain: a map's ground height, water, walls, shallow water and bushes (Game.TERRAIN) ----------
   // Painted once per map, board size and side onto a canvas of its own, then copied onto the board every frame.
   // Height is light and shade: higher ground lighter, lower darker, slopes lit from the top left, as Game.groundHeight
