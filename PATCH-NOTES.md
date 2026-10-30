@@ -4,6 +4,16 @@ Newest first. Each entry says what changed for players; technical details live i
 
 ---
 
+## 31 October 2026 – Balance
+
+- **Slime Wizard:** splash 6 m → **5 m**, health 700 → **620**.
+- **Flame Wizard:** health 2000 → **1700**.
+- **Truespear:** health 2000 → **1800**, range 25 m → **23 m**.
+- **Frost Wizard:** now has **4 armor**.
+- **Spiders:** 5 → **6** spiders per squad.
+
+---
+
 ## 29 October 2026 – Balance
 
 - **Tower falls:** a fallen tower still costs up to 10 health, but a round now costs at most **35 in all**, the tower included. A round that already did 35 damage costs nothing more for the tower; one that did 30 costs 5 more.
