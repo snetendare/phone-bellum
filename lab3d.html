@@ -3236,7 +3236,7 @@ const Game = (() => {
     let types = TOWER_TYPES.filter(x => !(m && Array.isArray(m.offTowers) && m.offTowers.includes(x.id))); // m.offTowers: left out of this match (Standard pack)
     if (!types.length) types = TOWER_TYPES;
     if (types.length <= TOWER_OFFER) return types.slice();
-    const r = rng(m.seed + side * 4241 + 17), pool = types.slice(), out = [];
+    const r = rng(m.seed + (m.mirror ? 0 : side) * 4241 + 17), pool = types.slice(), out = []; // m.mirror: both players get the same offer
     while (out.length < TOWER_OFFER) out.push(pool.splice(Math.floor(r() * pool.length), 1)[0]);
     return out;
   }
@@ -4189,7 +4189,7 @@ const Game = (() => {
   // ---------- starting packages ----------
   // Before round 1 each player picks one of 3 packages (their own, not mirrored): two tier 1-2 unit types,
   // both unlocked for free, plus free squads of them worth exactly PACKAGE.value gold. Units with noPack are never in one.
-  const PACKAGE = { value: 300, maxPrice: 200, options: 3 };
+  const PACKAGE = { value: 300, maxPrice: 200, options: 3, maxOptions: 6 };
   // off (optional): indexes of units left out of the match
   function allPackages(units, off) {
     const out = [], ok = units.map((u, i) => unitCostOf(u) <= PACKAGE.maxPrice && !u.noPack && !(off || []).includes(i) ? i : -1).filter(i => i >= 0);
@@ -4206,12 +4206,13 @@ const Game = (() => {
     }
     return out;
   }
-  function dealPackages(units, r, offChars, off) {
-    const all = allPackages(units, off), pick = [];
-    for (let guard = 0; pick.length < Math.min(PACKAGE.options, all.length) && guard < 200; guard++) {
+  // n (optional): how many options to deal (PACKAGE.options by default; a tournament can set 2 to 5)
+  function dealPackages(units, r, offChars, off, n) {
+    const all = allPackages(units, off), pick = [], want = Math.max(1, Math.min(PACKAGE.maxOptions, n | 0 || PACKAGE.options));
+    for (let guard = 0; pick.length < Math.min(want, all.length) && guard < 400; guard++) {
       const p = all[Math.floor(r() * all.length)];
       // three different packages, and no unit type in more than one of them where possible
-      if (pick.includes(p) || (guard < 120 && pick.some(q => q.units.some(u => p.units.includes(u))))) continue;
+      if (pick.includes(p) || (guard < 240 && pick.some(q => q.units.some(u => p.units.includes(u))))) continue;
       pick.push(p);
     }
     // a random character for each package, never the same one twice among a player's options
@@ -4263,7 +4264,10 @@ const Game = (() => {
   // offChars (optional): character ids left out of the pool (at least one always stays in)
   // opts (optional): { offUnits: unit indexes left out of the match (at least two stay in), rules: roster rules for the fights (see Engine.RULES),
   //   offTowers: tower type ids left out of the round 3 offer,
-  //   factions: [[ids of player 0's factions], [player 1's]] for a Factions match (units: factionSet's, each with its `faction`) }
+  //   factions: [[ids of player 0's factions], [player 1's]] for a Factions match (units: factionSet's, each with its `faction`),
+  //   packOptions: how many packages each player picks from (2 to PACKAGE.maxOptions; 3 by default),
+  //   mirror: both players get the same rolls: the same package options (with the same leaders and squads), the same
+  //     tower offer and Zoe's tiles mirrored (tournaments) }
   function createMatch(units, matrix, seed, mapId, lastMapId, offChars, opts) {
     const r = rng((seed >>> 0) + 777);
     const factions = opts && Array.isArray(opts.factions) && opts.factions.length === 2 && opts.factions.every(Array.isArray) ? opts.factions.map(f => f.map(String)) : null;
@@ -4292,7 +4296,7 @@ const Game = (() => {
       unlocks: [{}, {}], // units unlocked per player: unlocks[side][unitIdx] = round it was unlocked
       off, // units left out of this match: they can't be unlocked, placed or dealt in a package
       rules, // roster rules for the fights (null = all on)
-      packages: [dealPackages(units, r, offChars, packOff(0)), dealPackages(units, r, offChars, packOff(1))], // each player's 3 starting package options, each with a different random character
+      packages: [dealPackages(units, r, offChars, packOff(0), opts && opts.packOptions), dealPackages(units, r, offChars, packOff(1), opts && opts.packOptions)], // each player's 3 starting package options, each with a different random character
       pack: [null, null], // which one each player picked
       map: rollMap(seed >>> 0, mapId, lastMapId), // { id, elfCol }: the map this match is fought on (mapId picks it; otherwise random)
       skin: null, // the 3D board's look for a map with skins (SKINS; null = the map's own)
@@ -4308,6 +4312,7 @@ const Game = (() => {
       dev: dev ? { picks: [[], []], buildings: [[], []], casts: [], nextKey: 1 } : null, // the Factions devtest (see DEV)
       offTowers: !factions && opts && Array.isArray(opts.offTowers) ? opts.offTowers.filter(id => TOWER_TYPES.some(x => x.id === id)) : [], // tower types left out (Standard pack)
     };
+    if (opts && opts.mirror && !factions) { m.mirror = true; m.packages[1] = JSON.parse(JSON.stringify(m.packages[0])); } // the same rolls for both
     m.towers = [towerSpot(m, 0), towerSpot(m, 1)];
     { // the look: the host's pick, or 'random': one of the looks from the match's seed (never the last match's again)
       const mp = MAPS.find(x => x.id === m.map.id); let sk = opts && opts.skin;
@@ -5132,6 +5137,15 @@ const Game = (() => {
     if (!m.buff) m.buff = [[], []];
     m.buff[side] = [];
     if (charOf(m, side) !== 'zoe') return;
+    if (m.mirror && side === 1) { // the same rolls for both: side 0's tiles, straight across the board (where still free)
+      const ok = (col, row) => inZone(1, row) && !reserved(1, col, row) && !towerAt(m, 1, col, row) && !treasuryAt(m, 1, col, row) && !shroomAt(m, col, row) && !terrainBlocks(m, col, row);
+      if (!m.chars) m.chars = [null, null];
+      const saved = m.buff[0], was = m.chars[0];
+      m.chars[0] = 'zoe'; rollBuffTiles(m, 0); const mine = m.buff[0]; m.chars[0] = was; m.buff[0] = saved;
+      m.buff[1] = mine.map(t => ({ col: t.col, row: ROWS - 1 - t.row })).filter(t => ok(t.col, t.row));
+      if (m.buff[1].length === mine.length) return;
+      m.buff[1] = [];
+    }
     const r = rng(m.seed + m.round * 6151 + side * 3571 + 99);
     const spots = [];
     for (const row of zoneRows(side)) for (let col = 0; col < COLS; col++) if (!reserved(side, col, row) && !towerAt(m, side, col, row) && !treasuryAt(m, side, col, row) && !shroomAt(m, col, row) && !terrainBlocks(m, col, row)) spots.push({ col, row });

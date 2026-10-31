@@ -35,7 +35,7 @@ fs.writeFileSync('lab.html', labDoc);
 // Game
 const game = src('site-template.html').replace('/*BASECSS*/', () => src('game.css'))
   .replace('/*SHAPES*/', () => shapes).replace('/*ENGINE*/', () => eng)
-  .replace('/*GAME*/', () => src('game.js'))
+  .replace('/*GAME*/', () => src('game.js')).replace('/*TOUR*/', () => src('tournament.js'))
   .replace('/*ART*/', () => src('art.js')).replace('/*RENDER2D*/', () => src('render2d.js')).replace('/*DATA*/', () => src('demo-units.json'))
   .replace('/*FACTIONS*/', () => src('faction-units.json'))
   .replace('/*V3D*/', () => require('crypto').createHash('sha1').update(['camera3d.js', 'kaykit3d.js', 'models3d.js', 'scenery3d.js', 'render3d.js', 'game.js', 'engine.js'].map(src).join('')).digest('hex').slice(0, 10));

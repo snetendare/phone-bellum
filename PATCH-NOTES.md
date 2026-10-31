@@ -4,6 +4,23 @@ Newest first. Each entry says what changed for players; technical details live i
 
 ---
 
+## 31 October 2026 – Tournaments
+
+### Host a tournament
+- New on the start screen: **Host a tournament**. Send the invite link (or the 4-letter code) to your friends. They open it, pick a **gamertag**, and wait in the lobby. Works for any number of players; 6 to 12 is the sweet spot.
+- Formats: **Swiss + playoffs** (everyone plays every round against someone on the same score, then the top 4 play semifinals and a final) or **Knockout**.
+- Each round, your match shows on the tournament screen: tap **Start match** (if you host) or **Join match**. The match starts by itself when you are both in, and the result is sent by itself when it ends.
+- **Standings**, **Matches** and a **Bracket** for the playoffs, live on every phone. The organizer can also share a **big-screen link** for a TV or laptop.
+- Your opponent's gamertag shows at the top of the screen during the match.
+
+### Organizer tools
+- **Settings:** format, Swiss rounds, playoff size, map (fixed, or a random one each round that everyone plays), look, Standard pack or All units, which leaders and units are in, **how many leaders to choose from (2 to 5)**, deploy timers (round 1 and later rounds) and the results screen timer.
+- **Same rolls for both** (on by default): both players get the same leaders, starting units and tower choices to pick from.
+- Set or change any result, replay a match, swap who hosts, rename or drop a player, undo a round's pairings.
+- The tournament survives a reload of the organizer's page; everyone reconnects by themselves.
+
+---
+
 ## 31 October 2026 – Balance
 
 - **Slime Wizard:** splash 6 m → **5 m**, health 700 → **620**.
