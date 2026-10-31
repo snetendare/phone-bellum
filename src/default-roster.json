@@ -956,7 +956,7 @@
       "range": 18,
       "speed": 2.1,
       "splash": 0,
-      "shape": "triangle",
+      "shape": "skull",
       "color": "#E9E3CF",
       "skills": [
         "longbones",
@@ -1075,7 +1075,7 @@
       "range": 20,
       "speed": 3,
       "splash": 4,
-      "shape": "hexagon",
+      "shape": "fireball",
       "color": "#fb0022",
       "skills": [
         "range",
@@ -1122,7 +1122,7 @@
       "range": 29,
       "speed": 2,
       "splash": 0,
-      "shape": "cross",
+      "shape": "reticle",
       "color": "#F7D154",
       "skills": [
         "rangerScope",
@@ -1254,7 +1254,7 @@
       "range": 19,
       "speed": 4,
       "splash": 0,
-      "shape": "ring",
+      "shape": "wisp",
       "color": "#ff90ff",
       "skills": [
         "sightweavers",
@@ -1809,7 +1809,7 @@
       "range": 4,
       "speed": 2.2,
       "splash": 2,
-      "shape": "square",
+      "shape": "tree",
       "color": "#0d3000",
       "skills": [
         "forwardRoots",

@@ -599,7 +599,7 @@ const Models3D = (THREE) => {
     if (NAMED[u.name]) { const k = NAMED[u.name]; return u.awake && BUILD[k + ':awake'] ? k + ':awake' : u.eye && BUILD[k + ':eye'] ? k + ':eye' : u.unfolded && BUILD[k + ':unfolded'] ? k + ':unfolded' : k; } // Core Awoken, Unfold: their own versions
     if (u.shape === 'horse') return 'horse';
     if (u.shape === 'spider') return 'spider';
-    if (u.shape === 'imp' || u.shape === 'ring') return 'flier';
+    if (u.shape === 'imp' || u.shape === 'ring' || u.shape === 'wisp') return 'flier';
     const n = Math.round(u.bodies || 1);
     if (u.range >= RANGED) return n >= 3 ? 'archer' : 'caster';
     if (n >= 5) return 'goblin';

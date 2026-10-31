@@ -4,6 +4,21 @@ Newest first. Each entry says what changed for players; technical details live i
 
 ---
 
+## 31 October 2026 – New unit pictures
+
+Every tier 1 unit now has its own picture on the board, in the shop and in the encyclopedia, instead of a plain shape:
+
+- **Skeleton Archers:** a skull (was a triangle).
+- **Fire Mage:** a falling fireball (was a hexagon, shared with other wizards).
+- **Sniper:** a scope crosshair (was a cross).
+- **Wisps:** a glowing orb with a curling tail (was a ring).
+- **Ent:** a walking tree (was a square).
+- **Rollers** (Mechites): a spoked wheel (was a circle).
+
+Goblin Swarm and Ember Imps already had theirs. Sunken Deep's units are still placeholders and keep their shapes for now. The new pictures are also in the Counter Lab's shape list.
+
+---
+
 ## 31 October 2026 – Tournaments
 
 ### Host a tournament

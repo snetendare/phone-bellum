@@ -111,7 +111,7 @@
           "speed": 7,
           "splash": 0,
           "roll": 2,
-          "shape": "circle",
+          "shape": "wheel",
           "color": "#9A8B76",
           "skills": [
             "rollerMomentum",

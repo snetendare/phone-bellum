@@ -1,10 +1,10 @@
 // ===== Unit shapes (shared by Counter Lab and the demo) =====
 const Shapes = (() => {
-  const LIST = ['circle', 'ring', 'square', 'triangle', 'diamond', 'pentagon', 'hexagon', 'star', 'cross', 'bar', 'horse', 'spider', 'sun', 'flame', 'spear', 'imp', 'knife', 'drop', 'dagger', 'snowflake', 'obelisk', 'goblin'];
-  const LABELS = { circle: 'Circle', ring: 'Ring', square: 'Square', triangle: 'Triangle', diamond: 'Diamond', pentagon: 'Pentagon', hexagon: 'Hexagon', star: 'Star', cross: 'Cross', bar: 'Bar', horse: 'Horse', spider: 'Spider', sun: 'Sun', flame: 'Flame', spear: 'Spear', imp: 'Imp', knife: 'Knife', drop: 'Drop', dagger: 'Dagger', snowflake: 'Snowflake', obelisk: 'Obelisk', goblin: 'Goblin' };
+  const LIST = ['circle', 'ring', 'square', 'triangle', 'diamond', 'pentagon', 'hexagon', 'star', 'cross', 'bar', 'horse', 'spider', 'sun', 'flame', 'spear', 'imp', 'knife', 'drop', 'dagger', 'snowflake', 'obelisk', 'goblin', 'skull', 'fireball', 'reticle', 'wisp', 'tree', 'wheel'];
+  const LABELS = { circle: 'Circle', ring: 'Ring', square: 'Square', triangle: 'Triangle', diamond: 'Diamond', pentagon: 'Pentagon', hexagon: 'Hexagon', star: 'Star', cross: 'Cross', bar: 'Bar', horse: 'Horse', spider: 'Spider', sun: 'Sun', flame: 'Flame', spear: 'Spear', imp: 'Imp', knife: 'Knife', drop: 'Drop', dagger: 'Dagger', snowflake: 'Snowflake', obelisk: 'Obelisk', goblin: 'Goblin', skull: 'Skull', fireball: 'Fireball', reticle: 'Crosshair', wisp: 'Wisp', tree: 'Tree', wheel: 'Wheel' };
   const DEFAULTS = {
-    'Goblin Swarm': 'goblin', 'Skeleton Archers': 'diamond', 'Ember Imps': 'imp', 'Fire Mage': 'hexagon',
-    'Sniper': 'cross', 'Brute': 'square', 'Wisps': 'ring', 'Crossbow Volley': 'pentagon', 'Ballista': 'bar',
+    'Goblin Swarm': 'goblin', 'Skeleton Archers': 'skull', 'Ember Imps': 'imp', 'Fire Mage': 'fireball',
+    'Sniper': 'reticle', 'Brute': 'square', 'Wisps': 'wisp', 'Ent': 'tree', 'Rollers': 'wheel', 'Crossbow Volley': 'pentagon', 'Ballista': 'bar',
     'Boar Riders': 'circle', 'Spinning Golem': 'hexagon', 'Blunderbuss Crew': 'star', 'Ogre Smasher': 'square',
   };
   const valid = (s) => LIST.includes(s);
@@ -55,6 +55,12 @@ const Shapes = (() => {
     const n = line.map((_, i) => nrm(i));
     return line.map(([x, y], i) => [x + n[i][0], y + n[i][1]]).concat(line.map(([x, y], i) => [x - n[i][0], y - n[i][1]]).reverse());
   }
+  // a strip that narrows from w0 at its start to w1 at its end (a wisp's tail)
+  function taper(line, w0, w1) {
+    const k = line.length - 1, nrm = (i) => { const [ax, ay] = line[Math.max(0, i - 1)], [bx, by] = line[Math.min(k, i + 1)], l = Math.hypot(bx - ax, by - ay), w = w0 + (w1 - w0) * i / k; return [-(by - ay) / l * w, (bx - ax) / l * w]; };
+    const n = line.map((_, i) => nrm(i));
+    return line.map(([x, y], i) => [x + n[i][0], y + n[i][1]]).concat(line.map(([x, y], i) => [x - n[i][0], y - n[i][1]]).reverse());
+  }
   const SPIDER_LEGS = [[[0.15, -0.5], [0.72, -0.95], [1.02, -1.28]], [[0.22, -0.3], [0.92, -0.5], [1.3, -0.42]],
     [[0.24, -0.08], [0.92, 0.12], [1.3, 0.48]], [[0.2, 0.12], [0.72, 0.62], [0.98, 1.22]]];
   const ray = (a) => [[Math.cos(a) * 1.32, Math.sin(a) * 1.32], [Math.cos(a + 0.3) * 0.56, Math.sin(a + 0.3) * 0.56], [Math.cos(a - 0.3) * 0.56, Math.sin(a - 0.3) * 0.56]];
@@ -89,8 +95,26 @@ const Shapes = (() => {
     }).flat()],
     // an obelisk: a tall tapering stone with a pointed cap, on a wide plinth
     obelisk: [{ p: [[-0.46, 1.06], [0.46, 1.06], [0.3, -0.86], [0, -1.36], [-0.3, -0.86]] }, { p: [[-0.76, 0.96], [0.76, 0.96], [0.76, 1.32], [-0.76, 1.32]] }],
+    // tier 1 pictures (2026-10-31). A part with h: 1 is a hole: it runs the other way round, so it cuts out of what's under it.
+    // a skull with eye sockets and a nose hole (Skeleton Archers)
+    skull: [{ c: [0, -0.22, 0.86] }, { p: [[-0.5, 0.5], [0.5, 0.5], [0.46, 1.0], [0.24, 1.12], [-0.24, 1.12], [-0.46, 1.0]] },
+      { c: [-0.33, -0.2, 0.25], h: 1 }, { c: [0.33, -0.2, 0.25], h: 1 }, { p: [[0, 0.1], [0.14, 0.38], [-0.14, 0.38]], h: 1 }],
+    // a fireball falling to the lower left, its flames trailing up and to the right (Fire Mage)
+    fireball: [{ c: [-0.26, 0.34, 0.74] }, { p: [[-0.84, 0.02], [-0.56, -0.5], [-0.24, -0.58], [-0.06, -1.3], [0.24, -0.66], [0.6, -1.02], [0.64, -0.46], [1.3, -0.66],
+      [0.9, -0.04], [1.04, 0.24], [0.42, 0.44]] }],
+    // a scope's crosshair: a ring, four ticks and a dot (Sniper)
+    reticle: [{ c: [0, 0, 1.0] }, { c: [0, 0, 0.74], h: 1 }, { c: [0, 0, 0.17] },
+      ...[[0, -1], [1, 0], [0, 1], [-1, 0]].map(([dx, dy]) => ({ p: strip([[dx * 0.36, dy * 0.36], [dx * 1.36, dy * 1.36]], 0.13) }))],
+    // a wisp: a glowing orb with a curling tail and one spark (Wisps)
+    wisp: [{ c: [0.16, -0.36, 0.68] }, { p: taper([[0.36, 0.08], [0.24, 0.62], [-0.08, 1.0], [-0.52, 1.12], [-0.92, 0.9], [-1.06, 0.56]], 0.4, 0.07) }, { c: [-0.82, -0.84, 0.17] }],
+    // a walking tree: a round crown of leaves on a trunk that splits into two root legs (Ent)
+    tree: [{ c: [0, -0.62, 0.6] }, { c: [-0.58, -0.2, 0.52] }, { c: [0.58, -0.2, 0.52] }, { c: [0, -0.1, 0.56] },
+      { p: [[-0.22, 0.2], [0.22, 0.2], [0.24, 0.82], [0.52, 1.32], [0.18, 1.32], [0, 1.0], [-0.18, 1.32], [-0.52, 1.32], [-0.24, 0.82]] }],
+    // a spoked wheel (Rollers)
+    wheel: [{ c: [0, 0, 1.14] }, { c: [0, 0, 0.8], h: 1 }, { c: [0, 0, 0.3] },
+      ...[Math.PI / 4, -Math.PI / 4].map(a => ({ p: strip([[-Math.cos(a) * 0.96, -Math.sin(a) * 0.96], [Math.cos(a) * 0.96, Math.sin(a) * 0.96]], 0.12) }))],
   };
-  for (const parts of Object.values(FIGURES)) for (const pt of parts) if (pt.p) pt.p = clockwise(pt.p);
+  for (const parts of Object.values(FIGURES)) for (const pt of parts) if (pt.p) { pt.p = clockwise(pt.p); if (pt.h) pt.p = pt.p.slice().reverse(); }
 
   // Points of a regular polygon; up = 1 points toward the top of the screen, -1 toward the bottom
   function poly(ctx, x, y, r, n, rot) {
@@ -106,7 +130,7 @@ const Shapes = (() => {
   // Builds the path for a shape. Returns true if the shape should be stroked instead of filled (ring).
   function path(ctx, shape, x, y, r, up = 1) {
     const top = up >= 0 ? -Math.PI / 2 : Math.PI / 2;
-    switch (shape) {
+    switch (FIGURES[shape] ? 'figure' : shape) {
       case 'square': ctx.beginPath(); ctx.rect(x - r * 0.88, y - r * 0.88, r * 1.76, r * 1.76); return false;
       case 'triangle': poly(ctx, x, y + (up >= 0 ? r * 0.15 : -r * 0.15), r * 1.25, 3, top); return false;
       case 'diamond': poly(ctx, x, y, r * 1.2, 4, top); return false;
@@ -131,10 +155,10 @@ const Shapes = (() => {
       }
       case 'bar': ctx.beginPath(); ctx.rect(x - r * 1.3, y - r * 0.55, r * 2.6, r * 1.1); return false;
       case 'ring': ctx.beginPath(); ctx.arc(x, y, r * 0.8, 0, Math.PI * 2); return true;
-      case 'spider': case 'sun': case 'flame': case 'spear': case 'imp': case 'knife': case 'drop': case 'dagger': case 'snowflake': case 'obelisk': case 'goblin':
+      case 'figure':
         ctx.beginPath();
         for (const pt of FIGURES[shape]) {
-          if (pt.c) { const [cx, cy, cr] = pt.c; ctx.moveTo(x + (cx + cr) * r, y + cy * r); ctx.arc(x + cx * r, y + cy * r, cr * r, 0, Math.PI * 2); }
+          if (pt.c) { const [cx, cy, cr] = pt.c; ctx.moveTo(x + (cx + cr) * r, y + cy * r); if (pt.h) ctx.arc(x + cx * r, y + cy * r, cr * r, Math.PI * 2, 0, true); else ctx.arc(x + cx * r, y + cy * r, cr * r, 0, Math.PI * 2); }
           else { pt.p.forEach(([px, py], i) => i ? ctx.lineTo(x + px * r, y + py * r) : ctx.moveTo(x + px * r, y + py * r)); ctx.closePath(); }
         }
         return false;
@@ -161,7 +185,7 @@ const Shapes = (() => {
       const a = rot + i * Math.PI * 2 / n; return `${(c + Math.cos(a) * rr).toFixed(2)},${(cy + Math.sin(a) * rr).toFixed(2)}`;
     }).join(' ');
     let body;
-    switch (shape) {
+    switch (FIGURES[shape] ? 'figure' : shape) {
       case 'square': body = `<rect x="${c - r * 0.88}" y="${c - r * 0.88}" width="${r * 1.76}" height="${r * 1.76}"/>`; break;
       case 'triangle': body = `<polygon points="${pts(3, r * 1.25, -Math.PI / 2, c + r * 0.15)}"/>`; break;
       case 'diamond': body = `<polygon points="${pts(4, r * 1.2, -Math.PI / 2)}"/>`; break;
@@ -171,9 +195,10 @@ const Shapes = (() => {
       case 'cross': { const a = r * 1.15, b = r * 0.42; body = `<polygon points="${[[-b, -a], [b, -a], [b, -b], [a, -b], [a, b], [b, b], [b, a], [-b, a], [-b, b], [-a, b], [-a, -b], [-b, -b]].map(([px, py]) => `${(c + px).toFixed(2)},${(c + py).toFixed(2)}`).join(' ')}"/>`; break; }
       case 'bar': body = `<rect x="${c - r * 1.3}" y="${c - r * 0.55}" width="${r * 2.6}" height="${r * 1.1}"/>`; break;
       case 'horse': { const rr = r * 0.95; body = `<polygon points="${HORSE.map(([px, py]) => `${(c + px * rr).toFixed(2)},${(c + py * rr).toFixed(2)}`).join(' ')}"/>`; break; }
-      case 'spider': case 'sun': case 'flame': case 'spear': case 'imp': case 'knife': case 'drop': case 'dagger': case 'snowflake': case 'obelisk': case 'goblin': { const rr = r * 0.95; body = FIGURES[shape].map(pt => pt.c
-        ? `<circle cx="${(c + pt.c[0] * rr).toFixed(2)}" cy="${(c + pt.c[1] * rr).toFixed(2)}" r="${(pt.c[2] * rr).toFixed(2)}"/>`
-        : `<polygon points="${pt.p.map(([px, py]) => `${(c + px * rr).toFixed(2)},${(c + py * rr).toFixed(2)}`).join(' ')}"/>`).join(''); break; }
+      case 'figure': { const rr = r * 0.95, X = (v) => (c + v * rr).toFixed(2); // one path, so holes cut through
+        const d = FIGURES[shape].map(pt => { if (pt.p) return 'M' + pt.p.map(([px, py]) => `${X(px)} ${X(py)}`).join('L') + 'Z';
+          const [cx, cy, cr] = pt.c, rad = (cr * rr).toFixed(2), sw = pt.h ? 0 : 1; return `M${X(cx + cr)} ${X(cy)}A${rad} ${rad} 0 1 ${sw} ${X(cx - cr)} ${X(cy)}A${rad} ${rad} 0 1 ${sw} ${X(cx + cr)} ${X(cy)}Z`; }).join('');
+        body = `<path d="${d}"/>`; break; }
       case 'ring': body = `<circle cx="${c}" cy="${c}" r="${r * 0.8}" fill="none" stroke="currentColor" stroke-width="${Math.max(1.5, r * 0.45)}"/>`; break;
       default: body = `<circle cx="${c}" cy="${c}" r="${r}"/>`;
     }
