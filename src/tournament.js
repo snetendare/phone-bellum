@@ -56,6 +56,19 @@
     while (t.players.some(p => p.id !== id && p.name.toLowerCase() === out.toLowerCase())) out = (name.slice(0, 15) + ' ' + k++);
     return out;
   }
+  // a computer player (practice tournaments): the organizer's phone plays its matches against other bots by itself,
+  // and a person drawn against one plays it on their own phone against the AI
+  const BOT_NAMES = ['Rusty', 'Sprocket', 'Clank', 'Gearhart', 'Rivet', 'Widget', 'Ratchet', 'Cogsworth', 'Bolt', 'Tin Tim', 'Gizmo', 'Servo', 'Piston', 'Dynamo', 'Nutsy'];
+  function addBot(t, name) {
+    if (t.status !== 'lobby') return null;
+    const used = new Set(t.players.map(p => p.name.replace(/^Bot /, '')));
+    const pick = name || BOT_NAMES.find(n => !used.has(n)) || 'Bot ' + (t.players.length + 1);
+    const id = 'bot-' + Math.random().toString(36).slice(2, 10);
+    const p = join(t, id, 'Bot ' + pick.replace(/^Bot /, ''));
+    if (p) p.bot = true;
+    return p;
+  }
+  const isBot = (t, id) => !!(player(t, id) && player(t, id).bot);
   function rename(t, id, name) { const p = player(t, id), n = cleanName(name); if (!p || !n) return false; p.name = uniqueName(t, n, id); return true; }
   function remove(t, id) { // before the start: gone; after: dropped (no more pairings, results so far stay)
     if (t.status === 'lobby') { const k = t.players.findIndex(p => p.id === id); if (k < 0) return false; t.players.splice(k, 1); return true; }
@@ -252,7 +265,7 @@
     return st.slice().sort((x, y) => ((y.id === t.champion) - (x.id === t.champion)) || ((reach.get(y.id) ?? -1) - (reach.get(x.id) ?? -1)) || (pos.get(x.id) - pos.get(y.id)));
   }
 
-  const api = { CODE_CHARS, POINTS, rng, newCode, cleanName, suggestRounds, suggestCut, create, join, rename, remove, player, nameOf, active, swissRounds, cutSize,
+  const api = { CODE_CHARS, POINTS, BOT_NAMES, addBot, isBot, rng, newCode, cleanName, suggestRounds, suggestCut, create, join, rename, remove, player, nameOf, active, swissRounds, cutSize,
     standings, pairSwiss, bracketOrder, playoffFirst, nextPlan, advance, report, replay, swapHost, undoRound, roundDone, current, matchOf, findMatch, bracket, placings, outcome, winnerOf, sideOf };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.Tour = api;

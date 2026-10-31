@@ -19,6 +19,12 @@ Newest first. Each entry says what changed for players; technical details live i
 - Set or change any result, replay a match, swap who hosts, rename or drop a player, undo a round's pairings.
 - The tournament survives a reload of the organizer's page; everyone reconnects by themselves.
 
+### Practice vs bots
+- New on the start screen: **Practice vs bots** makes a tournament of you and **7 bots** (Bot Rusty, Bot Sprocket and friends), so you can try the whole thing alone.
+- Bots play each other by themselves on the organizer's phone: real matches, played out by the AI with the tournament's rules, so the standings make sense.
+- When you're drawn against a bot, tap **Play vs Bot …**: it's a normal match against the AI on your phone, with the tournament's map, timers and leader rules, and the result goes in by itself.
+- In any tournament lobby the organizer can **Add a bot** (or **Remove bots**), for example to fill an odd number of players.
+
 ---
 
 ## 31 October 2026 – Balance

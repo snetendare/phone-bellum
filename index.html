@@ -6710,6 +6710,19 @@ if (typeof module !== 'undefined') module.exports = Game;
     while (t.players.some(p => p.id !== id && p.name.toLowerCase() === out.toLowerCase())) out = (name.slice(0, 15) + ' ' + k++);
     return out;
   }
+  // a computer player (practice tournaments): the organizer's phone plays its matches against other bots by itself,
+  // and a person drawn against one plays it on their own phone against the AI
+  const BOT_NAMES = ['Rusty', 'Sprocket', 'Clank', 'Gearhart', 'Rivet', 'Widget', 'Ratchet', 'Cogsworth', 'Bolt', 'Tin Tim', 'Gizmo', 'Servo', 'Piston', 'Dynamo', 'Nutsy'];
+  function addBot(t, name) {
+    if (t.status !== 'lobby') return null;
+    const used = new Set(t.players.map(p => p.name.replace(/^Bot /, '')));
+    const pick = name || BOT_NAMES.find(n => !used.has(n)) || 'Bot ' + (t.players.length + 1);
+    const id = 'bot-' + Math.random().toString(36).slice(2, 10);
+    const p = join(t, id, 'Bot ' + pick.replace(/^Bot /, ''));
+    if (p) p.bot = true;
+    return p;
+  }
+  const isBot = (t, id) => !!(player(t, id) && player(t, id).bot);
   function rename(t, id, name) { const p = player(t, id), n = cleanName(name); if (!p || !n) return false; p.name = uniqueName(t, n, id); return true; }
   function remove(t, id) { // before the start: gone; after: dropped (no more pairings, results so far stay)
     if (t.status === 'lobby') { const k = t.players.findIndex(p => p.id === id); if (k < 0) return false; t.players.splice(k, 1); return true; }
@@ -6906,7 +6919,7 @@ if (typeof module !== 'undefined') module.exports = Game;
     return st.slice().sort((x, y) => ((y.id === t.champion) - (x.id === t.champion)) || ((reach.get(y.id) ?? -1) - (reach.get(x.id) ?? -1)) || (pos.get(x.id) - pos.get(y.id)));
   }
 
-  const api = { CODE_CHARS, POINTS, rng, newCode, cleanName, suggestRounds, suggestCut, create, join, rename, remove, player, nameOf, active, swissRounds, cutSize,
+  const api = { CODE_CHARS, POINTS, BOT_NAMES, addBot, isBot, rng, newCode, cleanName, suggestRounds, suggestCut, create, join, rename, remove, player, nameOf, active, swissRounds, cutSize,
     standings, pairSwiss, bracketOrder, playoffFirst, nextPlan, advance, report, replay, swapHost, undoRound, roundDone, current, matchOf, findMatch, bracket, placings, outcome, winnerOf, sideOf };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.Tour = api;
@@ -8525,7 +8538,7 @@ const Render2D = (cv, view, opts = {}) => {
   // ---------- state ----------
   let mode = 'ai';          // ai | claude | tutorial | host | guest
   const solo = () => mode === 'ai' || mode === 'claude' || mode === 'tutorial'; // playing against the computer on this screen
-  const foeName = () => mode === 'ai' || mode === 'tutorial' ? 'Enemy' : mode === 'claude' ? 'Claude' : (tourFoe() || 'Opponent'); // a tournament opponent by gamertag
+  const foeName = () => tourFoe() || (mode === 'ai' || mode === 'tutorial' ? 'Enemy' : mode === 'claude' ? 'Claude' : 'Opponent'); // a tournament opponent by gamertag
   let me = 0;               // which side of the match this screen plays (the guest is side 1)
   const foe = () => 1 - me;
   let m = null;             // match state (on the guest: a copy kept in step by the host)
@@ -10101,7 +10114,7 @@ const Render2D = (cv, view, opts = {}) => {
         <span class="joinrow"><input id="code-in" maxlength="5" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-label="Match code" placeholder="CODE"><button class="btn" id="join">Join</button></span>
       </div>
       <span class="hint" id="join-msg" aria-live="polite" hidden></span>
-      ${tour.role ? '' : `<div class="bar"><span class="hint">Invite friends to a tournament: brackets, gamertags, your rules.</span><button class="btn small" id="tour-new">Host a tournament</button></div>`}
+      ${tour.role ? '' : `<div class="bar"><span class="hint">Invite friends to a tournament: brackets, gamertags, your rules.</span><span class="btnrow"><button class="btn small" id="tour-new">Host a tournament</button><button class="btn small" id="tour-practice">Practice vs bots</button></span></div>`}
       ${packSeg()}
       ${settingsBox(`
         ${mapSeg()}
@@ -10132,6 +10145,7 @@ const Render2D = (cv, view, opts = {}) => {
     if ($('resume')) $('resume').addEventListener('click', () => resumeHost(resume));
     if ($('tour-back')) $('tour-back').addEventListener('click', () => { tour.menu = false; showStart(); });
     if ($('tour-new')) $('tour-new').addEventListener('click', tourCreate);
+    if ($('tour-practice')) $('tour-practice').addEventListener('click', tourPractice);
     $('load-units').addEventListener('click', openLoader);
     const joinNow = () => {
       const c = $('code-in').value.toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -10288,7 +10302,8 @@ const Render2D = (cv, view, opts = {}) => {
         <p class="big">${lines.join(' ')}</p>
         ${asked && !inTour ? '<p>Your opponent wants a rematch.</p>' : ''}
         <div class="btnrow">
-          ${solo() ? '<button class="btn primary" id="again">Play again</button>'
+          ${inTour ? '<button class="btn primary" id="again">Back to the tournament</button>'
+            : solo() ? '<button class="btn primary" id="again">Play again</button>'
             : inTour ? '<button class="btn primary" id="again">Back to the tournament</button>'
             : `<button class="btn primary" id="again" ${wait ? 'disabled' : ''}>${wait ? 'Waiting for opponent…' : 'Rematch'}</button>`}
           <button class="btn" id="look">Look at board</button>
@@ -10296,7 +10311,7 @@ const Render2D = (cv, view, opts = {}) => {
         </div>
       </div>`);
       $('panel').innerHTML = '';
-      $('again').addEventListener('click', mode === 'claude' ? startClaudeMatch : mode === 'ai' ? startAiMatch : inTour ? () => { if (mode === 'host') clearHost(); tour.menu = false; showStart(); } : askRematch);
+      $('again').addEventListener('click', inTour ? () => { if (mode === 'host') clearHost(); tour.menu = false; showStart(); } : mode === 'claude' ? startClaudeMatch : mode === 'ai' ? startAiMatch : askRematch);
       $('menu').addEventListener('click', () => { if (mode === 'host') clearHost(); showStart(); });
       bindLook(asked ? 'Your opponent wants a rematch.' : `${win ? 'Victory' : loss ? 'Defeat' : 'Draw'} · the board before the last fight.`);
       if (looking) lookAtBoard(true);
@@ -11073,7 +11088,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (mode === 'tutorial') { tutRound(); enterDeploy(0); return; } // the enemy's army is set by the script; no clock
     if (mode === 'claude') { startClaudeTurn(); enterDeploy(timerOn ? deployMs() : 0); return; }
     Game.aiDeploy(m, 1);       // the AI commits first; its new squads stay hidden until the fight
-    enterDeploy(timerOn ? deployMs() : 0);
+    enterDeploy(timerOn || tourSet() ? deployMs() : 0); // a tournament match against a bot always has the clock
   }
 
   function enterDeploy(ms) {
@@ -13355,7 +13370,9 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   const tourMine = () => tour.t && tour.myId ? Tour.matchOf(tour.t, tour.myId) : null;
   function tourLive() {
     const x = tourMine();
-    return x && !x.bye && (mode === 'host' || mode === 'guest') && net.code === x.match.code ? x : null;
+    if (!x || x.bye) return null;
+    if (mode === 'ai') return m && tour.botMatch === x.match.id && tour.botCode === x.match.code ? x : null; // against a bot, on this phone
+    return (mode === 'host' || mode === 'guest') && net.code === x.match.code ? x : null;
   }
   const tourSet = () => (tourLive() && tour.t.settings) || null; // the match settings while a tournament match is on
   const tourFoe = () => { const x = tourLive(); return x ? Tour.nameOf(tour.t, x.match[x.side === 'a' ? 'b' : 'a']) : ''; };
@@ -13363,6 +13380,14 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   const tourIsHost = (x) => x && tourHostKey(x.match) === x.side;
 
   // ----- the hub (organizer) -----
+  // a practice tournament: you and 7 bots, to try it all out
+  function tourPractice() {
+    tourCreate();
+    if (!tourOrg()) return;
+    tour.t.name = 'Practice cup';
+    for (let k = 0; k < 7; k++) Tour.addBot(tour.t);
+    tourChanged();
+  }
   function tourCreate() {
     if (!peerAvailable()) { overlayMsg('Couldn’t load the multiplayer code', 'Check your connection and reload the page.'); return; }
     let name = '';
@@ -13441,6 +13466,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (!peerAvailable() || !s || !s.t) return;
     tour.role = 'org'; tour.t = s.t; tour.code = s.t.code; tour.myId = s.myId || s.t.org; tour.menu = false; tour.tab = tour.t.status === 'lobby' ? 'players' : 'matches';
     tourHub(false);
+    tourBots();
   }
   // the organizer's tools: starts the next round (with this round's map), sets results, replays, drops
   function tourAdvance() {
@@ -13451,7 +13477,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       r.map = tour.t.settings.map || (pool.length ? pool[Math.floor(Math.random() * pool.length)].id : 'standard');
     }
     tour.tab = tour.t.status === 'done' ? 'standings' : 'matches';
-    tourChanged();
+    tourChanged(); tourBots();
   }
   // the match settings from the menu's own pickers (map, look, unit pack, leaders and units left out)
   function tourCapture() {
@@ -13529,7 +13555,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   function tourReport(winSide) {
     const x = tourLive();
     if (!x || !m) return;
-    const hk = tourHostKey(x.match), gk = hk === 'a' ? 'b' : 'a';
+    const hk = mode === 'ai' ? x.side : tourHostKey(x.match), gk = hk === 'a' ? 'b' : 'a'; // whose is side 0: the host's, or this phone's against a bot
     const winner = winSide === 0 ? hk : winSide === 1 ? gk : 'draw';
     const sideA = hk === 'a' ? 0 : 1;
     const msg = { t: 'result', match: x.match.id, winner, hp: [m.hp[sideA], m.hp[1 - sideA]], rounds: (m.history || []).length };
@@ -13542,6 +13568,15 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     const x = tourMine();
     if (!x || x.bye || x.match.result) return;
     tour.menu = false;
+    if (Tour.isBot(tour.t, x.match[x.side === 'a' ? 'b' : 'a'])) { // against a bot: an AI match on this phone, with the tournament's settings
+      leaveNet();
+      mode = 'ai'; me = 0; matchKind = 'standard'; bt = null;
+      tour.botMatch = x.match.id; tour.botCode = x.match.code;
+      m = tourCreateMatch(x);
+      nextReady = [false, false]; rematch = [false, false];
+      startReport(); beginAiRound();
+      return;
+    }
     if (tourIsHost(x)) {
       if (!peerAvailable()) { overlayMsg('Couldn’t load the multiplayer code', 'Check your connection and reload the page.'); return; }
       leaveNet();
@@ -13570,14 +13605,54 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   }
   // a tournament match: the tournament's map, look, units, leaders, package count, mirror rolls (on the built-in units)
   function tourCreateMatch(x) {
-    const s = { ...TOUR_DEFAULTS, ...tour.t.settings };
     restoreSet();
     if (customSet && !standardSet) standardSet = { set: rawSet, custom: customSet }; // restoreSet puts the player's own units back afterwards
     useSet(BUILTIN, false);
+    return tourNewMatch(x);
+  }
+  // the match itself, on the units loaded now (the built-in ones)
+  function tourNewMatch(x) {
+    const s = { ...TOUR_DEFAULTS, ...tour.t.settings };
     const off = units.map((u, i) => (s.offUnits || []).includes(u.name) ? i : -1).filter(i => i >= 0);
     const mapId = x.round.map && Game.MAPS.some(mp => mp.id === x.round.map) ? x.round.map : (s.map || null);
     return Game.createMatch(units, M, (now() ^ (Math.random() * 1e9)) >>> 0, mapId, null, (s.offChars || []).filter(id => Game.charInfo(id)),
       { skin: s.skin || null, offUnits: off, offTowers: s.offTowers || [], mirror: s.mirror !== false, packOptions: s.packOptions || 3 });
+  }
+
+  // Bot against bot (on the organizer's phone): the whole match is played out by the AI on both sides, one round at a
+  // time between frames, with the tournament's settings. A playoff draw is played again.
+  const tourSims = new Set();
+  function tourBots() {
+    if (!tourOrg() || !tour.t || tour.t.status !== 'running') return;
+    const r = Tour.current(tour.t);
+    for (const mt of r.matches) if (mt.b != null && !mt.result && !tourSims.has(mt.id) && Tour.isBot(tour.t, mt.a) && Tour.isBot(tour.t, mt.b)) tourSim(r, mt);
+  }
+  function tourSim(r, mt) {
+    tourSims.add(mt.id);
+    // the built-in units, without touching what this phone has loaded (a Counter Lab roster stays)
+    const keep = { units, M, rawSet, customSet };
+    if (customSet) useSet(BUILTIN, false);
+    const sm = tourNewMatch({ round: r, match: mt });
+    if (keep.customSet) { units = keep.units; M = keep.M; rawSet = keep.rawSet; customSet = keep.customSet; }
+    const code = mt.code;
+    const step = () => {
+      const f = tour.t && Tour.findMatch(tour.t, mt.id);
+      if (!f || f.match.result || f.match.code !== code || !tourOrg()) { tourSims.delete(mt.id); return; }
+      try {
+        for (const sd of [0, 1]) { if (Game.needsPack(sm, sd)) Game.choosePack(sm, sd, Math.floor(Math.random() * sm.packages[sd].length)); Game.aiDeploy(sm, sd); Game.aiLevel(sm, sd); }
+        for (const sd of [0, 1]) { Game.ensureTower(sm, sd); Game.ensurePack(sm, sd); Game.ensureBwalls(sm, sd); }
+        Game.settleTowerPicks(sm);
+        const sim = Game.startBattle(sm); while (sim.step()) {}
+        Game.resolve(sm, sim.result());
+      } catch (e) { console.warn('bot match', e); sm.over = true; sm.winner = Math.random() < 0.5 ? 0 : 1; }
+      if (m) Game.useGrid(m); // the board on screen keeps its own grid
+      if (!sm.over && sm.round < 40) { setTimeout(step, 120); return; }
+      tourSims.delete(mt.id);
+      const w = sm.winner === 0 ? 'a' : sm.winner === 1 ? 'b' : 'draw';
+      if (w === 'draw' && r.stage === 'playoff') { Tour.replay(tour.t, mt.id, Math.random); tourChanged(); tourBots(); return; }
+      if (Tour.report(tour.t, mt.id, w, [sm.hp[0], sm.hp[1]], sm.history.length, 'auto')) tourChanged();
+    };
+    setTimeout(step, 600);
   }
 
   // ends this device's part: keep (true) leaves the saved tournament for a later resume (a new one replaces it anyway).
@@ -13600,12 +13675,12 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     return `Round ${r.n} of ${Tour.swissRounds(tour.t)}`;
   };
   const mapName = (id) => { const mp = Game.MAPS.find(x => x.id === id); return mp ? mp.name : 'Random map'; };
-  const tourOn = (id) => tourOrg() ? tourOnline().includes(id) : tour.online.includes(id);
+  const tourOn = (id) => Tour.isBot(tour.t, id) || (tourOrg() ? tourOnline().includes(id) : tour.online.includes(id));
   const dot = (id) => id ? `<i class="tdot ${tourOn(id) ? 'on' : ''}" title="${tourOn(id) ? 'online' : 'offline'}"></i>` : '';
-  const pname = (id) => id == null ? '<i>Bye</i>' : `${dot(id)}${esc(Tour.nameOf(tour.t, id))}${id === tour.myId ? ' <small>(you)</small>' : ''}`;
+  const pname = (id) => id == null ? '<i>Bye</i>' : `${dot(id)}${Tour.isBot(tour.t, id) ? '🤖 ' : ''}${esc(Tour.nameOf(tour.t, id))}${id === tour.myId ? ' <small>(you)</small>' : ''}`;
   function tourResultText(mt) {
     if (mt.b == null) return `${esc(Tour.nameOf(tour.t, mt.a))} has a bye`;
-    if (!mt.result) return mt.conflict ? 'Results disagree' : 'Playing';
+    if (!mt.result) return mt.conflict ? 'Results disagree' : Tour.isBot(tour.t, mt.a) && Tour.isBot(tour.t, mt.b) ? 'Bots playing…' : 'Playing';
     if (mt.result.winner === 'draw') return `Draw${mt.result.hp ? ` (${mt.result.hp[0]}–${mt.result.hp[1]})` : ''}`;
     return `${esc(Tour.nameOf(tour.t, mt[mt.result.winner]))} won${mt.result.hp ? ` (${mt.result.hp[0]}–${mt.result.hp[1]})` : ''}${mt.result.by === 'org' ? ' · set by organizer' : ''}`;
   }
@@ -13656,8 +13731,9 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
         const host = tourIsHost(x);
         let saved = null; try { saved = JSON.parse(localStorage.getItem(HOST_STORE) || 'null'); } catch (e) {}
         const resume = host && saved && saved.code === x.match.code && saved.m;
-        body = `${esc(tourRoundName(r))} · ${esc(mapName(r.map))} · ${host ? 'you host' : `${esc(Tour.nameOf(t, foe))} hosts`}${tourOn(foe) ? '' : ' · opponent offline'}`;
-        btns = resume ? `<button class="btn primary" id="tour-resume">Resume match</button>` : `<button class="btn primary" id="tour-play">${host ? 'Start match' : 'Join match'}</button>`;
+        const vsBot = Tour.isBot(t, foe);
+        body = `${esc(tourRoundName(r))} · ${esc(mapName(r.map))} · ${vsBot ? 'a bot: you play it on this phone' : host ? 'you host' : `${esc(Tour.nameOf(t, foe))} hosts`}${tourOn(foe) ? '' : ' · opponent offline'}`;
+        btns = vsBot ? `<button class="btn primary" id="tour-play">Play vs ${esc(Tour.nameOf(t, foe))}</button>` : resume ? `<button class="btn primary" id="tour-resume">Resume match</button>` : `<button class="btn primary" id="tour-play">${host ? 'Start match' : 'Join match'}</button>`;
         if (x.match.conflict) body += ' · the results disagree: the organizer decides';
       }
     }
@@ -13719,7 +13795,8 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
         <div class="linkbox" id="tour-link">${esc(tourLink())}</div>
         <span class="btnrow">${navigator.share ? '<button class="btn primary small" id="tour-share">Share invite</button>' : ''}<button class="btn small" id="tour-copy">Copy invite</button><button class="btn small" id="tour-copy-watch">Copy big-screen link</button></span>` : ''}
         <ul class="tour-list">${list}</ul>
-        ${t.status === 'lobby' ? `<div class="bar"><span class="hint">You play too</span><div class="seg"><button data-orgplays="1" aria-pressed="${!!Tour.player(t, t.org)}">Yes</button><button data-orgplays="0" aria-pressed="${!Tour.player(t, t.org)}">No, just organize</button></div></div>
+        ${t.status === 'lobby' ? `<div class="bar"><span class="hint">Practice: bots play each other by themselves; against you, they play on your phone.</span><span class="btnrow"><button class="btn small" id="tour-bot">Add a bot</button>${t.players.some(p => p.bot) ? '<button class="btn small" id="tour-nobots">Remove bots</button>' : ''}</span></div>
+        <div class="bar"><span class="hint">You play too</span><div class="seg"><button data-orgplays="1" aria-pressed="${!!Tour.player(t, t.org)}">Yes</button><button data-orgplays="0" aria-pressed="${!Tour.player(t, t.org)}">No, just organize</button></div></div>
         <span class="hint">${tourPlan()}</span>
         <button class="btn primary" id="tour-start" ${Tour.active(t).length >= 2 ? '' : 'disabled'}>Start tournament</button>` : ''}
         ${tour.problem ? `<span class="hint">${esc(tour.problem)}</span>` : ''}`;
@@ -13810,6 +13887,8 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       else Tour.remove(t, t.org);
       tourChanged();
     });
+    if ($('tour-bot')) $('tour-bot').addEventListener('click', () => { if (Tour.addBot(t)) tourChanged(); });
+    if ($('tour-nobots')) $('tour-nobots').addEventListener('click', () => { t.players.filter(p => p.bot).forEach(p => Tour.remove(t, p.id)); tourChanged(); });
     if ($('tour-start')) $('tour-start').addEventListener('click', () => { tourCapture(); tourAdvance(); });
     if ($('tour-next')) $('tour-next').addEventListener('click', tourAdvance);
     if ($('tour-undo')) $('tour-undo').addEventListener('click', () => { if (Tour.undoRound(t)) { tour.tab = t.status === 'lobby' ? 'players' : 'matches'; tourChanged(); } });
