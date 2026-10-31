@@ -395,7 +395,7 @@ textarea { min-height: 110px; resize: vertical; font-size: 12px; }
 // ===== Unit shapes (shared by Counter Lab and the demo) =====
 const Shapes = (() => {
   const LIST = ['circle', 'ring', 'square', 'triangle', 'diamond', 'pentagon', 'hexagon', 'star', 'cross', 'bar', 'horse', 'spider', 'sun', 'flame', 'spear', 'imp', 'knife', 'drop', 'dagger', 'snowflake', 'obelisk', 'goblin', 'skull', 'firestaff', 'reticle', 'wisp', 'tree', 'wheel'];
-  const LABELS = { circle: 'Circle', ring: 'Ring', square: 'Square', triangle: 'Triangle', diamond: 'Diamond', pentagon: 'Pentagon', hexagon: 'Hexagon', star: 'Star', cross: 'Cross', bar: 'Bar', horse: 'Horse', spider: 'Spider', sun: 'Sun', flame: 'Flame', spear: 'Spear', imp: 'Imp', knife: 'Knife', drop: 'Drop', dagger: 'Dagger', snowflake: 'Snowflake', obelisk: 'Obelisk', goblin: 'Goblin', skull: 'Skull', firestaff: 'Fire staff', reticle: 'Crosshair', wisp: 'Eye', tree: 'Tree', wheel: 'Wheel' };
+  const LABELS = { circle: 'Circle', ring: 'Ring', square: 'Square', triangle: 'Triangle', diamond: 'Diamond', pentagon: 'Pentagon', hexagon: 'Hexagon', star: 'Star', cross: 'Cross', bar: 'Bar', horse: 'Horse', spider: 'Spider', sun: 'Sun', flame: 'Flame', spear: 'Spear', imp: 'Imp', knife: 'Knife', drop: 'Drop', dagger: 'Dagger', snowflake: 'Snowflake', obelisk: 'Obelisk', goblin: 'Goblin', skull: 'Skull', firestaff: 'Fire orb', reticle: 'Crosshair', wisp: 'Eye', tree: 'Tree', wheel: 'Wheel' };
   const DEFAULTS = {
     'Goblin Swarm': 'goblin', 'Skeleton Archers': 'skull', 'Ember Imps': 'imp', 'Fire Mage': 'firestaff',
     'Sniper': 'reticle', 'Brute': 'square', 'Wisps': 'wisp', 'Ent': 'tree', 'Rollers': 'wheel', 'Crossbow Volley': 'pentagon', 'Ballista': 'bar',
@@ -493,10 +493,8 @@ const Shapes = (() => {
     // a skull with one eye socket, the other eye closed (a slit), and a nose hole (Skeleton Archers)
     skull: [{ c: [0, -0.22, 0.86] }, { p: [[-0.5, 0.5], [0.5, 0.5], [0.46, 1.0], [0.24, 1.12], [-0.24, 1.12], [-0.46, 1.0]] },
       { c: [-0.33, -0.2, 0.25], h: 1 }, { p: strip([[0.1, -0.24], [0.33, -0.13], [0.56, -0.24]], 0.07), h: 1 }, { p: [[0, 0.1], [0.14, 0.38], [-0.14, 0.38]], h: 1 }],
-    // a mage's staff: a forked top holding a ball of fire with flames rising off it (Fire Mage)
-    firestaff: [{ p: strip([[0, 1.36], [0, -0.1]], 0.14) }, { p: strip([[-0.04, 0.0], [-0.56, -0.24], [-0.66, -0.68]], 0.1) },
-      { p: strip([[0.04, 0.0], [0.56, -0.24], [0.66, -0.68]], 0.1) }, { c: [0, -0.62, 0.5] },
-      { p: [[-0.3, -0.98], [-0.2, -1.2], [-0.08, -1.08], [0, -1.38], [0.08, -1.08], [0.2, -1.2], [0.3, -0.98]] }],
+    // a ball of fire with three flames rising off it (Fire Mage)
+    firestaff: [{ c: [0, 0.32, 0.9] }, { p: [[-0.62, -0.18], [-0.5, -0.86], [-0.2, -0.6], [0, -1.36], [0.2, -0.6], [0.5, -0.86], [0.62, -0.18]] }],
     // a scope's crosshair: a ring, four ticks and a dot (Sniper)
     reticle: [{ c: [0, 0, 1.0] }, { c: [0, 0, 0.74], h: 1 }, { c: [0, 0, 0.17] },
       ...[[0, -1], [1, 0], [0, 1], [-1, 0]].map(([dx, dy]) => ({ p: strip([[dx * 0.36, dy * 0.36], [dx * 1.36, dy * 1.36]], 0.13) }))],
