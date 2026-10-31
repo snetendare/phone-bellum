@@ -8,7 +8,7 @@ Newest first. Each entry says what changed for players; technical details live i
 
 Every tier 1 unit now has its own picture on the board, in the shop and in the encyclopedia, instead of a plain shape:
 
-- **Skeleton Archers:** a skull with one eye closed (was a triangle).
+- **Skeleton Archers:** a skull in front of two crossed arrows (was a triangle).
 - **Fire Mage:** a ball of fire with flames rising off it (was a hexagon, shared with other wizards).
 - **Sniper:** a scope crosshair (was a cross).
 - **Wisps:** a round eye (was a ring).

@@ -96,9 +96,15 @@ const Shapes = (() => {
     // an obelisk: a tall tapering stone with a pointed cap, on a wide plinth
     obelisk: [{ p: [[-0.46, 1.06], [0.46, 1.06], [0.3, -0.86], [0, -1.36], [-0.3, -0.86]] }, { p: [[-0.76, 0.96], [0.76, 0.96], [0.76, 1.32], [-0.76, 1.32]] }],
     // tier 1 pictures (2026-10-31). A part with h: 1 is a hole: it runs the other way round, so it cuts out of what's under it.
-    // a skull with one eye socket, the other eye closed (a slit), and a nose hole (Skeleton Archers)
-    skull: [{ c: [0, -0.22, 0.86] }, { p: [[-0.5, 0.5], [0.5, 0.5], [0.46, 1.0], [0.24, 1.12], [-0.24, 1.12], [-0.46, 1.0]] },
-      { c: [-0.33, -0.2, 0.25], h: 1 }, { p: strip([[0.1, -0.24], [0.33, -0.13], [0.56, -0.24]], 0.07), h: 1 }, { p: [[0, 0.1], [0.14, 0.38], [-0.14, 0.38]], h: 1 }],
+    // a skull in front of two crossed arrows (Skeleton Archers). The arrows only show outside the skull, so the
+    // skull's holes (angled eye sockets, nose, two teeth gaps) cut through cleanly.
+    skull: [{ c: [0, -0.18, 0.66] }, { p: [[-0.38, 0.26], [0.38, 0.26], [0.34, 0.74], [-0.34, 0.74]] },
+      { p: [[-0.46, -0.26], [-0.08, -0.14], [-0.12, 0.08], [-0.4, 0.04]], h: 1 }, { p: [[0.46, -0.26], [0.4, 0.04], [0.12, 0.08], [0.08, -0.14]], h: 1 },
+      { p: [[0, 0.1], [0.11, 0.3], [-0.11, 0.3]], h: 1 },
+      { p: [[-0.17, 0.52], [-0.07, 0.52], [-0.07, 0.68], [-0.17, 0.68]], h: 1 }, { p: [[0.07, 0.52], [0.17, 0.52], [0.17, 0.68], [0.07, 0.68]], h: 1 },
+      ...[1, -1].flatMap(sx => { const at = (t, o) => [sx * (t + o) * Math.SQRT1_2, (-t + o) * Math.SQRT1_2]; // t along the arrow (+ toward its head, up), o across it
+        return [{ p: strip([at(0.6, 0), at(1.12, 0)], 0.09) }, { p: [at(1.44, 0), at(1.06, 0.22), at(1.06, -0.22)] }, // shaft and head
+          { p: strip([at(-0.6, 0), at(-1.3, 0)], 0.09) }, { p: [at(-0.94, 0), at(-1.08, 0.2), at(-1.4, 0.2), at(-1.26, 0)] }, { p: [at(-0.94, 0), at(-1.26, 0), at(-1.4, -0.2), at(-1.08, -0.2)] }]; })],
     // a ball of fire with three flames rising off it (Fire Mage)
     firestaff: [{ c: [0, 0.32, 0.9] }, { p: [[-0.62, -0.18], [-0.5, -0.86], [-0.2, -0.6], [0, -1.36], [0.2, -0.6], [0.5, -0.86], [0.62, -0.18]] }],
     // a scope's crosshair: a ring, four ticks and a dot (Sniper)
