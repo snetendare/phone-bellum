@@ -1,9 +1,9 @@
 // ===== Unit shapes (shared by Counter Lab and the demo) =====
 const Shapes = (() => {
-  const LIST = ['circle', 'ring', 'square', 'triangle', 'diamond', 'pentagon', 'hexagon', 'star', 'cross', 'bar', 'horse', 'spider', 'sun', 'flame', 'spear', 'imp', 'knife', 'drop', 'dagger', 'snowflake', 'obelisk', 'goblin', 'skull', 'fireball', 'reticle', 'wisp', 'tree', 'wheel'];
-  const LABELS = { circle: 'Circle', ring: 'Ring', square: 'Square', triangle: 'Triangle', diamond: 'Diamond', pentagon: 'Pentagon', hexagon: 'Hexagon', star: 'Star', cross: 'Cross', bar: 'Bar', horse: 'Horse', spider: 'Spider', sun: 'Sun', flame: 'Flame', spear: 'Spear', imp: 'Imp', knife: 'Knife', drop: 'Drop', dagger: 'Dagger', snowflake: 'Snowflake', obelisk: 'Obelisk', goblin: 'Goblin', skull: 'Skull', fireball: 'Fireball', reticle: 'Crosshair', wisp: 'Wisp', tree: 'Tree', wheel: 'Wheel' };
+  const LIST = ['circle', 'ring', 'square', 'triangle', 'diamond', 'pentagon', 'hexagon', 'star', 'cross', 'bar', 'horse', 'spider', 'sun', 'flame', 'spear', 'imp', 'knife', 'drop', 'dagger', 'snowflake', 'obelisk', 'goblin', 'skull', 'firestaff', 'reticle', 'wisp', 'tree', 'wheel'];
+  const LABELS = { circle: 'Circle', ring: 'Ring', square: 'Square', triangle: 'Triangle', diamond: 'Diamond', pentagon: 'Pentagon', hexagon: 'Hexagon', star: 'Star', cross: 'Cross', bar: 'Bar', horse: 'Horse', spider: 'Spider', sun: 'Sun', flame: 'Flame', spear: 'Spear', imp: 'Imp', knife: 'Knife', drop: 'Drop', dagger: 'Dagger', snowflake: 'Snowflake', obelisk: 'Obelisk', goblin: 'Goblin', skull: 'Skull', firestaff: 'Fire staff', reticle: 'Crosshair', wisp: 'Eye', tree: 'Tree', wheel: 'Wheel' };
   const DEFAULTS = {
-    'Goblin Swarm': 'goblin', 'Skeleton Archers': 'skull', 'Ember Imps': 'imp', 'Fire Mage': 'fireball',
+    'Goblin Swarm': 'goblin', 'Skeleton Archers': 'skull', 'Ember Imps': 'imp', 'Fire Mage': 'firestaff',
     'Sniper': 'reticle', 'Brute': 'square', 'Wisps': 'wisp', 'Ent': 'tree', 'Rollers': 'wheel', 'Crossbow Volley': 'pentagon', 'Ballista': 'bar',
     'Boar Riders': 'circle', 'Spinning Golem': 'hexagon', 'Blunderbuss Crew': 'star', 'Ogre Smasher': 'square',
   };
@@ -96,20 +96,21 @@ const Shapes = (() => {
     // an obelisk: a tall tapering stone with a pointed cap, on a wide plinth
     obelisk: [{ p: [[-0.46, 1.06], [0.46, 1.06], [0.3, -0.86], [0, -1.36], [-0.3, -0.86]] }, { p: [[-0.76, 0.96], [0.76, 0.96], [0.76, 1.32], [-0.76, 1.32]] }],
     // tier 1 pictures (2026-10-31). A part with h: 1 is a hole: it runs the other way round, so it cuts out of what's under it.
-    // a skull with eye sockets and a nose hole (Skeleton Archers)
+    // a skull with one eye socket, the other eye closed (a slit), and a nose hole (Skeleton Archers)
     skull: [{ c: [0, -0.22, 0.86] }, { p: [[-0.5, 0.5], [0.5, 0.5], [0.46, 1.0], [0.24, 1.12], [-0.24, 1.12], [-0.46, 1.0]] },
-      { c: [-0.33, -0.2, 0.25], h: 1 }, { c: [0.33, -0.2, 0.25], h: 1 }, { p: [[0, 0.1], [0.14, 0.38], [-0.14, 0.38]], h: 1 }],
-    // a fireball falling to the lower left, its flames trailing up and to the right (Fire Mage)
-    fireball: [{ c: [-0.26, 0.34, 0.74] }, { p: [[-0.84, 0.02], [-0.56, -0.5], [-0.24, -0.58], [-0.06, -1.3], [0.24, -0.66], [0.6, -1.02], [0.64, -0.46], [1.3, -0.66],
-      [0.9, -0.04], [1.04, 0.24], [0.42, 0.44]] }],
+      { c: [-0.33, -0.2, 0.25], h: 1 }, { p: strip([[0.1, -0.24], [0.33, -0.13], [0.56, -0.24]], 0.07), h: 1 }, { p: [[0, 0.1], [0.14, 0.38], [-0.14, 0.38]], h: 1 }],
+    // a mage's staff: a forked top holding a ball of fire with flames rising off it (Fire Mage)
+    firestaff: [{ p: strip([[0, 1.36], [0, -0.1]], 0.14) }, { p: strip([[-0.04, 0.0], [-0.56, -0.24], [-0.66, -0.68]], 0.1) },
+      { p: strip([[0.04, 0.0], [0.56, -0.24], [0.66, -0.68]], 0.1) }, { c: [0, -0.62, 0.5] },
+      { p: [[-0.3, -0.98], [-0.2, -1.2], [-0.08, -1.08], [0, -1.38], [0.08, -1.08], [0.2, -1.2], [0.3, -0.98]] }],
     // a scope's crosshair: a ring, four ticks and a dot (Sniper)
     reticle: [{ c: [0, 0, 1.0] }, { c: [0, 0, 0.74], h: 1 }, { c: [0, 0, 0.17] },
       ...[[0, -1], [1, 0], [0, 1], [-1, 0]].map(([dx, dy]) => ({ p: strip([[dx * 0.36, dy * 0.36], [dx * 1.36, dy * 1.36]], 0.13) }))],
-    // a wisp: a glowing orb with a curling tail and one spark (Wisps)
-    wisp: [{ c: [0.16, -0.36, 0.68] }, { p: taper([[0.36, 0.08], [0.24, 0.62], [-0.08, 1.0], [-0.52, 1.12], [-0.92, 0.9], [-1.06, 0.56]], 0.4, 0.07) }, { c: [-0.82, -0.84, 0.17] }],
+    // a wisp: a round eye, a big dark pupil (a hole) with a glint in it (Wisps)
+    wisp: [{ c: [0, 0, 1.1] }, { c: [0, 0.06, 0.6], h: 1 }, { c: [0.22, -0.16, 0.19] }],
     // a walking tree: a round crown of leaves on a trunk that splits into two root legs (Ent)
-    tree: [{ c: [0, -0.62, 0.6] }, { c: [-0.58, -0.2, 0.52] }, { c: [0.58, -0.2, 0.52] }, { c: [0, -0.1, 0.56] },
-      { p: [[-0.22, 0.2], [0.22, 0.2], [0.24, 0.82], [0.52, 1.32], [0.18, 1.32], [0, 1.0], [-0.18, 1.32], [-0.52, 1.32], [-0.24, 0.82]] }],
+    tree: [{ c: [0, -0.56, 0.74] }, { c: [-0.66, -0.12, 0.64] }, { c: [0.66, -0.12, 0.64] }, { c: [0, -0.04, 0.7] },
+      { p: [[-0.38, 0.3], [0.38, 0.3], [0.4, 0.8], [0.74, 1.32], [0.24, 1.32], [0, 1.02], [-0.24, 1.32], [-0.74, 1.32], [-0.4, 0.8]] }],
     // a spoked wheel (Rollers)
     wheel: [{ c: [0, 0, 1.14] }, { c: [0, 0, 0.8], h: 1 }, { c: [0, 0, 0.3] },
       ...[Math.PI / 4, -Math.PI / 4].map(a => ({ p: strip([[-Math.cos(a) * 0.96, -Math.sin(a) * 0.96], [Math.cos(a) * 0.96, Math.sin(a) * 0.96]], 0.12) }))],

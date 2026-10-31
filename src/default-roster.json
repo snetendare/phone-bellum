@@ -1075,7 +1075,7 @@
       "range": 20,
       "speed": 3,
       "splash": 4,
-      "shape": "fireball",
+      "shape": "firestaff",
       "color": "#fb0022",
       "skills": [
         "range",

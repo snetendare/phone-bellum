@@ -8,11 +8,11 @@ Newest first. Each entry says what changed for players; technical details live i
 
 Every tier 1 unit now has its own picture on the board, in the shop and in the encyclopedia, instead of a plain shape:
 
-- **Skeleton Archers:** a skull (was a triangle).
-- **Fire Mage:** a falling fireball (was a hexagon, shared with other wizards).
+- **Skeleton Archers:** a skull with one eye closed (was a triangle).
+- **Fire Mage:** a staff holding a ball of fire (was a hexagon, shared with other wizards).
 - **Sniper:** a scope crosshair (was a cross).
-- **Wisps:** a glowing orb with a curling tail (was a ring).
-- **Ent:** a walking tree (was a square).
+- **Wisps:** a round eye (was a ring).
+- **Ent:** a big, fat walking tree (was a square).
 - **Rollers** (Mechites): a spoked wheel (was a circle).
 
 Goblin Swarm and Ember Imps already had theirs. Sunken Deep's units are still placeholders and keep their shapes for now. The new pictures are also in the Counter Lab's shape list.
