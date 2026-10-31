@@ -198,6 +198,8 @@
     for (const [a, b] of plan.pairs) {
       let code; do code = newCode(r); while (used.has(code)); used.add(code);
       const mt = { id: 'm' + round.n + '-' + (round.matches.length + 1), a, b, code, host: 'a', result: null };
+      const bo = plan.stage === 'playoff' ? bestOf(t) : 1;
+      if (bo > 1 && b != null) { mt.bo = bo; mt.games = []; mt.codeGame = { [code]: 0 }; } // a series: best of bo games, each with its own code
       if (b != null && hosted(t, b) < hosted(t, a)) mt.host = 'b'; // take turns hosting
       round.matches.push(mt);
     }
@@ -205,12 +207,33 @@
     return true;
   }
 
+  // the playoffs' series length: 1 (one game), 3, 5 or 7
+  const bestOf = (t) => [3, 5, 7].includes(t.settings.bestOf | 0) ? t.settings.bestOf | 0 : 1;
+  const winsNeeded = (mt) => Math.floor((mt.bo || 1) / 2) + 1;
+  // games won so far in a series: [a's, b's] (a single game: its result)
+  const score = (mt) => {
+    if (!mt.bo) return mt.result && mt.result.winner !== 'draw' ? (mt.result.winner === 'a' ? [1, 0] : [0, 1]) : [0, 0];
+    const g = mt.games || [];
+    return [g.filter(x => x.winner === 'a').length, g.filter(x => x.winner === 'b').length];
+  };
+  // which game of its match a code is for (-1: not this match's, or an old code that no longer counts)
+  const gameOf = (mt, code) => mt.codeGame ? (mt.codeGame[code] != null ? mt.codeGame[code] : -1) : code === mt.code ? 0 : -1;
+  function freshCode(t, rnd) { const used = new Set(allMatches(t).flatMap(mt => [mt.code, ...Object.keys(mt.codeGame || {})])); let code; do code = newCode(rnd || Math.random); while (used.has(code)); return code; }
+  // a series' next game: a new code for it, and codes for games not played any more stop counting
+  function nextCode(t, mt, rnd) {
+    const n = (mt.games || []).length;
+    for (const c in mt.codeGame) if (mt.codeGame[c] >= n) delete mt.codeGame[c];
+    mt.code = freshCode(t, rnd); mt.codeGame[mt.code] = n;
+  }
   const findMatch = (t, matchId) => { for (const r of t.rounds) for (const mt of r.matches) if (mt.id === matchId) return { round: r, match: mt }; return null; };
   // A result from a phone (by 'auto') or the organizer (by 'org'). winner: 'a', 'b' or 'draw'. The organizer's always
   // counts; a phone's counts unless the organizer already set one. Two phones that disagree mark the match for the organizer.
-  function report(t, matchId, winner, hp, rounds, by) {
+  // In a series (mt.bo) each report is one game (game: its number from 0; the organizer's always the next game).
+  // A drawn game doesn't count; the series is over at winsNeeded, and until then each game gets a new code.
+  function report(t, matchId, winner, hp, rounds, by, game) {
     const f = findMatch(t, matchId);
     if (!f || f.match.b == null || !['a', 'b', 'draw'].includes(winner)) return false;
+    if (f.match.bo > 1) return reportGame(t, f.match, winner, hp, rounds, by, game);
     const mt = f.match, res = { winner, hp: Array.isArray(hp) ? [hp[0] | 0, hp[1] | 0] : [0, 0], rounds: rounds | 0, by: by === 'org' ? 'org' : 'auto' };
     if (res.by === 'auto' && mt.result) {
       if (mt.result.by === 'org') return false;
@@ -220,13 +243,36 @@
     mt.result = res; delete mt.conflict;
     return true;
   }
-  // the organizer clears a match to have it played again: a new code, no result
+  function reportGame(t, mt, winner, hp, rounds, by, game) {
+    const g = { winner, hp: Array.isArray(hp) ? [hp[0] | 0, hp[1] | 0] : [0, 0], rounds: rounds | 0, by: by === 'org' ? 'org' : 'auto' };
+    mt.games = mt.games || [];
+    const k = g.by === 'org' ? mt.games.length : (game | 0);
+    if (k < mt.games.length) { // a game already in: the other phone's report of it
+      if (mt.games[k].winner === winner || mt.games[k].by === 'org') return false;
+      mt.conflict = true; return true;
+    }
+    if (mt.result || k > mt.games.length) return false; // the series is over, or a game not started yet
+    mt.games.push(g); delete mt.conflict;
+    const [wa, wb] = score(mt), need = winsNeeded(mt);
+    if (wa >= need || wb >= need) mt.result = { winner: wa >= need ? 'a' : 'b', hp: g.hp, rounds: mt.games.reduce((n, x) => n + x.rounds, 0), score: [wa, wb], by: g.by };
+    else nextCode(t, mt);
+    return true;
+  }
+  // the organizer clears a match to have it played again: a new code, no result (a series starts over)
   function replay(t, matchId, rnd) {
     const f = findMatch(t, matchId);
     if (!f || f.match.b == null || f.round !== current(t)) return false;
-    const used = new Set(allMatches(t).map(mt => mt.code)); let code;
-    do code = newCode(rnd || Math.random); while (used.has(code));
-    f.match.code = code; f.match.result = null; delete f.match.conflict;
+    f.match.result = null; delete f.match.conflict;
+    if (f.match.bo > 1) { f.match.games = []; nextCode(t, f.match, rnd); }
+    else f.match.code = freshCode(t, rnd);
+    return true;
+  }
+  // the organizer takes back the last game of a series
+  function undoGame(t, matchId) {
+    const f = findMatch(t, matchId);
+    if (!f || !(f.match.bo > 1) || !(f.match.games || []).length || f.round !== current(t)) return false;
+    f.match.games.pop(); f.match.result = null; delete f.match.conflict;
+    nextCode(t, f.match);
     return true;
   }
   function swapHost(t, matchId) { const f = findMatch(t, matchId); if (!f || f.match.b == null || f.match.result) return false; f.match.host = other(f.match.host || 'a'); return true; }
@@ -265,7 +311,7 @@
     return st.slice().sort((x, y) => ((y.id === t.champion) - (x.id === t.champion)) || ((reach.get(y.id) ?? -1) - (reach.get(x.id) ?? -1)) || (pos.get(x.id) - pos.get(y.id)));
   }
 
-  const api = { CODE_CHARS, POINTS, BOT_NAMES, addBot, isBot, rng, newCode, cleanName, suggestRounds, suggestCut, create, join, rename, remove, player, nameOf, active, swissRounds, cutSize,
+  const api = { CODE_CHARS, POINTS, BOT_NAMES, addBot, isBot, bestOf, winsNeeded, score, gameOf, undoGame, rng, newCode, cleanName, suggestRounds, suggestCut, create, join, rename, remove, player, nameOf, active, swissRounds, cutSize,
     standings, pairSwiss, bracketOrder, playoffFirst, nextPlan, advance, report, replay, swapHost, undoRound, roundDone, current, matchOf, findMatch, bracket, placings, outcome, winnerOf, sideOf };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.Tour = api;

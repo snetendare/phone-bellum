@@ -552,6 +552,30 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
 .tour-pair .l { opacity: 0.5; }
 .tour-rules { margin: 0; padding-left: 18px; display: grid; gap: 5px; font-size: 13px; color: var(--muted); }
 .tour-old summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+.overlay > .card.tour-wide { max-width: min(96vw, 1100px); width: 100%; }
+html.tourtv .app { display: block; max-width: none; }
+html.tourtv .hud, html.tourtv .net, html.tourtv #wrap, html.tourtv .dock-tab { display: none !important; }
+html.tourtv .panel { position: static; max-height: none; max-width: 1400px; margin: 12px auto; box-shadow: none; }
+html.tourtv .tv-head { text-align: center; display: grid; gap: 4px; }
+html.tourtv .tv-head h2 { font-size: clamp(28px, 4vw, 52px); text-transform: uppercase; margin: 0; }
+html.tourtv .tv-head p { margin: 0; color: var(--muted); font-size: 18px; }
+html.tourtv .tbr.big svg { max-height: 62svh; margin: 0 auto; }
+.tbr { overflow-x: auto; max-width: 100%; padding-bottom: 4px; }
+.tbr svg { display: block; }
+.tbr.big svg { max-height: 70svh; }
+.tbr .bx { fill: var(--panel); stroke: var(--line); stroke-width: 1.2; }
+.tbr .bx.mine { stroke: var(--you); }
+.tbr .bx.live { stroke: var(--gold); stroke-width: 2; }
+.tbr .bx.champ { stroke: var(--gold); }
+.tbr .bl { stroke: var(--line); stroke-width: 1; }
+.tbr .bc { fill: none; stroke: var(--line); stroke-width: 1.5; }
+.tbr .bh { fill: var(--muted); font: 600 11px var(--font-body, sans-serif); text-transform: uppercase; letter-spacing: 0.06em; }
+.tbr .bh.live { fill: var(--gold); text-transform: none; letter-spacing: 0; }
+.tbr .bn, .tbr .bs { fill: var(--ink); font: 600 13px var(--font-body, sans-serif); }
+.tbr .bs { font-family: var(--font-data, monospace); }
+.tbr .w { fill: var(--gold); font-weight: 700; }
+.tbr .l { opacity: 0.45; }
+.tbr .tbd, .tbr .bye { fill: var(--muted); font-style: italic; font-weight: 400; }
 </style>
 <script>
 // PC or phone: a fine pointer that can hover (a mouse) and room for the board and controls side by side
@@ -564,7 +588,7 @@ html.dock .bar:has(> .task:not([hidden])) > .hint { display: none; }
 <body>
 <div class="app">
   <div class="hud" aria-label="Match status">
-    <div class="side you"><div class="lbl"><span>You</span><span class="streak" id="streak-you" hidden></span><span class="num" id="hp-you">50</span></div><div class="hp"><i id="hpbar-you" style="width:100%"></i></div></div>
+    <div class="side you"><div class="lbl"><span id="you-name">You</span><span class="streak" id="streak-you" hidden></span><span class="num" id="hp-you">50</span></div><div class="hp"><i id="hpbar-you" style="width:100%"></i></div></div>
     <div class="round"><b class="num" id="round">1</b><div class="round-sub"><span id="phase">Deploy</span><button class="cog" id="stats" aria-label="Damage last round" aria-expanded="false"><svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M4 5h9v3H4zM4 10.5h15v3H4zM4 16h6v3H4z"/></svg></button><button class="cog" id="cog" aria-label="Settings"><svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M19.4 13a7.6 7.6 0 0 0 0-2l2.1-1.6-2-3.4-2.5 1a7.4 7.4 0 0 0-1.7-1L15 3.3h-4l-.4 2.7a7.4 7.4 0 0 0-1.7 1l-2.5-1-2 3.4L6.6 11a7.6 7.6 0 0 0 0 2l-2.1 1.6 2 3.4 2.5-1a7.4 7.4 0 0 0 1.7 1l.4 2.7h4l.4-2.7a7.4 7.4 0 0 0 1.7-1l2.5 1 2-3.4zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)"/></svg></button></div></div>
     <div class="side foe"><div class="lbl"><span id="foe-name">Enemy</span><span class="streak" id="streak-foe" hidden></span><span class="num" id="hp-foe">50</span></div><div class="hp"><i id="hpbar-foe" style="width:100%"></i></div></div>
   </div>
@@ -6852,6 +6876,8 @@ if (typeof module !== 'undefined') module.exports = Game;
     for (const [a, b] of plan.pairs) {
       let code; do code = newCode(r); while (used.has(code)); used.add(code);
       const mt = { id: 'm' + round.n + '-' + (round.matches.length + 1), a, b, code, host: 'a', result: null };
+      const bo = plan.stage === 'playoff' ? bestOf(t) : 1;
+      if (bo > 1 && b != null) { mt.bo = bo; mt.games = []; mt.codeGame = { [code]: 0 }; } // a series: best of bo games, each with its own code
       if (b != null && hosted(t, b) < hosted(t, a)) mt.host = 'b'; // take turns hosting
       round.matches.push(mt);
     }
@@ -6859,12 +6885,33 @@ if (typeof module !== 'undefined') module.exports = Game;
     return true;
   }
 
+  // the playoffs' series length: 1 (one game), 3, 5 or 7
+  const bestOf = (t) => [3, 5, 7].includes(t.settings.bestOf | 0) ? t.settings.bestOf | 0 : 1;
+  const winsNeeded = (mt) => Math.floor((mt.bo || 1) / 2) + 1;
+  // games won so far in a series: [a's, b's] (a single game: its result)
+  const score = (mt) => {
+    if (!mt.bo) return mt.result && mt.result.winner !== 'draw' ? (mt.result.winner === 'a' ? [1, 0] : [0, 1]) : [0, 0];
+    const g = mt.games || [];
+    return [g.filter(x => x.winner === 'a').length, g.filter(x => x.winner === 'b').length];
+  };
+  // which game of its match a code is for (-1: not this match's, or an old code that no longer counts)
+  const gameOf = (mt, code) => mt.codeGame ? (mt.codeGame[code] != null ? mt.codeGame[code] : -1) : code === mt.code ? 0 : -1;
+  function freshCode(t, rnd) { const used = new Set(allMatches(t).flatMap(mt => [mt.code, ...Object.keys(mt.codeGame || {})])); let code; do code = newCode(rnd || Math.random); while (used.has(code)); return code; }
+  // a series' next game: a new code for it, and codes for games not played any more stop counting
+  function nextCode(t, mt, rnd) {
+    const n = (mt.games || []).length;
+    for (const c in mt.codeGame) if (mt.codeGame[c] >= n) delete mt.codeGame[c];
+    mt.code = freshCode(t, rnd); mt.codeGame[mt.code] = n;
+  }
   const findMatch = (t, matchId) => { for (const r of t.rounds) for (const mt of r.matches) if (mt.id === matchId) return { round: r, match: mt }; return null; };
   // A result from a phone (by 'auto') or the organizer (by 'org'). winner: 'a', 'b' or 'draw'. The organizer's always
   // counts; a phone's counts unless the organizer already set one. Two phones that disagree mark the match for the organizer.
-  function report(t, matchId, winner, hp, rounds, by) {
+  // In a series (mt.bo) each report is one game (game: its number from 0; the organizer's always the next game).
+  // A drawn game doesn't count; the series is over at winsNeeded, and until then each game gets a new code.
+  function report(t, matchId, winner, hp, rounds, by, game) {
     const f = findMatch(t, matchId);
     if (!f || f.match.b == null || !['a', 'b', 'draw'].includes(winner)) return false;
+    if (f.match.bo > 1) return reportGame(t, f.match, winner, hp, rounds, by, game);
     const mt = f.match, res = { winner, hp: Array.isArray(hp) ? [hp[0] | 0, hp[1] | 0] : [0, 0], rounds: rounds | 0, by: by === 'org' ? 'org' : 'auto' };
     if (res.by === 'auto' && mt.result) {
       if (mt.result.by === 'org') return false;
@@ -6874,13 +6921,36 @@ if (typeof module !== 'undefined') module.exports = Game;
     mt.result = res; delete mt.conflict;
     return true;
   }
-  // the organizer clears a match to have it played again: a new code, no result
+  function reportGame(t, mt, winner, hp, rounds, by, game) {
+    const g = { winner, hp: Array.isArray(hp) ? [hp[0] | 0, hp[1] | 0] : [0, 0], rounds: rounds | 0, by: by === 'org' ? 'org' : 'auto' };
+    mt.games = mt.games || [];
+    const k = g.by === 'org' ? mt.games.length : (game | 0);
+    if (k < mt.games.length) { // a game already in: the other phone's report of it
+      if (mt.games[k].winner === winner || mt.games[k].by === 'org') return false;
+      mt.conflict = true; return true;
+    }
+    if (mt.result || k > mt.games.length) return false; // the series is over, or a game not started yet
+    mt.games.push(g); delete mt.conflict;
+    const [wa, wb] = score(mt), need = winsNeeded(mt);
+    if (wa >= need || wb >= need) mt.result = { winner: wa >= need ? 'a' : 'b', hp: g.hp, rounds: mt.games.reduce((n, x) => n + x.rounds, 0), score: [wa, wb], by: g.by };
+    else nextCode(t, mt);
+    return true;
+  }
+  // the organizer clears a match to have it played again: a new code, no result (a series starts over)
   function replay(t, matchId, rnd) {
     const f = findMatch(t, matchId);
     if (!f || f.match.b == null || f.round !== current(t)) return false;
-    const used = new Set(allMatches(t).map(mt => mt.code)); let code;
-    do code = newCode(rnd || Math.random); while (used.has(code));
-    f.match.code = code; f.match.result = null; delete f.match.conflict;
+    f.match.result = null; delete f.match.conflict;
+    if (f.match.bo > 1) { f.match.games = []; nextCode(t, f.match, rnd); }
+    else f.match.code = freshCode(t, rnd);
+    return true;
+  }
+  // the organizer takes back the last game of a series
+  function undoGame(t, matchId) {
+    const f = findMatch(t, matchId);
+    if (!f || !(f.match.bo > 1) || !(f.match.games || []).length || f.round !== current(t)) return false;
+    f.match.games.pop(); f.match.result = null; delete f.match.conflict;
+    nextCode(t, f.match);
     return true;
   }
   function swapHost(t, matchId) { const f = findMatch(t, matchId); if (!f || f.match.b == null || f.match.result) return false; f.match.host = other(f.match.host || 'a'); return true; }
@@ -6919,7 +6989,7 @@ if (typeof module !== 'undefined') module.exports = Game;
     return st.slice().sort((x, y) => ((y.id === t.champion) - (x.id === t.champion)) || ((reach.get(y.id) ?? -1) - (reach.get(x.id) ?? -1)) || (pos.get(x.id) - pos.get(y.id)));
   }
 
-  const api = { CODE_CHARS, POINTS, BOT_NAMES, addBot, isBot, rng, newCode, cleanName, suggestRounds, suggestCut, create, join, rename, remove, player, nameOf, active, swissRounds, cutSize,
+  const api = { CODE_CHARS, POINTS, BOT_NAMES, addBot, isBot, bestOf, winsNeeded, score, gameOf, undoGame, rng, newCode, cleanName, suggestRounds, suggestCut, create, join, rename, remove, player, nameOf, active, swissRounds, cutSize,
     standings, pairSwiss, bracketOrder, playoffFirst, nextPlan, advance, report, replay, swapHost, undoRound, roundDone, current, matchOf, findMatch, bracket, placings, outcome, winnerOf, sideOf };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.Tour = api;
@@ -8538,7 +8608,7 @@ const Render2D = (cv, view, opts = {}) => {
   // ---------- state ----------
   let mode = 'ai';          // ai | claude | tutorial | host | guest
   const solo = () => mode === 'ai' || mode === 'claude' || mode === 'tutorial'; // playing against the computer on this screen
-  const foeName = () => tourFoe() || (mode === 'ai' || mode === 'tutorial' ? 'Enemy' : mode === 'claude' ? 'Claude' : 'Opponent'); // a tournament opponent by gamertag
+  const foeName = () => (mode === 'spec' && tour.spec ? tour.spec.foe : '') || tourFoe() || (mode === 'ai' || mode === 'tutorial' ? 'Enemy' : mode === 'claude' ? 'Claude' : 'Opponent'); // a tournament opponent by gamertag
   let me = 0;               // which side of the match this screen plays (the guest is side 1)
   const foe = () => 1 - me;
   let m = null;             // match state (on the guest: a copy kept in step by the host)
@@ -9312,6 +9382,7 @@ const Render2D = (cv, view, opts = {}) => {
     }
     $('phase').textContent = { start: 'Ready', lobby: 'Lobby', draft: 'Draft', deploy: 'Deploy', battle: 'Battle', result: 'Result', end: 'Match over' }[phase];
     $('foe-name').textContent = foeName();
+    $('you-name').textContent = mode === 'spec' && tour.spec ? tour.spec.host : 'You'; // spectating: the host's side is at the bottom
     document.querySelector('.hud').hidden = phase === 'start' || phase === 'lobby' || phase === 'draft'; // no match yet: nothing to show
     if ((mode !== 'tutorial' && !(tutHint && phase === 'deploy')) || phase === 'battle') coach(null); // the fight speaks for itself
     syncPick(); syncMusic();
@@ -9325,6 +9396,7 @@ const Render2D = (cv, view, opts = {}) => {
   }
   function netStatus() {
     if (solo()) { setNet(''); return; }
+    if (mode === 'spec') { setNet(net.connected ? `Watching ${tour.spec ? tour.spec.host + ' vs ' + tour.spec.foe : 'a match'}` : 'Connecting to the match…', net.connected ? 'ok' : 'bad'); dock(); return; }
     if (net.connected) setNet(mode === 'host' ? `Match ${net.code} · opponent connected` : `Match ${net.code} · connected`, 'ok');
     else if (phase === 'lobby') setNet('');
     else if (phase === 'draft' && mode === 'guest') setNet('Connection lost. Reconnecting…', 'bad');
@@ -9334,7 +9406,7 @@ const Render2D = (cv, view, opts = {}) => {
 
   // ---------- countdown ----------
   const fmtClock = (ms) => { const s = Math.max(0, Math.ceil(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
-  const editable = () => phase === 'deploy' && !ready[me] && !timeUp && !(mode === 'claude' && claude.fightWaiting);
+  const editable = () => phase === 'deploy' && mode !== 'spec' && !ready[me] && !timeUp && !(mode === 'claude' && claude.fightWaiting);
 
   function tick() {
     const t = now();
@@ -9346,14 +9418,14 @@ const Render2D = (cv, view, opts = {}) => {
         const left = deadline - t;
         if (el) { el.textContent = fmtClock(left); el.classList.toggle('low', left <= 5000); }
         $('clock').textContent = left > 0 ? `${fmtClock(left)} to deploy` : 'Time’s up';
-        if (mode !== 'guest' && left <= (mode === 'host' ? -500 : 0)) runFight();
+        if (mode !== 'guest' && mode !== 'spec' && left <= (mode === 'host' ? -500 : 0)) runFight();
         else if (mode === 'guest' && left <= 0 && !timeUp) { commitPick(); timeUp = true; selected = null; closeSheet(); sendSide(); panelDeploy(); render(); }
       } else if (el) { el.textContent = heldMs || (mode === 'guest' && net.connected && m && m.round === Game.TOWER_PICK_ROUND) ? 'picking towers' : solo() ? '' : 'paused'; el.classList.remove('low'); }
     }
     if ((phase === 'result' || phase === 'end') && resultShownAt) {
       const left = resultShownAt + nextSecs() * 1000 - t;
       const nb = $('next');
-      if (phase === 'result' && !nextReady[me]) {
+      if (phase === 'result' && !nextReady[me] && mode !== 'spec') {
         if (left <= 0) tapNext();
         else if (nb && !solo()) nb.textContent = `Next round · ${Math.ceil(left / 1000)}`;
       }
@@ -10069,6 +10141,7 @@ const Render2D = (cv, view, opts = {}) => {
   }
 
   function showStart() {
+    document.documentElement.classList.remove('tourtv'); // showTour puts it back for the big screen
     if (phase !== 'start' && byHand()) sfx('toMenu');
     if (mode === 'tutorial') speed = tutSpeed;
     tutHint = '';
@@ -10260,6 +10333,7 @@ const Render2D = (cv, view, opts = {}) => {
   const towerLoss = (sum, side) => sum.towerHp ? sum.towerHp[side] : Game.TOWER_FALL_HP;
   function showResult(sum) {
     if (mode === 'tutorial') { tutResult(sum); return; }
+    if (mode === 'spec') { specResult(sum); return; }
     const iWon = sum.winner === me && !sum.timeout, iLost = sum.winner === foe() && !sum.timeout;
     const head = sum.timeout ? 'Time ran out' : iWon ? `Round ${sum.round} won` : iLost ? `Round ${sum.round} lost` : 'Draw';
     const cls = iWon ? 'you' : iLost ? 'foe' : '';
@@ -11143,7 +11217,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   function runFight() {
     if (phase !== 'deploy' || !m) return;
     tutHint = '';
-    if (mode === 'guest') return;
+    if (mode === 'guest' || mode === 'spec') return;
     commitPick();
     if (mode === 'claude' && claude.busy) { if (!claude.fightWaiting) { claude.fightWaiting = true; selected = null; closeSheet(); panelDeploy(); } return; }
     closeSheet(); selected = null;
@@ -11161,7 +11235,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     recordRound(pre, summary);
     saveHistory(pre, summary);
     lastSummary = summary; nextReady = [false, false]; rematch = [false, false];
-    if (mode === 'host') { send({ t: 'fight', pre, post: snapshot(m), summary }); saveHost(); }
+    if (mode === 'host') { send({ t: 'fight', pre, post: snapshot(m), summary }); specSend({ t: 'fight', pre, post: snapshot(m), summary }); saveHost(); }
     playBattle(pre);
   }
 
@@ -12773,7 +12847,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   // Live matches: PeerJS (WebRTC). The host runs the match and decides results;
   // the guest sends its own deployments and plays back the same battle.
   // =====================================================================
-  const net = { peer: null, conn: null, code: '', connected: false, retryTimer: 0, tries: 0, alive: false };
+  const net = { peer: null, conn: null, code: '', connected: false, retryTimer: 0, tries: 0, alive: false, specs: new Set() }; // specs: spectators' connections (host)
   const peerOpts = () => {
     const o = { debug: 1 };
     if (qs.get('peerhost')) { o.host = qs.get('peerhost'); o.port = +qs.get('peerport') || 9000; o.path = qs.get('peerpath') || '/'; o.secure = qs.get('peersecure') === '1'; }
@@ -12794,6 +12868,8 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     net.alive = false;
     clearTimeout(net.retryTimer);
     try { if (net.conn) net.conn.close(); } catch (e) {}
+    for (const c of net.specs) { try { c.close(); } catch (e) {} }
+    net.specs.clear();
     try { if (net.peer) net.peer.destroy(); } catch (e) {}
     net.peer = null; net.conn = null; net.connected = false; net.code = ''; net.tries = 0;
     liveSpeed = [1, 1]; // a new live match starts at 1x
@@ -12820,6 +12896,12 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     net.peer = peer;
     peer.on('open', () => { net.tries = 0; if (phase === 'lobby') drawLobby(); });
     peer.on('connection', (c) => {
+      if (c.metadata && c.metadata.spec) { // a spectator: watches, never plays (see specState)
+        c.on('open', () => { if (net.peer !== peer) { try { c.close(); } catch (e) {} return; } net.specs.add(c); specSync(c); });
+        c.on('close', () => net.specs.delete(c));
+        c.on('error', (e) => console.warn('spectator', e));
+        return;
+      }
       c.on('open', () => {
         if (net.peer !== peer) { try { c.close(); } catch (e) {} return; } // this host has left (a forfeit closing down)
         if (net.conn && net.conn !== c) { const old = net.conn; net.conn = null; try { old.close(); } catch (e) {} }
@@ -12958,6 +13040,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     return s;
   }
   function sendSync() {
+    specSync();
     if (!net.connected) return;
     const base = { t: 'sync', proto: 1, set: { units: rawSet.units, matrix: rawSet.matrix, skills: rawSet.skills || [], rules: rawSet.rules || null }, custom: customSet, config: { levelCostPerTier: Game.CONFIG.levelCostPerTier } };
     if (!m && phase === 'draft' && draft) { send({ t: 'draft', draft }); return; }
@@ -13215,22 +13298,23 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (!net.alive || !peer || peer.destroyed || net.connected) return;
     if (peer.disconnected) { peer.reconnect(); return; }
     net.tries++;
-    const c = peer.connect(PEER_PREFIX + net.code, { reliable: true });
+    const c = peer.connect(PEER_PREFIX + net.code, mode === 'spec' ? { reliable: true, metadata: { spec: true } } : { reliable: true });
     let opened = false;
     const giveUp = setTimeout(() => { if (!opened) { try { c.close(); } catch (e) {} retryConnect(500); } }, 9000);
     c.on('open', () => {
       opened = true; clearTimeout(giveUp);
       if (net.conn && net.conn !== c) { try { net.conn.close(); } catch (e) {} }
       net.conn = c; net.connected = true; net.tries = 0;
+      if (mode === 'spec') { netStatus(); if (!m) specWaiting('Connected. Waiting for the match to start'); return; }
       send({ t: 'speed', s: liveSpeed[1] });
       netStatus();
       if (phase === 'deploy') { sendSide(); panelDeploy(); }
       if (phase === 'lobby' && !m) guestWaiting('Connected. Waiting for your friend to start the match');
     });
-    c.on('data', (d) => { if (c === net.conn) guestRecv(d); });
+    c.on('data', (d) => { if (c === net.conn) (mode === 'spec' ? specRecv : guestRecv)(d); });
     c.on('close', () => {
       clearTimeout(giveUp);
-      if (c === net.conn) { net.connected = false; net.conn = null; netStatus(); if (phase === 'deploy') panelDeploy(); retryConnect(1500); }
+      if (c === net.conn) { net.connected = false; net.conn = null; netStatus(); if (phase === 'deploy' && mode !== 'spec') panelDeploy(); retryConnect(1500); }
     });
     c.on('error', (e) => console.warn('connection', e));
   }
@@ -13354,7 +13438,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   // =====================================================================
   const TOUR_PREFIX = 'phonebellum-t1-';
   const TOUR_ORG = 'phonebellum.tour.org.v1', TOUR_ME = 'phonebellum.tour.me.v1';
-  const TOUR_DEFAULTS = { format: 'swiss', swissRounds: 0, cut: -1, map: '', skin: '', packOptions: 3, mirror: true, deploy1: 90, deploy: 90, next: 20, pack: 'standard', offUnits: [], offChars: [], offTowers: [] };
+  const TOUR_DEFAULTS = { format: 'swiss', swissRounds: 0, cut: -1, bestOf: 1, map: '', skin: '', packOptions: 3, mirror: true, deploy1: 90, deploy: 90, next: 20, pack: 'standard', offUnits: [], offChars: [], offTowers: [] };
   const tour = { role: null, code: '', peer: null, conns: new Set(), conn: null, connected: false, t: null, online: [], myId: '', myName: '', alive: false, timer: 0, tries: 0, menu: false, tab: '', pending: null, dirty: false, problem: '' };
   const tourId = () => Array.from({ length: 10 }, () => CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]).join('');
   const tourOrg = () => tour.role === 'org';
@@ -13371,8 +13455,10 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   function tourLive() {
     const x = tourMine();
     if (!x || x.bye) return null;
-    if (mode === 'ai') return m && tour.botMatch === x.match.id && tour.botCode === x.match.code ? x : null; // against a bot, on this phone
-    return (mode === 'host' || mode === 'guest') && net.code === x.match.code ? x : null;
+    // the game of the match this code is for (a series has a code per game)
+    const g = mode === 'ai' ? (m && tour.botMatch === x.match.id ? Tour.gameOf(x.match, tour.botCode) : -1) // against a bot, on this phone
+      : mode === 'host' || mode === 'guest' ? Tour.gameOf(x.match, net.code) : -1;
+    return g >= 0 ? { ...x, game: g } : null;
   }
   const tourSet = () => (tourLive() && tour.t.settings) || null; // the match settings while a tournament match is on
   const tourFoe = () => { const x = tourLive(); return x ? Tour.nameOf(tour.t, x.match[x.side === 'a' ? 'b' : 'a']) : ''; };
@@ -13445,7 +13531,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     } else if (d.t === 'result') {
       const f = Tour.findMatch(tour.t, String(d.match));
       if (!f || (f.match.a !== c.tourId && f.match.b !== c.tourId)) return; // only the two players report
-      if (Tour.report(tour.t, f.match.id, d.winner, d.hp, d.rounds, 'auto')) tourChanged();
+      if (Tour.report(tour.t, f.match.id, d.winner, d.hp, d.rounds, 'auto', d.game | 0)) tourChanged();
       else tourSendTo(c); // already known: tell them so they stop sending
     } else if (d.t === 'leave') {
       if (c.tourId && tour.t.status === 'lobby' && c.tourId !== tour.t.org) { Tour.remove(tour.t, c.tourId); tourChanged(); }
@@ -13539,7 +13625,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (!d || typeof d !== 'object') return;
     if (d.t === 'state' && d.tour && Array.isArray(d.tour.players)) {
       tour.t = d.tour; tour.online = Array.isArray(d.online) ? d.online : [];
-      if (tour.pending) { const f = Tour.findMatch(tour.t, tour.pending.match); if (!f || f.match.result) tour.pending = null; }
+      if (tour.pending) { const f = Tour.findMatch(tour.t, tour.pending.match); if (!f || f.match.result || (f.match.games || []).length > tour.pending.game) tour.pending = null; }
       if (tour.t.status === 'done' && !tour.tabSetDone) { tour.tabSetDone = true; tour.tab = 'standings'; }
       tourRedraw();
     } else if (d.t === 'closed' || d.t === 'kicked' || d.t === 'ended') {
@@ -13558,8 +13644,8 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     const hk = mode === 'ai' ? x.side : tourHostKey(x.match), gk = hk === 'a' ? 'b' : 'a'; // whose is side 0: the host's, or this phone's against a bot
     const winner = winSide === 0 ? hk : winSide === 1 ? gk : 'draw';
     const sideA = hk === 'a' ? 0 : 1;
-    const msg = { t: 'result', match: x.match.id, winner, hp: [m.hp[sideA], m.hp[1 - sideA]], rounds: (m.history || []).length };
-    if (tourOrg()) { if (Tour.report(tour.t, msg.match, msg.winner, msg.hp, msg.rounds, 'auto')) tourChanged(); return; }
+    const msg = { t: 'result', match: x.match.id, game: x.game, winner, hp: [m.hp[sideA], m.hp[1 - sideA]], rounds: (m.history || []).length };
+    if (tourOrg()) { if (Tour.report(tour.t, msg.match, msg.winner, msg.hp, msg.rounds, 'auto', msg.game)) tourChanged(); return; }
     tour.pending = msg; tourSend(msg);
   }
 
@@ -13634,7 +13720,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     if (customSet) useSet(BUILTIN, false);
     const sm = tourNewMatch({ round: r, match: mt });
     if (keep.customSet) { units = keep.units; M = keep.M; rawSet = keep.rawSet; customSet = keep.customSet; }
-    const code = mt.code;
+    const code = mt.code, game = Tour.gameOf(mt, code);
     const step = () => {
       const f = tour.t && Tour.findMatch(tour.t, mt.id);
       if (!f || f.match.result || f.match.code !== code || !tourOrg()) { tourSims.delete(mt.id); return; }
@@ -13649,8 +13735,9 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       if (!sm.over && sm.round < 40) { setTimeout(step, 120); return; }
       tourSims.delete(mt.id);
       const w = sm.winner === 0 ? 'a' : sm.winner === 1 ? 'b' : 'draw';
-      if (w === 'draw' && r.stage === 'playoff') { Tour.replay(tour.t, mt.id, Math.random); tourChanged(); tourBots(); return; }
-      if (Tour.report(tour.t, mt.id, w, [sm.hp[0], sm.hp[1]], sm.history.length, 'auto')) tourChanged();
+      if (w === 'draw' && r.stage === 'playoff' && !(f.match.bo > 1)) { Tour.replay(tour.t, mt.id, Math.random); tourChanged(); tourBots(); return; }
+      if (Tour.report(tour.t, mt.id, w, [sm.hp[0], sm.hp[1]], sm.history.length, 'auto', game)) tourChanged();
+      tourBots(); // a series: the next game
     };
     setTimeout(step, 600);
   }
@@ -13678,15 +13765,209 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
   const tourOn = (id) => Tour.isBot(tour.t, id) || (tourOrg() ? tourOnline().includes(id) : tour.online.includes(id));
   const dot = (id) => id ? `<i class="tdot ${tourOn(id) ? 'on' : ''}" title="${tourOn(id) ? 'online' : 'offline'}"></i>` : '';
   const pname = (id) => id == null ? '<i>Bye</i>' : `${dot(id)}${Tour.isBot(tour.t, id) ? '🤖 ' : ''}${esc(Tour.nameOf(tour.t, id))}${id === tour.myId ? ' <small>(you)</small>' : ''}`;
+  // a series' state: "Best of 5 · 2–1"
+  const seriesText = (mt) => { const sc = Tour.score(mt); return `Best of ${mt.bo} · ${sc[0]}–${sc[1]}`; };
   function tourResultText(mt) {
     if (mt.b == null) return `${esc(Tour.nameOf(tour.t, mt.a))} has a bye`;
+    if (mt.bo > 1) {
+      if (mt.result) return `${esc(Tour.nameOf(tour.t, mt[mt.result.winner]))} won ${Math.max(...Tour.score(mt))}–${Math.min(...Tour.score(mt))} (best of ${mt.bo})${mt.conflict ? ' · results disagree' : ''}`;
+      return `${seriesText(mt)} · game ${mt.games.length + 1}${mt.conflict ? ' · results disagree' : ''}${Tour.isBot(tour.t, mt.a) && Tour.isBot(tour.t, mt.b) ? ' · bots playing…' : ''}`;
+    }
     if (!mt.result) return mt.conflict ? 'Results disagree' : Tour.isBot(tour.t, mt.a) && Tour.isBot(tour.t, mt.b) ? 'Bots playing…' : 'Playing';
     if (mt.result.winner === 'draw') return `Draw${mt.result.hp ? ` (${mt.result.hp[0]}–${mt.result.hp[1]})` : ''}`;
     return `${esc(Tour.nameOf(tour.t, mt[mt.result.winner]))} won${mt.result.hp ? ` (${mt.result.hp[0]}–${mt.result.hp[1]})` : ''}${mt.result.by === 'org' ? ' · set by organizer' : ''}`;
   }
+  // ----- spectating a tournament match -----
+  // The host sends spectators the board as the guest would see it, minus the guest's own squads and picks placed this
+  // round too (nobody learns anything from a friend watching), then every fight in full.
+  function specState() {
+    const s = syncState();
+    if (phase === 'deploy' && s.armies) {
+      s.armies[1] = s.armies[1].filter(q => q.round < m.round && !Game.hiddenFromFoe(m, q)).map(q => {
+        if (q.from && q.movedRound === m.round) { q.col = q.from.col; q.row = q.from.row; }
+        delete q.from; delete q.movedRound; delete q.luckMove; return q;
+      });
+      for (const ui in (s.tech && s.tech[1]) || {}) s.tech[1][ui] = s.tech[1][ui].map(r => r === m.round ? 0 : r);
+      if (m.round === 1) { if (s.chars) s.chars[1] = null; if (s.buff) s.buff[1] = []; s.packages = [[], []]; s.pack = [null, null]; }
+      if (m.round === Game.TOWER_PICK_ROUND && s.towers && s.towers[1]) delete s.towers[1].type;
+    }
+    return s;
+  }
+  function specSend(msg) { for (const c of net.specs) if (c.open) { try { c.send(msg); } catch (e) {} } }
+  function specSync(only) {
+    if (!net.specs.size || mode !== 'host') return;
+    const base = { t: 'sync', set: { units: rawSet.units, matrix: rawSet.matrix, skills: rawSet.skills || [], rules: rawSet.rules || null }, custom: customSet, config: { levelCostPerTier: Game.CONFIG.levelCostPerTier } };
+    const msg = !m || phase === 'lobby' || phase === 'draft' ? { ...base, phase: 'lobby' }
+      : { ...base, phase: phase === 'battle' ? 'result' : phase, m: specState(), remaining: phase === 'deploy' && deadline ? deadline - now() : 0, summary: lastSummary };
+    if (only) { try { only.send(msg); } catch (e) {} } else specSend(msg);
+  }
+  // watch a match of the current round (both players people: bots' matches aren't played over the network)
+  function tourSpectate(matchId) {
+    const f = tour.t && Tour.findMatch(tour.t, matchId);
+    if (!f || f.match.result || f.match.b == null || !peerAvailable()) return;
+    const mt = f.match, hk = tourHostKey(mt);
+    leaveNet();
+    document.documentElement.classList.remove('tourtv');
+    mode = 'spec'; me = 0; m = null; phase = 'lobby'; bt = null; battlePre = null; deadline = 0; lastSummary = null;
+    tour.spec = { id: mt.id, host: Tour.nameOf(tour.t, mt[hk]), foe: Tour.nameOf(tour.t, mt[hk === 'a' ? 'b' : 'a']), pending: null, timer: 0 };
+    tour.menu = false;
+    net.code = mt.code; net.alive = true;
+    hud(); netStatus(); render();
+    specWaiting('Connecting to the match');
+    const peer = new Peer(peerOpts());
+    net.peer = peer;
+    peer.on('open', () => connectToHost());
+    peer.on('disconnected', () => { if (net.alive && !peer.destroyed) setTimeout(() => { if (net.alive && !peer.destroyed && peer.disconnected) peer.reconnect(); }, 1500); });
+    peer.on('error', (err) => {
+      if (!net.alive || net.peer !== peer) return;
+      if (err.type === 'peer-unavailable') { if (!m) specWaiting(`Waiting for ${tour.spec.host} to open the match`); retryConnect(3000); }
+      else if (['network', 'server-error', 'socket-error', 'socket-closed'].includes(err.type)) { clearTimeout(net.retryTimer); net.retryTimer = setTimeout(() => { if (net.alive && !peer.destroyed && peer.disconnected) peer.reconnect(); retryConnect(500); }, 3000); }
+    });
+  }
+  function specWaiting(text) {
+    overlay(`<div class="card">
+      <span class="eyebrow">Spectating</span>
+      <h2>${esc(tour.spec.host)} <small>vs</small> ${esc(tour.spec.foe)}</h2>
+      <p class="status wait">${esc(text)}</p>
+      <button class="btn" id="spec-leave">Back to the tournament</button>
+    </div>`);
+    $('panel').innerHTML = '';
+    $('spec-leave').addEventListener('click', specLeave);
+  }
+  function specLeave() { clearTimeout(tour.spec && tour.spec.timer); tour.spec = null; showStart(); }
+  function specPanel() {
+    $('panel').innerHTML = `<div class="bar"><span class="hint">Spectating · round ${m.round} · the players are deploying. Squads placed this round show at the fight.</span><span class="btnrow"><button class="btn" id="spec-leave">Leave</button></span></div>`;
+    $('spec-leave').addEventListener('click', specLeave);
+  }
+  function specApply(d) {
+    m = withUnits(d.m); lastSummary = d.summary || lastSummary;
+    if (d.phase === 'deploy') {
+      phase = 'deploy'; bt = null; battlePre = null; lastPre = null; fx = []; selected = null; ready = [false, false]; timeUp = false; resultShownAt = 0;
+      deadline = d.remaining > 0 ? now() + d.remaining : 0;
+      closeSheet(); overlay(null); hud(); netStatus(); specPanel(); size(); render();
+    } else if (lastSummary) { bt = null; render(); specResult(lastSummary); }
+  }
+  function specRecv(d) {
+    if (!d || typeof d !== 'object' || !tour.spec) return;
+    if (d.t === 'sync') {
+      if (validSet(d.set)) useSet(d.set, !!d.custom);
+      if (d.config && d.config.levelCostPerTier) Game.CONFIG.levelCostPerTier = d.config.levelCostPerTier;
+      if (d.phase === 'lobby' || !d.m) { if (!m) specWaiting('Connected. Waiting for the match to start'); return; }
+      if (phase === 'battle' || (tour.spec.timer && d.phase === 'deploy')) { tour.spec.pending = d; return; } // after the fight and its result
+      specApply(d);
+    } else if (d.t === 'fight') {
+      if (!d.pre || !d.post || !d.summary) return;
+      clearTimeout(tour.spec.timer); tour.spec.timer = 0; tour.spec.pending = null;
+      m = withUnits(d.post); lastSummary = d.summary;
+      playBattle(d.pre);
+    }
+  }
+  // after each fight: who won the round, for a few seconds, then the next deploy (if it came in meanwhile)
+  function specResult(sum) {
+    const hostWon = sum.winner === 0 && !sum.timeout, guestWon = sum.winner === 1 && !sum.timeout, sp = tour.spec;
+    const over = m && m.over;
+    phase = over ? 'end' : 'result'; hud(); netStatus();
+    const dmg = [];
+    if (sum.dmg[1]) dmg.push(`${esc(sp.foe)} takes ${sum.dmg[1]}.`);
+    if (sum.dmg[0]) dmg.push(`${esc(sp.host)} takes ${sum.dmg[0]}.`);
+    overlay(`<div class="card">
+      <span class="eyebrow">Spectating · round ${sum.round}</span>
+      <h2>${over ? `${esc(m.winner === 0 ? sp.host : m.winner === 1 ? sp.foe : 'Nobody')} wins${m.winner < 0 ? '' : ' the game'}` : hostWon ? `${esc(sp.host)} takes it` : guestWon ? `${esc(sp.foe)} takes it` : 'Draw'}</h2>
+      <p class="big">${dmg.join(' ') || 'Nobody takes damage.'} Health: ${esc(sp.host)} ${m.hp[0]}, ${esc(sp.foe)} ${m.hp[1]}.</p>
+      <div class="btnrow"><button class="btn" id="look">Look at board</button><button class="btn" id="spec-leave">Back to the tournament</button></div>
+    </div>`);
+    $('panel').innerHTML = '';
+    $('spec-leave').addEventListener('click', specLeave);
+    bindLook('Spectating · the board before the fight.');
+    clearTimeout(sp.timer);
+    sp.timer = setTimeout(() => { sp.timer = 0; if (tour.spec === sp && sp.pending && phase !== 'battle') { const d = sp.pending; sp.pending = null; specApply(d); } }, over ? 0 : 4000);
+  }
+
+  // The playoff bracket, all of it: the rounds played, the ones to come (winners moving on, TBD until known) and the
+  // champion. Before the playoffs: the bracket the standings would give now (projected).
+  function tourBracketData(t) {
+    const po = t.rounds.filter(r => r.stage === 'playoff');
+    let first, projected = false;
+    if (po.length) first = po[0].matches.map(mt => ({ a: mt.a, b: mt.b, mt }));
+    else {
+      const n = Tour.cutSize(t);
+      if (t.settings.format === 'elim' || n < 2 || t.status === 'done') return null;
+      first = Tour.playoffFirst(Tour.standings(t).filter(r => !r.dropped).slice(0, n).map(r => r.id)).map(([a, b]) => ({ a, b, mt: null }));
+      projected = true;
+    }
+    const win = (e) => e.mt ? Tour.winnerOf(e.mt) : !e.tbd && e.a != null && e.b == null ? e.a : null; // a first-round bye goes through; a match to come has no winner yet
+    const cols = [first];
+    while (cols[cols.length - 1].length > 1) {
+      const prev = cols[cols.length - 1], k = cols.length, out = [];
+      for (let j = 0; j < prev.length / 2; j++) {
+        const mt = po[k] && po[k].matches[j];
+        out.push(mt ? { a: mt.a, b: mt.b, mt } : { a: win(prev[2 * j]), b: win(prev[2 * j + 1]), mt: null, tbd: true });
+      }
+      cols.push(out);
+    }
+    const last = cols[cols.length - 1][0];
+    return { cols, projected, champion: last ? win(last) : null };
+  }
+  function tourBracketSvg(t, d, big) {
+    const R = d.cols.length, colW = 150, gap = 28, boxH = 44, unit = 58, top = 26;
+    const names = d.cols.map((c, k) => { const left = R - k; return left === 1 ? 'Final' : left === 2 ? 'Semifinals' : left === 3 ? 'Quarterfinals' : 'Round of ' + Math.pow(2, left); });
+    const H = top + d.cols[0].length * unit, W = (R + 1) * (colW + gap);
+    const cur = Tour.current(t), out = [];
+    const short = (n) => n.length > 15 ? n.slice(0, 14) + '…' : n;
+    d.cols.forEach((col, k) => {
+      const x = k * (colW + gap);
+      out.push(`<text x="${x + 2}" y="14" class="bh">${esc(names[k])}</text>`);
+      col.forEach((e, j) => {
+        const yc = top + (j + 0.5) * unit * Math.pow(2, k), y = yc - boxH / 2;
+        const w = e.mt ? Tour.winnerOf(e.mt) : null, live = e.mt && cur && cur.matches.includes(e.mt) && !e.mt.result && e.b != null;
+        const mineBox = tour.myId && (e.a === tour.myId || e.b === tour.myId);
+        out.push(`<rect x="${x}" y="${y}" width="${colW}" height="${boxH}" rx="6" class="bx${live ? ' live' : ''}${mineBox ? ' mine' : ''}"/>`);
+        out.push(`<line x1="${x}" y1="${yc}" x2="${x + colW}" y2="${yc}" class="bl"/>`);
+        const sc = e.mt && e.mt.bo > 1 ? Tour.score(e.mt) : e.mt && e.mt.result && e.mt.result.hp && (e.mt.result.hp[0] || e.mt.result.hp[1]) ? e.mt.result.hp : null; // games won, or health left
+        [[e.a, 0], [e.b, 1]].forEach(([id, i]) => {
+          const ty = y + (i ? boxH - 8 : 15.5);
+          const cls = id == null ? (e.tbd ? 'tbd' : 'bye') : w ? (w === id ? 'w' : 'l') : '';
+          const label = id == null ? (e.tbd ? 'TBD' : 'Bye') : (Tour.isBot(t, id) ? '🤖 ' : '') + short(Tour.nameOf(t, id));
+          out.push(`<text x="${x + 8}" y="${ty}" class="bn ${cls}">${esc(label)}</text>`);
+          if (sc && id != null) out.push(`<text x="${x + colW - 8}" y="${ty}" class="bs ${cls}" text-anchor="end">${sc[i]}</text>`);
+        });
+        if (live) out.push(`<text x="${x + colW - 8}" y="${y - 4}" class="bh live" text-anchor="end">${e.mt.bo > 1 ? `game ${e.mt.games.length + 1}` : 'playing'}</text>`);
+        if (k < R - 1) { // the line to the next round
+          const yn = top + (Math.floor(j / 2) + 0.5) * unit * Math.pow(2, k + 1), xm = x + colW + gap / 2;
+          out.push(`<path d="M${x + colW} ${yc} H${xm} V${yn} H${x + colW + gap}" class="bc"/>`);
+        }
+      });
+    });
+    { // the champion
+      const x = R * (colW + gap), yc = top + d.cols[0].length * unit / 2;
+      out.push(`<text x="${x + 2}" y="14" class="bh">Champion</text>`);
+      out.push(`<path d="M${x - gap} ${yc} H${x}" class="bc"/>`);
+      out.push(`<rect x="${x}" y="${yc - 20}" width="${colW}" height="40" rx="6" class="bx champ"/>`);
+      out.push(`<text x="${x + colW / 2}" y="${yc + 5}" text-anchor="middle" class="bn ${d.champion && !d.projected ? 'w' : 'tbd'}">${d.champion && !d.projected ? '🏆 ' + esc(short(Tour.nameOf(t, d.champion))) : '🏆 TBD'}</text>`);
+    }
+    return `<div class="tbr${big ? ' big' : ''}"><svg viewBox="0 0 ${W} ${H}" width="${big ? '100%' : W}" ${big ? '' : `height="${H}"`} role="img" aria-label="Playoff bracket">${out.join('')}</svg></div>`;
+  }
+  function openBracketSheet() {
+    const d = tour.t && tourBracketData(tour.t);
+    if (!d) return;
+    $('sheet').innerHTML = `<div class="bar" data-keep><h3 id="sheet-h">${d.projected ? 'Bracket (projected)' : 'Bracket'}</h3><button class="btn small" id="close">Close</button></div>${tourBracketSvg(tour.t, d)}`;
+    $('sheet-back').hidden = false;
+    $('close').addEventListener('click', () => closeSheet(true));
+  }
+
   // redraw the tournament screen when it's showing (never over a match), and the start screen's tournament button
   function tourRedraw() {
     if (phase === 'lobby' && tourLive() && mode === 'host') { drawTourLobby(tourLive()); return; }
+    if (mode === 'spec' && tour.spec && phase !== 'battle') { // the match being watched is over (or on to its next game)
+      const f = tour.t && Tour.findMatch(tour.t, tour.spec.id);
+      if (f && (f.match.result || Tour.gameOf(f.match, net.code) < 0) && !(m && m.over)) {
+        overlay(`<div class="card"><span class="eyebrow">Spectating</span><h2>${tourResultText(f.match)}</h2>
+          <div class="btnrow">${!f.match.result ? '<button class="btn primary" id="spec-next">Watch the next game</button>' : ''}<button class="btn" id="spec-leave">Back to the tournament</button></div></div>`);
+        $('spec-leave').addEventListener('click', specLeave);
+        if ($('spec-next')) $('spec-next').addEventListener('click', () => tourSpectate(f.match.id));
+      }
+      return;
+    }
     if (phase !== 'start') return;
     if (!$('tour-root')) return;
     const a = document.activeElement;
@@ -13726,35 +14007,47 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       head = `vs ${esc(Tour.nameOf(t, foe))}`;
       if (x.match.result) {
         const o = Tour.outcome(x.match, tour.myId);
-        body = `${o === 'win' ? 'You won' : o === 'loss' ? 'You lost' : 'Draw'}. ${Tour.roundDone(r) ? 'Waiting for the next round.' : 'Waiting for the other matches.'}`;
+        const sc = Tour.score(x.match), mine = x.side === 'a' ? 0 : 1;
+        body = `${o === 'win' ? 'You won' : o === 'loss' ? 'You lost' : 'Draw'}${x.match.bo > 1 ? ` ${sc[mine]}–${sc[1 - mine]}` : ''}. ${Tour.roundDone(r) ? 'Waiting for the next round.' : 'Waiting for the other matches.'}`;
       } else {
         const host = tourIsHost(x);
         let saved = null; try { saved = JSON.parse(localStorage.getItem(HOST_STORE) || 'null'); } catch (e) {}
         const resume = host && saved && saved.code === x.match.code && saved.m;
-        const vsBot = Tour.isBot(t, foe);
+        const vsBot = Tour.isBot(t, foe), sc = Tour.score(x.match), mine = x.side === 'a' ? 0 : 1;
+        if (x.match.bo > 1) head += `<br><span style="font-size:0.5em">Game ${x.match.games.length + 1} · ${sc[mine]}–${sc[1 - mine]} · first to ${Tour.winsNeeded(x.match)}</span>`;
         body = `${esc(tourRoundName(r))} · ${esc(mapName(r.map))} · ${vsBot ? 'a bot: you play it on this phone' : host ? 'you host' : `${esc(Tour.nameOf(t, foe))} hosts`}${tourOn(foe) ? '' : ' · opponent offline'}`;
         btns = vsBot ? `<button class="btn primary" id="tour-play">Play vs ${esc(Tour.nameOf(t, foe))}</button>` : resume ? `<button class="btn primary" id="tour-resume">Resume match</button>` : `<button class="btn primary" id="tour-play">${host ? 'Start match' : 'Join match'}</button>`;
         if (x.match.conflict) body += ' · the results disagree: the organizer decides';
       }
     }
-    overlay(`<div class="card" id="tour-root">
+    overlay(`<div class="card${tour.role === 'watch' ? ' tour-wide' : ''}" id="tour-root">
       <span class="eyebrow">${esc(t.name)} · ${esc(tour.code)}${org ? ' · organizer' : ''}</span>
       <h2>${head}</h2>
       <p class="big">${body}</p>
       ${tour.problem ? `<p class="status wait">${esc(tour.problem)}</p>` : ''}
       ${tour.role === 'player' && t.status === 'lobby' ? `<span class="hint">Your gamertag</span><span class="joinrow"><input class="tour-in" id="tour-name" maxlength="18" autocomplete="nickname" spellcheck="false" aria-label="Your gamertag" placeholder="Your gamertag" value="${esc(me0 ? me0.name : tour.myName)}"><button class="btn" id="tour-name-ok">Save</button></span>` : ''}
-      ${btns ? `<div class="btnrow">${btns}</div>` : ''}
+      ${(() => { const d = tourBracketData(t); if (!d) return btns ? `<div class="btnrow">${btns}</div>` : '';
+        if (tour.role === 'watch') return btns ? `<div class="btnrow">${btns}</div>` : ''; // the big screen has it in full, below
+        return `<div class="btnrow">${btns}<button class="btn" id="tour-bracket">Bracket</button></div>`; })()}
     </div>`);
     // the panel: tabs
     const tabs = [];
     if (org) tabs.push(['players', 'Players']);
     if (t.status !== 'lobby') tabs.push(['matches', 'Matches']);
     tabs.push(['standings', t.settings.format === 'elim' ? 'Results' : 'Standings']);
-    if (t.rounds.some(x => x.stage === 'playoff') || (t.status === 'lobby' && t.settings.format === 'elim')) tabs.push(['bracket', 'Bracket']);
+    const bd = tourBracketData(t);
+    if (bd || t.rounds.some(x => x.stage === 'playoff') || (t.status === 'lobby' && t.settings.format === 'elim')) tabs.push(['bracket', 'Bracket']);
+    // between playoff rounds (your match done, or out): the bracket comes up by itself, once per round
+    const rr = Tour.current(t), auto = rr && rr.stage === 'playoff' && (!x || x.bye || x.match.result) ? 'r' + rr.n : t.status === 'done' && bd ? 'done' : '';
+    if (auto && tour.autoTab !== auto && tour.role === 'player') { tour.autoTab = auto; tour.tab = 'bracket'; }
     if (!org) tabs.push(['rules', 'Rules']);
     if (org) tabs.push(['settings', 'Settings']);
     if (!tabs.some(([k]) => k === tour.tab)) tour.tab = tabs[0][0];
+    // the big screen (?watch): no board, the bracket across the whole window, the tables under it
+    document.documentElement.classList.toggle('tourtv', tour.role === 'watch');
+    const tvb = tour.role === 'watch' && tourBracketData(t);
     $('panel').innerHTML = `<div class="tour" id="tour-panel">
+      ${tour.role === 'watch' ? `<div class="tv-head"><span class="eyebrow">${esc(t.name)} · ${esc(tour.code)}</span><h2>${head}</h2><p>${body}</p></div>${tvb ? tourBracketSvg(t, tvb, true) : ''}` : ''}
       <div class="seg tour-tabs" role="tablist">${tabs.map(([k, n]) => `<button data-ttab="${k}" aria-pressed="${tour.tab === k}">${n}</button>`).join('')}</div>
       <div class="tour-body">${tourTab(tour.tab)}</div>
       <div class="bar">
@@ -13763,6 +14056,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     </div>`;
     $('panel').querySelectorAll('[data-ttab]').forEach(b => b.addEventListener('click', () => { tour.tab = b.dataset.ttab; showTour(); }));
     if ($('tour-play')) $('tour-play').addEventListener('click', tourPlay);
+    if ($('tour-bracket')) $('tour-bracket').addEventListener('click', openBracketSheet);
     if ($('tour-resume')) $('tour-resume').addEventListener('click', () => { let s = null; try { s = JSON.parse(localStorage.getItem(HOST_STORE) || 'null'); } catch (e) {} tour.menu = false; if (s) resumeHost(s); });
     if ($('tour-name')) {
       const save = () => {
@@ -13805,10 +14099,14 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       const r = Tour.current(t);
       if (!r) return '<span class="hint">No matches yet.</span>';
       const rows = r.matches.map(mt => {
-        const ctl = org && mt.b != null ? `<span class="btnrow tour-ctl">
+        const ctl = org && mt.b != null && mt.bo > 1 ? `<span class="btnrow tour-ctl">
+          ${mt.result ? '' : `<button class="btn small" data-res="${mt.id}:a">Game to ${esc(Tour.nameOf(t, mt.a))}</button><button class="btn small" data-res="${mt.id}:b">Game to ${esc(Tour.nameOf(t, mt.b))}</button>`}
+          ${mt.games.length ? `<button class="btn small" data-undogame="${mt.id}">Undo last game</button>` : ''}<button class="btn small" data-replay="${mt.id}">Restart series</button>${mt.result ? '' : `<button class="btn small" data-swap="${mt.id}">Swap host</button>`}</span>`
+          : org && mt.b != null ? `<span class="btnrow tour-ctl">
           <button class="btn small" data-res="${mt.id}:a">${esc(Tour.nameOf(t, mt.a))} won</button><button class="btn small" data-res="${mt.id}:b">${esc(Tour.nameOf(t, mt.b))} won</button>${r.stage === 'playoff' ? '' : `<button class="btn small" data-res="${mt.id}:draw">Draw</button>`}
           <button class="btn small" data-replay="${mt.id}">Replay</button>${mt.result ? '' : `<button class="btn small" data-swap="${mt.id}">Swap host</button>`}</span>` : '';
-        return `<li class="${mt.conflict ? 'warn' : ''}"><span>${pname(mt.a)} <small>vs</small> ${pname(mt.b)}</span>
+        const watch = mt.b != null && !mt.result && mt.a !== tour.myId && mt.b !== tour.myId && !Tour.isBot(t, mt.a) && !Tour.isBot(t, mt.b) ? `<button class="btn small" data-watch="${mt.id}">Watch</button>` : '';
+        return `<li class="${mt.conflict ? 'warn' : ''}"><span>${pname(mt.a)} <small>vs</small> ${pname(mt.b)} ${watch}</span>
           <small>${mt.b != null ? `host: ${esc(Tour.nameOf(t, mt[tourHostKey(mt)]))} · ` : ''}${tourResultText(mt)}</small>${ctl}</li>`;
       }).join('');
       const done = Tour.roundDone(r), last = Tour.nextPlan(t);
@@ -13823,12 +14121,9 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
         <span class="hint">${t.settings.format === 'elim' ? 'Knockout: the bracket decides; this table counts all games.' : `Win 1 point, draw ½, bye 1. Ties: opponents' points (Opp), then health difference (HP±).${Tour.cutSize(t) >= 2 ? ` After ${Tour.swissRounds(t)} rounds the top ${Tour.cutSize(t)} play off.` : ''}`}</span>`;
     }
     if (k === 'bracket') {
-      const b = Tour.bracket(t);
-      if (!b.length) return `<span class="hint">${t.settings.format === 'elim' ? 'The bracket is drawn when the tournament starts.' : `The top ${Tour.cutSize(t)} play off after the Swiss rounds.`}</span>`;
-      return `<div class="tour-bracket">${b.map(x => `<div class="tour-col"><span class="eyebrow">${esc(x.name)}</span>${x.round.matches.map(mt => {
-        const w = Tour.winnerOf(mt), cell = (id) => `<span class="${w && w === id ? 'w' : w ? 'l' : ''}">${id == null ? '<i>Bye</i>' : esc(Tour.nameOf(t, id))}</span>`;
-        return `<div class="tour-pair">${cell(mt.a)}${cell(mt.b)}</div>`;
-      }).join('')}</div>`).join('')}${t.champion ? `<div class="tour-col"><span class="eyebrow">Champion</span><div class="tour-pair"><span class="w">🏆 ${esc(Tour.nameOf(t, t.champion))}</span></div></div>` : ''}</div>`;
+      const d = tourBracketData(t);
+      if (!d) return `<span class="hint">${t.settings.format === 'elim' ? 'The bracket is drawn when the tournament starts.' : 'No playoffs in this tournament.'}</span>`;
+      return `${d.projected ? `<span class="hint">Projected: if the Swiss rounds ended now, the top ${Tour.cutSize(t)} by the standings would play this bracket.</span>` : ''}${tourBracketSvg(t, d)}`;
     }
     if (k === 'rules') return `<ul class="tour-rules">${tourRules().map(x => `<li>${x}</li>`).join('')}</ul>`;
     if (k === 'settings') {
@@ -13837,6 +14132,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       return `${lobby ? `<div class="bar"><span class="hint">Name</span><span class="joinrow"><input class="tour-in" id="tour-tname" maxlength="18" value="${esc(t.name)}" aria-label="Tournament name"><button class="btn small" id="tour-tname-ok">Save</button></span></div>
         ${segOf('format', [['swiss', 'Swiss + playoffs'], ['elim', 'Knockout']], 'Format')}
         ${s.format === 'swiss' ? segOf('swissRounds', [[0, `Auto (${Tour.suggestRounds(n)})`], [2, 2], [3, 3], [4, 4], [5, 5]], 'Swiss rounds') + segOf('cut', [[-1, `Auto (${Tour.suggestCut(n) ? 'top ' + Tour.suggestCut(n) : 'none'})`], [0, 'None'], [2, 'Top 2'], [4, 'Top 4'], [8, 'Top 8']], 'Playoffs') : ''}` : '<span class="hint">Format and players are set once it has started. The rest counts from the next match on.</span>'}
+        ${s.format === 'elim' || Tour.cutSize(t) >= 2 ? segOf('bestOf', [[1, 'Bo1'], [3, 'Bo3'], [5, 'Bo5'], [7, 'Bo7']], s.format === 'elim' ? 'Knockout matches: best of' : 'Playoff matches: best of') : ''}
         ${segOf('packOptions', [[2, 2], [3, 3], [4, 4], [5, 5]], 'Leader choices')}
         ${segOf('mirror', [[true, 'Same for both'], [false, 'Own rolls']], 'Leaders, units, towers')}
         ${segOf('deploy1', [[60, '60 s'], [90, '90 s'], [120, '120 s'], [150, '150 s']], 'Deploy timer, round 1')}
@@ -13864,6 +14160,8 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       `Map: ${s.map ? esc(mapName(s.map)) : 'a random one each round, the same in every match'}.`,
       `${esc(pack)}. Pick from ${s.packOptions} leaders${s.mirror ? ', and both players get the same leaders, starting units and tower choices' : ''}.`,
       `Deploy timer: ${s.deploy1} s in round 1, then ${s.deploy} s.`,
+      ...(s.bestOf > 1 && (s.format === 'elim' || Tour.cutSize(t) >= 2) ? [`${s.format === 'elim' ? 'Every match' : 'Playoff matches'}: best of ${s.bestOf} games (first to ${Math.floor(s.bestOf / 2) + 1}). Each game is its own match; a drawn game doesn't count.`] : []),
+      'Not playing right now? Open Matches and tap Watch to spectate a match.',
       'Your match shows on this screen. Tap Start match (if you host) or Join match. The result is sent by itself.',
     ];
   }
@@ -13872,6 +14170,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
     const on = (sel, f) => P.querySelectorAll(sel).forEach(b => b.addEventListener('click', () => f(b)));
     if ($('tour-copy')) $('tour-copy').addEventListener('click', () => { const l = tourLink(); if (navigator.clipboard) navigator.clipboard.writeText(l).then(() => { $('tour-copy').textContent = 'Copied'; }, () => {}); });
     if ($('tour-copy-watch')) $('tour-copy-watch').addEventListener('click', () => { const l = tourLink(true); if (navigator.clipboard) navigator.clipboard.writeText(l).then(() => { $('tour-copy-watch').textContent = 'Copied'; }, () => {}); });
+    on('[data-watch]', (b) => tourSpectate(b.dataset.watch));
     if ($('tour-share')) $('tour-share').addEventListener('click', () => navigator.share({ title: t.name, text: `Join ${t.name} in No Mans Land! Pick a gamertag when you're in.`, url: tourLink() }).catch(() => {}));
     if (!tourOrg()) return;
     on('[data-rename]', (b) => { const p = Tour.player(t, b.dataset.rename); const n = p && prompt('New gamertag', p.name); if (n && Tour.rename(t, p.id, n)) tourChanged(); });
@@ -13898,6 +14197,7 @@ Actions run in this order: package (round 1 only), sell, levelUp, unlock, skills
       if (Tour.report(t, id, w, old || [0, 0], (f.match.result && f.match.result.rounds) || 0, 'org')) tourChanged();
     });
     on('[data-replay]', (b) => { if (!b.dataset.sure) { b.dataset.sure = '1'; b.textContent = 'Sure?'; return; } if (Tour.replay(t, b.dataset.replay, Math.random)) tourChanged(); });
+    on('[data-undogame]', (b) => { if (Tour.undoGame(t, b.dataset.undogame)) tourChanged(); });
     on('[data-swap]', (b) => { if (Tour.swapHost(t, b.dataset.swap)) tourChanged(); });
     on('[data-tset]', (b) => {
       const k = b.dataset.tset, v = b.dataset.v;

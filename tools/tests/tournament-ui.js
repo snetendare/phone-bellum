@@ -107,9 +107,9 @@ const ok = (c, msg) => { console.log((c ? 'ok   ' : 'FAIL ') + msg); if (!c) fai
   ok(fin.status === 'done' && fin.champ, `tournament over: ${fin.rounds.join(', ')}; champion ${fin.champ}`);
   await ps[2].waitForFunction(() => /🏆/.test(document.getElementById('tour-root').textContent), null, { timeout: 10000 });
   ok(true, 'players see the champion: ' + await text(ps[2], '#tour-root h2'));
-  ok(await ps[2].isVisible('.tour-bracket') || true, '');
+  ok(await ps[2].isVisible('.tbr svg') || true, '');
   await ps[2].click('[data-ttab="bracket"]');
-  ok(/Final/i.test(await text(ps[2], ".tour-bracket")), 'bracket: ' + await text(ps[2], '.tour-bracket'));
+  { const bt = await ps[2].locator('.tbr svg').first().textContent(); ok(/Final/i.test(bt), 'bracket: ' + bt); }
   // a watcher (big screen)
   const w = await mk('watch');
   await w.goto(link + '&watch=1&test');

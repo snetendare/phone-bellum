@@ -84,3 +84,32 @@ for (const n of [6, 8, 11]) {
   const plain = Game.createMatch(units, M, 7, 'standard', null, [], {});
   assert(plain.packages[0].length === 3 && !plain.mirror, 'default: 3 options, own rolls');
 }
+// best-of series in the playoffs: each game its own code, draws don't count, first to 3 in a Bo5
+{
+  const t = Tour.create('X', 'Cup', { format: 'elim', bestOf: 5 });
+  for (let k = 0; k < 4; k++) Tour.join(t, 'p' + k, 'P' + k);
+  Tour.advance(t, r);
+  const mt = Tour.current(t).matches[0];
+  assert(mt.bo === 5 && Tour.winsNeeded(mt) === 3, 'Bo5: 3 wins needed');
+  const c0 = mt.code;
+  assert(Tour.report(t, mt.id, 'a', [50, 0], 6, 'auto', 0) && mt.code !== c0 && Tour.gameOf(mt, mt.code) === 1, 'game 1 in, game 2 gets a new code');
+  assert(!Tour.report(t, mt.id, 'a', [50, 0], 6, 'auto', 0) && mt.games.length === 1, 'the other phone\'s report of game 1 adds nothing');
+  Tour.report(t, mt.id, 'b', [0, 50], 6, 'auto', 0); assert(mt.conflict, 'a disagreeing report of game 1 marks it');
+  Tour.report(t, mt.id, 'draw', [0, 0], 6, 'auto', 1); assert(!mt.result && mt.games.length === 2 && Tour.score(mt).join() === '1,0', 'a drawn game doesn\'t count');
+  Tour.report(t, mt.id, 'b', [0, 9], 6, 'auto', 2); Tour.report(t, mt.id, 'a', [9, 0], 6, 'auto', 3);
+  assert(!mt.result && Tour.score(mt).join() === '2,1', 'score 2-1, still on');
+  Tour.report(t, mt.id, 'b', [0, 9], 6, 'org');
+  assert(Tour.score(mt).join() === '2,2' && mt.games[4].by === 'org', 'organizer adds a game');
+  assert(Tour.undoGame(t, mt.id) && Tour.score(mt).join() === '2,1' && Tour.gameOf(mt, mt.code) === 4, 'undo the last game: a new code for game 5');
+  Tour.report(t, mt.id, 'a', [20, 0], 7, 'auto', 4);
+  assert(mt.result && mt.result.winner === 'a' && mt.result.score.join() === '3,1', 'a wins the series 3-1');
+  assert(!Tour.report(t, mt.id, 'b', [0, 9], 6, 'auto', 5), 'no more games after the series');
+  const s0 = Tour.current(t).matches[1];
+  Tour.report(t, s0.id, 'b', [0, 9], 6, 'auto', 0); Tour.report(t, s0.id, 'b', [0, 9], 6, 'auto', 1); Tour.report(t, s0.id, 'b', [0, 9], 6, 'auto', 2);
+  assert(Tour.advance(t, r) && Tour.current(t).matches[0].bo === 5, 'final is a series too');
+  const sw = Tour.create('Y', 'Cup', { format: 'swiss', bestOf: 3 }); for (let k = 0; k < 4; k++) Tour.join(sw, 'p' + k, 'P' + k); Tour.advance(sw, r);
+  assert(!Tour.current(sw).matches[0].bo, 'Swiss rounds stay single games');
+  const old = mt.code; Tour.replay(t, Tour.current(t).matches[0].id, r);
+  const f = Tour.current(t).matches[0]; Tour.report(t, f.id, 'a', [1, 0], 3, 'auto', 0); const c1 = Object.keys(f.codeGame);
+  assert(Tour.replay(t, f.id, r) && !f.games.length && Tour.gameOf(f, f.code) === 0 && c1.every(c => Tour.gameOf(f, c) < 0 || c === f.code), 'replay starts the series over; old codes stop counting');
+}

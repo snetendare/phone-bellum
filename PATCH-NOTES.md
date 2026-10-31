@@ -25,6 +25,21 @@ Newest first. Each entry says what changed for players; technical details live i
 - When you're drawn against a bot, tap **Play vs Bot …**: it's a normal match against the AI on your phone, with the tournament's map, timers and leader rules, and the result goes in by itself.
 - In any tournament lobby the organizer can **Add a bot** (or **Remove bots**), for example to fill an odd number of players.
 
+### Best of 3, 5 or 7
+- New setting: **Knockout matches: best of 1, 3, 5 or 7** (in Swiss + playoffs it's for the playoff matches; Swiss rounds stay single games).
+- Each game is its own match: after a game, your tournament screen shows **Game 2 · 1–0 · first to 2**, and you tap Start or Join again. A drawn game doesn't count.
+- The organizer can add a game to either player, undo the last game, or restart the series.
+
+### The bracket
+- A real **bracket picture**: every round, winners moving on, TBD slots for what's still to come, series scores, the matches being played right now (gold) and the champion.
+- It comes up by itself on your phone between playoff rounds, and there's a **Bracket** button on the tournament screen.
+- Before the playoffs it shows the **projected** bracket: what the standings would give if the Swiss rounds ended now.
+- The **big-screen link** now shows the bracket across the whole screen with the standings under it, made for a TV or laptop.
+
+### Spectating
+- Not playing right now? Open **Matches** and tap **Watch** next to a match. You see the board while they deploy (squads placed this round stay hidden until the fight, so no one can tip anyone off), every fight live, and who took each round.
+- Works from the big screen too. When a game of a series ends, **Watch the next game** takes you along.
+
 ---
 
 ## 31 October 2026 – Balance
